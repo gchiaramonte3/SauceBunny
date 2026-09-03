@@ -691,13 +691,38 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       }
       return previewSinkPromise;
     };
+    /** How long the first open of the preview decoder may take before the
+     *  overlay gives up and says so. Generous - it is one ranged read plus an
+     *  index - but finite, which is the point. */
+    const PREVIEW_OPEN_TIMEOUT_MS = 6000;
     const requestPreview = (seconds: number) => {
       previewTargetRef.current = seconds;
       if (previewBusyRef.current) return;
       previewBusyRef.current = true;
       void (async () => {
-        const sink = await ensurePreviewSink();
-        if (!sink) { previewBusyRef.current = false; return; }
+        try {
+        // A DEADLINE, because the two layers under this are both unbounded:
+        // mediabunny retries a throwing fetch for ever, and the loopback
+        // proxy has no read timeout. Without it, one hung open silently
+        // disabled the scrub preview for the whole source - the latch below
+        // stayed true, every later request returned at the `if
+        // (previewBusyRef.current) return` line, and NOTHING was logged. That
+        // is exactly what a user's pipeline log showed: 239 seeks in one drag
+        // and not a single line from this decoder, neither ready nor
+        // unavailable. Silence was the bug.
+        const sink = await Promise.race([
+          ensurePreviewSink(),
+          new Promise<null>((res) => window.setTimeout(() => res(null), PREVIEW_OPEN_TIMEOUT_MS)),
+        ]);
+        if (!sink) {
+          // Drop the memo so a later gesture can try again rather than
+          // inheriting a promise that never settles.
+          if (previewSinkPromise) {
+            previewSinkPromise = null;
+            previewUnavailable(`opening the stream took longer than ${PREVIEW_OPEN_TIMEOUT_MS}ms`);
+          }
+          return;
+        }
         while (previewTargetRef.current != null && !disposed) {
           const t = previewTargetRef.current;
           previewTargetRef.current = null;
@@ -728,7 +753,15 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             setScrubPreview(true);
           }
         }
-        previewBusyRef.current = false;
+        } catch (e) {
+          // A throw in here used to reject the void-ed IIFE and wedge the
+          // latch true for ever, with nothing said. Report it and carry on.
+          previewUnavailable(e instanceof Error ? e.message : String(e));
+        } finally {
+          // ALWAYS. This latch is what serialises the decoder, and a latch
+          // that can be left set is a feature that turns itself off.
+          previewBusyRef.current = false;
+        }
       })();
     };
     requestPreviewRef.current = requestPreview;

@@ -598,7 +598,14 @@ pub(crate) fn probe_stream_epoch(upstream: &str, start: f64) -> Option<f64> {
     static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<(String, u64), f64>>> =
         OnceLock::new();
     let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-    let key = (upstream.to_string(), start.to_bits());
+    // QUANTISED TO THE SECOND, not the exact float. The key used to be
+    // `start.to_bits()`, and the frontend sends a distinct three-decimal
+    // position for every scrub - 623.3, 631.0, 745.0 - so the memo could
+    // never hit on a real gesture and EVERY seek paid the full probe on the
+    // critical path. The epoch is a property of the keyframe the seek lands
+    // on, and seeks within the same second land on the same keyframe, so a
+    // whole-second bucket is the coarsest key that is still correct.
+    let key = (upstream.to_string(), start.floor() as u64);
     if let Ok(map) = cache.lock() {
         if let Some(&e) = map.get(&key) {
             return Some(e);

@@ -6,6 +6,17 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Fixed
+- **Scrubbing a web source tells you what it is doing, and the preview can no
+  longer switch itself off.** The frame-accurate overlay is what makes
+  scrubbing feel instant, and one slow open could wedge it silently for the
+  rest of the clip: every later scrub returned at a latch that was never
+  released, and nothing was written to the log either way. It now has a
+  deadline, always releases, and says so when it gives up.
+- **Every seek no longer pays a fresh timeline probe.** The probe's cache was
+  keyed on the exact seek position to three decimals, so scrubbing to 623.3
+  never matched 631.0 and the cache could never hit during real use. It is
+  keyed to the second now, which is the precision the answer actually has.
+
 - **The five-second wait after scrubbing a YouTube link is gone.** The frame
   you scrub to is decoded and painted in about 40ms, which is what made
   scrubbing feel instant. Rebuilding the stream then attached a fresh, empty
