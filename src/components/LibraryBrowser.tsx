@@ -679,7 +679,12 @@ export function LibraryBrowser({
       )}
       <div className="cp-lib-main">
         {shelf === "sessions" ? (
-          <ReviewSessionsPane treeOpen={treeOpen} onShowTree={() => setTreeOpen(true)} />
+          <ReviewSessionsPane
+            treeOpen={treeOpen}
+            onShowTree={() => setTreeOpen(true)}
+            onOpenLocalPath={onOpenLocalPath}
+            onOpenWebUrl={onOpenWebUrl}
+          />
         ) : shelf === "frames" ? (
           <FramesPane
             treeOpen={treeOpen}

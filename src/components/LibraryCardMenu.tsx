@@ -78,7 +78,9 @@ type Props = {
   onEditCustom?: (columnId: string) => void;
   onChooseThumbnail: () => void;
   onResetThumbnail: () => void;
-  onOpen: () => void;
+  /** Optional: a row that knows no source omits the verb rather than
+   *  offering "Open in Clip" and doing something else. */
+  onOpen?: () => void;
   /** Open this source and land in the Review workspace (session-ready). */
   onReview?: () => void;
   onClose: () => void;
@@ -122,7 +124,7 @@ export function LibraryCardMenu({
     }
   }
   if (onMove) items.push({ icon: <IconFolderSolid size={13} />, label: "Move to folder…", onSelect: onMove });
-  items.push({ icon: <IconPlay size={13} />, label: "Open in Clip", onSelect: onOpen });
+  if (onOpen) items.push({ icon: <IconPlay size={13} />, label: "Open in Clip", onSelect: onOpen });
   /* Batch transcription's home. It used to live ONLY in the floating
      multi-select pill, so removing that pill would have removed the feature -
      the verb moved here rather than being dropped, and the label carries the

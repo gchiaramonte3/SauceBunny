@@ -75,9 +75,15 @@ function lengthLabel(a: number, b: number): string {
   return `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, "0")}`;
 }
 
-export function ReviewSessionsPane({ treeOpen, onShowTree }: {
+export function ReviewSessionsPane({ treeOpen, onShowTree, onOpenLocalPath, onOpenWebUrl }: {
   treeOpen: boolean;
   onShowTree: () => void;
+  /** The two openers every other library section already receives. This pane
+   *  had NEITHER, which is why "Open in Clip" was wired to the reveal: the
+   *  capability was never plumbed here, so the menu offered a verb the
+   *  component could not perform. */
+  onOpenLocalPath: (path: string) => void;
+  onOpenWebUrl: (url: string) => void;
 }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [query, setQuery] = useState("");
@@ -139,6 +145,28 @@ export function ReviewSessionsPane({ treeOpen, onShowTree }: {
     onEnd: grid.onMarqueeEnd,
   });
 
+  /**
+   * The source this session watched, or null if it recorded none.
+   *
+   * `sourceKeys` is OPTIONAL and absent on every entry written before the
+   * field existed, so absent means UNKNOWN - never "none". A session with no
+   * key is not offered the verb at all; guessing at a source and opening the
+   * wrong clip would be worse than the menu being one item shorter.
+   *
+   * A key is a local path or a URL (see review-store), which is exactly the
+   * pair of openers the library already has.
+   */
+  const sourceOf = (id: string): string | null => {
+    const r = rows?.find((x) => x.id === id);
+    const k = r?.sourceKeys?.[0];
+    return typeof k === "string" && k.trim() !== "" ? k : null;
+  };
+  const openOne = (id: string) => {
+    const key = sourceOf(id);
+    if (!key) return;
+    if (/^https?:\/\//i.test(key)) onOpenWebUrl(key);
+    else onOpenLocalPath(key);
+  };
   const revealOne = (id: string) => {
     const p = screeningPath(id);
     if (p) void invoke("reveal_in_finder", { path: p }).catch(() => { /* gone */ });
@@ -215,7 +243,7 @@ export function ReviewSessionsPane({ treeOpen, onShowTree }: {
                         setMenuAt({ x: b.left + 18, y: b.bottom - 6, id: r.id });
                       }
                     }}
-                    onDoubleClick={() => revealOne(r.id)}
+                    onDoubleClick={() => (sourceOf(r.id) ? openOne(r.id) : revealOne(r.id))}
                     title={r.title}
                   >
                     <span className="cp-lib-lrow-art" aria-hidden="true"><IconReview size={13} /></span>
@@ -241,7 +269,7 @@ export function ReviewSessionsPane({ treeOpen, onShowTree }: {
                     data-path={r.id}
                     className={"cp-sess-card" + (grid.selected.has(r.id) ? " selected" : "")}
                     onClick={(e) => grid.onItemClick(r.id, e)}
-                    onDoubleClick={() => revealOne(r.id)}
+                    onDoubleClick={() => (sourceOf(r.id) ? openOne(r.id) : revealOne(r.id))}
                   >
                     <span className="cp-sess-card-title">{r.title}</span>
                     <span className="cp-sess-card-meta">{whenLabel(r.startedAt)}</span>
@@ -262,7 +290,11 @@ export function ReviewSessionsPane({ treeOpen, onShowTree }: {
           <LibraryCardMenu
             anchor={{ x: menuAt.x, y: menuAt.y }}
             revealPath={screeningPath(menuAt.id)}
-            onOpen={() => revealOne(menuAt.id)}
+            /* WAS `revealOne`. "Open in Clip" revealed the session's JSON in
+               Finder - the label named one thing and the handler did another,
+               and the only reason it type-checked is that both are
+               `() => void`. */
+            onOpen={sourceOf(menuAt.id) ? () => openOne(menuAt.id) : undefined}
             // A screening is a RECORD of something that happened. There is no
             // sensible "delete" here yet, and inventing one that throws away
             // the only account of a session would be worse than not offering
