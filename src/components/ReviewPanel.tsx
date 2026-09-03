@@ -1603,6 +1603,8 @@ function ReviewComposer({
   const [enhanceErr, setEnhanceErr] = useState<string | null>(null);
   const [enhancedFrom, setEnhancedFrom] = useState<string | null>(null);
   const [enhancedTo, setEnhancedTo] = useState<string | null>(null);
+  /** What the last run did, in the composer's own hint bar. */
+  const [enhanceNote, setEnhanceNote] = useState<string | null>(null);
   const enhanceAbort = useRef<AbortController | null>(null);
   const canUndoEnhance = enhancedFrom !== null && text === enhancedTo;
 
@@ -1614,14 +1616,28 @@ function ReviewComposer({
       return;
     }
     setEnhanceErr(null);
+    setEnhanceNote(null);
     setEnhancing(true);
     const ctrl = new AbortController();
     enhanceAbort.current = ctrl;
     try {
-      const after = await enhanceComment(before, ctrl.signal);
+      const out = await enhanceComment(before, ctrl.signal);
       if (ctrl.signal.aborted) return;
-      // One setState, so one undo puts the author's words back.
-      if (after !== before) { setEnhancedFrom(before); setEnhancedTo(after); setText(after); }
+      // THREE OUTCOMES, AND SILENCE IS NEVER ONE. A byte-identical answer used
+      // to fall through this branch with no text change, no message and no
+      // error: the spinner simply stopped, which reads as a broken button and
+      // is exactly what was reported.
+      if (out.changed) {
+        // One setState, so one undo puts the author's words back.
+        setEnhancedFrom(before); setEnhancedTo(out.text); setText(out.text);
+        // Say what actually happened. When only the deterministic pass had
+        // work to do, do not claim the spelling was checked.
+        setEnhanceNote(out.source === "typography"
+          ? "Fixed capitalisation and punctuation."
+          : "Tidied up.");
+      } else {
+        setEnhanceNote("Already tidy. Nothing to change.");
+      }
     } catch (e) {
       if (ctrl.signal.aborted) return;
       setEnhanceErr(e instanceof NoLocalModelError
@@ -1689,7 +1705,13 @@ function ReviewComposer({
       )}
       {canUndoEnhance && (
         <div className="cp-review-drawhint">
-          Tidied up. <button className="cp-review-undoenh" onClick={undoEnhance}>Undo</button>
+          {enhanceNote ?? "Tidied up."} <button className="cp-review-undoenh" onClick={undoEnhance}>Undo</button>
+        </div>
+      )}
+      {/* A run that changed nothing still has to SAY so. */}
+      {!canUndoEnhance && enhanceNote && (
+        <div className="cp-review-drawhint" onClick={() => setEnhanceNote(null)} title="Dismiss">
+          {enhanceNote}
         </div>
       )}
       {enhanceErr && (

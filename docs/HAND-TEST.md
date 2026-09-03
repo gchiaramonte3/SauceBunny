@@ -880,6 +880,17 @@ The contracts prove the rules; only eyes prove the pixels.
     intact. Shift+F10 opens the same menu from the keyboard. Then switch to
     grid view and confirm its menu still works as before.
 
+38. **Tidy up.** Type, exactly: `sound desgin here is thin, fix in the mix`
+    and press the wand. It must come back capitalised, spelled correctly and
+    ending in a full stop. Then try a note with a timecode and a clip name
+    (`at 01:23:04 the cut feels lae in a007_c012.mov`): the timecode and the
+    clip name must be character-for-character identical afterwards, and the
+    clip name must NOT be capitalised.
+39. **It always says what it did.** Press the wand on an already-clean note
+    ("The grade is too warm."). A bar must say "Already tidy. Nothing to
+    change." It must never just stop with no message, which is the bug.
+40. **Undo still works in one step** after any of the above.
+
 ### People tiles and the A/V mesh
 
 31. **Your own tile.** In a session, look at your tile: camera and mic buttons

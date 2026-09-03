@@ -68,6 +68,16 @@ a library tree whose chevrons had never actually worked.
 - The About panel credits **mediabunny**, which it had never named.
 
 ### Fixed
+- **Tidy up actually edits now.** It used to hand the note back unchanged and
+  say nothing, because the prompt never once used the words spelling,
+  punctuation, grammar or capitalise: it asked for "clearer" and then gave
+  thirteen instructions not to change anything. It now asks for exactly those
+  corrections, shows the model four worked examples, and runs a mechanical
+  pass that fixes capitalisation and full stops with no model involved, so the
+  button cannot do nothing. Timecodes, filenames, URLs, mentions and clip
+  names must survive a rewrite character for character or it is discarded. And
+  every run now says which of three things happened, instead of the spinner
+  stopping in silence.
 - **Right-click works in the Frames list.** The frames GRID has had a context
   menu all along; the list view had none, so the same shelf behaved two
   different ways depending on the view toggle. The rows now offer Reveal in
