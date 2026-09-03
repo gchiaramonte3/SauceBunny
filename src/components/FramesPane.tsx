@@ -5,7 +5,7 @@ import {
   filterFrames, formatFrameTimecode, frameCrumbs, frameLevel, groupBySource,
   sortFrames, FRAMES_CHANGED_EVENT, type FrameItem,
 } from "../lib/frames";
-import { formatBytes } from "../lib/library";
+import { formatBytes, LASSO_GUTTER_SELECTOR } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { assetUrl } from "../lib/asset-url";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
@@ -235,7 +235,7 @@ export function FramesPane({ treeOpen, onShowTree }: {
     itemSelector: prefs.view === "list" ? ".cp-lib-lrow" : ".cp-lib-card",
     // Rows are wrapped, so name the wrapper as gutter too or a band cannot
     // start in the space beside a row.
-    gutterSelector: ".cp-web-grid, .cp-web-shelf, .cp-web-summary, .cp-web-lrow-wrap",
+    gutterSelector: LASSO_GUTTER_SELECTOR,
     onSelect: grid.onMarquee,
     onEnd: grid.onMarqueeEnd,
   });

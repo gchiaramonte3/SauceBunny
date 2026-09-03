@@ -722,7 +722,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and six rules in this file are checked by a test rather than remembered. If you
+One hundred and seven rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -843,6 +843,7 @@ written after finding the rule already broken somewhere.
 | `session-clear-contract` | Clearing the room's source drops the shared notes only AFTER writing them to disk, on both the host and the guest path, and a cleared room does not read as "Connecting" for ever |
 | `list-rules-contract` | Every list view draws its column lines, and the header, the rows and the rules share one track geometry. A gutter applied to two of the three put every body line 32px off its header divider |
 | `contract-register` | This table describes itself: the spelled-out count matches the rows, and every row names a test file that exists |
+| `lasso-gutter-contract` | Every pane with a lasso declares what blank space is, and no two retype the same selector. Two panes relied on `target === currentTarget` and silently had no lasso on blank space at all |
 | `e2e-mock-shape-contract` | The two object literals in `e2e/tauri-mock.ts` carry exactly the fields of their ts-rs binding, so 100 Playwright tests cannot certify a backend shape that no longer exists |
 | `elevation-contract` | Two shadow tiers, two tokens: a popover, menu, toast or HUD floats on `--shadow-card`, a dialog on `--shadow-modal`. Twenty floating surfaces carried twelve hand-typed shadows and the dialog tier had no token; four popovers on one monitor bar cast four different shadows. A literal outer shadow with 8px or more of blur fails, with a shrink-only list for lifts and drag ghosts that are states rather than surfaces |
 | `danger-text-contract` | One red on text. Error copy was drawn in five reds (the solid `--danger`, `--danger-text`, a third hex `--color-destructive`, and three literals plus the retired `#ff6b6b` as rgba nine times) while tokens.css claimed the light red had been "named once". Text and glyphs are `--danger-text`; the solid is for fills, borders and the armed button; no stylesheet retypes a retired red |

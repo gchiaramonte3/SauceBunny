@@ -57,3 +57,66 @@ test("library rows alternate, starting from the header", async ({ page }) => {
 
   expect(new Set(result.borders), "a per-row hairline is drawn as well as the stripe").toEqual(new Set(["0px"]));
 });
+
+/**
+ * The stripes carry on BELOW the last row, the way Finder's do.
+ *
+ * Reported as "I like the checkerboarding throughout the library even when
+ * clips aren't present, see the reference of Finder". A table that stops
+ * striping where its data stops leaves a hard edge across the pane.
+ *
+ * The phase is the part that can silently be wrong, so it is asserted against
+ * the same rule the four lists compute it from rather than hardcoded here.
+ */
+test("the zebra fills the empty space under the last row", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
+  await page.addInitScript(() => {
+    localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
+    localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
+    localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
+    localStorage.setItem("e2e.manyFiles", "5");
+    localStorage.setItem("saucebunny.libraryBrowser", JSON.stringify({ view: "list" }));
+  });
+  await page.goto("/");
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("Meta+2");
+  await expect(page.locator(".cp-lib-lrow").first()).toBeVisible({ timeout: 15_000 });
+
+  const m = await page.evaluate(() => {
+    const list = document.querySelector(".cp-lib-list") as HTMLElement;
+    const pane = list.closest(".cp-lib-pane") as HTMLElement;
+    const rows = [...list.querySelectorAll(".cp-lib-lrow")] as HTMLElement[];
+    const after = getComputedStyle(list, "::after");
+    const paneStyle = getComputedStyle(pane);
+    return {
+      rowCount: rows.length,
+      rowHeights: [...new Set(rows.map((r) => +r.getBoundingClientRect().height.toFixed(2)))],
+      declaredRowH: getComputedStyle(list).getPropertyValue("--lrow-h").trim(),
+      fillerH: parseFloat(after.height),
+      gradient: after.backgroundImage,
+      phase: list.style.getPropertyValue("--lrow-fill-phase"),
+      slack: pane.getBoundingClientRect().bottom
+        - list.getBoundingClientRect().bottom - parseFloat(paneStyle.paddingBottom),
+    };
+  });
+
+  // Canary: with no rows and no leftover height there is nothing to get wrong.
+  expect(m.rowCount, "no rows were rendered").toBeGreaterThan(1);
+
+  // The period and the row height must be the SAME number, or the filler
+  // drifts a whole row out of phase over a long list.
+  expect(m.rowHeights, "rows are not a single exact height").toHaveLength(1);
+  expect(`${m.rowHeights[0]}px`).toBe(m.declaredRowH);
+  expect(m.gradient, "the filler draws no stripes").toContain("gradient");
+  expect(m.gradient).toContain(m.declaredRowH);
+
+  // It reaches the bottom of the pane: that is what "fills" means.
+  expect(m.fillerH, "the filler has no height, so nothing is painted").toBeGreaterThan(100);
+  expect(Math.abs(m.slack), `the list stops ${m.slack.toFixed(0)}px short of the pane`)
+    .toBeLessThanOrEqual(1);
+
+  // Phase: an even row count ends on a plain row, so the filler starts striped.
+  expect(m.phase).toBe(m.rowCount % 2 === 0 ? "1" : "0");
+});

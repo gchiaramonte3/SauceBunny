@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   filterCachedWeb, groupBySite, siteName, sortCachedWeb, type CachedWebItem,
 } from "../lib/web-source";
-import { formatBytes } from "../lib/library";
+import { formatBytes, LASSO_GUTTER_SELECTOR } from "../lib/library";
 import { appUndo } from "../lib/undo";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { secondsToClock } from "../lib/timecode";
@@ -257,7 +257,7 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
     itemSelector: prefs.view === "list" ? ".cp-lib-lrow" : ".cp-lib-card",
     // Rows are wrapped, so name the wrapper as gutter too or a band cannot
     // start in the space beside a row.
-    gutterSelector: ".cp-web-grid, .cp-web-shelf, .cp-web-summary, .cp-web-lrow-wrap",
+    gutterSelector: LASSO_GUTTER_SELECTOR,
     onSelect: grid.onMarquee,
     onEnd: grid.onMarqueeEnd,
   });

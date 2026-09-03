@@ -1186,6 +1186,12 @@
 .cp-lib-browse-body { flex: 1; display: flex; min-height: 0; min-width: 0; position: relative; }
 .cp-lib-pane {
   flex: 1;
+  /* A COLUMN, so the list below can take the space under the last row. It was
+     `block`, which left the list exactly as tall as its rows and the pane
+     empty beneath them - see the striped-filler note on .cp-lib-list::after. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
@@ -1244,8 +1250,15 @@
    itself by the same amount, which keeps the columns exactly where they were
    while the backgrounds run the full width. */
 .cp-lib-list {
+  /* ONE definition of a row's height, used by the rows and by the striped
+     filler under them. Component-scoped rather than a --s-* token: it is a
+     measurement of this table, not a step on the spacing scale. */
+  --lrow-h: 27px;
   display: flex;
   flex-direction: column;
+  /* Claim the leftover height so ::after has somewhere to paint. `0 1 auto`
+     left the list the exact height of its rows. */
+  flex: 1 1 auto;
   position: relative;
   /* RIGHT ONLY. Bleeding left as well put the rows underneath
      .cp-lib-tree-resize - the 10px full-height grab strip for the folder
@@ -1351,6 +1364,11 @@
   color: var(--fg-4);
 }
 .cp-lib-lrow {
+  /* EXACT, not content-derived. Measured at 27.13px from padding plus the
+     34px 16:9 thumbnail, and a striped filler whose period is 27 while the
+     rows are 27.13 drifts a whole row out of phase every 200 rows. Pinning it
+     costs 0.13px and makes the two provably equal. */
+  height: var(--lrow-h);
   padding: var(--s-1) var(--s-2);
   border: none;
   border-radius: 0;
@@ -1390,6 +1408,29 @@
    wrap; the row's own hover/selection paints over it. Pinned by
    src/lib/list-zebra-contract.test.ts. */
 .cp-lib-lrow:nth-child(even) { background: rgba(255, 255, 255, 0.028); }
+/* The stripes CARRY ON below the last row, the way Finder's do.
+   A table that stops striping where its data stops leaves a hard edge across
+   the pane and makes the list look like it failed to fill, which is what was
+   reported ("I like the checkerboarding throughout the library even when clips
+   aren't present, see the reference of Finder").
+   Drawn as a gradient on one pseudo-element rather than as empty filler rows:
+   the row count needed depends on the pane height, so real rows would want a
+   ResizeObserver and would re-render the list on every window drag.
+   PHASE is the whole difficulty. The header is child 1, so rows are children
+   2..N+1 and the stripe falls on the EVEN children - rows 1, 3, 5. Whether
+   the band immediately under the last row must be plain or striped therefore
+   depends on how many rows there are, which CSS cannot count. The list sets
+   --lrow-fill-phase inline (0 or 1) beside the --lrow-cols it already sets. */
+.cp-lib-list::after {
+  content: "";
+  flex: 1 1 auto;
+  min-height: 0;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0, transparent var(--lrow-h),
+    rgba(255, 255, 255, 0.028) var(--lrow-h), rgba(255, 255, 255, 0.028) calc(var(--lrow-h) * 2));
+  background-position: 0 calc(var(--lrow-fill-phase, 0) * var(--lrow-h) * -1);
+}
 .cp-web-lrow-wrap:nth-child(even) { background: rgba(255, 255, 255, 0.028); }
 
 /* One monotonic ladder, and the stripe is its bottom rung. Composited over

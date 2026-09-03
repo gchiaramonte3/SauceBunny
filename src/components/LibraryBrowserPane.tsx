@@ -5,7 +5,7 @@ import { LibraryListRow } from "./LibraryListRow";
 import { LibraryFolderCard } from "./LibraryFolderCard";
 import { LibraryFolderRow } from "./LibraryFolderRow";
 import type { LibraryViewMode } from "./LibraryBrowserBar";
-import { countLibraryItems, formatBytes, formatModifiedDate, libraryPosterPaths } from "../lib/library";
+import { countLibraryItems, formatBytes, formatModifiedDate, libraryPosterPaths, listFillPhase, LASSO_GUTTER_SELECTOR } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { useRovingGrid } from "../hooks/use-roving-grid";
 import { useMarquee } from "../hooks/use-marquee";
@@ -197,6 +197,7 @@ export function LibraryBrowserPane({
   const marquee = useMarquee({
     containerRef: paneRef,
     itemSelector: view === "grid" ? ".cp-lib-card" : ".cp-lib-lrow",
+    gutterSelector: LASSO_GUTTER_SELECTOR,
     onSelect: (paths, mods) => onMarquee?.(paths, mods),
     onEnd: () => onMarqueeEnd?.(),
   });
@@ -342,7 +343,7 @@ export function LibraryBrowserPane({
            five-track template, which cannot express a hidden or reordered
            column: the width would still be reserved and the cells would still
            come out in source order. */
-        style={{ ["--lrow-cols" as string]: template }}
+        style={{ ["--lrow-cols" as string]: template, ["--lrow-fill-phase" as string]: String(listFillPhase(folders.length + items.length)) }}
       >
         {/* Column headers that SORT.
             These were decorative aria-hidden spans that looked exactly like

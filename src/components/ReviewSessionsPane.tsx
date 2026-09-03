@@ -4,6 +4,7 @@ import {
   hydrateScreeningIndex, listScreenings, screeningPath, SCREENINGS_CHANGED,
   type ScreeningIndexEntry,
 } from "../lib/screening-store";
+import { listFillPhase, LASSO_GUTTER_SELECTOR } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { loadJson, saveJson } from "../lib/storage";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
@@ -141,6 +142,7 @@ export function ReviewSessionsPane({ treeOpen, onShowTree, onOpenLocalPath, onOp
     // MUST follow the view mode. Pinned to one selector the lasso silently
     // selects nothing in the other view: the band draws and finds no items.
     itemSelector: prefs.view === "list" ? ".cp-lib-lrow" : ".cp-sess-card",
+    gutterSelector: LASSO_GUTTER_SELECTOR,
     onSelect: grid.onMarquee,
     onEnd: grid.onMarqueeEnd,
   });
@@ -217,7 +219,7 @@ export function ReviewSessionsPane({ treeOpen, onShowTree, onOpenLocalPath, onOp
             {prefs.view === "list" ? (
               <div
                 className="cp-lib-list"
-                style={{ ["--lrow-cols" as string]: template }}
+                style={{ ["--lrow-cols" as string]: template, ["--lrow-fill-phase" as string]: String(listFillPhase(shown.length)) }}
               >
                 <div className="cp-lib-list-head" onContextMenu={(e) => e.preventDefault()}>
                   <span className="cp-lib-lrow-art" aria-hidden="true" />

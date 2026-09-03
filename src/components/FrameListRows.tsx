@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useListColumns } from "../hooks/use-list-columns";
 import { LibraryCardMenu } from "./LibraryCardMenu";
-import { formatBytes } from "../lib/library";
+import { formatBytes, listFillPhase } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { formatFrameTimecode, type FrameItem } from "../lib/frames";
 import { assetUrl } from "../lib/asset-url";
@@ -79,7 +79,7 @@ export function FrameListRows({ items, sort, dir, onSort, onOpenFrame, selected,
       role="list"
       aria-label="Grabbed frames"
       /* One track list from the column model; see WebListRows. */
-      style={{ ["--lrow-cols" as string]: template }}
+      style={{ ["--lrow-cols" as string]: template, ["--lrow-fill-phase" as string]: String(listFillPhase(items.length)) }}
     >
       <div className="cp-lib-list-head" onContextMenu={(e) => e.preventDefault()}>
         <span className="cp-lib-lrow-art" aria-hidden="true" />

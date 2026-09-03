@@ -510,3 +510,45 @@ export function artFirst(items: readonly LibraryItem[]): LibraryItem[] {
  */
 export type LibColKey = "kind" | "size" | "date";
 export const DEFAULT_LIB_COLUMNS: readonly LibColKey[] = ["kind", "size", "date"];
+
+/**
+ * Which band the striped filler under a list must start with.
+ *
+ * The stripes carry on below the last row, Finder-style (see
+ * `.cp-lib-list::after`). Getting the PHASE right is the whole difficulty:
+ * `.cp-lib-list-head` is child 1, so rows are children 2..n+1 and the stripe
+ * falls on the even children - rows 1, 3, 5. Whether the band immediately
+ * under the last row must be plain or striped therefore depends on how many
+ * rows there are, and CSS cannot count them.
+ *
+ * An even row count ends on a PLAIN row, so the filler starts striped (1).
+ * An odd count ends on a striped row, so the filler starts plain (0).
+ *
+ * Shared rather than inlined at each of the four lists: a parity expression
+ * copied four times is a parity expression that will be corrected three times.
+ */
+export function listFillPhase(rowCount: number): 0 | 1 {
+  return rowCount % 2 === 0 ? 1 : 0;
+}
+
+/**
+ * What counts as blank space for a lasso, in every pane that has one.
+ *
+ * `useMarquee`'s base rule is `target === currentTarget`: a press on the
+ * scroll container itself. That held only while the container's empty area
+ * really was the container. It is not, in two ways:
+ *
+ *  - the web and frames shelves group cards into sections, so a gap belongs
+ *    to a section or an inner grid two levels down;
+ *  - the list now stretches to the bottom of its pane to paint the striped
+ *    filler under the last row, so the whole empty area below a table is
+ *    `.cp-lib-list`.
+ *
+ * The Library browser and Review sessions panes named NOTHING here, which is
+ * why a band could be started on blank space in Frames and the web shelf but
+ * not in a session list - reported as "in the review session it does not
+ * lasso highlight the same way as the other pages". One list, so a pane
+ * cannot be left out of it by being written later.
+ */
+export const LASSO_GUTTER_SELECTOR =
+  ".cp-lib-list, .cp-web-grid, .cp-web-shelf, .cp-web-summary, .cp-web-lrow-wrap";

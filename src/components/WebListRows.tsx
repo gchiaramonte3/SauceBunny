@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useListColumns } from "../hooks/use-list-columns";
-import { formatBytes } from "../lib/library";
+import { formatBytes, listFillPhase } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { siteName, type CachedWebItem } from "../lib/web-source";
 import { secondsToClock } from "../lib/timecode";
@@ -85,7 +85,7 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
          header and every row. See .cp-monitor-stack's sibling reasoning in
          library.css: three --col-* variables against a fixed five-track
          template cannot express a hidden or reordered column. */
-      style={{ ["--lrow-cols" as string]: template }}
+      style={{ ["--lrow-cols" as string]: template, ["--lrow-fill-phase" as string]: String(listFillPhase(items.length)) }}
     >
       <div className="cp-lib-list-head" onContextMenu={(e) => e.preventDefault()}>
         <span className="cp-lib-lrow-art" aria-hidden="true" />
