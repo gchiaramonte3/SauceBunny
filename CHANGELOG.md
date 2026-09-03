@@ -5,7 +5,17 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Scrubbing a YouTube link is frame-accurate again.** Releasing the playhead
+  snapped the picture back to where the drag started and held it there while
+  the stream rebuilt. The frame you see while scrubbing a web source is
+  decoded straight to an overlay; a fix for a black frame during long seeks
+  was drawing the video's own frame over it, and on those seeks the video is
+  still parked where you began. The held frame is now only used when the
+  overlay has nothing in it at all.
+
+
 
 ## [0.5.0] - 2026-09-03
 

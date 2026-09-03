@@ -7,6 +7,7 @@ import type { PlayerHandle } from "./player-handle";
 import { base64UrlEncode } from "../lib/stream-proxy";
 import { encodedStreamMime, peerStreamMime } from "../lib/codec-strings";
 import { rebuildLogLine } from "../lib/seek-log";
+import { shouldFreezeOutgoingFrame } from "../lib/scrub-freeze";
 import { planFirstAppend } from "../lib/first-append";
 
 /**
@@ -448,9 +449,32 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         // live seek with a stale canvas that only moved at decoder speed, and
         // made the common case worse to fix the rare one. Only a rebuild
         // blanks the element, so only a rebuild gets the freeze.
+        // AND ONLY WHEN THE OVERLAY IS HOLDING NOTHING.
+        //
+        // This is the bug that made YouTube scrubbing feel ruined, and it is
+        // worse than the one it was fixing. On an out-of-buffer drag the
+        // <video> never moves - it stays parked at the PRE-DRAG position,
+        // because the seek it was given cannot land until the pipeline is
+        // rebuilt. Meanwhile the decoder overlay has been painting the
+        // frame-accurate frame at the target, which is the whole reason
+        // scrubbing a web source feels good.
+        //
+        // Drawing the video here therefore painted the frame you started
+        // from OVER the frame you had just scrubbed to: let go of the
+        // playhead and the picture snapped back to the beginning of the
+        // gesture and sat there for the entire rebuild.
+        //
+        // So the freeze is a LAST RESORT for an overlay with nothing in it -
+        // a peer stream, where the decoder is off, or the moments before its
+        // first paint. A decoded frame is always better than this one and is
+        // never overwritten.
         const fv = videoRef.current;
         const dst = scrubCanvasRef.current;
-        if (fv && dst && fv.readyState >= 2 && fv.videoWidth > 0) {
+        if (fv && dst && shouldFreezeOutgoingFrame({
+          previewPainted: previewPaintedRef.current,
+          readyState: fv.readyState,
+          videoWidth: fv.videoWidth,
+        })) {
           if (dst.width !== fv.videoWidth || dst.height !== fv.videoHeight) {
             dst.width = fv.videoWidth;
             dst.height = fv.videoHeight;
