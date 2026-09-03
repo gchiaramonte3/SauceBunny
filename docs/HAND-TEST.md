@@ -873,6 +873,13 @@ The contracts prove the rules; only eyes prove the pixels.
     discord.gg in your DEFAULT BROWSER and the app stays exactly where it
     was. If the app itself navigates, that is the bug this avoided.
 
+37. **Frames, list view.** Right-click a row: a menu appears with Reveal in
+    Finder, Move to folder, Remove from Library and Delete frame. Right-click
+    a row that is NOT selected and it becomes the selection first; right-click
+    one that is already part of a multi-selection and the selection is left
+    intact. Shift+F10 opens the same menu from the keyboard. Then switch to
+    grid view and confirm its menu still works as before.
+
 ### People tiles and the A/V mesh
 
 31. **Your own tile.** In a session, look at your tile: camera and mic buttons

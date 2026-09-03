@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useListColumns } from "../hooks/use-list-columns";
+import { LibraryCardMenu } from "./LibraryCardMenu";
 import { formatBytes } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { formatFrameTimecode, type FrameItem } from "../lib/frames";
@@ -46,12 +48,22 @@ function grabbedLabel(unixSeconds: number): string {
   });
 }
 
-export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame, selected, onSelect }: {
+export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame, selected, onSelect, onMove, onRemove, onContextSelect }: {
   items: readonly FrameItem[];
   sort: LibrarySortKey;
   dir: LibrarySortDir;
   onSort: (key: LibrarySortKey) => void;
   onDelete: (path: string) => void;
+  /** The card menu's verbs, so the LIST view offers what the GRID already
+   *  does. The grid has had a right-click menu all along (LibraryCard owns
+   *  it); only these rows had none, which is why the same shelf behaved two
+   *  different ways depending on the view toggle. */
+  onMove?: (path: string) => void;
+  onRemove?: (path: string) => void;
+  /** Finder's rule, same as the library list: right-clicking an UNSELECTED
+   *  row makes it the selection first, so the menu acts on what is under the
+   *  cursor; a row already in the selection leaves the set intact. */
+  onContextSelect?: (path: string) => void;
   onOpenFrame: (path: string) => void;
   /** Multi-select, when the shelf above is running one. Absent leaves the
    *  rows behaving exactly as they did. */
@@ -60,6 +72,8 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
 }) {
   const colModel = useListColumns(COLS_KEY, COL_DEFAULT);
   const { visible, template } = colModel;
+
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number; path: string } | null>(null);
 
   return (
     <div
@@ -89,6 +103,19 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
               // split LibraryListRow uses. Without a selection above, the
               // single click still opens, exactly as before.
               onClick={(e) => { if (onSelect) onSelect(it.path, e); else onOpenFrame(it.path); }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                onContextSelect?.(it.path);
+                setMenuAt({ x: e.clientX, y: e.clientY, path: it.path });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                  e.preventDefault();
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  onContextSelect?.(it.path);
+                  setMenuAt({ x: r.left + 18, y: r.bottom - 6, path: it.path });
+                }
+              }}
               onDoubleClick={() => onOpenFrame(it.path)}
             >
               <span className="cp-lib-lrow-art">
@@ -124,6 +151,23 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
           </div>
         );
       })}
+      {menuAt && (
+        <LibraryCardMenu
+          anchor={{ x: menuAt.x, y: menuAt.y }}
+          revealPath={menuAt.path}
+          onMove={onMove && (() => onMove(menuAt.path))}
+          onRemove={onRemove && (() => onRemove(menuAt.path))}
+          deleteLabel="Delete frame…"
+          onDelete={() => onDelete(menuAt.path)}
+          // A still IS its own poster, so there is no frame to pick out of it.
+          canPickThumbnail={false}
+          hasChosenThumbnail={false}
+          onChooseThumbnail={() => {}}
+          onResetThumbnail={() => {}}
+          onOpen={() => onOpenFrame(menuAt.path)}
+          onClose={() => setMenuAt(null)}
+        />
+      )}
     </div>
   );
 }

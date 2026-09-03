@@ -437,6 +437,14 @@ export function FramesPane({ treeOpen, onShowTree }: {
                 dir={prefs.dir}
                 onSort={onSort}
                 onOpenFrame={setPreview}
+                onContextSelect={(p) => {
+                  // Finder's rule: an unselected row BECOMES the selection so
+                  // the menu acts on what is under the cursor; a row already
+                  // in the set leaves it intact so the menu can act on all.
+                  if (!grid.selected.has(p)) grid.setSel({ selected: new Set([p]), anchor: p });
+                }}
+                onMove={(p) => { const row = g.items.find((x) => x.path === p); if (row) setMoving(row); }}
+                onRemove={(p) => removeFromLibrary(grid.selected.has(p) ? [...grid.selected] : [p])}
                 onDelete={(p) => {
                   const row = g.items.find((x) => x.path === p);
                   if (!row) return;

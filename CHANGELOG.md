@@ -68,6 +68,11 @@ a library tree whose chevrons had never actually worked.
 - The About panel credits **mediabunny**, which it had never named.
 
 ### Fixed
+- **Right-click works in the Frames list.** The frames GRID has had a context
+  menu all along; the list view had none, so the same shelf behaved two
+  different ways depending on the view toggle. The rows now offer Reveal in
+  Finder, Move to folder, Remove from Library and Delete, and right-clicking
+  an unselected row selects it first, the way Finder does.
 - **The tidy-up control is a wand**, not the generic sparkle that already
   means "AI is present" elsewhere in the app.
 - **The composer's tooltips appear above the pointer**, instead of under it
