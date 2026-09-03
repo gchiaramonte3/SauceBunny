@@ -68,6 +68,12 @@ a library tree whose chevrons had never actually worked.
 - The About panel credits **mediabunny**, which it had never named.
 
 ### Fixed
+- **The tidy-up control is a wand**, not the generic sparkle that already
+  means "AI is present" elsewhere in the app.
+- **The composer's tooltips appear above the pointer**, instead of under it
+  where they covered the next row of controls and the button being described.
+  Native tooltips are placed by the OS and cannot be moved, so this row draws
+  its own; every other tooltip in the app is untouched.
 - **The selection highlight is calmer.** The violet was the full brand colour
   and read too bright over a dense list. It is now the deeper, less saturated
   stop the export button's gradient already ends on, which also lifts white

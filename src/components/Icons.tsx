@@ -212,6 +212,23 @@ export const IconDiscord = ({ size = 16, style, className }: IconProps) => (
   </svg>
 );
 
+/** A magic wand. The tidy-up control was a generic sparkle, which in this app
+ *  already means "AI is present" (it is the AI Summary tab's mark). A wand
+ *  says something is about to be DONE to the thing you are looking at, which
+ *  is what the button does. */
+export const IconWand = (p: IconProps) => (
+  <Icon {...p}>
+    {/* The stick, tip at the top right. */}
+    <path d="M4 20 14.5 9.5" />
+    {/* The tip's four-point star. */}
+    <path d="M17.5 3.5 18.6 6.4 21.5 7.5 18.6 8.6 17.5 11.5 16.4 8.6 13.5 7.5 16.4 6.4Z" />
+    {/* ONE small glint, upper left. There were two; the second sat close
+        enough to the stick that at 16px - the only size this is used at - it
+        read as a smudge on the shaft rather than as a spark. */}
+    <path d="M6.5 4v2.2M5.4 5.1h2.2" />
+  </Icon>
+);
+
 export const IconCrown = (p: IconProps) => (
   <Icon {...p} strokeWidth={2}>
     <path d="M3 7l4.5 3.5L12 4l4.5 6.5L21 7l-1.6 11.5a1 1 0 0 1-1 .85H5.6a1 1 0 0 1-1-.85L3 7z" />

@@ -844,6 +844,29 @@
   border-top-color: color-mix(in srgb, var(--danger) 22%, transparent);
   cursor: pointer;
 }
+/* Tooltip that clears the pointer. Native `title` is placed by the OS BELOW
+   the cursor, which on this icon row puts it over the next control and hides
+   the button it describes. Fixed, so the composer's overflow cannot clip it,
+   and translated up by its own height so `top` can be the control's top edge
+   rather than something this has to measure twice. */
+.cp-tip-wrap { display: inline-flex; }
+.cp-tip {
+  position: fixed;
+  z-index: var(--z-popover);
+  transform: translate(-50%, -100%);
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-2);
+  background: var(--bg-4);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-none);
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-card);
+}
+
 /* ── Enhance (AI tidy-up) ──────────────────────────────────────────────
    The sweep means WORK IS RUNNING, which is the same thing the Generate
    button's sweep means, so it is the same green with the brand violet leading

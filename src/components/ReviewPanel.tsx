@@ -2,6 +2,7 @@ import { COMMENT_REACTION_EMOJI } from "../lib/reactions";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMenuKeys } from "../hooks/use-menu-keys";
 import { useDismiss } from "../hooks/use-dismiss";
+import { Tooltip } from "./Tooltip";
 import { enhanceComment, ENHANCE_MAX_CHARS, NoLocalModelError } from "../lib/enhance-comment";
 import { ColorSwatches } from "./ColorSwatches";
 import { useModalFocus } from "../hooks/use-modal-focus";
@@ -11,7 +12,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type { DictateDoneEvent, DictateLevelEvent, DictatePartialEvent, ReviewRangeDraft } from "../types";
 import { DictationWave } from "./DictationWave";
 import { EmojiPicker } from "./EmojiPicker";
-import { IconDownload, IconRange, IconSparkles } from "./Icons";
+import { IconDownload, IconRange, IconWand } from "./Icons";
 import { getPlayheadSeconds, usePlayheadSecondsCoarse } from "../lib/playhead-store";
 import { secondsToHms, secondsToTc } from "../lib/timecode";
 import { loadJson, saveJson } from "../lib/storage";
@@ -1822,24 +1823,26 @@ function ReviewComposer({
           title="Drag to resize · arrow keys to nudge · Home to reset"
         />
         {onToggleDraw && (
-          <button
-            className={"cp-review-tool" + (drawActive && !labelActive ? " active" : "")}
-            onClick={() => { if (ensureNamed()) onToggleDraw(); }}
-            title={drawActive ? "Stop drawing" : "Draw on the frame"}
-            aria-label="Draw on the frame"
-          >
-            <PencilGlyph />
-          </button>
+        <Tooltip label={drawActive ? "Stop drawing" : "Draw on the frame"}>
+            <button
+              className={"cp-review-tool" + (drawActive && !labelActive ? " active" : "")}
+              onClick={() => { if (ensureNamed()) onToggleDraw(); }}
+              aria-label="Draw on the frame"
+            >
+              <PencilGlyph />
+            </button>
+        </Tooltip>
         )}
         {onToggleLabel && (
-          <button
-            className={"cp-review-tool" + (drawActive && labelActive ? " active" : "")}
-            onClick={() => { if (ensureNamed()) onToggleLabel(); }}
-            title={drawActive && labelActive ? "Stop placing labels" : "Place a text label on the frame"}
-            aria-label="Place a text label on the frame"
-          >
-            <LabelGlyph />
-          </button>
+        <Tooltip label={drawActive && labelActive ? "Stop placing labels" : "Place a text label on the frame"}>
+            <button
+              className={"cp-review-tool" + (drawActive && labelActive ? " active" : "")}
+              onClick={() => { if (ensureNamed()) onToggleLabel(); }}
+              aria-label="Place a text label on the frame"
+            >
+              <LabelGlyph />
+            </button>
+        </Tooltip>
         )}
         <button
           className={"cp-review-tool" + (recording ? " recording" : "")}
@@ -1873,16 +1876,17 @@ function ReviewComposer({
         </button>
         {/* Tidy up the note. Sits last in the tool row, next to Post, because
             it acts on what you have written rather than on the frame. */}
-        <button
-          className={"cp-review-tool cp-review-enhance" + (enhancing ? " working" : "")}
-          onClick={() => { if (ensureNamed()) void runEnhance(); }}
-          disabled={enhancing || !text.trim()}
-          title={enhancing ? "Tidying up…" : "Tidy up this note with AI. One undo puts your words back."}
-          aria-label="Tidy up this note with AI"
-          aria-busy={enhancing}
-        >
-          <IconSparkles size={16} className="cp-review-glyph" />
-        </button>
+        <Tooltip label={enhancing ? "Tidying up…" : "Tidy up this note with AI"}>
+          <button
+            className={"cp-review-tool cp-review-enhance" + (enhancing ? " working" : "")}
+            onClick={() => { if (ensureNamed()) void runEnhance(); }}
+            disabled={enhancing || !text.trim()}
+            aria-label="Tidy up this note with AI"
+            aria-busy={enhancing}
+          >
+            <IconWand size={16} className="cp-review-glyph" />
+          </button>
+        </Tooltip>
           <span className="cp-review-composer-spacer" />
         <button className="btn btn-primary btn-compact" onClick={submit} disabled={!text.trim() && !hasDraft}>Post</button>
         </div>
