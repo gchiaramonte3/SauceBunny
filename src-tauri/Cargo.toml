@@ -24,6 +24,12 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
+# statvfs, for the free-space check a session recording needs: it is the one
+# feature that can write 8 GB unattended, and "recording failed" is a much
+# worse answer than a refusal naming the number of gigabytes free. Already in
+# the graph (core-foundation -> security-framework -> keyring), so this makes
+# a transitive dependency direct rather than adding one. MIT/Apache-2.0.
+libc = "0.2"
 # Native camera/mic TCC status (WKWebView's JS Permissions query is
 # unreliable for capture, so the app can't otherwise tell "granted" from
 # "denied" - AVCaptureDevice.authorizationStatus is the real answer).

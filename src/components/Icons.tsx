@@ -591,6 +591,16 @@ export const IconScreenShare = (p: IconProps) => (
 /* Movie camera (live webcam), NOT the photo camera: body + side lens wedge.
    The transport snapshot keeps IconCamera; the room's camera toggle uses
    this pair so "save a frame" and "my webcam" stop sharing a glyph. */
+/* A filled disc: the platform-standard record mark. The wrapper sets
+   fill="none" on the <svg>, which children override freely - several icons in
+   this file already do `fill="currentColor" stroke="none"`. Deliberately not
+   a red "R": every control glyph here is a 24-viewBox stroke shape, and
+   tokens.css states outright that --danger is "heavy for a glyph and fails
+   against dark greys", so the colour lives on the button state, not the mark. */
+export const IconRecord = (p: IconProps) => (
+  <Icon {...p}><circle cx="12" cy="12" r="6.5" fill="currentColor" stroke="none" /></Icon>
+);
+
 export const IconVideo = (p: IconProps) => (
   <Icon {...p}>
     <rect x="2.5" y="6.5" width="12.5" height="11" rx="2" />

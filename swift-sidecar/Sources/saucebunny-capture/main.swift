@@ -93,13 +93,19 @@ func runList() async -> Never {
     }
 
     // Real windows only: on the normal layer, big enough to mean something,
-    // not our own process, and belonging to a nameable app.
-    let ownPid = ProcessInfo.processInfo.processIdentifier
+    // not the APP's own windows, and belonging to a nameable app.
+    //
+    // `ProcessInfo.processInfo.processIdentifier` is THIS SIDECAR's pid, not
+    // the app's, so the comparison it used to make never excluded anything -
+    // which is why the share picker offered Sauce Bunny's own window and
+    // sharing it produced a mirror tunnel. The app passes its pid in.
+    // Absent (0), nothing is excluded, which is the old behaviour.
+    let excludePid = Int32(opt("--exclude-pid") ?? "0") ?? 0
     let windows = content.windows.filter { w in
         w.isOnScreen && w.windowLayer == 0
             && Int(w.frame.width) >= 120 && Int(w.frame.height) >= 90
             && w.owningApplication != nil
-            && w.owningApplication?.processID != ownPid
+            && (excludePid == 0 || w.owningApplication?.processID != excludePid)
     }
     var windowEntries: [[String: Any]] = []
     for w in windows.prefix(24) {
@@ -108,6 +114,10 @@ func runList() async -> Never {
             "title": w.title ?? "",
             "app": w.owningApplication?.applicationName ?? "",
             "width": Int(w.frame.width), "height": Int(w.frame.height),
+            // The owning process, so the app can find its OWN window to
+            // record. Everything else here describes a window to a human
+            // picking one; this is the one field a program needs.
+            "pid": Int(w.owningApplication?.processID ?? 0),
         ]
         if wantThumbs,
            let t = await thumbnail(filter: SCContentFilter(desktopIndependentWindow: w),
@@ -231,7 +241,9 @@ func runStream() async -> Never {
         fail("stream needs --kind display|window and --id N", code: 2)
     }
     let fps = Int(opt("--fps") ?? "30") ?? 30
-    let maxWidth = Int(opt("--max-width") ?? "1600") ?? 1600
+    // 1600 is the SHARE's cap - it exists because a share is uploaded once per
+    // peer. A recording is an archive, so it opts out and keeps source size.
+    let maxWidth = flag("--full-res") ? Int.max : (Int(opt("--max-width") ?? "1600") ?? 1600)
     let audioFifoPath = opt("--audio-fifo")
 
     let content: SCShareableContent
@@ -284,7 +296,12 @@ func runStream() async -> Never {
         cfg.capturesAudio = true
         cfg.sampleRate = 48000
         cfg.channelCount = 2
-        cfg.excludesCurrentProcessAudio = true
+        // SHARING must exclude our own audio or the room hears itself.
+        // RECORDING must include it: when the app is capturing its own window,
+        // our process's audio IS the programme audio - the film under review
+        // plus the remote participants' voices as the app renders them.
+        // Excluded, a recording of a review session has no review in it.
+        cfg.excludesCurrentProcessAudio = !flag("--include-own-audio")
     }
 
     // The spawner reads this ONE stderr line to build the ffmpeg args.

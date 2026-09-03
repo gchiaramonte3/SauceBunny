@@ -1988,7 +1988,7 @@ pub(crate) fn parse_share_source(url_path: &str) -> ShareReq {
 
 /// The saucebunny-capture sidecar (ScreenCaptureKit engine), resolved like
 /// ffmpeg: next to the exe in bundles, suffixed in dev target dirs.
-fn capture_path() -> Option<std::path::PathBuf> {
+pub(crate) fn capture_path() -> Option<std::path::PathBuf> {
     static CAPTURE: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
     CAPTURE
         .get_or_init(|| {

@@ -70,6 +70,11 @@ type Props = {
   /** Tier B peer stream: no random access on the raw route, so the MSE
    *  player's frame-accurate scrub overlay stays off. */
   disableScrubPreview?: boolean;
+  /** Draw the recording frame. True while THIS window is being recorded.
+   *  Threaded to every `.cp-monitor` below, not just the loaded one: a
+   *  recording keeps running while a source refetches or errors, and a frame
+   *  that vanishes exactly then is a frame that lies when it matters. */
+  recording?: boolean;
   /** Tier B quality rung to request, or null for passthrough / non-peer. */
   streamRung?: number | null;
   /** The <video> ran out of buffered media — feeds the rung policy. */
@@ -325,6 +330,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     resumeTitle, onResume, onboarding,
     aspect,
     sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, streamStartAt, disableScrubPreview, onDiag, onAudioDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
+  recording,
     streamRung, onStreamStall, onStreamInfo, streamRungBadge, streamRungBadgeTitle, streamKeepBadge, streamKeepAction, onStreamKeepAction,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs, scrubAudio,
     streamLoadingPhase,
@@ -379,6 +385,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     return (
       <div className="cp-monitor-area">
         <div className="cp-monitor" ref={monitorRef} style={monitorStyle}>
+          {recording && <div className="cp-monitor-rec-frame" aria-hidden />}
           <div className="cp-empty">
             <h3>Paste a URL or drop a file.</h3>
             {resumeTitle && onResume && (
@@ -436,6 +443,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     return (
       <div className="cp-monitor-area">
         <div className="cp-monitor" ref={monitorRef} style={monitorStyle}>
+          {recording && <div className="cp-monitor-rec-frame" aria-hidden />}
           {/* The copy has to match the source.
               This block was hardcoded to "RESOLVING SOURCE STREAM… yt-dlp ·
               probing manifests" for EVERY fetching state, including opening a
@@ -465,6 +473,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     return (
       <div className="cp-monitor-area">
         <div className="cp-monitor" ref={monitorRef} style={monitorStyle}>
+          {recording && <div className="cp-monitor-rec-frame" aria-hidden />}
           {metadata?.thumbnail && (
             <img className="cp-monitor-img" src={metadata.thumbnail} alt=""
                  style={{ filter: "grayscale(0.6) brightness(0.4)" }} referrerPolicy="no-referrer" />
@@ -511,6 +520,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
   return (
     <div className="cp-monitor-area">
       <div className="cp-monitor" ref={monitorRef} style={monitorStyle}>
+          {recording && <div className="cp-monitor-rec-frame" aria-hidden />}
         {sourceKind === "file" && localFilePath ? (
           useWebCodecs ? (
             <MediaBunnyPlayer

@@ -256,6 +256,23 @@ pub enum SessionMsg {
     /// Screen-share flag for the tile badge. Dumb relay; `from` is rewritten
     /// by the host to the true sender (like Rtc) so it can't be spoofed.
     Sharing { from: String, on: bool },
+    /// Someone in the room started or stopped a recording.
+    ///
+    /// `what` is "stage" (this window, and so the film plus everyone's tiles)
+    /// or "camera" (that member's own camera and mic, locally). One boolean
+    /// would not do: the user asked for two different recordings with two
+    /// different consent asks, and "someone is recording" without saying
+    /// which is not informed consent.
+    ///
+    /// NO PATH RIDES HERE, ever - not the output file, not a filename with a
+    /// home directory in it. wire-path-contract only scans reviewDoc sends,
+    /// so nothing catches a regression here but review.
+    ///
+    /// It is an HONOUR SIGNAL and the UI must not imply otherwise: nothing in
+    /// the protocol proves anyone is or is not recording, a modified build
+    /// simply does not send this, and QuickTime on the whole Mac is invisible
+    /// to this app. `from` is rewritten by the host like Sharing/Rtc.
+    Recording { from: String, what: String, on: bool },
     /// Ephemeral live reaction (applause/confetti/thumbsup/question) or the
     /// persistent raise-hand flag (emote "hand", on=false lowers). Fire and
     /// forget: never persisted, never replayed to late joiners. `from` is
@@ -801,6 +818,8 @@ pub async fn session_broadcast(
     // frontend filled in).
     let msg = match msg {
         SessionMsg::Sharing { on, .. } => SessionMsg::Sharing { from: "m0".into(), on },
+        SessionMsg::Recording { what, on, .. } =>
+            SessionMsg::Recording { from: "m0".into(), what, on },
         SessionMsg::Reaction { emote, on, .. } => SessionMsg::Reaction { from: "m0".into(), emote, on },
         SessionMsg::LoadSource { source_kind, url, fingerprint, title, duration, review_key, .. } =>
             SessionMsg::LoadSource { from: "m0".into(), source_kind, url, fingerprint, title, duration, review_key },
@@ -1134,6 +1153,13 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
                         }
                         SessionMsg::Sharing { on, .. } => {
                             let msg = SessionMsg::Sharing { from: member.clone(), on };
+                            let _ = app.emit("session:msg", &msg);
+                            relay_to_others(&shared, id, &msg).await;
+                        }
+                        // Without this arm the catch-all below swallows it and
+                        // the HOST never learns a guest is recording.
+                        SessionMsg::Recording { what, on, .. } => {
+                            let msg = SessionMsg::Recording { from: member.clone(), what, on };
                             let _ = app.emit("session:msg", &msg);
                             relay_to_others(&shared, id, &msg).await;
                         }
@@ -1866,6 +1892,7 @@ async fn peer_read_loop(
                     | SessionMsg::ReviewDoc { .. }
                     | SessionMsg::Presence { .. }
                     | SessionMsg::Sharing { .. }
+                    | SessionMsg::Recording { .. }
                     | SessionMsg::Reaction { .. }
                     | SessionMsg::OfferFile { .. }) => {
                         let _ = app.emit("session:msg", &msg);

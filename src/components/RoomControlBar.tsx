@@ -2,7 +2,7 @@ import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 import { useState } from "react";
 import {
   IconClearMarks, IconFullscreen, IconFullscreenExit, IconMic, IconMicOff,
-  IconPencil, IconScreenShare, IconSettings, IconSmile, IconVideo, IconVideoOff,
+  IconPencil, IconRecord, IconScreenShare, IconSettings, IconSmile, IconVideo, IconVideoOff,
 } from "./Icons";
 import { DevicePanel } from "./DevicePanel";
 import { ReactionPicker } from "./ReactionPicker";
@@ -17,7 +17,7 @@ import type { ShareState } from "../lib/share-machine";
  * INSIDE the transport row's right side (Transport's roomControls slot),
  * with the snapshot/speed/volume controls - not floating over the timeline.
  */
-export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareState, onStartShare, onStopShare, theater, onToggleTheater, onReact, handRaised, onToggleHand, liveDrawOn, onToggleLiveDraw, onClearLiveDraw, liveDrawHasMarks }: {
+export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareState, onStartShare, onStopShare, theater, onToggleTheater, onReact, handRaised, onToggleHand, liveDrawOn, onToggleLiveDraw, onClearLiveDraw, liveDrawHasMarks, canRecord, recording, onToggleRecording }: {
   micOn: boolean;
   camOn: boolean;
   onToggleMic: () => void;
@@ -30,6 +30,11 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
   onReact: (emote: string) => void;
   handRaised: boolean;
   onToggleHand: () => void;
+  /** Recording the stage is the PRESENTER's verb: it captures this window,
+   *  which is the film plus everyone's tiles. Absent for a guest. */
+  canRecord?: boolean;
+  recording?: boolean;
+  onToggleRecording?: () => void;
   /** Live telestration: draw over the picture for everyone, then it fades.
    *  Nothing it draws is ever saved - see LiveDrawLayer. */
   liveDrawOn: boolean;
@@ -78,6 +83,25 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
       >
         <IconScreenShare size={15} />
       </button>
+      {canRecord && onToggleRecording && (
+        <button
+          type="button"
+          className={"cp-room-bar-btn" + (recording ? " recording" : "")}
+          /* Says WHAT it records, because window capture takes the people
+             tiles too - so this records the room's faces, not just the film.
+             Copy that hides that would be the wrong kind of quiet. */
+          title={recording
+            ? "Stop recording. The file is saved under Movies, Sauce Bunny, Sessions."
+            : "Record this window: the film, the people tiles and everything you hear through the app."}
+          aria-label={recording
+            ? "Stop recording. The file is saved under Movies, Sauce Bunny, Sessions."
+            : "Record this window, including the film, the people tiles and everything you hear through the app."}
+          aria-pressed={!!recording}
+          onClick={onToggleRecording}
+        >
+          <IconRecord size={13} />
+        </button>
+      )}
       {pickerOpen && shareState === "idle" && (
         <ShareDialog
           onPick={onStartShare}

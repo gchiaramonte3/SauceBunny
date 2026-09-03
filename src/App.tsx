@@ -3762,6 +3762,8 @@ export default function App() {
     keepBadge, keepAction, onKeepCancel, onKeepResume, keepEnabled, setKeepEnabled,
     onKeepStall, onKeepStreamInfo,
     startCoReview, joinCoReview, leaveCoReview, pendingJoinCode, clearPendingJoinCode, outboxDepth,
+    recordingMembers, stageRecorders, stageRecording, lastRecording,
+    startStageRecording, stopStageRecording,
     liveDraw, postDrawOp, clearLiveDraw, pruneLiveDraw,
   } = useCoReview({
     isPlaying, fps, playbackRate,
@@ -3918,6 +3920,25 @@ export default function App() {
    * because that is what the session was ABOUT; the stamp only separates two
    * sittings with the same cut.
    */
+  // WHERE THE FILE WENT. A recording that finishes silently is a recording
+  // the user has to go looking for, and this one is potentially gigabytes in
+  // a folder they have never opened. Fires once per take.
+  const toldRecordingRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!lastRecording || toldRecordingRef.current === lastRecording.path) return;
+    toldRecordingRef.current = lastRecording.path;
+    // ts-rs maps Rust's u64 to bigint, which will not divide by a number.
+    const bytes = Number(lastRecording.bytes);
+    const gb = bytes / 1e9;
+    const size = gb >= 1 ? `${gb.toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
+    const mins = Math.round(Number(lastRecording.seconds) / 60);
+    pushNotification(
+      "success",
+      "Recording saved",
+      `${mins < 1 ? "Under a minute" : `${mins} min`}, ${size}. In Movies, Sauce Bunny, Sessions.`,
+    );
+  }, [lastRecording, pushNotification]);
+
   const sessionDefaultTitle = useMemo(() => {
     const d = new Date();
     const p2 = (n: number) => String(n).padStart(2, "0");
@@ -4642,6 +4663,8 @@ export default function App() {
                 mutedForMe={meshMutedForMe}
                 onToggleMuteForMe={toggleMuteForMe}
                 sharingMembers={sharingMembers}
+                recordingMembers={recordingMembers}
+                selfRecording={stageRecording}
                 shareStream={shareStream}
                 raisedHands={raisedHands}
                 presenter={coSession.presenter}
@@ -4920,6 +4943,11 @@ export default function App() {
                     webCachedUseMediabunny={webCachedPlayer === "mediabunny"}
                     streamStartAt={webPlayback.streamStartAt}
                     disableScrubPreview={activeSourceUrl?.startsWith("peer://") ?? false}
+                    /* "This stage is being recorded" - by me, or by whoever
+                       in the room is recording the window. NOT "someone is
+                       recording something": a camera take is reported per
+                       tile, where it belongs. One 2px frame cannot say both. */
+                    recording={stageRecording || stageRecorders.size > 0}
                     /* Tier B adaptive quality (step 3e). Null for a web source:
                        the ladder only means anything when another Mac is
                        encoding for us. */
@@ -5191,6 +5219,15 @@ export default function App() {
                         onReact={sendReaction}
                         handRaised={handRaised}
                         onToggleHand={toggleHand}
+                        /* Recording the stage captures THIS WINDOW, so it is
+                           the presenter's verb - a guest recording the stage
+                           would be recording a view they do not control. */
+                        canRecord={isPresenter}
+                        recording={stageRecording}
+                        onToggleRecording={() => {
+                          if (stageRecording) void stopStageRecording();
+                          else void startStageRecording(metadata?.title ?? coSession.title ?? null);
+                        }}
                         liveDrawOn={liveDrawOn}
                         onToggleLiveDraw={() => setLiveDrawOn((v) => !v)}
                         onClearLiveDraw={clearLiveDraw}
@@ -5259,6 +5296,8 @@ export default function App() {
                       mutedForMe={meshMutedForMe}
                       onToggleMuteForMe={toggleMuteForMe}
                       sharingMembers={sharingMembers}
+                recordingMembers={recordingMembers}
+                selfRecording={stageRecording}
                       shareStream={shareStream}
                       raisedHands={raisedHands}
                     />

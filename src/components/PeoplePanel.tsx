@@ -37,9 +37,15 @@ function rosterAnnouncement(joined: readonly string[], left: readonly string[]):
   return [phrase(joined, "joined"), phrase(left, "left")].filter(Boolean).join(". ");
 }
 
-export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe, onRemovePerson }: {
+export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, recordingMembers, selfRecording, shareStream, raisedHands, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe, onRemovePerson }: {
   active: boolean;
   participants: Participant[];
+  /** Member ids recording their own camera. */
+  recordingMembers?: ReadonlySet<string>;
+  /** Is THIS machine recording? Derived locally so the badge does not lag a
+   *  network round trip behind your own click - and because the host never
+   *  receives its own broadcast at all. */
+  selfRecording?: boolean;
   /** Member id currently driving source + transport. */
   presenter?: string;
   /** True for the host, who is the one who can pass the floor. */
@@ -136,6 +142,7 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
             stream={p.isSelf ? (shareStream ?? selfStream) : remoteStreams.get(p.id) ?? null}
             state={p.isSelf ? "live" : peerStates.get(p.id) ?? "connecting"}
             sharing={p.isSelf ? shareStream != null : sharingMembers.has(p.id)}
+            recording={p.isSelf ? !!selfRecording : !!recordingMembers?.has(p.id)}
             handUp={raisedHands.has(p.id)}
             flash={reactionFlashes.get(p.id) ?? null}
             isPresenter={p.id === presenter}
@@ -158,11 +165,12 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
 /** One member: camera tile when a video track flows, avatar card when not.
  *  Speaking glow rides an AnalyserNode threshold on the tile's own audio
  *  (reduced motion: no glow animation, static ring). */
-function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, canGrant, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe, onRemovePerson }: {
+function PersonTile({ p, stream, state, sharing, recording, handUp, flash, isPresenter, canGrant, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe, onRemovePerson }: {
   p: Participant;
   stream: MediaStream | null;
   state: MeshPeerState;
   sharing: boolean;
+  recording?: boolean;
   handUp: boolean;
   flash: string | null;
   /** This member currently chooses what the room watches. */
@@ -317,6 +325,9 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
         <span className="cp-person-presenting" title="Choosing what everyone watches">Presenting</span>
       )}
       {sharing && <span className="cp-person-share">Sharing screen</span>}
+      {recording && (
+        <span className="cp-person-rec" title="Recording their own camera and mic">Recording</span>
+      )}
       {handUp && <span className="cp-person-hand" title="Hand raised" aria-label="Hand raised">✋</span>}
       {flash && <span className="cp-person-flash" aria-hidden>{flash}</span>}
       <div className="cp-person-meta">

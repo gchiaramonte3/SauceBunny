@@ -941,6 +941,19 @@ The contracts prove the rules; only eyes prove the pixels.
     have THEM leave a note. After the session, that note must appear under
     that session in your ledger, not under "Outside a session".
 
+52. **Record a session.** Host one, press the record dot in the room bar.
+    A red frame appears around the picture and stays there while a source
+    reloads or errors. Stop it: a toast names the size and says Movies, Sauce
+    Bunny, Sessions. Open the file - it must play, have sound, and show the
+    window at full size rather than 1600px wide.
+53. **Quit mid-recording** (Cmd-Q while it runs). The file must still play up
+    to the moment you quit, and must NOT be left named `.part`.
+54. **A guest sees it.** With a guest connected, start recording: their copy
+    shows the red frame too. Stop: it clears on both. Have the guest drop and
+    rejoin while you record - their frame must come back, not stay dark.
+55. **Refusal with a number.** If the volume has under 2 GB free, Record must
+    refuse and say how much is free rather than failing silently.
+
 ### People tiles and the A/V mesh
 
 31. **Your own tile.** In a session, look at your tile: camera and mic buttons

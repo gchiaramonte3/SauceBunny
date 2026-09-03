@@ -1447,3 +1447,27 @@
 /* Selected reads brighter, never the accent — green means "playing" here. */
 .cp-annot-tool.on { color: var(--fg-1); background: var(--bg-3); border-color: var(--line-2); }
 .cp-annot-tool:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+
+/* THE RECORDING FRAME.
+   Not a border or inset shadow on .cp-monitor itself: the player's <video>
+   fills that box at 100%/100% and paints over it, .cp-monitor already carries
+   a 1px border plus a box-shadow ring, and an OUTER ring clips because
+   .cp-monitor-area is overflow:hidden. So a dedicated child, inset 0.
+
+   z-index 9 clears everything else inside .cp-monitor: the prep banner (4),
+   the stream loading scrim (5) - the frame must stay visible while a source
+   reloads, since the recording keeps running - captions and annotations (6),
+   and the timecode HUD, shuttle badge and rung chip (8). The z20/z40 rules in
+   this file are transport popovers, not children of .cp-monitor.
+
+   Static, not blinking: .cp-person.speaking is the app's only other
+   persistent state ring and it does not animate, and an infinite pulse is
+   exactly what reduced-motion-contract was written about. */
+.cp-monitor-rec-frame {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--danger);
+  border-radius: var(--r-sm);
+  pointer-events: none;
+  z-index: 9;
+}

@@ -5,6 +5,28 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **Record the session.** The presenter can record the review to a real file:
+  the film, the people tiles and everything you hear through the app,
+  including the other side's voices. It writes to
+  `~/Movies/Sauce Bunny/Sessions/`, one folder per take, and everyone in the
+  room is told while it runs - a red frame around the picture and a badge on
+  the tile of anyone recording themselves.
+  
+  It records natively, in a child process, and not through the web view. That
+  is not a detail: the session's own audio track is silent while you are
+  muted, it is capped at 720p because that is what the other side receives,
+  and a take that lived in the web view for ninety minutes would be sitting
+  in the most disposable process on the machine. The file is a fragmented
+  MP4, so a take that is interrupted still plays up to its last moment.
+  
+  Two honest limits, stated in the app rather than buried here: recording the
+  window records the people tiles too, so it records faces; and nothing in
+  the protocol can prove anyone is or is not recording, so the red frame is
+  an announcement, not a guarantee.
+
+
 ### Fixed
 
 - **Transcripts appear again.** The library scan opened and read 128 KB of

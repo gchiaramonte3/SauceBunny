@@ -5,9 +5,9 @@ import { join, resolve } from "node:path";
 /**
  * The co-review wire protocol: every `SessionMsg` kind is handled by someone.
  *
- * Fifteen variants cross between peers, and they are split deliberately —
+ * Sixteen variants cross between peers, and they are split deliberately —
  * `hello` / `welcome` / `peerList` / `bye` are connection lifecycle and belong
- * to Rust's session layer; the other eleven are application messages the
+ * to Rust's session layer; the other twelve are application messages the
  * frontend applies. Neither side handles the other's, and that is correct, not
  * an omission. It is also invisible: reading either file alone shows a switch
  * that covers only part of the union.

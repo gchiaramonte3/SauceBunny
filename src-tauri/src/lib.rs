@@ -180,6 +180,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(commands::JobRegistry::default())
+        .manage(commands::recording::Recorder::default())
         .manage(commands::LlmServer::default())
         .manage(commands::SessionManager::default())
         .manage(commands::PendingReviewLink::default())
@@ -308,6 +309,10 @@ pub fn run() {
             commands::session_join,
             commands::session_leave,
             commands::session_state,
+            commands::recording_start,
+            commands::recording_stop,
+            commands::recording_status,
+            commands::recording_own_window,
             commands::session_broadcast,
             commands::session_send,
             commands::session_offer_file,
@@ -438,6 +443,11 @@ pub fn run() {
                 // (three orphaned yt-dlp+ffmpeg pairs were found still pulling
                 // the same download half an hour after their app instance had
                 // quit, starving the next launch of bandwidth).
+                // A recording finalizes BEFORE the blanket sidecar kill below:
+                // that loop would take the encoder out mid-container, and
+                // while a fragmented MP4 survives that, closing it properly
+                // is strictly better and costs a bounded moment.
+                app.state::<commands::recording::Recorder>().shutdown();
                 let registry = app.state::<commands::JobRegistry>();
                 let mut killed = 0usize;
                 for id in registry.active_ids() {

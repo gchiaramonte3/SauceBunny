@@ -45,6 +45,8 @@ import {
   type DrawOp, type DrawState,
 } from "../lib/draw-ops";
 import type { SessionMsg } from "../bindings/SessionMsg";
+import type { RecordingHandle } from "../bindings/RecordingHandle";
+import type { RecordingResult } from "../bindings/RecordingResult";
 import type { SessionState as CoSessionState } from "../bindings/SessionState";
 import { useRtcMesh, type TurnConfig } from "./use-rtc-mesh";
 import type { MeshPeerState } from "../lib/rtc-mesh";
@@ -215,6 +217,19 @@ export type CoReview = {
   sharingMembers: ReadonlySet<string>;
   startShare: (source: ShareSourceArg) => void;
   stopShare: () => void;
+  /** Member ids recording their own camera, and recording THIS WINDOW. Two
+   *  sets because they mean different things to the person being told. */
+  recordingMembers: ReadonlySet<string>;
+  stageRecorders: ReadonlySet<string>;
+  /** True while THIS machine is recording the stage. Held locally as well as
+   *  announced, because a light driven by the wire lags your own click by a
+   *  round trip - and the host never receives its own broadcast at all. */
+  stageRecording: boolean;
+  /** Start/stop recording this window. Announces to the room either way. */
+  startStageRecording: (title: string | null) => Promise<void>;
+  stopStageRecording: () => Promise<void>;
+  /** The last take's file, for the toast that says where it went. */
+  lastRecording: RecordingResult | null;
   /** Transient reactions currently on screen (auto-pruned after ~5s). */
   /** Member ids with a raised hand (persistent until lowered). */
   raisedHands: ReadonlySet<string>;
@@ -333,6 +348,17 @@ export function useCoReview({
   // mesh hook must be declared after the message handler's closure).
   const rtcSignalRef = useRef<((from: string, payload: string) => void) | null>(null);
   const [sharingMembers, setSharingMembers] = useState<ReadonlySet<string>>(new Set());
+  /**
+   * Who is recording, keyed by what they are recording.
+   *
+   * Two sets rather than one, because the two recordings mean different
+   * things to the person being told: "camera" is that member recording
+   * themselves, "stage" is someone recording this window - which includes
+   * everyone's tiles, and so their face. A single "is recording" flag cannot
+   * carry that, and a consent signal that is vague is not one.
+   */
+  const [recordingMembers, setRecordingMembers] = useState<ReadonlySet<string>>(new Set());
+  const [stageRecorders, setStageRecorders] = useState<ReadonlySet<string>>(new Set());
   const [shareState, setShareState] = useState<ShareState>("idle");
   const [shareStream, setShareStream] = useState<MediaStream | null>(null);
   const coSessionActive = coSession.role !== "off";
@@ -777,6 +803,17 @@ export function useCoReview({
           return next;
         });
         return;
+      case "recording": {
+        const put = (prev: ReadonlySet<string>) => {
+          const next = new Set(prev);
+          if (m.on) next.add(m.from); else next.delete(m.from);
+          return next;
+        };
+        if (m.what === "stage") setStageRecorders(put); else setRecordingMembers(put);
+        slog(m.on ? "warn" : "info",
+          `${m.from} ${m.on ? "started" : "stopped"} recording ${m.what === "stage" ? "the stage" : "their camera"}.`);
+        return;
+      }
       case "presence":
         // Straight into the ghost store - App must not re-render for a
         // peer's playhead tick. Only the Timeline leaf subscribes.
@@ -1771,6 +1808,85 @@ export function useCoReview({
       sendSessionMsg({ kind: "sourceStatus", from: "", state: "failed", detail: null });
     }
   }, [loadLocalPath, sendSessionMsg]);
+  const [stageRecording, setStageRecording] = useState(false);
+  const [lastRecording, setLastRecording] = useState<RecordingResult | null>(null);
+
+  /** Tell the room. Safe outside a session: it is a no-op there. */
+  const announceRecording = useCallback((what: string, on: boolean) => {
+    if (coRoleRef.current === "off") return;
+    void trySendSessionMsg({ kind: "recording", from: "", what, on }).catch(() => {});
+  }, [trySendSessionMsg]);
+
+  const startStageRecording = useCallback(async (title: string | null) => {
+    try {
+      // The window id is found by the backend, not passed from here: a
+      // CGWindowID is not something the renderer can know, and asking the
+      // capture engine which window belongs to our pid is the only honest way
+      // to get it.
+      const windowId = await invoke<number>("recording_own_window");
+      await invoke<RecordingHandle>("recording_start", { windowId, title });
+      setStageRecording(true);
+      announceRecording("stage", true);
+    } catch (e) {
+      pushNotification("error", "Couldn't start recording", formatError(e));
+    }
+  }, [announceRecording, pushNotification]);
+
+  const stopStageRecording = useCallback(async () => {
+    try {
+      const res = await invoke<RecordingResult>("recording_stop");
+      setLastRecording(res);
+    } catch (e) {
+      pushNotification("error", "Couldn't finish the recording", formatError(e));
+    } finally {
+      // Local state and the announcement clear even if finalizing complained:
+      // a red light that stays on after the recording has stopped is worse
+      // than a missing file, because it is a lie about what is happening.
+      setStageRecording(false);
+      announceRecording("stage", false);
+    }
+  }, [announceRecording, pushNotification]);
+
+  // What is ALREADY recording, asked once on mount. Same reason session state
+  // is asked for: a reload cannot be told by a pushed event about something
+  // that started before it existed, and a recording outlives a reload.
+  useEffect(() => {
+    void invoke<RecordingHandle | null>("recording_status")
+      .then((h) => { if (h) setStageRecording(true); })
+      .catch(() => { /* older backend, or nothing recording */ });
+  }, []);
+
+  /**
+   * PRUNE AGAINST THE ROSTER, which `sharing` and `hand` both fail to do.
+   *
+   * Neither of those is ever pruned; they clear only when the whole session
+   * ends. Rust holds no per-member flag state either, and member ids are
+   * reclaimed by install id - so a peer that drops while flagged and rejoins
+   * comes back still flagged. For "Sharing screen" that is cosmetic. For a
+   * recording light it is a lie about whether someone is being recorded.
+   */
+  useEffect(() => {
+    const live = new Set(coSession.peers.map((p) => p.id));
+    const keep = (prev: ReadonlySet<string>) => {
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    };
+    setRecordingMembers(keep);
+    setStageRecorders(keep);
+  }, [coSession.peers]);
+
+  // RE-ANNOUNCE ON ROSTER GROWTH, per member. The existing re-sync is
+  // host-only and self-only, so "guest B is recording, guest C joins" told C
+  // nothing. Each member re-sends its OWN flag; the host cannot do it on
+  // anyone's behalf, because session_broadcast rewrites `from` to m0.
+  const peerCountRef = useRef(0);
+  useEffect(() => {
+    const n = coSession.peers.length;
+    const grew = n > peerCountRef.current;
+    peerCountRef.current = n;
+    if (grew && stageRecording) announceRecording("stage", true);
+  }, [coSession.peers.length, stageRecording, announceRecording]);
+
   const startShare = useCallback((source: ShareSourceArg) => { void shareRef.current?.start(source); }, []);
   const stopShare = useCallback(() => { void shareRef.current?.stop(); }, []);
   // Session over -> the share dies with it (same converged cleanup).
@@ -1789,6 +1905,8 @@ export function useCoReview({
     meshStreams: mesh.remoteStreams, meshStates: mesh.peerStates,
     meshMutedForMe: mesh.peerMutedForMe, toggleMuteForMe: mesh.toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
+    recordingMembers, stageRecorders, stageRecording, lastRecording,
+    startStageRecording, stopStageRecording,
     viewerShareState, startViewerShare, stopViewerShare,
     raisedHands,
     /** True when WE drive source + transport (host by default). */

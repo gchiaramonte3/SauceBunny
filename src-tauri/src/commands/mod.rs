@@ -55,6 +55,8 @@ pub mod peer_stream;
 pub mod rung;
 pub mod session;
 pub use session::*;
+pub mod recording;
+pub use recording::*;
 pub mod library;
 pub use library::*;
 
