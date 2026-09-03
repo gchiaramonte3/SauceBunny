@@ -189,11 +189,31 @@
 
   /* Diagonal brand wash — used as background overlay on hero surfaces
      (canvas empty state, banner backdrops). Subtle in opacity; reads as
-     "premium tinted dark" rather than "skittles". */
+     "premium tinted dark" rather than "skittles".
+     
+     IT IS DITHERED, AND IT HAS TO BE. A 0.10-alpha bloom fading out over
+     ~40% of a large panel crosses about 26 distinct 8-bit values across
+     several hundred pixels, which puts a hard step every dozen pixels or so:
+     on a dark panel those read as concentric rings, and on the stage - the
+     biggest surface in the app - they were the first thing the eye found.
+     No amount of extra colour stops fixes it; the steps are the output
+     depth, not the interpolation, so the only real remedy is to break the
+     boundaries up with noise below the threshold of a visible texture.
+     
+     The dither is a 2px checker at ~2/255, carried as the TOP layer with its
+     own size in the shorthand (`position / size`), so every existing
+     `background: var(--grad-brand-wash)` picks it up with no change at the
+     call site. Keep it first, and keep its alpha low enough to be invisible
+     as texture on a flat fill - it is a hair over the quantisation step, on
+     purpose. Do not "tidy" it away; the rings come straight back.
+     
+     Falloffs also stretched (42/48/40 -> 58/64/56) so each step spans more
+     pixels, which softens what is left of them. */
   --grad-brand-wash:
-    radial-gradient(at 12% 8%,  rgba(108,255,141,0.10) 0%, transparent 42%),
-    radial-gradient(at 88% 92%, rgba(109,82,237,0.10) 0%, transparent 48%),
-    radial-gradient(at 70% 10%, rgba(197,74,247,0.06) 0%, transparent 40%);
+    repeating-conic-gradient(rgba(255,255,255,0.010) 0% 25%, rgba(0,0,0,0.010) 0% 50%) 0 0 / 4px 4px,
+    radial-gradient(at 12% 8%,  rgba(108,255,141,0.10) 0%, transparent 58%),
+    radial-gradient(at 88% 92%, rgba(109,82,237,0.10) 0%, transparent 64%),
+    radial-gradient(at 70% 10%, rgba(197,74,247,0.06) 0%, transparent 56%);
   /* r162: the two steps the scale was missing, found by counting rather
      than guessing. --r-2xs covers 16 declarations of 2px (scrollbar
      thumbs, progress bars, hairline chips) that had no name. --r-card

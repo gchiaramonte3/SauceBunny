@@ -75,6 +75,28 @@ a library tree whose chevrons had never actually worked.
 - The About panel credits **mediabunny**, which it had never named.
 
 ### Fixed
+- **"A co-review session is already active" no longer traps you.** Session
+  state only ever arrived as a pushed event, and the app emits one only when
+  something changes, so a window that missed or reset past one had no way to
+  ask what was true. A live session could sit invisible behind a lobby
+  offering to start another, and every press of Start failed with an error
+  about a session it was not showing. The app can now ask, it asks on launch,
+  and a refused Start puts the running session back on screen instead.
+- **Column lines run the whole way down.** They stopped at the bottom of the
+  header, so a table read as a labelled strip sitting on an undivided field of
+  rows. Every list view now draws them from the header through the last row,
+  on the same tracks, including the sessions table.
+- **Right-click works in the From the web list.** The grid has had a menu all
+  along; switching to list view quietly took every verb with it and handed
+  back the system menu. Same menu, same verbs, keyboard-reachable.
+- **The background wash no longer bands.** A soft bloom fading out across a
+  large dark panel crosses only about two dozen 8-bit steps, which paints
+  visible rings. It is dithered now, and the falloffs are longer.
+- **A toast sizes to its words.** As a flex item it shrank far below its own
+  limit, so a 1280px stage produced a 263px toast with both lines wrapped and
+  room to spare beside it.
+- **The empty Source panel shows the app's own mark**, greyed, instead of a
+  generic film strip.
 - **Scrubbing inside a session is as quick as scrubbing outside one again.**
   The live-drawing layer is mounted for the whole session whether or not
   anyone picks up the pen, and it was repainting a full-size canvas sixty

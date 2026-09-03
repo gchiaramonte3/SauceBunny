@@ -307,6 +307,7 @@ pub fn run() {
             commands::session_start,
             commands::session_join,
             commands::session_leave,
+            commands::session_state,
             commands::session_broadcast,
             commands::session_send,
             commands::session_offer_file,

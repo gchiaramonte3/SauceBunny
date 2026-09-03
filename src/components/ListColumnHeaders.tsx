@@ -432,3 +432,47 @@ function CustomColumnSection({ custom, onKey, onDone }: {
     </>
   );
 }
+
+/**
+ * The column lines, running the full height of the list.
+ *
+ * The header already draws a divider per column, but it lived inside the
+ * header CELL and stopped at its bottom edge, so a table read as a labelled
+ * strip sitting on top of an undivided field of rows. Columns you can see in
+ * the header and not in the body are the thing this fixes, and it has to hold
+ * everywhere the list view appears or the tables drift apart.
+ *
+ * IT IS AN OVERLAY, NOT A BORDER ON THE CELLS. Row cells are vertically
+ * centred, so their boxes are content-height rather than row-height: a border
+ * on them draws a stack of short dashes, not a line. Rendering one absolutely
+ * positioned grid over the list, with the SAME track template the header and
+ * every row already share, is what makes the line continuous and keeps it
+ * aligned through a resize for free.
+ *
+ * Drawn LAST and `pointer-events: none`: it must sit over the row fills (a
+ * line the striping hides is not a line) while remaining untouchable, or it
+ * would swallow the clicks and the marquee gesture belonging to the rows
+ * underneath it.
+ */
+export function ListColumnRules({ template, trackCount, lastColumnTrack }: {
+  /** The shared track list. Omitted by tables whose columns are fixed in CSS
+   *  rather than computed from a resize model; those point the overlay at
+   *  their own tracks in the stylesheet. */
+  template?: string;
+  trackCount: number;
+  /** 1-based track of the last real column, which carries the trailing line.
+   *  Not the last track: an explicit Name width appends a filler. */
+  lastColumnTrack: number;
+}) {
+  return (
+    <div
+      className="cp-lib-colrules"
+      aria-hidden
+      style={template ? { ["--lrow-cols" as string]: template } : undefined}
+    >
+      {Array.from({ length: trackCount }, (_, i) => (
+        <span key={i} className={i + 1 === lastColumnTrack ? "last-col" : undefined} />
+      ))}
+    </div>
+  );
+}

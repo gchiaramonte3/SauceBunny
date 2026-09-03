@@ -6,7 +6,7 @@ import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { formatFrameTimecode, type FrameItem } from "../lib/frames";
 import { assetUrl } from "../lib/asset-url";
 import { NameHeader } from "./ListColumnHeaders";
-import { ListColumnHeaders } from "./ListColumnHeaders";
+import { ListColumnHeaders, ListColumnRules } from "./ListColumnHeaders";
 import type { ColSpec } from "./ListColumnHeaders";
 import { IconCircleX } from "./Icons";
 
@@ -151,6 +151,7 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
           </div>
         );
       })}
+      <ListColumnRules template={template} trackCount={colModel.trackCount} lastColumnTrack={colModel.lastColumnTrack} />
       {menuAt && (
         <LibraryCardMenu
           anchor={{ x: menuAt.x, y: menuAt.y }}

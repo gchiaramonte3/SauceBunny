@@ -1,3 +1,4 @@
+import logoUrl from "../assets/saucebunny.svg";
 import { type CSSProperties, useEffect, useId, useMemo, useState, useSyncExternalStore } from "react";
 import { WEB_POSTERS_CHANGED_EVENT, webPosterFor } from "../lib/web-poster-store";
 import { inertWhen } from "../lib/inert";
@@ -371,10 +372,13 @@ export function Sidebar(props: Props) {
           <div className="cp-section-label">Source</div>
           <div className="cp-thumb cp-thumb-empty">
             <div className="cp-thumb-empty-stack">
-              {/* 32, not 24: IconFilm's geometry sits on a 1.5-unit grid, and
-                  32 is the size where every stroke lands on whole device
-                  pixels (1.5 x 32/24 = 2px) - at 24 the glyph read soft. */}
-              <IconFilm size={32} stroke="rgba(255,255,255,0.32)" />
+              {/* The app's own mark, quiet. A generic film strip said nothing
+                  a person could not already see - the panel is titled Source
+                  and sits under an empty player - so the space now holds the
+                  thing the app IS, at rest. The brand green is desaturated in
+                  CSS rather than kept as a second grey copy of the artwork,
+                  which would drift from this one the moment it is redrawn. */}
+              <img className="cp-thumb-empty-mark" src={logoUrl} alt="" draggable={false} />
               <span className="cp-thumb-empty-label">
                 {status === "fetching" ? "Resolving…" : status === "error" ? "Resolve failed" : "No source loaded"}
               </span>

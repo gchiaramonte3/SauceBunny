@@ -721,7 +721,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and four rules in this file are checked by a test rather than remembered. If you
+One hundred and five rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -839,6 +839,7 @@ written after finding the rule already broken somewhere.
 | `row-key-path-contract` | A row's identity key is never used as a filesystem path. LibraryTree keys rows `<rootIndex>:<path>`, so passing the key where a path belongs asks the disk about "0:/Users/..." and gets nothing back - no error, just a feature that looks unwired. It happened seven times; the seventh left every folder in the sidebar with no Finder colour and was reported twice as a regression |
 | `native-drag-contract` | No element declares HTML5 `draggable`. On macOS that opens a real NSDragging session, which Tauri's webview drag-drop listener cannot tell from a Finder drag - so dragging a column header raised the full-window "drop a file to import" card. In-app drags are pointer-based. `draggable={false}` on an image is the opposite and is expected |
 | `offer-readiness-contract` | A host can offer the file BEFORE anyone has failed to open it. The button was gated on a guest having already reported "missing", so a human then had to notice it appear and click - an unbounded wait sitting in front of the hash, the substream and the transfer. The click itself stays: it is the consent step for a multi-GB read |
+| `list-rules-contract` | Every list view draws its column lines, and the header, the rows and the rules share one track geometry. A gutter applied to two of the three put every body line 32px off its header divider |
 | `contract-register` | This table describes itself: the spelled-out count matches the rows, and every row names a test file that exists |
 | `e2e-mock-shape-contract` | The two object literals in `e2e/tauri-mock.ts` carry exactly the fields of their ts-rs binding, so 100 Playwright tests cannot certify a backend shape that no longer exists |
 | `elevation-contract` | Two shadow tiers, two tokens: a popover, menu, toast or HUD floats on `--shadow-card`, a dialog on `--shadow-modal`. Twenty floating surfaces carried twelve hand-typed shadows and the dialog tier had no token; four popovers on one monitor bar cast four different shadows. A literal outer shadow with 8px or more of blur fails, with a shrink-only list for lifts and drag ghosts that are states rather than surfaces |

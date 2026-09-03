@@ -884,7 +884,14 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  max-width: 80%;
+  /* SIZE TO THE COPY, then clamp. As a flex item this shrank to something
+     far under its own max-width - a 1280px stage produced a 263px toast -
+     so both lines wrapped in a box with room to spare beside it, and a
+     title like "Couldn't start co-review" broke at its hyphen for no
+     reason a reader could see. max-content asks for the width the words
+     actually want; the clamp keeps a long one from crossing the picture. */
+  width: max-content;
+  max-width: min(560px, 80%);
   padding: 10px 14px 10px 12px;
   background: color-mix(in srgb, var(--bg-2) 92%, transparent);
   backdrop-filter: blur(14px);
@@ -913,6 +920,9 @@
 .cp-canvas-toast.info    .icon { background: rgba(255,255,255,0.10);           color: var(--fg-1);  }
 .cp-canvas-toast .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .cp-canvas-toast .title {
+  /* When it does wrap, split the lines evenly rather than leaving one word
+     stranded under a full line. */
+  text-wrap: balance;
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
   color: var(--fg-1);

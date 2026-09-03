@@ -10,7 +10,7 @@ import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { useRovingGrid } from "../hooks/use-roving-grid";
 import { useMarquee } from "../hooks/use-marquee";
 import type { LibraryFolder, LibraryItem } from "../types";
-import { ListColumnHeaders, NameHeader } from "./ListColumnHeaders";
+import { ListColumnHeaders, ListColumnRules, NameHeader } from "./ListColumnHeaders";
 import { useCustomColumns, CUSTOM_COL_WIDTH } from "../hooks/use-custom-columns";
 import type { ColSpec } from "./ListColumnHeaders";
 import type { LibColKey } from "../lib/library";
@@ -396,6 +396,7 @@ export function LibraryBrowserPane({
             onResetPoster={onResetPoster}
           />
         ))}
+        <ListColumnRules template={template} trackCount={colModel.trackCount} lastColumnTrack={colModel.lastColumnTrack} />
       </div>
       {editCell && (
         <input

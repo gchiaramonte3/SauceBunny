@@ -740,6 +740,30 @@ pub async fn session_join(
     Ok(())
 }
 
+/// WHAT IS ACTUALLY TRUE RIGHT NOW, on demand.
+///
+/// Session state reached the frontend only as a pushed `session:state` event,
+/// and Rust emits one only when something CHANGES. That is fine until the two
+/// sides disagree, and then it is unrecoverable: a renderer that missed an
+/// emit, reloaded, or reset past one has no way to ask, so a live session can
+/// sit invisible behind a lobby that offers to start another. Every press of
+/// Start then fails with "A co-review session is already active" - an error
+/// that is both correct and useless, because the UI is not showing the session
+/// it is talking about and gives no way to reach it.
+///
+/// This is the same handshake the panel bus already uses for the same reason
+/// (see the `panel:request-state` note in CLAUDE.md): events are dropped, not
+/// queued, so a pushed channel needs a pull to recover from.
+///
+/// Read-only. It takes the lock, copies the snapshot and returns it.
+#[tauri::command]
+pub async fn session_state(
+    state: State<'_, SessionManager>,
+) -> Result<SessionState, crate::AppError> {
+    let inner = state.inner.lock().await;
+    Ok(snapshot_state(&inner).await)
+}
+
 /// Leave / end the session (both roles). Idempotent: calling while "off"
 /// just clears any stale error and re-emits state.
 #[tauri::command]

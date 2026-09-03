@@ -11,6 +11,7 @@ import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useGridSelection } from "../hooks/use-grid-selection";
 import { useMarquee } from "../hooks/use-marquee";
 import { IconReview } from "./Icons";
+import { ListColumnRules } from "./ListColumnHeaders";
 
 /**
  * The sessions this Mac has already held.
@@ -198,6 +199,7 @@ export function ReviewSessionsPane({ treeOpen, onShowTree }: {
                     <span className="cp-lib-lrow-date">{whenLabel(r.startedAt)}</span>
                   </button>
                 ))}
+                <ListColumnRules trackCount={4} lastColumnTrack={4} />
               </div>
             ) : (
               <div className="cp-web-grid" role="list">

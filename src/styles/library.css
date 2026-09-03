@@ -1233,7 +1233,37 @@
 }
 
 /* ── List mode — a compact table (poster · name · kind · size · modified). ── */
-.cp-lib-list { display: flex; flex-direction: column; }
+.cp-lib-list { display: flex; flex-direction: column; position: relative; }
+/* The column lines, continuous from the header through the body. See
+   ListColumnRules: an overlay rather than borders on the cells, because row
+   cells are centred and so are content-height, which would draw a stack of
+   dashes instead of a line. */
+.cp-lib-colrules {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: var(--lrow-cols);
+  gap: var(--s-3);
+  /* The rows' own horizontal padding, so these tracks land exactly where the
+     rows' tracks do. Without it every line sits var(--s-2) to the left. */
+  padding: 0 var(--s-2);
+  pointer-events: none;
+}
+/* One line per boundary the HEADER has a divider for: the right edge of Name
+   and of each column after it. Art has no divider, and a line between the
+   thumbnail and the name would invent a boundary the header does not show. */
+.cp-lib-colrules > span:nth-child(n + 3) {
+  border-left: 1px solid var(--line-1);
+  /* Back out of the gap and onto the previous track's right edge, which is
+     where .cp-lib-coldiv paints (right: -5px + left: 4px = 1px inside). Any
+     other offset leaves the body line and the header divider visibly out of
+     step at every boundary. */
+  margin-left: calc(-1 * var(--s-3) - 1px);
+}
+/* The table's right-hand edge. On the LAST COLUMN rather than the last track:
+   an explicit Name width appends a filler track, and a line drawn there would
+   float out at the pane's edge with no header divider above it. */
+.cp-lib-colrules > span.last-col { border-right: 1px solid var(--line-1); }
 /* Sortable column header. Inherits the header row's type so it reads as a
    label, not a button, until you point at it — the Finder behaviour. */
 .cp-lib-sorthead {
@@ -2060,11 +2090,33 @@
    shelf. Four columns rather than the file list's five: a session has no
    size and no kind, and inventing a column to keep the grid identical would
    be worse than a grid that fits what it holds. */
+/* One track list for the header, every row AND the column rules, declared
+   once as a variable for the same reason the resizable tables read
+   --lrow-cols: three boxes that must agree, and a second copy is how they
+   stop agreeing. This table's columns are fixed (no resize model yet), so the
+   value is literal rather than computed. */
+.cp-sess-list {
+  --sess-cols: minmax(180px, 1fr) minmax(120px, 0.8fr) 64px 150px;
+  --sess-gap: 10px;
+}
 .cp-sess-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(120px, 0.8fr) 64px 150px;
-  gap: 10px;
+  grid-template-columns: var(--sess-cols);
+  gap: var(--sess-gap);
   align-items: center;
+}
+/* The sessions table gets the same continuous lines as every other list
+   view. Its geometry differs (its own tracks, its own gap), so the shared
+   overlay is re-pointed at them rather than re-implemented. */
+.cp-sess-list .cp-lib-colrules {
+  grid-template-columns: var(--sess-cols);
+  gap: var(--sess-gap);
+  padding: 0 var(--s-2);
+}
+/* Every boundary after the first column, since this table has no art track. */
+.cp-sess-list .cp-lib-colrules > span:nth-child(n + 2) {
+  border-left: 1px solid var(--line-1);
+  margin-left: calc(-1 * var(--sess-gap) - 1px);
 }
 .cp-sess-list .cp-lib-list-head button {
   padding: 0;
@@ -2136,8 +2188,13 @@
    than every row's and each column's values sat 40px LEFT of their heading.
    Reported from a screenshot as "columns that do not line up". One rule,
    read by both, so they cannot disagree again. */
+/* The rules overlay is listed HERE, in the same rule as the header and the
+   rows, rather than given its own matching declaration elsewhere: these three
+   boxes must share one track geometry, and a gutter applied to two of them
+   put every body line 32px right of the header divider it belongs to. */
 .cp-lib-list-gutter .cp-lib-list-head,
-.cp-lib-list-gutter .cp-lib-lrow { padding-right: 40px; }
+.cp-lib-list-gutter .cp-lib-lrow,
+.cp-lib-list-gutter .cp-lib-colrules { padding-right: 40px; }
 .cp-web-lrow-dur,
 .cp-web-lrow-have {
   margin-left: var(--s-2);

@@ -107,6 +107,15 @@
   align-items: center;
   gap: 8px;
 }
+/* The mark at rest: the real asset, desaturated, so there is ONE copy of the
+   artwork. Its viewBox is tall (808 x 1024), so height leads and the width
+   follows, or the bunny renders squashed. */
+.cp-thumb-empty-mark {
+  height: 40px;
+  width: auto;
+  filter: grayscale(1);
+  opacity: 0.3;
+}
 .cp-thumb-empty-label {
   font-family: var(--font-ui);
   font-size: var(--text-sm);

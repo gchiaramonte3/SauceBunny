@@ -84,43 +84,54 @@ describe("co-review op relay (applyReviewOp)", () => {
     expect(setResolved(d0, "x1", true, 4000).comments[0].updatedAt).toBe(4000);
   });
 
-  it("a reaction removed during a live session can come back and STICK", () => {
-    // A RECORD OF A LIMITATION, not a specification. Measured, not reasoned.
+  it("an unlike beats a stale snapshot that still carries the like", () => {
+    // THIS TEST USED TO PASS BY ACCIDENT, and the accident is worth recording
+    // because it hid a real change.
     //
-    // mergeReviewDoc unions reactions, and a union cannot express removal.
-    // The host publishes a snapshot on every change, so one is routinely in
-    // flight when a guest unlikes:
+    // It was written before `reactedAt`, when mergeReviewDoc could only UNION
+    // reactions - and a union cannot express a removal, so an unlike was
+    // resurrected by any snapshot still in flight and STUCK there. It asserted
+    // exactly that. `reactedAt` then fixed it (newest op per emoji and
+    // reviewer wins), which should have turned this red... and did not,
+    // because it called setLike twice with no explicit time and both landed
+    // in the SAME MILLISECOND. mergeReactions resolves a same-ms tie to `on`,
+    // so the stale like won anyway and the old assertion still held.
     //
-    //   guest unlikes            -> local has none
-    //   stale snapshot arrives   -> union puts it back
-    //   host republishes WITHOUT it (it processed the unlike)
-    //                            -> union of local ["Ada"] and snapshot []
-    //                               is still ["Ada"]
-    //
-    // So it is not a flicker that settles. It is stuck until the guest
-    // unlikes a SECOND time, which is the recovery path and also why this is
-    // survivable rather than serious. What the user sees is a reaction they
-    // removed reappearing and the button apparently not working.
-    //
-    // Fixing it properly means tombstones, or last-write-wins per
-    // (comment, emoji, user), which is a change to the wire contract.
+    // It only failed under a full `npm run verify`, where load let the clock
+    // tick between the two calls. So the flake was the test telling the truth
+    // for the first time. Both cases are now pinned with EXPLICIT times.
     const { doc, v } = seed();
-    const withLike = setLike(insertComment(doc, mk(v, "x1", 1000)), "x1", "Ada", true);
-    const unliked = setLike(withLike, "x1", "Ada", false);
+    const withLike = setLike(insertComment(doc, mk(v, "x1", 1000)), "x1", "Ada", true, "👍", 5000);
+    const unliked = setLike(withLike, "x1", "Ada", false, "👍", 5001);
     expect(reactionsOf(unliked.comments[0])["👍"]).toBeUndefined();
 
-    // A snapshot published before the host saw the unlike.
-    const resurrected = mergeReviewDoc(unliked, withLike);
-    expect(reactionsOf(resurrected.comments[0])["👍"]).toEqual(["Ada"]);
+    // A snapshot published before the host saw the unlike. The unlike is
+    // NEWER, so it survives the merge - this is the behaviour reactedAt
+    // exists to provide.
+    const merged = mergeReviewDoc(unliked, withLike);
+    expect(
+      reactionsOf(merged.comments[0])["👍"],
+      "a stale snapshot resurrected a reaction the user removed",
+    ).toBeUndefined();
 
-    // And the host's NEXT snapshot, which correctly lacks the reaction, does
-    // not clear it — because union.
-    const afterHostCaughtUp = mergeReviewDoc(resurrected, unliked);
-    expect(reactionsOf(afterHostCaughtUp.comments[0])["👍"]).toEqual(["Ada"]);
+    // And it STAYS gone when the host republishes, which is what made the old
+    // bug unrecoverable rather than a flicker.
+    const afterHostCaughtUp = mergeReviewDoc(merged, withLike);
+    expect(reactionsOf(afterHostCaughtUp.comments[0])["👍"]).toBeUndefined();
+  });
 
-    // Unliking again does clear it, as long as no stale snapshot is still out.
-    const secondTry = mergeReviewDoc(setLike(afterHostCaughtUp, "x1", "Ada", false), unliked);
-    expect(reactionsOf(secondTry.comments[0])["👍"]).toBeUndefined();
+  it("a same-millisecond like/unlike collision resolves to ON, on both peers", () => {
+    // The documented tie-break. It matters that it is a RULE and not a
+    // coincidence: two peers merging the same pair in opposite arrival orders
+    // must land on the same value, so the tie cannot be "whoever arrived
+    // last". mergeReactions picks `on`, matching how the op relay breaks its
+    // other ties (resolved=true wins).
+    const { doc, v } = seed();
+    const withLike = setLike(insertComment(doc, mk(v, "x1", 1000)), "x1", "Ada", true, "👍", 7000);
+    const unliked = setLike(withLike, "x1", "Ada", false, "👍", 7000);
+    expect(reactionsOf(mergeReviewDoc(unliked, withLike).comments[0])["👍"]).toEqual(["Ada"]);
+    // The other arrival order agrees, which is the whole point.
+    expect(reactionsOf(mergeReviewDoc(withLike, unliked).comments[0])["👍"]).toEqual(["Ada"]);
   });
 
   it("mergeReviewDoc is IDEMPOTENT — the host republishing changes nothing", () => {

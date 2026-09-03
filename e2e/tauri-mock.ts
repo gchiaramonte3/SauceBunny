@@ -98,6 +98,13 @@ export function tauriMockInit(expectedBuildId: string): void {
       return writeSeededFile(String(a.path ?? ""), String(a.text ?? ""));
     },
     get_backend_build_id: expectedBuildId,
+    // The renderer asks this on mount to recover from a state drift. Answering
+    // "off" is what a machine with no session running actually reports; the
+    // shape is SessionState.
+    session_state: {
+      role: "off", code: null, peers: [], selfId: null, title: null,
+      error: null, presenter: "", presenterEpoch: 0,
+    },
     get_cache_stats: {
       file_count: 0,
       bytes_total: 0,

@@ -907,6 +907,13 @@ export function useCoReview({
       if (next.error && next.error !== prev.error) slog("err", `Session error: ${next.error}`);
       setCoSession(next);
     });
+    // Ask once, AFTER the listener above is registered - the same ordering the
+    // panel bus uses. A session that was already running when this window
+    // mounted emits nothing (it has not changed), so without this pull the
+    // renderer would show a lobby over a live room until something moved.
+    void invoke<CoSessionState>("session_state")
+      .then((st) => { if (st.role !== "off") setCoSession(st); })
+      .catch(() => { /* backend not up yet; the pushed event still arrives */ });
     const unMsg = listen<SessionMsg>("session:msg", (e) => coApplyRef.current(e.payload));
     const unLog = listen<{ tag: string; line: string }>("session:log", (e) => {
       appendLogRef.current(asLogTag(e.payload.tag), "session", e.payload.line);
@@ -1171,6 +1178,21 @@ export function useCoReview({
     });
   }, [sendSessionMsg]);
 
+  /**
+   * Adopt whatever Rust says is true.
+   *
+   * The pushed `session:state` event is the normal channel; this is the pull
+   * that lets the renderer RECOVER when the two have drifted, which a pushed
+   * channel alone cannot do (events are dropped, not queued).
+   */
+  const syncSessionState = useCallback(async (): Promise<CoSessionState | null> => {
+    try {
+      const st = await invoke<CoSessionState>("session_state");
+      setCoSession(st);
+      return st;
+    } catch { return null; }
+  }, []);
+
   const startCoReview = useCallback(async (title?: string) => {
     try {
       // Host under the review identity's name (falls back to "Host" in Rust)
@@ -1178,8 +1200,21 @@ export function useCoReview({
       // The optional title names the SESSION (room header + peers' Welcome).
       await invoke<string>("session_start", { name: loadReviewer().name || null, title: title?.trim() || null });
     }
-    catch (e) { pushNotification("error", "Couldn't start co-review", formatError(e)); }
-  }, [pushNotification]);
+    catch (e) {
+      // "A session is already active" means the RENDERER is out of date, not
+      // that the user did anything wrong: Rust is holding a session this
+      // window has stopped showing. Adopting Rust's state puts the room back
+      // on screen, which is both the answer and the way out - so the failure
+      // repairs itself instead of leaving a dead-end error that repeats on
+      // every press.
+      const st = await syncSessionState();
+      if (st && st.role !== "off") {
+        slog("info", "Start refused: a session was already running. Re-synced from the backend.");
+        return;
+      }
+      pushNotification("error", "Couldn't start co-review", formatError(e));
+    }
+  }, [pushNotification, syncSessionState, slog]);
   const joinCoReview = useCallback(async (ticket: string, name: string, grant?: string | null) => {
     // install: lets the host hand back the SAME member id if we've been in
     // this session before, instead of adding a duplicate person tile.

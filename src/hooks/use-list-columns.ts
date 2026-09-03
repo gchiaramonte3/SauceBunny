@@ -87,6 +87,16 @@ export function useListColumns<K extends string>(
   moveCol: (key: K, index: number) => void;
   /** grid-template-columns for the header and every row, from one source. */
   template: string;
+  /** 1-based index of the LAST REAL column's track, which is not always the
+   *  last track: an explicit Name width appends a filler track to absorb the
+   *  slack, and the table's trailing line belongs on the last column, not on
+   *  the pane's edge. */
+  lastColumnTrack: number;
+  /** How many tracks `template` declares. Cannot be recovered by splitting
+   *  the string: `minmax(0, 1fr)` contains a space, so a naive split counts
+   *  one track as three. The column rules need it to draw one cell per
+   *  track, so it is published rather than re-derived. */
+  trackCount: number;
   /** The column being dragged, for the divider's active state. */
   dragCol: K | null;
   startColDrag: (key: K) => (e: React.MouseEvent) => void;
@@ -243,6 +253,10 @@ export function useListColumns<K extends string>(
      the time this track comes round. */
   if (nameWidth != null) tracks.push("minmax(0, 1fr)");
   const template = tracks.join(" ");
+  const trackCount = tracks.length;
+  // art + name + the visible columns. Deliberately NOT `tracks.length`, which
+  // counts the filler track when there is one.
+  const lastColumnTrack = 2 + visible.length;
 
 
   const [dragCol, setDragCol] = useState<K | null>(null);
@@ -335,7 +349,7 @@ export function useListColumns<K extends string>(
   const resetName = () => setState((st) => ({ ...st, name: null }));
 
   return {
-    cols, order, visible, isVisible, toggleCol, moveCol, template,
+    cols, order, visible, isVisible, toggleCol, moveCol, template, trackCount, lastColumnTrack,
     dragCol, startColDrag, nudgeCol, bounds: { min: COL_MIN, max: COL_MAX },
     nameWidth, dragName, startNameDrag, nudgeName, resetName,
     nameBounds: { min: NAME_MIN, max: NAME_MAX },

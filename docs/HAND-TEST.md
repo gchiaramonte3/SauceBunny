@@ -912,6 +912,20 @@ The contracts prove the rules; only eyes prove the pixels.
     watch a guest's screen while you drag: they should sit still on the frame
     they were on and jump ONCE, when you let go, rather than chasing you.
 
+45. **Start a session twice.** Host one, then (without ending it) find any
+    path back to the lobby and press Start again. You should be returned to
+    the running session, NOT shown "A co-review session is already active".
+    Then end the session and start a new one: that must work first time.
+46. **Column lines.** Library ▸ any shelf ▸ list view. One continuous line per
+    column boundary, from the header through the last row, lining up exactly
+    with the draggable header divider. Drag a divider: the body line follows.
+    Check the same in From the web, Frames and Review sessions.
+47. **Right-click a row in From the web** (list view, not grid). A menu with
+    Open, Reveal (only when a copy is downloaded), Forget and Delete the copy.
+    Shift+F10 opens it too.
+48. **Look at the empty stage on a large display** for gradient rings. There
+    should be none.
+
 ### People tiles and the A/V mesh
 
 31. **Your own tile.** In a session, look at your tile: camera and mic buttons

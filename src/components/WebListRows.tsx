@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useListColumns } from "../hooks/use-list-columns";
 import { formatBytes } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
@@ -5,7 +6,8 @@ import { siteName, type CachedWebItem } from "../lib/web-source";
 import { secondsToClock } from "../lib/timecode";
 import { NameHeader } from "./ListColumnHeaders";
 import { IconCircleX, IconDownload, IconLink } from "./Icons";
-import { ListColumnHeaders } from "./ListColumnHeaders";
+import { ListColumnHeaders, ListColumnRules } from "./ListColumnHeaders";
+import { LibraryCardMenu } from "./LibraryCardMenu";
 import type { ColSpec } from "./ListColumnHeaders";
 
 /**
@@ -21,6 +23,13 @@ import type { ColSpec } from "./ListColumnHeaders";
  * The column-resize closure is duplicated from LibraryBrowserPane on
  * purpose - two consumers, and the house rule extracts shared stateful logic
  * at three. If a third table appears, lift it then.
+ *
+ * RIGHT-CLICK REACHES THE SAME VERBS THE GRID HAS. The grid draws these items
+ * with LibraryCard, which carries a menu; switching to list view silently took
+ * every verb except the inline one away, and a right-click fell through to
+ * WKWebView's own menu - so the list looked like the same table with fewer
+ * powers for no stated reason. This is the same parity the frames list was
+ * given, using the same component, so the two lists cannot drift apart.
  */
 
 const COLS_KEY = "saucebunny.webListCols";
@@ -64,6 +73,8 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
 }) {
   const colModel = useListColumns(COLS_KEY, COL_DEFAULT);
   const { visible, template } = colModel;
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number; url: string } | null>(null);
+  const menuItem = menuAt ? items.find((i) => i.url === menuAt.url) ?? null : null;
 
   return (
     <div
@@ -96,6 +107,20 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
               // split LibraryListRow uses. Without a selection above, the
               // single click still opens, exactly as before.
               onClick={(e) => { if (onSelect) onSelect(it.url, e); else onOpenUrl(it.url); }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenuAt({ x: e.clientX, y: e.clientY, url: it.url });
+              }}
+              // Keyboard parity: the menu key and Shift+F10 are how this is
+              // reached without a mouse, and a menu only a mouse can open is
+              // not a menu everyone has.
+              onKeyDown={(e) => {
+                if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                  e.preventDefault();
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  setMenuAt({ x: r.left + 18, y: r.bottom - 6, url: it.url });
+                }
+              }}
               onDoubleClick={() => onOpenUrl(it.url)}
             >
               <span className="cp-lib-lrow-art">
@@ -142,6 +167,31 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
           </div>
         );
       })}
+      <ListColumnRules template={template} trackCount={colModel.trackCount} lastColumnTrack={colModel.lastColumnTrack} />
+      {menuAt && menuItem && (
+        <LibraryCardMenu
+          anchor={{ x: menuAt.x, y: menuAt.y }}
+          // Only a DOWNLOADED copy has somewhere to be revealed. A
+          // resolve-only entry is a URL and nothing else, so the menu must
+          // not offer to show it in Finder.
+          revealPath={menuItem.path ?? null}
+          onOpen={() => onOpenUrl(menuAt.url)}
+          onRemove={() => onForget(menuAt.url)}
+          // The grid's two verbs, kept apart for the reason CachedWebPane
+          // states: forgetting the entry is about this shelf, deleting the
+          // copy is about the disk, and one control doing both meant tidying
+          // the shelf threw away minutes of fetching.
+          deleteLabel="Delete the copy…"
+          onDelete={menuItem.path ? () => onForget(menuAt.url) : undefined}
+          // A web source's poster comes from the site, so there is no local
+          // frame to pick out of it - the same answer the frames list gives.
+          canPickThumbnail={false}
+          hasChosenThumbnail={false}
+          onChooseThumbnail={() => {}}
+          onResetThumbnail={() => {}}
+          onClose={() => setMenuAt(null)}
+        />
+      )}
     </div>
   );
 }
