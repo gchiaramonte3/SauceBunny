@@ -20,6 +20,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ScreeningDoc } from "./screening";
 import { screeningCommentCount } from "./screening";
+import { screeningSourceKeys } from "./review-ledger";
 import { STORE_SCHEMA_VERSION, futureVersionIn, reportFutureVersion } from "./store-schema";
 
 /** One row in the index: everything a library card needs WITHOUT opening the
@@ -34,6 +35,14 @@ export type ScreeningIndexEntry = {
   segmentCount: number;
   commentCount: number;
   bytes: number;
+  /** Every source this screening watched, so "which sessions saw this clip?"
+   *  can be answered from the index instead of by opening every file.
+   *
+   *  OPTIONAL, and absent on every entry written before it existed. Callers
+   *  must treat "absent" as "unknown", never as "none" - reading it as none
+   *  would hide the whole history of anything reviewed before this shipped,
+   *  which is exactly the material the ledger exists to show. */
+  sourceKeys?: string[];
 };
 
 const INDEX_FILE = "index.json";
@@ -130,6 +139,7 @@ export function indexEntryFor(doc: ScreeningDoc, bytes: number): ScreeningIndexE
     segmentCount: doc.segments.length,
     commentCount: screeningCommentCount(doc),
     bytes,
+    sourceKeys: screeningSourceKeys(doc),
   };
 }
 
@@ -216,6 +226,35 @@ export function listScreenings(): (ScreeningIndexEntry & { id: string })[] {
   return [...index.entries()]
     .map(([id, e]) => ({ id, ...e }))
     .sort((a, b) => b.startedAt - a.startedAt);
+}
+
+/**
+ * Every screening that watched `sourceKey`, for the review panel's ledger.
+ *
+ * The index is a filter, not the answer: an entry that LISTS its sources and
+ * does not include this one is skipped without a read, while an entry with no
+ * `sourceKeys` (written before that field existed) has to be opened to find
+ * out. So an old library costs more reads than a new one and neither is wrong.
+ *
+ * Bounded on purpose. This runs when a review panel opens, which is a normal
+ * thing to do repeatedly, and a shelf of hundreds of screenings must not turn
+ * that into hundreds of file reads. The newest are the ones a ledger is read
+ * for, and `listScreenings` already returns newest first.
+ */
+export async function loadScreeningsForSource(
+  sourceKey: string, limit = 60,
+): Promise<ScreeningDoc[]> {
+  await hydrateScreeningIndex();
+  const out: ScreeningDoc[] = [];
+  let opened = 0;
+  for (const entry of listScreenings()) {
+    if (out.length >= limit || opened >= limit) break;
+    if (entry.sourceKeys && !entry.sourceKeys.includes(sourceKey)) continue;
+    opened += 1;
+    const doc = await loadScreening(entry.id);
+    if (doc && doc.segments.some((s) => s.localSourceKey === sourceKey)) out.push(doc);
+  }
+  return out;
 }
 
 /** Read one full screening. Null when it is missing or unreadable. */

@@ -1,5 +1,12 @@
 import { COMMENT_REACTION_EMOJI } from "../lib/reactions";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { ReviewLedgerPicker } from "./ReviewLedgerPicker";
+import { loadScreeningsForSource } from "../lib/screening-store";
+import { SCREENINGS_CHANGED } from "../lib/screening-store";
+import {
+  ALL_NOTES, buildLedger, EMPTY_LEDGER, inLens, lensStillValid,
+  type Ledger, type LedgerLens,
+} from "../lib/review-ledger";
 import { useMenuKeys } from "../hooks/use-menu-keys";
 import { useDismiss } from "../hooks/use-dismiss";
 import { Tooltip } from "./Tooltip";
@@ -976,16 +983,46 @@ export function ReviewPanel({
     return m;
   }, [viewDoc]);
 
-  // The visible list = current open/resolved filter ∩ text search (body or author).
+  // ── The ledger: which session each note was written in ──────────────
+  //
+  // A READ over data that already exists (screening files + this doc), never a
+  // second copy of the notes. See lib/review-ledger.ts for why it reads the
+  // screening's comment ids rather than the note's own sessionId.
+  const [ledger, setLedger] = useState<Ledger>(EMPTY_LEDGER);
+  const [lens, setLens] = useState<LedgerLens>(ALL_NOTES);
+  useEffect(() => {
+    // A session doc has no local source key to look up, and the ledger is a
+    // question about THIS Mac's history of a source on disk.
+    if (!sourceKey || inSession) { setLedger(EMPTY_LEDGER); return; }
+    let alive = true;
+    const load = () => {
+      void loadScreeningsForSource(sourceKey)
+        .then((docs) => { if (alive) setLedger(buildLedger(docs, sourceKey, viewDoc?.comments ?? [])); })
+        .catch(() => { if (alive) setLedger(EMPTY_LEDGER); });
+    };
+    load();
+    // A session that ends while the panel is open adds a row to this history.
+    window.addEventListener(SCREENINGS_CHANGED, load);
+    return () => { alive = false; window.removeEventListener(SCREENINGS_CHANGED, load); };
+  }, [sourceKey, inSession, viewDoc]);
+  // A lens can outlive what it named: sessions arrive asynchronously and the
+  // doc can be re-keyed under the panel. Falling back to All is the only safe
+  // answer - an empty list would read as "nothing was said here".
+  useEffect(() => {
+    if (!lensStillValid(lens, ledger)) setLens(ALL_NOTES);
+  }, [lens, ledger]);
+
+  // The visible list = ledger lens ∩ open/resolved filter ∩ text search (body or author).
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return roots.filter((c) => {
+      if (!inLens(lens, ledger, c.id)) return false;
       if (filter === "open" && c.resolved) return false;
       if (filter === "resolved" && !c.resolved) return false;
       if (q && !(c.body.toLowerCase().includes(q) || c.author.toLowerCase().includes(q))) return false;
       return true;
     });
-  }, [roots, filter, search]);
+  }, [roots, filter, search, lens, ledger]);
 
   if (connecting) {
     return (
@@ -1183,6 +1220,11 @@ export function ReviewPanel({
         </div>
       )}
 
+      {/* Going back through the sessions this source was reviewed in. Renders
+          nothing until there IS a history to go back through. */}
+      <ReviewLedgerPicker
+        ledger={ledger} lens={lens} onPick={setLens} totalRoots={roots.length}
+      />
       {/* Comment list */}
       <div className="cp-review-list" ref={listRef} tabIndex={-1}>
         {roots.length === 0 && carried.length === 0 && (
@@ -1190,7 +1232,14 @@ export function ReviewPanel({
         )}
         {roots.length > 0 && visible.length === 0 && (
           <div className="cp-review-hint">
-            {search.trim() ? "No comments match your search." : filter === "open" ? "No open comments. All signed off." : "No resolved comments yet."}
+            {/* Name the reason that is actually hiding them. A scoped ledger
+                saying "no comments match your search" sends the reader to
+                clear a search box that is already empty. */}
+            {search.trim()
+              ? "No comments match your search."
+              : lens.kind !== "all"
+                ? "Nothing was said here in this session. Choose All notes to see the rest."
+                : filter === "open" ? "No open comments. All signed off." : "No resolved comments yet."}
           </div>
         )}
         {visible.map((c) => (

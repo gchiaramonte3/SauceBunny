@@ -79,6 +79,84 @@
 .cp-review-iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Search bar (revealed by the magnifier). */
+/* ── The ledger picker: which session's notes are on screen ──────────────
+   Quiet by default, because "All notes" is the default and a control shouting
+   about the absence of a filter is noise. It only takes on the selected
+   treatment once it is actually hiding something, which is the state a reader
+   must never be in without knowing. */
+.cp-review-ledger { position: relative; padding: var(--s-1) var(--s-3) 0; }
+.cp-ledger-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.cp-ledger-btn:hover { background: rgba(255,255,255,0.04); color: var(--fg-2); }
+.cp-ledger-btn:focus-visible { outline: none; border-color: var(--focus-ring); }
+/* Scoped: notes are being withheld, so the control says so plainly rather
+   than leaving the reader to wonder where the rest went. */
+.cp-ledger-btn.scoped { color: var(--fg-1); background: rgba(255,255,255,0.05); }
+.cp-ledger-btn-label { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-ledger-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: var(--s-3);
+  right: var(--s-3);
+  z-index: var(--z-popover);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-card);
+}
+.cp-ledger-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.cp-ledger-item:hover { background: rgba(255,255,255,0.05); }
+.cp-ledger-item:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--focus-ring); }
+.cp-ledger-item.active { background: var(--sel-fill); }
+.cp-ledger-item.active .cp-ledger-item-title,
+.cp-ledger-item.active .cp-ledger-item-meta { color: var(--sel-ink); }
+.cp-ledger-item-title {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The count is the reason to open this list at all: it separates the session
+   where the real pass happened from the one where two things were said. */
+.cp-ledger-item-meta {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cp-review-search {
   display: flex;
   align-items: center;

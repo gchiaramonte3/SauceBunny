@@ -436,6 +436,80 @@ not Documents.
 
 ---
 
+## 4b. How a comment knows which session it belongs to
+
+Written up after the report "I started a second and third session and the
+previous notes persisted throughout". The notes were not leaking. There was no
+such thing as a session, as far as the review panel was concerned, and this
+records what the model already held before anything was added.
+
+### What was already there
+
+| Fact | Where | Written by | Read by (before) |
+|---|---|---|---|
+| Notes for a source | `Reviews/<slug>-<hash>.json`, one doc per `sourceKey` | `review-store` | the panel, whole |
+| Which cut a note is on | `ReviewComment.versionId` | `addComment` | `rootComments` |
+| Which SESSION a note was made in | `ReviewComment.sessionId` / `segmentId` | `stampOpWithSession` | **nothing** |
+| Which notes a session collected | `ScreeningSegment.commentIds` | `recordOpInScreening` | **nothing** |
+
+Both halves of the attribution existed and were already being written. Neither
+had a reader. So the ledger is a READ, not a schema change: no migration, no
+wire change, and a library reviewed before it shipped has a full history.
+
+### Five findings
+
+**F-L1. One doc per source is correct and must stay.** Every note about a
+source lands in one `ReviewDoc`, and the invariant is written into
+`ReviewComment.sessionId`'s own comment: opening that source SOLO, with no
+screening files present, must still show every note ever made about it.
+Partitioning notes per session would break it, and would also mean a note
+existed in two places.
+
+**F-L2. A session is not a version.** A `ReviewVersion` is a new CUT: it owns
+its own approval state (`ReviewDoc.status` is keyed by version id) and
+`carriedComments` deliberately carries unresolved notes forward across one.
+Three sessions watching the same cut are one version. Minting a version per
+session would fork approval and start carrying notes into a cut that never
+changed. "Automatic versioning" is the right instinct on the wrong axis: what
+changed between session 1 and session 3 is the ROOM, not the picture.
+
+**F-L3 (defect). `comment.sessionId` is only trustworthy for your own notes.**
+`ScreeningDoc.id` is a `crypto.randomUUID()` minted per machine, deliberately
+(nothing correlated two attendees' files, because nothing needed to). A note is
+stamped by its AUTHOR, on the author's machine, and relayed verbatim. So a note
+that arrived from a peer carries an id matching no screening on this Mac. A
+ledger keyed on `sessionId` would show only the notes you wrote yourself, in a
+list that looks complete. This is the finding that decided the design.
+
+**F-L4. `segment.commentIds` is the complete local record.**
+`recordOpInScreening` runs for relayed ops as well as local ones ("Everyone's
+notes belong to the screening, not just ours"), so it holds every root comment
+this machine saw, whoever wrote it. The ledger reads this, and keeps
+`sessionId` only as a fallback for a note the screening never recorded.
+
+**F-L5. The screening index could not answer "which sessions watched this
+clip".** It carried a title, times, participants and counts, but no source
+keys, so the question needed every file opened. `ScreeningIndexEntry.sourceKeys`
+is now written alongside them. It is OPTIONAL, and absent means UNKNOWN, never
+none: reading absent as none would hide the entire history of anything
+reviewed before it shipped, which is the exact material the ledger exists to
+show. Entries without it are opened and checked; entries with it are skipped
+unread.
+
+### The resulting shape
+
+`lib/review-ledger.ts` is pure and takes screenings + a source key + the doc's
+comments, and returns sessions (newest first, each with its own comment ids)
+plus a solo bucket for notes made alone. The panel filters through a lens whose
+default is **All notes** - scoping by default would answer the original
+complaint by hiding work someone did, which is worse than showing too much.
+
+Replies are placed with their parent rather than bucketed on their own, or a
+thread would appear in two sessions at once. Ids no longer in the doc are
+dropped, so a deleted note leaves no phantom in a count. A session that watched
+the source and collected nothing still lists: "we watched it and said nothing"
+is a fact about that session.
+
 ## 5. What checks this
 
 | test | what it holds |

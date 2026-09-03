@@ -14,6 +14,18 @@ Since build `2026082903`: **review links**, a Finder-style library list, and
 a library tree whose chevrons had never actually worked.
 
 ### Added
+- **Session history in the review panel.** A source reviewed in more than one
+  session now carries a ledger: a quiet control above the notes names what you
+  are reading, and opening it lists every session this Mac has held on that
+  clip, newest first, with who was there and how many notes each one produced.
+  Pick one to read that session alone; pick All notes to come back. Notes made
+  outside a session have their own row.
+
+  It is a reader over records that already existed - every session has been
+  writing down which notes it collected all along - so nothing moved on disk,
+  nothing was migrated, and a clip reviewed months ago has its full history.
+  Notes are never hidden by default: All notes is where it starts, and the
+  control marks itself when it IS holding something back.
 - **Review sessions in the library.** Every co-review session has been
   recording itself all along, and the only way to see one was a shelf at the
   bottom of the co-review lobby. There is now a Review sessions section beside

@@ -926,6 +926,21 @@ The contracts prove the rules; only eyes prove the pixels.
 48. **Look at the empty stage on a large display** for gradient rings. There
     should be none.
 
+49. **The session ledger.** Hold a co-review on a clip and leave a note or
+    two; end it. Hold a SECOND session on the same clip, leave different
+    notes, end it. Open that clip's review panel: above the notes there should
+    be a control reading "All notes", and opening it lists both sessions,
+    newest first, with dates, participants and per-session note counts.
+    Choosing one shows only its notes and the control marks itself as scoped;
+    choosing All notes brings everything back.
+50. **The ledger must never hide a note by default.** Open a clip you reviewed
+    ALONE: the control should not appear at all, and every note is visible.
+    Then check a clip reviewed in one session only: the control appears, still
+    defaulting to All notes.
+51. **A guest's notes belong to the session too.** With a peer in the room,
+    have THEM leave a note. After the session, that note must appear under
+    that session in your ledger, not under "Outside a session".
+
 ### People tiles and the A/V mesh
 
 31. **Your own tile.** In a session, look at your tile: camera and mic buttons
