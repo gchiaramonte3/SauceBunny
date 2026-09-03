@@ -292,7 +292,7 @@ export function LibraryBrowser({
     /**
      * UNDO, for a move that had none.
      *
-     * `trashItem` a few lines below explains that it may ship BECAUSE the OS
+     * The retired trashItem explained that a move may ship BECAUSE the OS
      * offers Put Back, "which is also why this is allowed to ship at all when
      * a drag-to-move between folders is not: one is recoverable and the other
      * would not be". Drag-to-move shipped anyway - this function is reached
@@ -419,49 +419,18 @@ export function LibraryBrowser({
     });
   }, []);
 
-  const trashItem = useCallback(async (item: LibraryItem) => {
-    const ok = confirm(
-      `Move "${item.name}" to the Trash?\n\nYou can put it back from the Finder.`,
-    );
-    if (!ok) return;
-    try {
-      await invoke("move_to_trash", { path: item.path });
-      setDetailItem((cur) => (cur?.path === item.path ? null : cur));
-      rescanAll();
-    } catch (e) {
-      // A refusal has to be seen. The frames shelf learned this the hard way:
-      // a swallowed error and a dead button look identical.
-      alert(formatError(e));
-    }
-  }, [rescanAll]);
-
   /**
-   * Trash a whole selection, for ⌘Delete.
+   * MOVE TO TRASH IS GONE, and so is the frames shelf's permanent delete.
    *
-   * One confirm for the set rather than one per file: Apple's own wording is
-   * "Move the selected item to the Trash", singular verb over a plural
-   * selection, and a dialog per file for a twelve-file selection is a way of
-   * saying no.
+   * On the owner's decision: the app removes things from its own view and
+   * never deletes anyone's media. `removeFromLibrary` above is the whole
+   * story now - the file stays exactly where it is, the shelf stops listing
+   * it, and Settings can put it back. The Rust commands behind both verbs
+   * (`move_to_trash`, `delete_frame`) have been deleted rather than left
+   * unused, so neither can quietly return.
+   *
+   * Deleting footage is Finder's job, and Finder is better at it.
    */
-  const trashMany = useCallback(async (list: readonly LibraryItem[]) => {
-    const what = list.length === 1
-      ? `"${list[0].name}"`
-      : `${list.length} files`;
-    if (!confirm(`Move ${what} to the Trash?\n\nYou can put ${list.length === 1 ? "it" : "them"} back from the Finder.`)) return;
-    const failures: string[] = [];
-    for (const item of list) {
-      try {
-        await invoke("move_to_trash", { path: item.path });
-      } catch (e) {
-        failures.push(`${item.name}: ${formatError(e)}`);
-      }
-    }
-    setSel(EMPTY_SELECTION);
-    setDetailItem(null);
-    rescanAll();
-    // Same rule as the drop: one refusal must not hide behind the others.
-    if (failures.length > 0) setMoveError(failures.join(" · "));
-  }, [rescanAll]);
 
   const selectedNode = useMemo(
     () => (selected ? findLibraryFolder(trees, selected[selected.length - 1].path) : null),
@@ -658,16 +627,17 @@ export function LibraryBrowser({
           setSel(selectAll(itemPathsRef.current));
           return;
         }
-        // ⌘Delete = "Move the selected item to the Trash", Apple's own wording,
-        // and it applies to the whole selection. The verb already exists in the
-        // card menu and the selection bar; it just had no key.
+        // ⌘Delete takes the selection OFF THE SHELF. It used to move it to
+        // the Trash; the app no longer deletes anyone's media, so the key
+        // does what the menu does - the files stay put and Settings can put
+        // them back. Undoable, unlike the Trash.
         if (e.metaKey && !e.ctrlKey && (e.key === "Backspace" || e.key === "Delete")
             && !(e.target instanceof HTMLInputElement)) {
-          const doomed = items.filter((i) => sel.selected.has(i.path));
+          const doomed = items.filter((i) => sel.selected.has(i.path)).map((i) => i.path);
           if (doomed.length === 0) return;
           e.preventDefault();
           e.stopPropagation();
-          void trashMany(doomed);
+          removeFromLibrary(doomed);
           return;
         }
         // Space = Quick Look, Finder's muscle memory. Only with exactly one
@@ -765,7 +735,6 @@ export function LibraryBrowser({
               verbs moved into the row menus - see LibraryBatchStatus. */}
           <LibraryBatchStatus batchLine={batchLine} onBatchCancel={onBatchCancel} />
           <LibraryBrowserPane
-            onTrashItem={trashItem}
             onRemoveItems={removeFromLibrary}
             /* Batch transcribe, moved out of the removed multi-select bar and
                into the row menu. Acts on the SELECTION when the clicked row is

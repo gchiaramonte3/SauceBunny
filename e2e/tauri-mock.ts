@@ -229,7 +229,6 @@ export function tauriMockInit(expectedBuildId: string): void {
         f(600, "Bear", "Selects"),
       ];
     },
-    delete_frame: null,
     // STATEFUL, because the bug is the round trip. A folder that has just
     // been made holds nothing, and list_frames only reports FILES - so unless
     // the folder listing remembers the creation, "New folder" looks like it

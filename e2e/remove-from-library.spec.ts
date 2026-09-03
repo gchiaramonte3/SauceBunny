@@ -63,7 +63,9 @@ for (const view of ["grid", "list"] as const) {
     await expect(item, "the menu item is missing in this view").toBeVisible();
 
     // It must NOT be the destructive one, and both must be offered.
-    await expect(page.getByRole("menuitem", { name: /Move to Trash/ })).toBeVisible();
+    // "Move to Trash" is gone: the app no longer deletes anyone's media, so
+    // removal is the only verb and this asserts nothing destructive returned.
+    await expect(page.getByRole("menuitem", { name: /Move to Trash|Delete/ })).toHaveCount(0);
 
     // Nothing may reach the backend: this touches no file.
     const calls: string[] = [];

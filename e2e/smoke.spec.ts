@@ -626,10 +626,14 @@ test("green room: returning user with granted devices lands on READY", async ({ 
   await expect(lobby.getByRole("heading", { name: "Host a session" })).toBeVisible();
   await expect(lobby.getByRole("button", { name: "Start session" })).toBeEnabled();
   await expect(lobby.getByRole("button", { name: "Enable camera and mic" })).toHaveCount(0);
-  // Review links are issued from a clip in the library, not from here: a link
+  // Review links live on the idle lobby: a durable link is for someone who is
+  // NOT in the room, so requiring a live session to mint one was backwards.
+  // (This asserted their ABSENCE, on a plan to move them onto the clip that
+  // was never built - which left the panel reachable only while hosting.)
+  // Original note kept for the record: a link
   // is for someone who is not in the room, so the lobby was the wrong place
   // to ask for one. And the device strip is gone with it.
-  await expect(lobby.getByRole("heading", { name: "Review links" })).toHaveCount(0);
+  await expect(lobby.getByRole("heading", { name: "Review links" })).toBeVisible();
   await expect(lobby.locator(".cp-gr-strip")).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });

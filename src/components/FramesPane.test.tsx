@@ -7,6 +7,7 @@
 // list views the folder pane and web shelf use.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { clearHidden } from "../lib/library-hidden";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { FramesPane } from "./FramesPane";
 
@@ -37,6 +38,7 @@ beforeEach(() => {
   // test happens to run next.
   cleanup();
   h.calls = []; h.items = []; localStorage.clear();
+  clearHidden();
 });
 
 const mount = () => render(<FramesPane treeOpen onShowTree={() => {}} />);
@@ -153,40 +155,42 @@ describe("the frames shelf", () => {
     expect(screen.getByRole("button", { name: /Grabbed/ }).getAttribute("aria-sort")).toBe("descending");
   });
 
-  it("puts delete in the card menu, not on the card, and asks first", async () => {
-    // The verb belongs where a card's other verbs already live. A button
-    // floating beside the ⋯ that opens that menu is the same action twice.
-    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
+  it("REMOVES a frame from the shelf and never deletes the file", async () => {
+    // The owner's rule: the app takes things off its own shelves and never
+    // deletes anyone's media, nor moves it to the Trash. `delete_frame` was
+    // the only permanent unlink in the app and has been removed from the Rust
+    // side entirely, so this asserts both halves - the verb still works, and
+    // no destructive command is reachable from it.
     h.items = [frame()];
     mount();
     await screen.findAllByText("Bear_00012304.jpg");
-    expect(document.querySelector(".cp-web-grid .cp-web-forget")).toBeNull();
 
     screen.getAllByRole("button", { name: "More actions" })[0].click();
-    (await screen.findByRole("menuitem", { name: /Delete frame/ })).click();
+    (await screen.findByRole("menuitem", { name: /Remove from Library/ })).click();
 
     await waitFor(() => {
-      expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(1);
+      expect(document.querySelectorAll(".cp-lib-card").length).toBe(0);
     });
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    confirmSpy.mockRestore();
+    expect(
+      h.calls.filter(([c]) => c === "delete_frame" || c === "move_to_trash"),
+      "a destructive command was invoked; the file must be left alone",
+    ).toHaveLength(0);
   });
 
-  it("declining the ask deletes nothing", async () => {
-    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(false);
+  it("offers no destructive verb at all", async () => {
+    // Break-test anchor: if a "Delete"/"Trash" item ever reappears in this
+    // menu, this fails rather than the rule being quietly reversed.
     h.items = [frame()];
     mount();
     await screen.findAllByText("Bear_00012304.jpg");
     screen.getAllByRole("button", { name: "More actions" })[0].click();
-    (await screen.findByRole("menuitem", { name: /Delete frame/ })).click();
-    await new Promise((r) => setTimeout(r, 10));
-    expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(0);
-    confirmSpy.mockRestore();
+    await screen.findByRole("menuitem", { name: /Remove from Library/ });
+    expect(screen.queryByRole("menuitem", { name: /Delete|Trash/ })).toBeNull();
   });
 });
 
 describe("folders as containers", () => {
-  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); });
+  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); clearHidden(); });
 
   const tree = () => [
     frame({ path: "/f/root.jpg", name: "Bear_00000100.jpg", folder: "", created_at: 10 }),
@@ -261,7 +265,7 @@ describe("folders as containers", () => {
 });
 
 describe("filing a frame into a folder", () => {
-  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); });
+  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); clearHidden(); });
 
   it("Move to folder… is a menu item, and moving calls the scoped command", async () => {
     const { fireEvent } = await import("@testing-library/react");
@@ -312,7 +316,7 @@ describe("filing a frame into a folder", () => {
 });
 
 describe("selecting more than one frame", () => {
-  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); });
+  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); clearHidden(); });
 
   const four = () => [
     frame({ path: "/f/1.jpg", name: "a1.jpg", source: "Bear", created_at: 40 }),
@@ -367,29 +371,11 @@ describe("selecting more than one frame", () => {
     expect(document.querySelectorAll(".cp-lib-card.selected")).toHaveLength(1);
   });
 
-  it("shows NO floating bar for a selection, however many are selected", async () => {
-    // The bar was removed on request: a second, competing set of actions
-    // hovering over the shelf in a different idiom from the row menus that
-    // already carry those verbs, covering the last row while it did so.
+  it("removing from the row menu takes the WHOLE selection off the shelf", async () => {
+    // The selection-aware verb survives the removal of the destructive one:
+    // right-clicking a card inside a selection acts on the set, and nothing
+    // on disk is touched.
     const { fireEvent } = await import("@testing-library/react");
-    h.items = four();
-    mount();
-    await screen.findAllByText("a1.jpg");
-
-    fireEvent.click(cardFor("a1.jpg"));
-    expect(document.querySelector(".cp-lib-selbar")).toBeNull();
-    fireEvent.click(cardFor("a3.jpg"), { shiftKey: true });
-    expect(
-      document.querySelector(".cp-lib-selbar"),
-      "the multi-select bar is back",
-    ).toBeNull();
-  });
-
-  it("deleting from the row menu asks ONCE and removes the whole selection", async () => {
-    // Where the bar's Delete went. The verb has to keep acting on the SET,
-    // or removing the bar would have quietly demoted it to a one-file action.
-    const { fireEvent } = await import("@testing-library/react");
-    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
     h.items = four();
     mount();
     await screen.findAllByText("a1.jpg");
@@ -397,29 +383,15 @@ describe("selecting more than one frame", () => {
     fireEvent.click(cardFor("a1.jpg"));
     fireEvent.click(cardFor("a3.jpg"), { shiftKey: true });
     fireEvent.contextMenu(cardFor("a2.jpg"));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Delete frame/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Remove from Library/ }));
 
     await waitFor(() => {
-      expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(3);
+      expect(document.querySelectorAll(".cp-lib-card").length).toBe(1);
     });
-    // One question for the batch, not one per file.
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    confirmSpy.mockRestore();
-  });
-
-  it("declining that ask deletes nothing", async () => {
-    const { fireEvent } = await import("@testing-library/react");
-    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(false);
-    h.items = four();
-    mount();
-    await screen.findAllByText("a1.jpg");
-    fireEvent.click(cardFor("a1.jpg"));
-    fireEvent.click(cardFor("a3.jpg"), { shiftKey: true });
-    fireEvent.contextMenu(cardFor("a2.jpg"));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Delete frame/ }));
-    await new Promise((r) => setTimeout(r, 10));
-    expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(0);
-    confirmSpy.mockRestore();
+    expect(
+      h.calls.filter(([c]) => c === "delete_frame" || c === "move_to_trash"),
+      "a destructive command was invoked for a selection",
+    ).toHaveLength(0);
   });
 
   it("a single click still opens the viewer on double-click, not on the first", async () => {
@@ -440,7 +412,7 @@ describe("the shelf keeps up with the grabber", () => {
   // cleanup() rather than wiping document.body: the viewer renders through a
   // PORTAL, and clearing the body by hand tears out a node React still owns,
   // so the next unmount throws instead of the test failing on its own terms.
-  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); });
+  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); clearHidden(); });
 
   it("re-reads when a frame is grabbed, without waiting for a window focus", async () => {
     // The case that actually happens: grab a frame in the Clip workspace,

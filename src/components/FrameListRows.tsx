@@ -47,12 +47,11 @@ function grabbedLabel(unixSeconds: number): string {
   });
 }
 
-export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame, selected, onSelect, onMove, onRemove, onContextSelect }: {
+export function FrameListRows({ items, sort, dir, onSort, onOpenFrame, selected, onSelect, onMove, onRemove, onContextSelect }: {
   items: readonly FrameItem[];
   sort: LibrarySortKey;
   dir: LibrarySortDir;
   onSort: (key: LibrarySortKey) => void;
-  onDelete: (path: string) => void;
   /** The card menu's verbs, so the LIST view offers what the GRID already
    *  does. The grid has had a right-click menu all along (LibraryCard owns
    *  it); only these rows had none, which is why the same shelf behaved two
@@ -145,8 +144,6 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
           revealPath={menuAt.path}
           onMove={onMove && (() => onMove(menuAt.path))}
           onRemove={onRemove && (() => onRemove(menuAt.path))}
-          deleteLabel="Delete frame…"
-          onDelete={() => onDelete(menuAt.path)}
           // A still IS its own poster, so there is no frame to pick out of it.
           canPickThumbnail={false}
           hasChosenThumbnail={false}

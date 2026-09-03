@@ -189,30 +189,13 @@ fn walk_frames(root: &std::path::Path, dir: &std::path::Path, depth: u32, out: &
     }
 }
 
-/// Delete one frame. Scoped to the managed folder: a caller cannot hand us
-/// a path outside it, which is the same rule the screenings index follows
-/// for the same reason.
-#[tauri::command]
-pub async fn delete_frame(app: AppHandle, path: String) -> Result<(), crate::AppError> {
-    let dir = frames_dir(&app)?;
-    let target = std::path::PathBuf::from(&path);
-    let Ok(canon_dir) = dir.canonicalize() else {
-        return Err(crate::AppError::not_found("the Frames folder does not exist"));
-    };
-    let Ok(canon_target) = target.canonicalize() else {
-        return Err(crate::AppError::not_found("that frame is already gone"));
-    };
-    // starts_with, not parent-equals: frames live in subfolders now. Still on
-    // the CANONICALISED paths - dropping that would turn a scoped one-file
-    // delete into a delete-anywhere primitive via a symlinked subfolder.
-    if !canon_target.starts_with(&canon_dir) {
-        return Err(crate::AppError::Invalid(
-            "that file is not in the Frames folder".into(),
-        ));
-    }
-    std::fs::remove_file(&canon_target)
-        .map_err(|e| crate::AppError::Io(format!("delete frame: {e}")))
-}
+/* `delete_frame` was here, and is deliberately gone.
+
+   It was the ONLY place in this app that permanently unlinked a user's file -
+   every other removal went to the Trash, and now none of them do either. The
+   frames shelf removes a frame from its own listing (lib/library-hidden.ts);
+   the jpg stays on disk. Deleted rather than left uncalled, for the reason
+   given where move_to_trash used to live. */
 
 /// Every folder under the Frames root, as paths relative to it.
 ///

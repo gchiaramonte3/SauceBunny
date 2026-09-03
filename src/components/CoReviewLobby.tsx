@@ -318,6 +318,17 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                 )}
 
 
+                {/* REVIEW LINKS, back on the idle lobby.
+                    They were taken out of here on the reasoning that a link
+                    is for someone who is NOT in the room, so it belongs on
+                    the clip. That half never got built, and taking it out
+                    left the panel reachable only while already hosting a live
+                    session - which is the exact opposite of what a durable
+                    link is for. It needs no session: ReviewGrants mints its
+                    own code from `review_code`, and `sessionCode` only
+                    chooses which caption it shows. */}
+                <ReviewGrants sessionCode={null} />
+
                 <section className="cp-colobby-card">
                   <h2 className="cp-colobby-card-title big">Join a session</h2>
                   <label className="cp-colobby-field">

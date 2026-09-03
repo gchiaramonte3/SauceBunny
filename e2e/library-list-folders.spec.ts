@@ -97,12 +97,13 @@ test("type-ahead lands on the name it was given", async ({ page }) => {
   await expect(page.locator(".cp-lib-lrow:focus")).toContainText("clip-a.mp4");
 });
 
-test("a list row can be moved to the Trash, same as a card", async ({ page }) => {
+test("a list row can be removed, same as a card", async ({ page }) => {
   await bootLibrary(page);
   await openRoot(page);
   await toList(page);
 
   const row = page.locator(".cp-lib-lrow").filter({ hasText: "clip-a.mp4" });
   await row.click({ button: "right" });
-  await expect(page.getByRole("menuitem", { name: /Move to Trash/ })).toBeVisible();
+  // Removal, not deletion - the destructive verb was retired app-wide.
+  await expect(page.getByRole("menuitem", { name: /Remove from Library/ })).toBeVisible();
 });

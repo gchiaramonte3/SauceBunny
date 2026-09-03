@@ -9,9 +9,11 @@ import { tauriMockInit } from "./tauri-mock";
  * file wall had none, so the one shelf holding somebody's actual footage was
  * the only one you could not remove anything from.
  *
- * It is the TRASH rather than a delete, and that distinction is the whole
- * reason it is allowed to ship: this app has no undo, and macOS already
- * offers Put Back on anything in there.
+ * It REMOVES rather than deletes: the card leaves the shelf and the file is
+ * untouched. This used to be a Move to Trash, and the header used to argue
+ * that the Trash was what made it shippable. The rule changed - the app does
+ * not delete anyone's media at all now - and the removal is undoable, which
+ * the Trash never was from inside the app.
  */
 async function boot(page: Page): Promise<void> {
   await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
@@ -37,42 +39,38 @@ async function openMenu(page: Page) {
   await page.getByRole("button", { name: "More actions" }).first().click();
 }
 
-test("the file card offers Move to Trash, which it never did before", async ({ page }) => {
+/**
+ * THE LIBRARY NEVER DELETES ANYONE'S FILE.
+ *
+ * This file used to prove the opposite: that the card menu offered "Move to
+ * Trash", asked first, and invoked `move_to_trash`. That verb is gone, along
+ * with the frames shelf's `delete_frame` - the app removes things from its own
+ * shelves and leaves the media alone. Both Rust commands were deleted rather
+ * than left registered, so the only way this could regress is by someone
+ * writing them again, which is what these assertions are for.
+ */
+test("the card menu offers removal, and nothing destructive", async ({ page }) => {
   await boot(page);
   await openMenu(page);
-  await expect(page.getByRole("menuitem", { name: /Move to Trash/ })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /Remove from Library/ })).toBeVisible();
+  await expect(
+    page.getByRole("menuitem", { name: /Move to Trash|Delete/ }),
+    "a destructive verb is back in the Library's card menu",
+  ).toHaveCount(0);
 });
 
-test("it asks first, and declining moves nothing", async ({ page }) => {
+test("removing takes the card off the shelf without touching the file", async ({ page }) => {
   await boot(page);
-  page.on("dialog", (d) => d.dismiss());
+  const before = await page.locator(".cp-lib-pane .cp-lib-card:not(.cp-lib-foldercard)").count();
+  expect(before, "no cards to remove").toBeGreaterThan(0);
+
   await openMenu(page);
-  await page.getByRole("menuitem", { name: /Move to Trash/ }).click();
-  await page.waitForTimeout(200);
+  await page.getByRole("menuitem", { name: /Remove from Library/ }).click();
+
+  await expect
+    .poll(() => page.locator(".cp-lib-pane .cp-lib-card:not(.cp-lib-foldercard)").count())
+    .toBe(before - 1);
+  // The point of the whole change: no command that destroys a file ran.
   expect(await calls(page, "move_to_trash")).toEqual([]);
-});
-
-test("accepting moves that file to the Trash and rescans", async ({ page }) => {
-  await boot(page);
-  page.on("dialog", (d) => d.accept());
-  const path = await page.locator(".cp-view-library .cp-lib-card:not(.cp-lib-foldercard)")
-    .first().getAttribute("data-path");
-  await openMenu(page);
-  await page.getByRole("menuitem", { name: /Move to Trash/ }).click();
-
-  await expect.poll(() => calls(page, "move_to_trash")).toEqual([{ path }]);
-  // The wall has to re-read, or the row stays on screen pointing at nothing.
-  expect((await calls(page, "scan_library_folder")).length).toBeGreaterThan(1);
-});
-
-test("it never reaches for a plain delete", async ({ page }) => {
-  // The distinction that makes this shippable. A recoverable removal and an
-  // unrecoverable one are different features.
-  await boot(page);
-  page.on("dialog", (d) => d.accept());
-  await openMenu(page);
-  await page.getByRole("menuitem", { name: /Move to Trash/ }).click();
-  await expect.poll(async () => (await calls(page, "move_to_trash")).length).toBe(1);
   expect(await calls(page, "delete_frame")).toEqual([]);
-  expect(await calls(page, "remove_file")).toEqual([]);
 });

@@ -5,6 +5,40 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The app no longer deletes your files.** Two verbs are gone: the frames
+  shelf's Delete, which permanently unlinked the picture, and the Library's
+  Move to Trash. Removing something now takes it off the shelf and leaves the
+  file exactly where it is, undoable, and reversible from Settings. Both
+  backend commands were deleted outright rather than left unused, so neither
+  can quietly come back. Deleting footage is Finder's job.
+
+### Fixed
+
+- **Scrubbing in the clip panel is quick again.** Yesterday's fix for a black
+  frame during a long seek held the previous frame on screen from the start of
+  every drag, including short seeks that were already instant. That made the
+  common case worse to fix the rare one. The held frame now appears only when
+  the stream is actually being rebuilt.
+- **Claude and ChatGPT no longer behave differently on the same prompt** where
+  it can be helped. The tidy-up and chapter features run near-greedy locally,
+  and that setting now reaches ChatGPT. It cannot reach Claude: the current
+  Claude models removed the setting from their API and reject it outright, so
+  sending one would have failed every request on the default model.
+- **Cloud answers no longer stop mid-sentence without saying so.** The ceiling
+  was low enough to truncate an ordinary summary, and nothing checked whether
+  it had. It is higher, and a truncated answer now says it was cut short.
+- **A stalled cloud request can end.** There was no timeout at all, so the
+  Settings Test button could spin for ever.
+- **Cloud errors read like sentences** instead of a raw response body.
+- **A screen share that ends with the sharer leaving no longer paints a dead
+  tile over the film**, and a raised hand can no longer come back stuck after
+  someone reconnects.
+- **Review links are reachable again without hosting a live session**, which
+  is the whole point of a link you hand to someone for later.
+
+
 ### Fixed
 
 - **Scrubbing in a session shows frames again.** Four separate causes, found

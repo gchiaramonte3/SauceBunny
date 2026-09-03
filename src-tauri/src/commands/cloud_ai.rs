@@ -116,6 +116,20 @@ pub struct CloudChatArgs {
     /// User/assistant turns.
     pub messages: Vec<CloudChatMsg>,
     pub max_tokens: Option<u32>,
+    /// Sampling temperature, 0..2. OPENAI ONLY, deliberately.
+    ///
+    /// The Anthropic Messages API REMOVED sampling controls on its current
+    /// models: `temperature`, `top_p` and `top_k` return a 400 on Sonnet 5,
+    /// Opus 5, Opus 4.7/4.8 and the Fable family. Sonnet 5 is this app's
+    /// default Claude model, so sending one would break the feature on the
+    /// stock configuration - the depth control there is
+    /// `output_config.effort`, which is a different thing and not a
+    /// substitute for near-greedy decoding.
+    ///
+    /// So the local path's deliberate 0.2 (comment tidy-up, chapter
+    /// detection) reaches OpenAI and not Claude. What keeps Claude honest
+    /// instead is the prompt and the verifier those features already run.
+    pub temperature: Option<f32>,
     /// Optional caller-minted id enabling `cloud_chat_cancel`. Without it the
     /// request simply isn't cancellable (the pre-r142 behaviour).
     pub request_id: Option<String>,
@@ -189,8 +203,16 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
             args.provider
         ))
     })?;
-    let client = reqwest::Client::new();
-    let max_tokens = args.max_tokens.unwrap_or(4096);
+    // A TIMEOUT, because there was none. Settings' "Test" button calls this
+    // with no AbortSignal, so a connection that stalls open was unkillable
+    // from the UI - the spinner simply never stopped.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| AppError::internal(format!("http client: {e}")))?;
+    // 4096 was low enough to truncate an ordinary summary of a long
+    // transcript, and nothing checked whether it had.
+    let max_tokens = args.max_tokens.unwrap_or(16000);
 
     // Register for cancellation before any network I/O so a Stop clicked the
     // instant after send can't miss. The guard unregisters on every exit.
@@ -225,10 +247,17 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
                 return Err(AppError::invalid(format!(
                     "Claude API error {}: {}",
                     status.as_u16(),
-                    short(&text)
+                    provider_error(&text)
                 )));
             }
             let v: serde_json::Value = serde_json::from_str(&text)?;
+            // A truncated answer used to be indistinguishable from a finished
+            // one: the text just stopped mid-sentence and nothing said why.
+            if v["stop_reason"].as_str() == Some("max_tokens") {
+                return Err(AppError::invalid(
+                    "Claude ran out of room before finishing. Try a shorter transcript or a smaller question.",
+                ));
+            }
             let out = v["content"]
                 .as_array()
                 .map(|blocks| {
@@ -241,14 +270,21 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
             Ok(out)
         }
         "openai" => {
-            // System as the first message; omit max_tokens — some OpenAI models
-            // reject it in favour of max_completion_tokens, and the default
-            // length is fine for a summary.
+            // System as the first message. `max_completion_tokens`, not
+            // `max_tokens`: current OpenAI models reject the old name.
             let mut msgs = vec![serde_json::json!({ "role": "system", "content": args.system })];
             for m in &args.messages {
                 msgs.push(serde_json::json!({ "role": m.role, "content": m.content }));
             }
-            let body = serde_json::json!({ "model": args.model, "messages": msgs });
+            let mut body = serde_json::json!({
+                "model": args.model,
+                "messages": msgs,
+                "max_completion_tokens": max_tokens,
+            });
+            // The one provider that still takes it. See CloudChatArgs.
+            if let Some(t) = args.temperature {
+                body["temperature"] = serde_json::json!(t);
+            }
             let req = client
                 .post("https://api.openai.com/v1/chat/completions")
                 .header("authorization", format!("Bearer {key}"))
@@ -259,7 +295,7 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
                 return Err(AppError::invalid(format!(
                     "OpenAI API error {}: {}",
                     status.as_u16(),
-                    short(&text)
+                    provider_error(&text)
                 )));
             }
             let v: serde_json::Value = serde_json::from_str(&text)?;
@@ -274,6 +310,16 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
 }
 
 /// UTF-8-safe truncation for embedding an API error body in a message.
+/// The provider's own `error.message`, which is the sentence a user can act
+/// on. Both Anthropic and OpenAI use that shape; the raw body is a JSON blob
+/// with the useful line buried in it.
+fn provider_error(text: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|v| v["error"]["message"].as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| short(text))
+}
+
 fn short(s: &str) -> String {
     let t = s.trim();
     let clipped: String = t.chars().take(300).collect();

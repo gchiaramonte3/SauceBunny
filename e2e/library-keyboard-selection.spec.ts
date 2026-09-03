@@ -69,7 +69,7 @@ test("a bare arrow after a range collapses back to one", async ({ page }) => {
   await expect(selected(page)).toHaveCount(1);
 });
 
-test("⌘Delete moves the selection to the Trash", async ({ page }) => {
+test("⌘Delete removes the selection from the shelf, deleting nothing", async ({ page }) => {
   await bootLibrary(page);
   page.on("dialog", (d) => void d.accept());
   await rows(page).first().focus();
@@ -77,11 +77,16 @@ test("⌘Delete moves the selection to the Trash", async ({ page }) => {
   await page.keyboard.press("Shift+ArrowDown");
   await expect(selected(page)).toHaveCount(2);
 
+  const before = await rows(page).count();
   await page.keyboard.press("Meta+Backspace");
-  await expect.poll(() => page.evaluate(() =>
+  // Both rows leave the shelf...
+  await expect.poll(() => rows(page).count()).toBe(before - 2);
+  // ...and nothing on disk is touched. This used to assert two calls to
+  // `move_to_trash`; that command no longer exists.
+  expect(await page.evaluate(() =>
     ((window as unknown as { __TAURI_MOCK__: { invoked: () => { cmd: string }[] } })
-      .__TAURI_MOCK__.invoked()).filter((c) => c.cmd === "move_to_trash").length
-  )).toBe(2);
+      .__TAURI_MOCK__.invoked()).filter((c) => c.cmd === "move_to_trash" || c.cmd === "delete_frame").length
+  ), "a destructive command ran").toBe(0);
 });
 
 test("⌘Delete with nothing selected does nothing", async ({ page }) => {
@@ -91,5 +96,5 @@ test("⌘Delete with nothing selected does nothing", async ({ page }) => {
   await page.locator(".cp-lib-pane").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("Meta+Backspace");
   await page.waitForTimeout(200);
-  expect(dialogs, "asked to trash an empty selection").toBe(0);
+  expect(dialogs, "asked about an empty selection").toBe(0);
 });

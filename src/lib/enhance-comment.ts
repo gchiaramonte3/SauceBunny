@@ -247,7 +247,10 @@ async function askModel(note: string, signal: AbortSignal): Promise<string> {
 
   if (provider !== "local") {
     const sys = messages[0].content;
-    return cloudChat(provider, sys, messages.slice(1), signal);
+    // The same 0.2 the local path uses: a tidy-up must not paraphrase. It
+    // reaches OpenAI only - Claude's current models reject the parameter - so
+    // on Claude the prompt and verifyRewrite are what hold the line.
+    return cloudChat(provider, sys, messages.slice(1), signal, 0.2);
   }
   const models = await invoke<LlmModel[]>("list_llm_models");
   const downloaded = models.filter((m) => m.downloaded);

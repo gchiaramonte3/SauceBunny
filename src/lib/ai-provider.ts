@@ -60,6 +60,14 @@ export function deleteApiKey(p: CloudProvider): Promise<void> {
  *  stopped run stops the provider generating (and billing) too (r142). */
 export async function cloudChat(
   provider: CloudProvider, system: string, messages: ChatMessage[], signal?: AbortSignal,
+  /**
+   * Sampling temperature for the features that deliberately run near-greedy
+   * locally. It reaches OPENAI ONLY: the Anthropic Messages API removed
+   * temperature on its current models (Sonnet 5 - this app's default Claude
+   * model - Opus 5, Opus 4.7/4.8, Fable), where sending one is a 400. Rust
+   * decides that, not the caller; passing it here is always safe.
+   */
+  temperature?: number,
 ): Promise<string> {
   const requestId = signal ? crypto.randomUUID() : undefined;
   const onAbort = requestId
@@ -71,7 +79,11 @@ export async function cloudChat(
   }
   try {
     return await invoke<string>("cloud_chat", {
-      args: { provider, model: loadCloudModel(provider), system, messages, request_id: requestId ?? null },
+      args: {
+        provider, model: loadCloudModel(provider), system, messages,
+        request_id: requestId ?? null,
+        temperature: temperature ?? null,
+      },
     });
   } finally {
     if (signal && onAbort) signal.removeEventListener("abort", onAbort);

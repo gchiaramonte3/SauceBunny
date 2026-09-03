@@ -1877,13 +1877,25 @@ export function useCoReview({
    */
   useEffect(() => {
     const live = new Set(coSession.peers.map((p) => p.id));
+    // The HOST is not in its own peer list, so without this the prune would
+    // delete the host's own raised hand on every roster change.
+    if (coSession.selfId) live.add(coSession.selfId);
     const keep = (prev: ReadonlySet<string>) => {
       const next = new Set([...prev].filter((id) => live.has(id)));
       return next.size === prev.size ? prev : next;
     };
     setRecordingMembers(keep);
     setStageRecorders(keep);
-  }, [coSession.peers]);
+    // `sharing` is NOT cosmetic: it is the gate that mounts a peer's mesh
+    // video full-bleed over the stage, so a stale entry paints a dead tile
+    // over the film. Member ids are reclaimed by install id in Rust, so a
+    // peer who drops while flagged and rejoins came back still flagged.
+    setSharingMembers(keep);
+    // A raised hand nobody can lower is the same bug with a smaller blast
+    // radius. Self is seeded into `live` below so the host's own hand, which
+    // is never in `peers`, survives.
+    setRaisedHands(keep);
+  }, [coSession.peers, coSession.selfId]);
 
   // RE-ANNOUNCE ON ROSTER GROWTH, per member. The existing re-sync is
   // host-only and self-only, so "guest B is recording, guest C joins" told C

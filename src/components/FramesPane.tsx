@@ -154,8 +154,17 @@ export function FramesPane({ treeOpen, onShowTree }: {
   const [, setHiddenTick] = useState(0);
   useEffect(() => subscribeHidden(() => setHiddenTick((n) => n + 1)), []);
 
-  /** Take frames off the shelf without deleting the files. Undoable, and
-   *  reversible from Settings, like the Library's. */
+  /**
+   * Take frames off the shelf. THE FILES ARE NOT TOUCHED. Undoable, and
+   * reversible from Settings, like the Library's.
+   *
+   * This is now the ONLY way to remove a frame. There used to be a second,
+   * `delete_frame`, which unlinked the jpg outright - the one place in the
+   * app that destroyed a user's file rather than moving it to the Trash. On
+   * the owner's decision both it and "Move to Trash…" are gone: the app
+   * removes things from its own view and never deletes anyone's media. The
+   * Rust command has been deleted too, so it cannot return by accident.
+   */
   const removeFromLibrary = useCallback((paths: readonly string[]) => {
     const added = paths.filter((p) => !isHidden(p));
     if (added.length === 0) return;
@@ -168,13 +177,15 @@ export function FramesPane({ treeOpen, onShowTree }: {
     });
   }, []);
 
-  const remove = useCallback((path: string) => {
-    setPreview((p) => (p === path ? null : p));
-    // Optimistic: the card goes now, because the disk work is one unlink and
-    // waiting on it makes an instant action feel broken.
-    setItems((prev) => prev?.filter((i) => i.path !== path) ?? prev);
-    void invoke("delete_frame", { path }).catch(load);
-  }, [load]);
+  /**
+   * Take a frame off the shelf. THE FILE IS NOT TOUCHED.
+   *
+   * This used to invoke `delete_frame`, which unlinked the jpg - the only
+   * place in the app that permanently destroyed a user's file rather than
+   * moving it to the Trash. Both are gone now, on the owner's decision: the
+   * app removes things from its own view and never deletes anyone's media.
+   * That command no longer exists, so this cannot come back by accident.
+   */
 
   // EVERY DERIVATION RUNS BEFORE THE EARLY RETURNS, because the selection
   // hook below needs the displayed order and hooks cannot be called after a
@@ -267,14 +278,6 @@ export function FramesPane({ treeOpen, onShowTree }: {
   // Batch verbs act on the selection when the clicked item is part of it,
   // and on the clicked item alone otherwise - the rule every file manager
   // uses, and the one the folder pane already follows.
-  const removeMany = (paths: readonly string[]) => {
-    const n = paths.length;
-    if (!confirm(n === 1
-      ? `Delete this frame? It is removed from this Mac.`
-      : `Delete ${n} frames? They are removed from this Mac.`)) return;
-    for (const p of paths) remove(p);
-    grid.clear();
-  };
 
   const frameCard = (it: FrameItem) => {
     const tc = formatFrameTimecode(it.timecode);
@@ -307,15 +310,6 @@ export function FramesPane({ treeOpen, onShowTree }: {
         onRemove={() => removeFromLibrary(
           grid.selected.has(it.path) ? [...grid.selected] : [it.path],
         )}
-        deleteLabel="Delete frame…"
-        // Acts on the SELECTION when this card is part of one, which is where
-        // the removed multi-select bar's Delete went. removeMany asks once for
-        // the whole set rather than once per frame.
-        onDelete={() => {
-          if (grid.selected.has(it.path) && grid.selected.size > 1) { removeMany([...grid.selected]); return; }
-          if (!confirm(`Delete ${it.name}? It is removed from this Mac.`)) return;
-          remove(it.path);
-        }}
       />
     );
   };
@@ -435,14 +429,6 @@ export function FramesPane({ treeOpen, onShowTree }: {
                 }}
                 onMove={(p) => { const row = g.items.find((x) => x.path === p); if (row) setMoving(row); }}
                 onRemove={(p) => removeFromLibrary(grid.selected.has(p) ? [...grid.selected] : [p])}
-                onDelete={(p) => {
-                  // Same selection-aware rule the cards use.
-                  if (grid.selected.has(p) && grid.selected.size > 1) { removeMany([...grid.selected]); return; }
-                  const row = g.items.find((x) => x.path === p);
-                  if (!row) return;
-                  if (!confirm(`Delete ${row.name}? It is removed from this Mac.`)) return;
-                  remove(p);
-                }}
               />
             ) : (
               <div className="cp-web-grid" role="list">{g.items.map(frameCard)}</div>

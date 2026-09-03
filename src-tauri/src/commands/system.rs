@@ -1224,30 +1224,17 @@ pub fn open_external_url(url: String) -> Result<(), crate::AppError> {
 /// there being none.
 ///
 /// Uses NSFileManager through objc2-foundation, which the app already
-/// depends on, so this adds no crate.
-#[tauri::command]
-pub fn move_to_trash(path: String) -> Result<(), crate::AppError> {
-    use objc2_foundation::{NSFileManager, NSString, NSURL};
 
-    if path.trim().is_empty() {
-        return Err(crate::AppError::invalid("No path to move to the Trash."));
-    }
-    let p = std::path::Path::new(&path);
-    // Report a missing file as missing rather than as a Trash failure: it is
-    // the ordinary case when two windows both act on the same item.
-    if !p.exists() {
-        return Err(crate::AppError::not_found(path.as_str()));
-    }
+/* `move_to_trash` was here, and is deliberately gone.
 
-    // No `unsafe` here: objc2 0.6 marks all three of these safe, and clippy
-    // rejects an unsafe block that wraps nothing unsafe.
-    let ns_path = NSString::from_str(&path);
-    let url = NSURL::fileURLWithPath(&ns_path);
-    let fm = NSFileManager::defaultManager();
-    fm.trashItemAtURL_resultingItemURL_error(&url, None)
-        .map_err(|e| crate::AppError::internal(format!("Couldn't move it to the Trash: {e}")))?;
-    Ok(())
-}
+   Together with frames' `delete_frame` it was one of two ways this app could
+   remove a user's file. On the owner's decision neither remains: the app
+   takes things off its own shelves (see lib/library-hidden.ts) and never
+   deletes anyone's media. Deleting footage is Finder's job.
+
+   The command is DELETED rather than left registered-and-uncalled, because
+   ipc-surface-contract would fail an orphan - and because a destructive
+   primitive that still exists is one wiring mistake from being reachable. */
 
 #[tauri::command]
 pub fn reveal_in_finder(path: String) -> Result<(), crate::AppError> {
@@ -1566,7 +1553,7 @@ pub fn default_export_path(app: AppHandle) -> Result<String, crate::AppError> {
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-09-03-r175-recording";
+pub const BACKEND_BUILD_ID: &str = "2026-09-03-r176-no-delete";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

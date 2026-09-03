@@ -357,41 +357,6 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       // hiding the video's laggier native seek. The 'seeked'/'loadeddata'
       // listeners hide it once the real video catches up post-gesture.
       // Peer streams skip it: no random access on the raw route.
-      // FREEZE THE OUTGOING FRAME, before anything can take it away.
-      //
-      // THE BUG THIS FIXES, which is "I scrub in a session and see no frames":
-      // an out-of-buffer seek rebuilds the pipeline, and the rebuild assigns
-      // `video.src = objectUrl` for a fresh MediaSource. That runs the media
-      // load algorithm, which DISCARDS the presented frame - so the element
-      // paints nothing and what you see is .cp-monitor's own `background:
-      // #000`, for the whole rebuild.
-      //
-      // The overlay exists to cover exactly that window, and it was not
-      // covering it. It is revealed by `if (previewPaintedRef.current)`, which
-      // is false until the decoder's SECOND frame, so the first scrub of every
-      // source showed black. The comment there reasoned that "the video
-      // underneath is a far better thing to look at than an opaque black
-      // rectangle" - true in general, and wrong in precisely this case,
-      // because the video underneath has just been blanked.
-      //
-      // Seeding from the <video> costs one drawImage, needs no decoder, and
-      // therefore also works on a peer stream, where the preview decoder is
-      // deliberately off. A stale frame is the right thing to hold: it is what
-      // the user was looking at a moment ago, and it is not black.
-      if (newGesture && v && v.readyState >= 2 && v.videoWidth > 0) {
-        const dst = scrubCanvasRef.current;
-        if (dst) {
-          if (dst.width !== v.videoWidth || dst.height !== v.videoHeight) {
-            dst.width = v.videoWidth;
-            dst.height = v.videoHeight;
-          }
-          try {
-            dst.getContext("2d")?.drawImage(v, 0, 0, dst.width, dst.height);
-            previewPaintedRef.current = true;
-            setScrubPreview(true);
-          } catch { /* tainted or not yet decodable: fall through to the decoder */ }
-        }
-      }
       if (!disableScrubPreviewRef.current) {
         // Fast-drag detection (mirrors MediaBunnyPlayer): closely-spaced
         // seeks covering real distance preview KEYFRAMES; a trailing pass
@@ -468,6 +433,34 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         // lib/seek-log.ts, where it can be tested.
         onDiagRef.current?.("info",
           rebuildLogLine(t, gestureFromRef.current, gestureSeeksRef.current));
+        // FREEZE THE OUTGOING FRAME, immediately before it is taken away.
+        //
+        // `teardownRef` + rebuild assigns `video.src` for a fresh MediaSource,
+        // and that runs the media load algorithm, which DISCARDS the presented
+        // frame. The element then paints nothing and what you see is
+        // .cp-monitor's own black for the whole rebuild - the "scrubbing shows
+        // no frames" report.
+        //
+        // IT BELONGS HERE AND NOWHERE EARLIER. A first attempt seeded this at
+        // the start of every gesture, which also covered the IN-BUFFER path
+        // above - and that path is an instant native seek, the thing that made
+        // scrubbing feel good in the clip panel. Freezing there replaced a
+        // live seek with a stale canvas that only moved at decoder speed, and
+        // made the common case worse to fix the rare one. Only a rebuild
+        // blanks the element, so only a rebuild gets the freeze.
+        const fv = videoRef.current;
+        const dst = scrubCanvasRef.current;
+        if (fv && dst && fv.readyState >= 2 && fv.videoWidth > 0) {
+          if (dst.width !== fv.videoWidth || dst.height !== fv.videoHeight) {
+            dst.width = fv.videoWidth;
+            dst.height = fv.videoHeight;
+          }
+          try {
+            dst.getContext("2d")?.drawImage(fv, 0, 0, dst.width, dst.height);
+            previewPaintedRef.current = true;
+            setScrubPreview(true);
+          } catch { /* not drawable: the decoder overlay or the video covers it */ }
+        }
         teardownRef.current?.();
         rebuildRef.current?.(t);
       }, 280);
