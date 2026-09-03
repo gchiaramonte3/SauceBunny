@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { useMenuKeys } from "../hooks/use-menu-keys";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil, IconTrash, IconFolderSolid, IconCircleX } from "./Icons";
+import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil, IconTrash, IconFolderSolid, IconCircleX, IconTranscript } from "./Icons";
 import { TagColorRow } from "./TagColorRow";
 import type { TagColorIndex } from "../lib/finder-tags";
 import type { FinderTag } from "../bindings/FinderTag";
@@ -21,6 +21,10 @@ import type { FinderTag } from "../bindings/FinderTag";
  */
 
 type Props = {
+  /** Transcribe. Present on the Library's own rows; absent elsewhere. Acts on
+   *  the whole selection when the clicked row is part of one. */
+  onTranscribe?: () => void;
+  transcribeLabel?: string;
   /** Viewport coords to anchor at (cursor, or the ⋯ button's corner). */
   anchor: { x: number; y: number };
   /**
@@ -90,6 +94,7 @@ export function LibraryCardMenu({
   anchor, align = "left", canPickThumbnail, hasChosenThumbnail, revealPath,
   onChooseThumbnail, onResetThumbnail, onOpen, onReview, onClose,
   tags, onToggleTagColor, onClearTagColors, onRename, onDelete, onRemove, deleteLabel, onMove, customEdits, onEditCustom,
+  onTranscribe, transcribeLabel,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: anchor.x, top: anchor.y });
@@ -118,6 +123,13 @@ export function LibraryCardMenu({
   }
   if (onMove) items.push({ icon: <IconFolderSolid size={13} />, label: "Move to folder…", onSelect: onMove });
   items.push({ icon: <IconPlay size={13} />, label: "Open in Clip", onSelect: onOpen });
+  /* Batch transcription's home. It used to live ONLY in the floating
+     multi-select pill, so removing that pill would have removed the feature -
+     the verb moved here rather than being dropped, and the label carries the
+     count so "what will this apply to" still has one visible answer. */
+  if (onTranscribe) {
+    items.push({ icon: <IconTranscript size={13} />, label: transcribeLabel ?? "Transcribe", onSelect: onTranscribe });
+  }
   if (onReview) {
     items.push({ icon: <IconReview size={13} />, label: "Review this clip", onSelect: onReview });
   }

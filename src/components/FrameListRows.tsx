@@ -8,7 +8,6 @@ import { assetUrl } from "../lib/asset-url";
 import { NameHeader } from "./ListColumnHeaders";
 import { ListColumnHeaders, ListColumnRules } from "./ListColumnHeaders";
 import type { ColSpec } from "./ListColumnHeaders";
-import { IconCircleX } from "./Icons";
 
 /**
  * The frames shelf as a table: the same five-track `cp-lib-lrow` grid and
@@ -77,7 +76,7 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
 
   return (
     <div
-      className="cp-lib-list cp-lib-list-gutter"
+      className="cp-lib-list"
       role="list"
       aria-label="Grabbed frames"
       /* One track list from the column model; see WebListRows. */
@@ -135,18 +134,6 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
                     ? <span key={k} className="cp-lib-lrow-size">{formatBytes(it.size_bytes)}</span>
                     : <span key={k} className="cp-lib-lrow-date">{grabbedLabel(it.created_at)}</span>
               ))}
-            </button>
-            {/* A list ROW has no ⋯ menu, so the verb is inline here - but
-                it asks before it deletes, the same confirm the grid's menu
-                item shows. */}
-            <button
-              type="button"
-              className="cp-web-forget list"
-              title="Delete this frame from this Mac."
-              aria-label={`Delete ${it.name}`}
-              onClick={() => onDelete(it.path)}
-            >
-              <IconCircleX size={13} />
             </button>
           </div>
         );

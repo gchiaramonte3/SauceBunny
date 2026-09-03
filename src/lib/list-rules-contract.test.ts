@@ -41,6 +41,26 @@ describe("list-rules-contract", () => {
     ).toEqual(["FrameListRows.tsx", "LibraryBrowserPane.tsx", "ReviewSessionsPane.tsx", "WebListRows.tsx"]);
   });
 
+  it("every table uses the SHARED header, rather than hand-rolling one", () => {
+    // The Review sessions table shipped with its own four-track grid and bare
+    // <button> headings, so it read as a different product sitting inside the
+    // library: "Session" in sentence case beside "PEOPLE" in caps, no column
+    // dividers, no resize, no reorder, no right-click. Same table, same
+    // chrome - the header components ARE the design.
+    const missing = tables
+      .filter(([, t]) => !(t.includes("<NameHeader") && t.includes("<ListColumnHeaders")))
+      .map(([f]) => f);
+    expect(
+      missing,
+      "a list view builds its own column headings instead of the shared ones, so it will not match:",
+    ).toEqual([]);
+  });
+
+  it("every table's rows are the shared row, so selection and lasso behave alike", () => {
+    const missing = tables.filter(([, t]) => !t.includes('"cp-lib-lrow')).map(([f]) => f);
+    expect(missing, "a list view rolls its own row class:").toEqual([]);
+  });
+
   it("every table draws the column lines", () => {
     const missing = tables.filter(([, t]) => !t.includes("<ListColumnRules")).map(([f]) => f);
     expect(
@@ -49,21 +69,30 @@ describe("list-rules-contract", () => {
     ).toEqual([]);
   });
 
-  it("the gutter moves the header, the rows and the rules together", () => {
+  it("the bleed moves the header, the rows and the rules together", () => {
+    // Was the 40px gutter, which existed to reserve room for a hover button
+    // that has since been removed. The rule that replaced it is the same
+    // shape and the same hazard: these three boxes share one track geometry,
+    // and horizontal padding applied to only some of them puts every body
+    // line out of step with the header divider above it.
     const css = readFileSync(CSS, "utf8");
-    const rule = css.match(/\.cp-lib-list-gutter[^{]*\{[^}]*padding-right[^}]*\}/);
-    expect(rule, "the list gutter rule is gone or was reshaped").toBeTruthy();
+    const rule = css.match(/\.cp-lib-list \.cp-lib-list-head[^{]*\{[^}]*padding-right[^}]*\}/);
+    expect(rule, "the shared row-padding rule is gone or was reshaped").toBeTruthy();
     for (const sel of ["cp-lib-list-head", "cp-lib-lrow", "cp-lib-colrules"]) {
       expect(
         rule![0],
-        `the gutter no longer applies to .${sel}, so its tracks are offset from the others`,
+        `the shared padding no longer applies to .${sel}, so its tracks are offset from the others`,
       ).toContain(sel);
     }
+    expect(rule![0], "the rows no longer reach the pane's edges").toContain("--lib-bleed");
   });
 
   it("the rules and the rows read ONE track list", () => {
     const css = readFileSync(CSS, "utf8");
-    const rules = css.match(/\.cp-lib-colrules\s*\{[^}]*\}/);
+    // Anchored to the start of a line: `.cp-lib-list .cp-lib-colrules` also
+    // contains this class name, and an unanchored match finds that padding
+    // rule instead of the one declaring the tracks.
+    const rules = css.match(/(?:^|\n)\.cp-lib-colrules\s*\{[^}]*\}/);
     expect(rules, ".cp-lib-colrules is gone").toBeTruthy();
     expect(
       rules![0],

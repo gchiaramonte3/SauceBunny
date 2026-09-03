@@ -9,7 +9,6 @@ import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { secondsToClock } from "../lib/timecode";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryCard } from "./LibraryCard";
-import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useGridSelection } from "../hooks/use-grid-selection";
 import { useMarquee } from "../hooks/use-marquee";
 import { useCardDrag } from "../hooks/use-card-drag";
@@ -218,9 +217,16 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
            control did the first under one label and both under the other,
            which meant the only way to tidy the shelf was to throw away a file
            that had taken minutes to fetch. */
-        onRemove={() => forget(it.url)}
+        // Both verbs act on the SELECTION when this card is part of one -
+        // where the removed multi-select bar's "Forget the selected clips"
+        // went. forgetMany asks once for the set rather than once per clip.
+        onRemove={() => {
+          if (grid.selected.has(it.url) && grid.selected.size > 1) { forgetMany([...grid.selected]); return; }
+          forget(it.url);
+        }}
         deleteLabel="Delete the copy…"
         onDelete={it.path ? () => {
+          if (grid.selected.has(it.url) && grid.selected.size > 1) { forgetMany([...grid.selected]); return; }
           if (!confirm(
             `Delete the ${size ?? ""} copy of ${it.title ?? it.url} from this Mac? `
             + "The source stays online.",
@@ -242,7 +248,6 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
     ...groups.flatMap((g) => g.items),
   ];
   const grid = useGridSelection(shown.map((i) => i.url));
-  const { selectedPaths: selectedUrls } = grid;
   const marquee = useMarquee({
     containerRef: paneRef,
     // The band has to find whatever the CURRENT view draws. This was pinned to
@@ -326,12 +331,6 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
         onNewFolder={(name) => (createWebCollection(name)
           ? null
           : "Could not make that collection. You may have reached the limit.")}
-      />
-      <LibrarySelectionBar
-        count={selectedUrls.length}
-        onDelete={() => forgetMany(selectedUrls)}
-        deleteLabel="Forget the selected clips"
-        onClear={grid.clear}
       />
       <div
         ref={paneRef}
@@ -435,6 +434,9 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
               onSort={onSort}
               onOpenUrl={onOpenUrl}
               onForget={(url) => {
+                // The selection's verb, where the removed multi-select bar's
+                // "Forget the selected clips" went. Asks once for the set.
+                if (grid.selected.has(url) && grid.selected.size > 1) { forgetMany([...grid.selected]); return; }
                 const row = g.items.find((x) => x.url === url);
                 const sz = row?.size_bytes ? formatBytes(row.size_bytes) : "";
                 if (row?.path && !confirm(

@@ -42,7 +42,7 @@ const KNOWN_SMALL: ReadonlySet<string> = new Set([
   "cp-lib-row-remove", "cp-recents-remove", "cp-review-range-x",
   "cp-review-linkoffer-x", "cp-tx-history-row-remove", "cp-tx-hint-close",
   "cp-spk-pip", "cp-newspk-pip", "cp-ai-chapter-del", "cp-canvas-toast-close",
-  "cp-web-forget", "cp-tx-search-nav-btn", "cp-spk-play", "cp-cast-del",
+  "cp-tx-search-nav-btn", "cp-spk-play", "cp-cast-del",
   "cp-tx-rename-icon", "cp-model-info-btn", "cp-recent-reveal", "cp-toggle-switch",
 ]);
 

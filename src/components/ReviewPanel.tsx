@@ -177,6 +177,7 @@ export function ReviewPanel({
   onRangeDraft,
   onRegisterRangeHotkeys,
   sessionActive = false,
+  roomHasSource = true,
   sessionDoc = null,
   onSessionOp,
   outboxDepth = 0,
@@ -263,6 +264,11 @@ export function ReviewPanel({
    *  a comment can't be written into the void (would be lost when the snapshot
    *  arrives). Drives `inSession` instead of doc-presence for exactly that reason. */
   sessionActive?: boolean;
+  /** Co-review: is the ROOM watching anything? False after the presenter
+   *  clears the source. Without it a cleared room reads as "Connecting to the
+   *  session…" forever, because both states are "in a session with no doc" -
+   *  and one of them is a wait that will end while the other never will. */
+  roomHasSource?: boolean;
   /** Co-review: the SHARED doc (arrives once the snapshot lands). While a
    *  session is active the panel shows this instead of the local-by-sourceKey
    *  doc and routes every mutation through `onSessionOp` (App applies + relays
@@ -767,7 +773,11 @@ export function ReviewPanel({
   // peer never falls back to the solo path and posts into the void. `dispatch`
   // sends an op to the session (App applies + relays) or mutates locally.
   const inSession = sessionActive;
-  const connecting = inSession && !sessionDoc;
+  // Waiting for the host's first snapshot - NOT the same as a room that has
+  // deliberately cleared its source, which is "Load a source to start a
+  // review." below. Defaults to true so a caller that does not pass it keeps
+  // the old behaviour.
+  const connecting = inSession && !sessionDoc && roomHasSource;
   const viewDoc = inSession ? sessionDoc : doc;
   /** The doc as of the LAST RENDER, for closures that run later than they were
    *  made. `dispatchUndoable` needs it: an undo fires long after the push. */

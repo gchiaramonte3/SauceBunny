@@ -5,6 +5,36 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Transcripts appear again.** The library scan opened and read 128 KB of
+  every transcript to decide whether it names speakers. On a library synced by
+  iCloud with its data evicted, each of those reads is a network fetch that
+  does not even leave the file behind, so it happened again on every scan:
+  measured at about 78 seconds of waiting before the panel could show anything,
+  which is why it sat empty while the folder list beside it appeared at once.
+  It no longer reads a file whose bytes are not on this Mac.
+- **Clearing the room clears the notes, for everyone.** Pressing Clear during a
+  session moved the picture and left the previous clip's review on screen, for
+  the host and every guest. The notes are written to disk first: they belong to
+  the clip, and clearing the room must never be a way to lose them.
+- **The floating multi-select bar is gone from the library.** Every verb it
+  held is in the right-click menu, which is where the rest of the library keeps
+  its verbs, and batch transcribe went with them - the menu names the count so
+  it is still clear what a batch will apply to. What remains is a status strip
+  while a batch is actually running, because a long job with no progress and no
+  way to stop it is worse than a crowded shelf.
+- **Review sessions is the same table as every other section.** It had its own
+  grid, its own headings and no right-click menu, so it read as a different
+  product inside the library. Same columns, same sorting, resizing and
+  reordering, same lines, same menu.
+- **A selected row reaches the right edge of the pane** instead of stopping
+  short of it, which read as a mis-drawn highlight.
+- **The stray circle-X on list rows is gone.** It duplicated the row menu's own
+  verb and floated over the last column.
+- **The selection violet is deeper again** (9.5:1 against its text, from 6.6).
+
+
 Nothing yet.
 
 ## [0.4.9] — 2026-09-02

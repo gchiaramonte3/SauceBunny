@@ -43,7 +43,7 @@ describe("list columns", () => {
     // an empty set, which is the failure mode this repo keeps meeting.
     expect(ALL.length, "no components were read").toBeGreaterThan(20);
     expect(heads.map(([n]) => n).sort(), "the set of list views changed").toEqual([
-      "FrameListRows.tsx", "LibraryBrowserPane.tsx", "WebListRows.tsx",
+      "FrameListRows.tsx", "LibraryBrowserPane.tsx", "ReviewSessionsPane.tsx", "WebListRows.tsx",
     ]);
   });
 

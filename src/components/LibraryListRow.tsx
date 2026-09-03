@@ -9,6 +9,9 @@ import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
 import type { LibraryItem } from "../types";
 
 type Props = {
+  /** Transcribe this item, or the selection it belongs to. Library only. */
+  onTranscribe?: () => void;
+  transcribeLabel?: string;
   /** The optional columns to render, in the header's current order and with
    *  hidden ones already removed. Omitted keeps the default three, so the
    *  grid view and any caller that does not manage columns is unchanged. */
@@ -63,6 +66,7 @@ type Props = {
  * ContextMenu/Shift+F10 open the same LibraryCardMenu.
  */
 export function LibraryListRow({
+  onTranscribe, transcribeLabel,
   item, selected, onSelect, onContextSelect, onRename, onDelete, onRemove, deleteLabel, onMove, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   tags, onToggleTagColor, onClearTagColors, columns, customText, customColumns, onEditCustom,
 }: Props) {
@@ -189,6 +193,8 @@ export function LibraryListRow({
       </button>
       {menuAnchor && (
         <LibraryCardMenu
+          onTranscribe={onTranscribe}
+          transcribeLabel={transcribeLabel}
           onRename={onRename}
           onDelete={onDelete}
           onRemove={onRemove}

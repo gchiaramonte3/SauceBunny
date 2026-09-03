@@ -7,11 +7,12 @@ import {
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { loadJson, saveJson } from "../lib/storage";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
-import { LibrarySelectionBar } from "./LibrarySelectionBar";
+import { useListColumns } from "../hooks/use-list-columns";
+import { NameHeader, ListColumnHeaders, ListColumnRules, type ColSpec } from "./ListColumnHeaders";
+import { LibraryCardMenu } from "./LibraryCardMenu";
 import { useGridSelection } from "../hooks/use-grid-selection";
 import { useMarquee } from "../hooks/use-marquee";
 import { IconReview } from "./Icons";
-import { ListColumnRules } from "./ListColumnHeaders";
 
 /**
  * The sessions this Mac has already held.
@@ -31,6 +32,18 @@ import { ListColumnRules } from "./ListColumnHeaders";
 
 type SessionPrefs = { view: LibraryViewMode; sort: LibrarySortKey; dir: LibrarySortDir };
 const PREFS_KEY = "saucebunny.sessionsBrowser";
+const COLS_KEY = "saucebunny.sessionListCols";
+const COL_DEFAULT = { people: 180, notes: 64, date: 120 };
+
+/** The same shape the web and frames tables declare, so this reads as one more
+ *  table rather than a bespoke page: sortable, resizable, reorderable,
+ *  hideable, with the shared uppercase header type and column dividers. */
+type SessColKey = "people" | "notes" | "date";
+const SESS_COL_SPECS: readonly ColSpec<SessColKey>[] = [
+  { key: "people", label: "People", className: "cp-lib-lrow-kind" },
+  { key: "notes", label: "Notes", className: "cp-lib-lrow-size", sort: "size" },
+  { key: "date", label: "Held", className: "cp-lib-lrow-date", sort: "date" },
+];
 
 function normalizePrefs(raw: unknown): SessionPrefs {
   const r = (typeof raw === "object" && raw !== null) ? raw as Record<string, unknown> : {};
@@ -70,6 +83,9 @@ export function ReviewSessionsPane({ treeOpen, onShowTree }: {
   const [query, setQuery] = useState("");
   const [prefs, setPrefs] = useState<SessionPrefs>(() => normalizePrefs(loadJson(PREFS_KEY, {})));
   const paneRef = useRef<HTMLDivElement>(null);
+  const colModel = useListColumns(COLS_KEY, COL_DEFAULT);
+  const { visible, template } = colModel;
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number; id: string } | null>(null);
 
   // Persist OUTSIDE the updater, the way every other pane does: a setState
   // updater must stay pure, and updater-purity-contract enforces it.
@@ -118,7 +134,7 @@ export function ReviewSessionsPane({ treeOpen, onShowTree }: {
     containerRef: paneRef,
     // MUST follow the view mode. Pinned to one selector the lasso silently
     // selects nothing in the other view: the band draws and finds no items.
-    itemSelector: prefs.view === "list" ? ".cp-sess-row" : ".cp-sess-card",
+    itemSelector: prefs.view === "list" ? ".cp-lib-lrow" : ".cp-sess-card",
     onSelect: grid.onMarquee,
     onEnd: grid.onMarqueeEnd,
   });
@@ -144,11 +160,6 @@ export function ReviewSessionsPane({ treeOpen, onShowTree }: {
         onPrefs={patchPrefs}
         treeOpen={treeOpen}
         onShowTree={onShowTree}
-      />
-      <LibrarySelectionBar
-        count={grid.selectedPaths.length}
-        onReveal={() => { const f = grid.selectedPaths[0]; if (f) revealOne(f); }}
-        onClear={grid.clear}
       />
       <div
         ref={paneRef}
@@ -176,30 +187,49 @@ export function ReviewSessionsPane({ treeOpen, onShowTree }: {
               {shown.length} session{shown.length === 1 ? "" : "s"}
             </div>
             {prefs.view === "list" ? (
-              <div className="cp-lib-list cp-sess-list">
-                <div className="cp-lib-list-head cp-sess-row">
-                  <button type="button" onClick={() => onSort("name")}>Session</button>
-                  <span>People</span>
-                  <button type="button" onClick={() => onSort("size")}>Notes</button>
-                  <button type="button" onClick={() => onSort("date")}>Held</button>
+              <div
+                className="cp-lib-list"
+                style={{ ["--lrow-cols" as string]: template }}
+              >
+                <div className="cp-lib-list-head" onContextMenu={(e) => e.preventDefault()}>
+                  <span className="cp-lib-lrow-art" aria-hidden="true" />
+                  <NameHeader sort={prefs.sort} dir={prefs.dir} onSort={onSort} model={colModel} />
+                  <ListColumnHeaders specs={SESS_COL_SPECS} model={colModel} sort={prefs.sort} dir={prefs.dir} onSort={onSort} />
                 </div>
                 {shown.map((r) => (
                   <button
                     key={r.id}
                     type="button"
                     data-path={r.id}
-                    className={"cp-lib-lrow cp-sess-row" + (grid.selected.has(r.id) ? " selected" : "")}
+                    className={"cp-lib-lrow" + (grid.selected.has(r.id) ? " selected" : "")}
                     onClick={(e) => grid.onItemClick(r.id, e)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      if (!grid.selected.has(r.id)) grid.onItemClick(r.id, e);
+                      setMenuAt({ x: e.clientX, y: e.clientY, id: r.id });
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+                        e.preventDefault();
+                        const b = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        setMenuAt({ x: b.left + 18, y: b.bottom - 6, id: r.id });
+                      }
+                    }}
                     onDoubleClick={() => revealOne(r.id)}
                     title={r.title}
                   >
-                    <span className="cp-sess-name">{r.title}</span>
-                    <span className="cp-lib-lrow-kind">{r.participants.join(", ")}</span>
-                    <span className="cp-lib-lrow-size">{r.commentCount || ""}</span>
-                    <span className="cp-lib-lrow-date">{whenLabel(r.startedAt)}</span>
+                    <span className="cp-lib-lrow-art" aria-hidden="true"><IconReview size={13} /></span>
+                    <span className="cp-lib-lrow-name">{r.title}</span>
+                    {visible.map((k) => (
+                      k === "people"
+                        ? <span key={k} className="cp-lib-lrow-kind">{r.participants.join(", ")}</span>
+                        : k === "notes"
+                          ? <span key={k} className="cp-lib-lrow-size">{r.commentCount || ""}</span>
+                          : <span key={k} className="cp-lib-lrow-date">{whenLabel(r.startedAt)}</span>
+                    ))}
                   </button>
                 ))}
-                <ListColumnRules trackCount={4} lastColumnTrack={4} />
+                <ListColumnRules template={template} trackCount={colModel.trackCount} lastColumnTrack={colModel.lastColumnTrack} />
               </div>
             ) : (
               <div className="cp-web-grid" role="list">
@@ -227,6 +257,22 @@ export function ReviewSessionsPane({ treeOpen, onShowTree }: {
               </div>
             )}
           </>
+        )}
+        {menuAt && (
+          <LibraryCardMenu
+            anchor={{ x: menuAt.x, y: menuAt.y }}
+            revealPath={screeningPath(menuAt.id)}
+            onOpen={() => revealOne(menuAt.id)}
+            // A screening is a RECORD of something that happened. There is no
+            // sensible "delete" here yet, and inventing one that throws away
+            // the only account of a session would be worse than not offering
+            // it - so the menu carries the verbs that exist and no more.
+            canPickThumbnail={false}
+            hasChosenThumbnail={false}
+            onChooseThumbnail={() => {}}
+            onResetThumbnail={() => {}}
+            onClose={() => setMenuAt(null)}
+          />
         )}
       </div>
     </div>

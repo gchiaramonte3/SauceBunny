@@ -5456,6 +5456,10 @@ export default function App() {
                 onReviewRangeDraft={setReviewRangeDraft}
                 onRegisterRangeHotkeys={registerReviewRangeKeys}
                 reviewSessionActive={coSessionActive}
+                // "The room cleared the source" and "the snapshot has not
+                // arrived yet" are both "in a session with no doc". Only one
+                // of them ever ends, so they must not read the same.
+                reviewRoomHasSource={sessionSource.kind !== "none"}
                 reviewSessionDoc={sessionDoc}
                 onReviewSessionOp={postSessionOp}
               />}

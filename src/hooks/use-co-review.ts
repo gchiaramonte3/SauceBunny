@@ -573,6 +573,15 @@ export function useCoReview({
           setSourceStatus(new Map());
           setOfferedFile(null); // the offer was for the outgoing source
           setKeepTarget(null); // and so was any copy running underneath it
+          // The notes go with the picture. Persist FIRST: a guest's own notes
+          // are theirs, and the host clearing the room must not be a way to
+          // lose them - persistDoc merges into any solo review they already
+          // have. Through refs because this handler is registered once.
+          if (sessionDocRef.current) {
+            persistDocRef.current(sessionDocRef.current);
+            setSessionDoc(null);
+          }
+          prevDocKeyRef.current = null;
           return;
         }
         slog("info",
@@ -1003,7 +1012,24 @@ export function useCoReview({
       coReadyRef.current = false;
       return;
     }
-    if (coSession.role !== "host" || !reviewSourceKey) return;
+    if (coSession.role !== "host") return;
+    // THE ROOM IS WATCHING NOTHING. Clearing the source used to fall through
+    // this early return, so the shared doc kept the outgoing clip's notes and
+    // the panel went on showing them - on the host's screen and, because the
+    // clear only ever moved the picture, on every guest's too. The room looked
+    // like it had cleared and was still holding a previous clip's review.
+    //
+    // The notes go to DISK before the panel drops them. They belong to the
+    // clip, not to the room, and clearing the room must never be a way to lose
+    // them - persistDoc merges into whatever solo review already exists.
+    if (!reviewSourceKey) {
+      if (sessionDocRef.current) {
+        persistDoc(sessionDocRef.current);
+        setSessionDoc(null);
+      }
+      prevDocKeyRef.current = null;
+      return;
+    }
     if (prevDocKeyRef.current === reviewSourceKey) return; // same source, nothing to do
 
     // CLOSE the outgoing source first: its comments belong to ITS file, and

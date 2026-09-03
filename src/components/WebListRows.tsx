@@ -5,7 +5,7 @@ import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { siteName, type CachedWebItem } from "../lib/web-source";
 import { secondsToClock } from "../lib/timecode";
 import { NameHeader } from "./ListColumnHeaders";
-import { IconCircleX, IconDownload, IconLink } from "./Icons";
+import { IconDownload, IconLink } from "./Icons";
 import { ListColumnHeaders, ListColumnRules } from "./ListColumnHeaders";
 import { LibraryCardMenu } from "./LibraryCardMenu";
 import type { ColSpec } from "./ListColumnHeaders";
@@ -78,7 +78,7 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
 
   return (
     <div
-      className="cp-lib-list cp-lib-list-gutter"
+      className="cp-lib-list"
       role="list"
       aria-label="Cached web sources"
       /* One track list, computed from the column model and read by the
@@ -93,7 +93,6 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
         <ListColumnHeaders specs={WEB_COL_SPECS} model={colModel} sort={sort} dir={dir} onSort={onSort} />
       </div>
       {items.map((it) => {
-        const size = it.size_bytes ? formatBytes(it.size_bytes) : "the copy";
         return (
           <div key={it.url} role="listitem" className="cp-web-lrow-wrap">
             <button
@@ -147,22 +146,6 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
                     ? <span key={k} className="cp-lib-lrow-size">{it.size_bytes ? formatBytes(it.size_bytes) : ""}</span>
                     : <span key={k} className="cp-lib-lrow-date">{fetchedLabel(it.fetched_at)}</span>
               ))}
-            </button>
-            {/* A list ROW has no ⋯ menu, so the verb is inline - and the
-                caller asks before deleting a downloaded copy, the same
-                confirm the grid's menu item shows. */}
-            <button
-              type="button"
-              className="cp-web-forget list"
-              title={it.path
-                ? "Delete the downloaded copy from this Mac. The source stays online."
-                : "Forget this resolve. Nothing is on disk; re-opening extracts again."}
-              aria-label={it.path
-                ? `Delete the ${size} copy of ${it.title ?? it.url}`
-                : `Forget ${it.title ?? it.url}`}
-              onClick={() => onForget(it.url)}
-            >
-              <IconCircleX size={13} />
             </button>
           </div>
         );

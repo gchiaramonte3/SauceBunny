@@ -95,8 +95,8 @@ test("⌘A in the Library selects what the pane drew, not what it knows", async 
   const drawn = await paneCards.count();
   const highlighted = await page.locator(".cp-lib-pane .cp-lib-card.selected, .cp-lib-pane .cp-lib-card[aria-current='true']").count();
   expect(drawn, "the browser cap should have bitten at 400 files").toBeLessThan(400);
-  // The bar's number and the highlighted cards must be the same claim.
+  // Selecting all must highlight exactly what the pane drew. The bar that
+  // used to restate that number as text is gone, so the highlighted cards
+  // are now the only claim - and the only one that ever mattered.
   expect(highlighted).toBe(drawn);
-  await expect(page.locator(".cp-lib-selbar, .cp-lib-selection-bar").first())
-    .toContainText(String(drawn));
 });

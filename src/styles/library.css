@@ -1190,6 +1190,8 @@
   min-height: 0;
   overflow-y: auto;
   padding: var(--s-4) var(--s-5) var(--s-10);
+  /* This pane pads by --s-5, not --s-4. See .cp-lib-list's bleed note. */
+  --lib-bleed: var(--s-5);
   /* The rubber-band is absolutely positioned in the pane's CONTENT box, which
      is why this needs a positioning context. Content coords (not viewport)
      also mean the band stays glued to the rows when the pane scrolls. */
@@ -1233,7 +1235,30 @@
 }
 
 /* ── List mode — a compact table (poster · name · kind · size · modified). ── */
-.cp-lib-list { display: flex; flex-direction: column; position: relative; }
+/* ROWS REACH THE EDGES OF THE PANE.
+   The pane pads itself so cards do not touch the window, but a TABLE is not a
+   card: a selected row whose fill stops 16px short reads as a mis-drawn
+   highlight rather than a selected row, and the eye finds the gap immediately.
+   So the list steps back out over its container's padding and each of the
+   three boxes that share the track geometry - header, rows, rules - pads
+   itself by the same amount, which keeps the columns exactly where they were
+   while the backgrounds run the full width. */
+.cp-lib-list {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  /* RIGHT ONLY. Bleeding left as well put the rows underneath
+     .cp-lib-tree-resize - the 10px full-height grab strip for the folder
+     panel - so a row became the thing under the cursor where the resize
+     handle is, which target-size caught as an undersized, crowded target.
+     The complaint was the right edge; the left edge has a control on it. */
+  margin-right: calc(-1 * var(--lib-bleed, 0px));
+}
+.cp-lib-list .cp-lib-list-head,
+.cp-lib-list .cp-lib-lrow,
+.cp-lib-list .cp-lib-colrules {
+  padding-right: calc(var(--s-2) + var(--lib-bleed, 0px));
+}
 /* The column lines, continuous from the header through the body. See
    ListColumnRules: an overlay rather than borders on the cells, because row
    cells are centred and so are content-height, which would draw a stack of
@@ -1999,6 +2024,9 @@
   position: relative;
 }
 .cp-web-pane {
+  /* What .cp-lib-list steps back out over. Declared here because this is where
+     the padding it cancels is declared - the two must not drift. */
+  --lib-bleed: var(--s-4);
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -2054,28 +2082,6 @@
 .cp-web-card { position: relative; }
 /* Hidden until the card is hovered or the button itself is focused, so a
    destructive-looking control is not sitting on forty cards at once. */
-.cp-web-forget {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: var(--r-sm);
-  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
-  color: var(--fg-3);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
-}
-.cp-web-card:hover .cp-web-forget,
-.cp-web-forget:focus-visible { opacity: 1; }
-.cp-web-forget:hover { color: var(--fg-1); }
-.cp-web-forget:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--focus-ring); }
 
 /* Reduced motion. Transitions here are stopped by DURATION, never by
    neutralising the transform: a `-50%` translate is CENTRING, so replacing it
@@ -2094,49 +2100,12 @@
    shelf. Four columns rather than the file list's five: a session has no
    size and no kind, and inventing a column to keep the grid identical would
    be worse than a grid that fits what it holds. */
-/* One track list for the header, every row AND the column rules, declared
-   once as a variable for the same reason the resizable tables read
-   --lrow-cols: three boxes that must agree, and a second copy is how they
-   stop agreeing. This table's columns are fixed (no resize model yet), so the
-   value is literal rather than computed. */
-.cp-sess-list {
-  --sess-cols: minmax(180px, 1fr) minmax(120px, 0.8fr) 64px 150px;
-  --sess-gap: 10px;
-}
-.cp-sess-row {
-  display: grid;
-  grid-template-columns: var(--sess-cols);
-  gap: var(--sess-gap);
-  align-items: center;
-}
-/* The sessions table gets the same continuous lines as every other list
-   view. Its geometry differs (its own tracks, its own gap), so the shared
-   overlay is re-pointed at them rather than re-implemented. */
-.cp-sess-list .cp-lib-colrules {
-  grid-template-columns: var(--sess-cols);
-  gap: var(--sess-gap);
-  padding: 0 var(--s-2);
-}
-/* Every boundary after the first column, since this table has no art track. */
-.cp-sess-list .cp-lib-colrules > span:nth-child(n + 2) {
-  border-left: 1px solid var(--line-1);
-  margin-left: calc(-1 * var(--sess-gap) - 1px);
-}
-.cp-sess-list .cp-lib-list-head button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.cp-sess-list .cp-lib-list-head button:hover { color: var(--fg-2); }
-.cp-sess-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* The list view is the SHARED table - same column model, same uppercase
+   headers, same dividers, same continuous rules as every other section. It
+   used to hand-roll a four-track grid with its own gap and its own bare-button
+   headings, which is exactly why it read as a different product: "Session" in
+   sentence case beside "PEOPLE" in caps, no resizing, no reordering, no
+   right-click. There is nothing here now because there is nothing special. */
 
 /* The card. No poster: a session is people and notes, not a picture, so the
    card leads with its name instead of reserving 16:9 for a black rectangle. */
@@ -2192,13 +2161,10 @@
    than every row's and each column's values sat 40px LEFT of their heading.
    Reported from a screenshot as "columns that do not line up". One rule,
    read by both, so they cannot disagree again. */
-/* The rules overlay is listed HERE, in the same rule as the header and the
-   rows, rather than given its own matching declaration elsewhere: these three
-   boxes must share one track geometry, and a gutter applied to two of them
-   put every body line 32px right of the header divider it belongs to. */
-.cp-lib-list-gutter .cp-lib-list-head,
-.cp-lib-list-gutter .cp-lib-lrow,
-.cp-lib-list-gutter .cp-lib-colrules { padding-right: 40px; }
+/* The 40px right gutter that used to live here is gone with the thing it was
+   reserving space for: a hover-revealed circle-X on every list row, which
+   duplicated the row menu's own verb and, being absolutely positioned at the
+   row's right edge, floated over the last column as a stray glyph. */
 .cp-web-lrow-dur,
 .cp-web-lrow-have {
   margin-left: var(--s-2);
@@ -2208,15 +2174,6 @@
   font-variant-numeric: tabular-nums;
 }
 .cp-web-lrow-have { color: var(--fg-3); }
-.cp-web-forget.list {
-  position: absolute;
-  top: 50%;
-  right: var(--s-2);
-  transform: translateY(-50%);
-}
-.cp-web-lrow-wrap:hover .cp-web-forget,
-.cp-web-lrow-wrap:focus-within .cp-web-forget { opacity: 1; }
-
 /* Web collections - the user-keyed fold above the site shelves. */
 .cp-web-shelf.collection .cp-web-shelf-head { color: var(--fg-1); }
 .cp-web-shelf-note {
@@ -2541,10 +2498,6 @@
 
 /* Destructive verb in the selection bar. Muted until hover, like every other
    danger affordance here: it should be findable, not loud. */
-.cp-lib-selbar .btn.cp-selbar-danger:hover {
-  color: var(--danger-text);
-  border-color: color-mix(in srgb, var(--danger) 45.0%, transparent);
-}
 
 /* ── Dragging cards onto a folder ────────────────────────────────────────────
    Pointer-driven rather than HTML5 drag-and-drop: the app needs Tauri's OS

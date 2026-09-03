@@ -7,7 +7,7 @@ import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryMoveDialog } from "./LibraryMoveDialog";
 import { useCardDrag } from "../hooks/use-card-drag";
 import { LibraryBrowserPane } from "./LibraryBrowserPane";
-import { LibrarySelectionBar } from "./LibrarySelectionBar";
+import { LibraryBatchStatus } from "./LibraryBatchStatus";
 import { useFinderTags } from "../hooks/use-finder-tags";
 import { CachedWebPane } from "./CachedWebPane";
 import { FramesPane } from "./FramesPane";
@@ -761,28 +761,24 @@ export function LibraryBrowser({
               {moveError}
             </p>
           )}
-          <LibrarySelectionBar
-            count={selectedPaths.length}
-            batchLine={batchLine}
-            onBatchCancel={onBatchCancel}
-            onTranscribe={onBatchTranscribe ? () => onBatchTranscribe(
-              selectedPaths.map((path) => ({
-                path,
-                name: items.find((i) => i.path === path)?.name ?? path.split("/").pop() ?? path,
-              })),
-            ) : undefined}
-            onReveal={() => {
-              // Reveal the FIRST only. Finder opens a window per call, so
-              // revealing twelve files buries the screen in twelve windows —
-              // the batch equivalent of a popup storm.
-              const first = selectedPaths[0];
-              if (first) invoke("reveal_in_finder", { path: first }).catch(() => { /* ignore */ });
-            }}
-            onClear={() => setSel(EMPTY_SELECTION)}
-          />
+          {/* Only a running batch, and only while it runs. The selection's
+              verbs moved into the row menus - see LibraryBatchStatus. */}
+          <LibraryBatchStatus batchLine={batchLine} onBatchCancel={onBatchCancel} />
           <LibraryBrowserPane
             onTrashItem={trashItem}
             onRemoveItems={removeFromLibrary}
+            /* Batch transcribe, moved out of the removed multi-select bar and
+               into the row menu. Acts on the SELECTION when the clicked row is
+               part of one, so the set still has one visible answer to "what
+               will this apply to" - the count in the label. */
+            transcribeLabel={selectedPaths.length > 1 ? `Transcribe ${selectedPaths.length} selected` : "Transcribe"}
+            onTranscribeItem={onBatchTranscribe ? (path) => {
+              const paths = selectedPaths.length > 1 && selectedPaths.includes(path) ? selectedPaths : [path];
+              onBatchTranscribe(paths.map((p) => ({
+                path: p,
+                name: items.find((i) => i.path === p)?.name ?? p.split("/").pop() ?? p,
+              })));
+            } : undefined}
             items={shown}
             folders={folders}
             onOpenFolder={(f) => {

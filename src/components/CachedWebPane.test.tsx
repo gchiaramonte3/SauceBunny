@@ -425,7 +425,7 @@ describe("selecting more than one clip", () => {
     expect(selected[1]).toBe(cards[1]);
   });
 
-  it("forgetting a selection asks once and forgets all of them", async () => {
+  it("forgetting from the row menu asks once and forgets the whole selection", async () => {
     const { fireEvent, waitFor } = await import("@testing-library/react");
     const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
     h.items = clips();
@@ -435,7 +435,11 @@ describe("selecting more than one clip", () => {
     const cards = [...document.querySelectorAll(".cp-lib-card")] as HTMLElement[];
     fireEvent.click(cards[0]);
     fireEvent.click(cards[2], { shiftKey: true });
-    fireEvent.click(screen.getByRole("button", { name: /Delete/ }));
+    // The verb lives in the row menu now; the floating bar it used to live in
+    // was removed. It must still act on the whole SELECTION.
+    expect(document.querySelector(".cp-lib-selbar"), "the multi-select bar is back").toBeNull();
+    fireEvent.contextMenu(cards[1]);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Remove|Forget|Delete/ }));
 
     await waitFor(() => {
       expect(h.calls.filter(([c]) => c === "forget_cached_web")).toHaveLength(3);

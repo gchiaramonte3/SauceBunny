@@ -21,7 +21,7 @@
      highlight colour" complaint coming back.
      Not a new colour: it is already the last stop of the export button's
      gradient, which now reads it from here. */
-  --novella-violet-deep: #5A39D6;
+  --novella-violet-deep: #4326A6;
 
   --bg-0:   #0A0A0D;
   --bg-1:   #0E0E10;
@@ -177,8 +177,11 @@
   --sel-soft: color-mix(in srgb, var(--novella-violet-deep) 26%, transparent);
   /* Text on the fill. Measured, not guessed: --fg-3 on --sel-fill is 2.3:1,
      so a selected row's Kind and Date cells have to come up to this or they
-     fail the moment the row is selected. --fg-1 on --sel-fill is 6.44:1,
-     which the deeper fill improved from 4.72:1. */
+     fail the moment the row is selected. --fg-1 on --sel-fill is 9.49:1.
+     The fill has been deepened twice on the same report - it read as too
+     bright at #6D52ED (4.72:1) and again at #5A39D6 (6.56:1) - so this step
+     is a real one rather than another nudge. Deepening only ever helps the
+     contrast here, because the ink is near-white. */
   --sel-ink: var(--fg-1);
 
   --color-surface-elevated:  #1A1A1D;

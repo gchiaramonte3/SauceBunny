@@ -103,23 +103,21 @@ for (const shelf of ["Frames", "From the web"] as const) {
     await expect(page.locator(SHELF + " .cp-lib-marquee")).toHaveCount(0);
   });
 
-  test(`${shelf}: the batch bar appears at two and clears`, async ({ page }) => {
+  test(`${shelf}: a selection raises NO floating bar`, async ({ page }) => {
+    // The multi-select bar was removed on request. Its verbs live in the row
+    // menu now, so the only thing to assert here is that selecting several
+    // items does not put a second set of actions over the shelf again.
     await bootShelf(page, shelf);
     const cards = page.locator(SHELF + " .cp-lib-card:not(.cp-lib-foldercard)");
     await cards.nth(0).click();
     await expect(page.locator(SHELF + " .cp-lib-selbar")).toHaveCount(0);
 
     await cards.nth(1).click({ modifiers: ["Shift"] });
-    const bar = page.locator(SHELF + " .cp-lib-selbar");
-    await expect(bar).toBeVisible();
-    await expect(bar).toContainText("2 selected");
-
-    // And it floats: it must not be as tall as the pane, the way the folder
-    // pane's bar once was.
-    const box = (await bar.boundingBox())!;
-    expect(box.height).toBeLessThan(80);
-
-    await bar.getByRole("button", { name: "Clear" }).click();
-    await expect(page.locator(SHELF + " .cp-lib-selbar")).toHaveCount(0);
+    await expect(page.locator(SHELF + " .cp-lib-card.selected")).toHaveCount(2);
+    await expect(
+      page.locator(SHELF + " .cp-lib-selbar"),
+      "the multi-select bar is back",
+    ).toHaveCount(0);
   });
+
 }

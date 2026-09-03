@@ -25,6 +25,9 @@ export type LibraryCardArt =
   | { kind: "remote"; url: string | null; urls?: string[] };
 
 type Props = {
+  /** Transcribe this item, or the selection it belongs to. Library only. */
+  onTranscribe?: () => void;
+  transcribeLabel?: string;
   title: string;
   /** Second line — size · date for files, host · recency for web sources.
    *  Revealed on hover/focus along with the play glyph. */
@@ -114,6 +117,7 @@ type Props = {
  * Open in Clip. The menu never triggers the card's open.
  */
 export function LibraryCard({
+  onTranscribe, transcribeLabel,
   title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, onDelete, onRemove, deleteLabel, onMove, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   onSelect, onContextSelect, onRename, selected, selectionPath, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
@@ -309,6 +313,8 @@ export function LibraryCard({
       </button>
       {menuAnchor && (
         <LibraryCardMenu
+          onTranscribe={onTranscribe}
+          transcribeLabel={transcribeLabel}
           anchor={menuAnchor}
           align={menuAnchor.align}
           canPickThumbnail={canPick}

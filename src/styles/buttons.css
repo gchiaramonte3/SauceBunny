@@ -636,8 +636,7 @@
   .cp-gen-result { transition: none; }
 }
 
-/* An armed destructive button, the text-button twin of `.cp-web-forget.armed`
-   in library.css. Same bargain: the second click deletes, so the control has
+/* An armed destructive button. The second click deletes, so the control has
    to stop looking like the ghost button beside it and start naming what goes.
    It carries the size in its label, because a model Delete used to be
    indistinguishable from the "Use as default" next to it. */

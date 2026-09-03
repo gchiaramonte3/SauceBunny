@@ -53,6 +53,13 @@ type Props = {
   /** Forget these paths without touching the files. Takes a LIST because
    *  the same verb serves one right-clicked row and a whole selection. */
   onRemoveItems?: (paths: readonly string[]) => void;
+  /** Transcribe this row - or the whole selection, when the row is in one.
+   *  The Library's batch transcribe used to live ONLY in the floating
+   *  multi-select bar; when that went, the verb moved into the row menu
+   *  rather than out of the app. */
+  onTranscribeItem?: (path: string) => void;
+  /** Label for that item, carrying the selection count when there is one. */
+  transcribeLabel?: string;
   onChoosePoster: (path: string) => void;
   onResetPoster: (path: string) => void;
   /** Clears the selection on a click in the empty gutter. */
@@ -111,7 +118,7 @@ const LIB_COL_SPECS: readonly ColSpec<LibColKey>[] = [
 export function LibraryBrowserPane({
   folders = EMPTY_FOLDERS, onOpenFolder,
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, onTagsChanged, posterVersions, requestThumb,
-  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onRemoveItems, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, onMoveToFolder, onRequestMove, onKeyboardSelect, cardDrag, emptyText,
+  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onRemoveItems, onTranscribeItem, transcribeLabel, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, onMoveToFolder, onRequestMove, onKeyboardSelect, cardDrag, emptyText,
   sort, dir, onSort,
 }: Props) {
 
@@ -291,6 +298,8 @@ export function LibraryBrowserPane({
             onClearTagColors={onClearTagColors ? () => onClearTagColors(it.path) : undefined}
             deleteLabel="Move to Trash…"
             onDelete={onTrashItem ? () => onTrashItem(it) : undefined}
+            onTranscribe={onTranscribeItem ? () => onTranscribeItem(it.path) : undefined}
+            transcribeLabel={transcribeLabel}
             /* The whole selection when the row is part of one, otherwise
                just this row - the same rule the other row verbs follow. */
             onRemove={onRemoveItems ? () => onRemoveItems(
@@ -383,6 +392,8 @@ export function LibraryBrowserPane({
             onRename={onRenameItem ? () => onRenameItem(it) : undefined}
             deleteLabel="Move to Trash…"
             onDelete={onTrashItem ? () => onTrashItem(it) : undefined}
+            onTranscribe={onTranscribeItem ? () => onTranscribeItem(it.path) : undefined}
+            transcribeLabel={transcribeLabel}
             /* The whole selection when the row is part of one, otherwise
                just this row - the same rule the other row verbs follow. */
             onRemove={onRemoveItems ? () => onRemoveItems(

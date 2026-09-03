@@ -16,7 +16,6 @@ import { FramePreview, revealFrame } from "./FramePreview";
 import { useGridSelection } from "../hooks/use-grid-selection";
 import { useMarquee } from "../hooks/use-marquee";
 import { useCardDrag } from "../hooks/use-card-drag";
-import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { FrameListRows } from "./FrameListRows";
 import { hidePaths, isHidden, subscribeHidden, unhidePaths, withoutHidden } from "../lib/library-hidden";
 import { appUndo } from "../lib/undo";
@@ -216,7 +215,6 @@ export function FramesPane({ treeOpen, onShowTree }: {
   // The same order the marquee and shift-click run ranges over: what is on
   // screen, as it is on screen.
   const grid = useGridSelection(shown.map((f) => f.path));
-  const { selectedPaths } = grid;
   const marquee = useMarquee({
     containerRef: paneRef,
     // The band has to find whatever the CURRENT view draws. This was pinned to
@@ -310,7 +308,11 @@ export function FramesPane({ treeOpen, onShowTree }: {
           grid.selected.has(it.path) ? [...grid.selected] : [it.path],
         )}
         deleteLabel="Delete frame…"
+        // Acts on the SELECTION when this card is part of one, which is where
+        // the removed multi-select bar's Delete went. removeMany asks once for
+        // the whole set rather than once per frame.
         onDelete={() => {
+          if (grid.selected.has(it.path) && grid.selected.size > 1) { removeMany([...grid.selected]); return; }
           if (!confirm(`Delete ${it.name}? It is removed from this Mac.`)) return;
           remove(it.path);
         }}
@@ -367,18 +369,6 @@ export function FramesPane({ treeOpen, onShowTree }: {
           onClose={() => setMoving(null)}
         />
       )}
-      <LibrarySelectionBar
-        count={selectedPaths.length}
-        onReveal={() => { const f = selectedPaths[0]; if (f) revealFrame(f); }}
-        onMove={() => {
-          // One dialog for the whole selection: the destination is the same
-          // for all of them, so asking once per frame would be ceremony.
-          const first = all.find((f) => f.path === selectedPaths[0]);
-          if (first) setMoving(first);
-        }}
-        onDelete={() => removeMany(selectedPaths)}
-        onClear={grid.clear}
-      />
       <div
         ref={paneRef}
         className="cp-web-pane"
@@ -446,6 +436,8 @@ export function FramesPane({ treeOpen, onShowTree }: {
                 onMove={(p) => { const row = g.items.find((x) => x.path === p); if (row) setMoving(row); }}
                 onRemove={(p) => removeFromLibrary(grid.selected.has(p) ? [...grid.selected] : [p])}
                 onDelete={(p) => {
+                  // Same selection-aware rule the cards use.
+                  if (grid.selected.has(p) && grid.selected.size > 1) { removeMany([...grid.selected]); return; }
                   const row = g.items.find((x) => x.path === p);
                   if (!row) return;
                   if (!confirm(`Delete ${row.name}? It is removed from this Mac.`)) return;

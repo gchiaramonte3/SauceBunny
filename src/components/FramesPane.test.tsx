@@ -367,7 +367,10 @@ describe("selecting more than one frame", () => {
     expect(document.querySelectorAll(".cp-lib-card.selected")).toHaveLength(1);
   });
 
-  it("the batch bar appears at two, not at one", async () => {
+  it("shows NO floating bar for a selection, however many are selected", async () => {
+    // The bar was removed on request: a second, competing set of actions
+    // hovering over the shelf in a different idiom from the row menus that
+    // already carry those verbs, covering the last row while it did so.
     const { fireEvent } = await import("@testing-library/react");
     h.items = four();
     mount();
@@ -375,13 +378,16 @@ describe("selecting more than one frame", () => {
 
     fireEvent.click(cardFor("a1.jpg"));
     expect(document.querySelector(".cp-lib-selbar")).toBeNull();
-
-    fireEvent.click(cardFor("a2.jpg"), { shiftKey: true });
-    expect(document.querySelector(".cp-lib-selbar")).toBeTruthy();
-    expect(screen.getByText("2 selected")).toBeTruthy();
+    fireEvent.click(cardFor("a3.jpg"), { shiftKey: true });
+    expect(
+      document.querySelector(".cp-lib-selbar"),
+      "the multi-select bar is back",
+    ).toBeNull();
   });
 
-  it("deleting a selection asks ONCE and removes all of them", async () => {
+  it("deleting from the row menu asks ONCE and removes the whole selection", async () => {
+    // Where the bar's Delete went. The verb has to keep acting on the SET,
+    // or removing the bar would have quietly demoted it to a one-file action.
     const { fireEvent } = await import("@testing-library/react");
     const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
     h.items = four();
@@ -390,7 +396,8 @@ describe("selecting more than one frame", () => {
 
     fireEvent.click(cardFor("a1.jpg"));
     fireEvent.click(cardFor("a3.jpg"), { shiftKey: true });
-    fireEvent.click(screen.getByRole("button", { name: /Delete/ }));
+    fireEvent.contextMenu(cardFor("a2.jpg"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Delete frame/ }));
 
     await waitFor(() => {
       expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(3);
@@ -400,7 +407,7 @@ describe("selecting more than one frame", () => {
     confirmSpy.mockRestore();
   });
 
-  it("declining the batch ask deletes nothing", async () => {
+  it("declining that ask deletes nothing", async () => {
     const { fireEvent } = await import("@testing-library/react");
     const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(false);
     h.items = four();
@@ -408,7 +415,8 @@ describe("selecting more than one frame", () => {
     await screen.findAllByText("a1.jpg");
     fireEvent.click(cardFor("a1.jpg"));
     fireEvent.click(cardFor("a3.jpg"), { shiftKey: true });
-    fireEvent.click(screen.getByRole("button", { name: /Delete/ }));
+    fireEvent.contextMenu(cardFor("a2.jpg"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Delete frame/ }));
     await new Promise((r) => setTimeout(r, 10));
     expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(0);
     confirmSpy.mockRestore();

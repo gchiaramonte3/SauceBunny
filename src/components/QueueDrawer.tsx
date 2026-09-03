@@ -182,6 +182,9 @@ type Props = {
   /** Co-review: true while a session is active (may precede the doc snapshot
    *  arriving — the panel shows "Connecting…" and blocks posting until then). */
   reviewSessionActive?: boolean;
+  /** Is the ROOM watching anything? False once the presenter clears the
+   *  source, which is not the same as waiting for the first snapshot. */
+  reviewRoomHasSource?: boolean;
   /** Co-review: the shared session doc (non-null once the snapshot lands) + the
    *  op sink. When active, the Review panel shows this doc and routes every
    *  mutation as an op instead of writing to local storage. */
@@ -272,7 +275,7 @@ export function QueueDrawer({
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
   onOpenReviewSource, onReviewLinkAsVersion, onReviewUnlinkVersion, reviewSourcePath, onReviewRangeDraft, onRegisterRangeHotkeys, onUndo, onRedo,
-  reviewSessionActive, reviewSessionDoc, onReviewSessionOp,
+  reviewSessionActive, reviewRoomHasSource, reviewSessionDoc, onReviewSessionOp,
   onRenameClip, onRenameAll, onReorderQueue,
   onPopOut, embedded = false, roomFace = false, focusItem = null,
   outboxDepth,
@@ -1093,6 +1096,7 @@ export function QueueDrawer({
           onRangeDraft={onReviewRangeDraft}
           onRegisterRangeHotkeys={onRegisterRangeHotkeys}
           sessionActive={!!reviewSessionActive}
+          roomHasSource={reviewRoomHasSource ?? true}
           sessionDoc={reviewSessionDoc ?? null}
           onSessionOp={onReviewSessionOp}
           /* The two verbs this drawer has been handing TranscriptViewer all

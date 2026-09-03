@@ -314,6 +314,49 @@ fn transcript_has_speaker_labels(path: &Path) -> bool {
     head.contains("[speaker_") || head.contains("<v ") || head.contains("<v.")
 }
 
+/// macOS marks a file whose data a file provider (iCloud Drive) has evicted.
+/// The entry is still listed and still reports its size; opening it is what
+/// triggers the download.
+#[cfg(target_os = "macos")]
+const SF_DATALESS: u32 = 0x4000_0000;
+
+/// Should the speaker-label probe READ this file?
+///
+/// Pure, and separated from the walk, because the answer is a policy and the
+/// walk is plumbing - and because a dataless file cannot be created in a unit
+/// test, so the only way to pin this rule is to test the decision itself.
+///
+/// THE RULE: never read a file whose data is not on this Mac.
+///
+/// The probe exists to light a "Speakers" badge for an IMPORTED transcript
+/// that names speakers but has no sidecar. It reads 128 KB of every such file.
+/// On local disk that is free. On a library synced by iCloud with its data
+/// evicted, each read is a network fetch: measured at 0.87s per file against a
+/// real library, and it does not even materialise the file, so the next scan
+/// pays it again. 90 files needing the probe is ~78 SECONDS of blocking I/O
+/// before the Transcripts panel can show anything, on every visit - which is
+/// exactly the "I am not seeing any transcripts" report, with the folder list
+/// (a cheap directory read) appearing instantly beside an empty list.
+///
+/// The cost of skipping is one badge, on an evicted file, until it is opened
+/// once. That is a far better trade than a panel that is empty for a minute.
+pub(crate) fn should_probe_labels(has_sidecar: bool, flags: u32) -> bool {
+    if has_sidecar { return false; }   // the sidecar already answers it
+    #[cfg(target_os = "macos")]
+    { flags & SF_DATALESS == 0 }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = flags; true }
+}
+
+/// The file's `st_flags`, or 0 where the platform has none.
+#[cfg(target_os = "macos")]
+fn file_flags(meta: &std::fs::Metadata) -> u32 {
+    use std::os::macos::fs::MetadataExt;
+    meta.st_flags()
+}
+#[cfg(not(target_os = "macos"))]
+fn file_flags(_meta: &std::fs::Metadata) -> u32 { 0 }
+
 fn collect_transcripts(dir: &Path, folder_label: &str, depth_remaining: u32, out: &mut Vec<TranscriptFile>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
@@ -342,8 +385,14 @@ fn collect_transcripts(dir: &Path, folder_label: &str, depth_remaining: u32, out
                 folder: folder_label.to_string(),
                 size_bytes: meta.len(),
                 modified_ms,
-                has_diarization: path.with_extension("diarization.json").is_file()
-                    || transcript_has_speaker_labels(&path),
+                has_diarization: {
+                    // Short-circuits on the sidecar, and never opens a file
+                    // whose bytes are not on this Mac. See should_probe_labels.
+                    let sidecar = path.with_extension("diarization.json").is_file();
+                    sidecar
+                        || (should_probe_labels(sidecar, file_flags(&meta))
+                            && transcript_has_speaker_labels(&path))
+                },
                 has_analysis: path.with_extension("analysis.json").is_file(),
                 format,
             });
@@ -1304,6 +1353,38 @@ mod tests {
         let msg = format!("{err:?}");
         assert!(msg.contains("still holds 2 transcripts"), "unhelpful refusal: {msg}");
         assert!(t.path().join("Show/ep1.srt").is_file(), "it deleted a transcript");
+    }
+
+    /// The scan must never open a file whose data iCloud has evicted.
+    ///
+    /// Measured against a real library: 111 transcripts, 80 of them dataless,
+    /// 90 needing the probe, 0.87s per evicted read that does not even
+    /// materialise the file - about 78 seconds of blocking I/O before the
+    /// Transcripts panel could show anything, every single time it opened.
+    /// The panel looked empty while the folder list beside it (a plain
+    /// directory read) appeared instantly.
+    #[test]
+    fn never_probes_a_file_whose_data_is_not_local() {
+        const DATALESS: u32 = 0x4000_0000;
+        const COMPRESSED: u32 = 0x0000_0020;
+
+        // A sidecar already answers the question - no read either way.
+        assert!(!should_probe_labels(true, 0));
+        assert!(!should_probe_labels(true, DATALESS));
+
+        // No sidecar and the bytes are here: probe, which is the whole point
+        // of the feature (an import that names speakers without a sidecar).
+        assert!(should_probe_labels(false, 0));
+        assert!(should_probe_labels(false, COMPRESSED));
+
+        // No sidecar and the bytes are NOT here: never. Real evicted files
+        // carry compressed AND dataless together, which is how they appear in
+        // `ls -lO`, so the check must not be an equality test on the flags.
+        #[cfg(target_os = "macos")]
+        {
+            assert!(!should_probe_labels(false, DATALESS));
+            assert!(!should_probe_labels(false, DATALESS | COMPRESSED));
+        }
     }
 
     #[test]
