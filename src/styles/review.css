@@ -63,6 +63,16 @@
   justify-content: center;
   width: 26px;
   height: 26px;
+  /* A 26px square control is 26px or it is broken. The toolbar row is
+     `nowrap`, and the ONLY control in it that refused to shrink was the filter
+     select - so when the row overran, the icon buttons absorbed all of it.
+     They squashed, while `.cp-review-glyph` (flex-shrink: 0, added when the
+     glyphs themselves were being squeezed) kept its size and spilled out of
+     the crushed box. What that looks like is the search icon painted over the
+     filter's chevron, which is exactly how it was reported.
+     The glyph was pinned and the button holding it was not; pinning half a
+     control is what made the overflow land here instead of somewhere legible. */
+  flex-shrink: 0;
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
@@ -1509,6 +1519,19 @@
 /* The filter, now one control. Sized so the widest option ("Resolved (12)")
    does not make the row it lives in the reason the row overflows. */
 .cp-review-filter-select {
-  flex-shrink: 0;
+  /* Shrinks now, but LAST and only to a floor. Refusing to shrink at all is
+     what pushed the overflow onto the icon buttons; shrinking freely would
+     clip the counts, which the comment above the markup calls the whole reason
+     to look at this control.
+     The budget, at the 320px drawer floor: 296px of content box, minus four
+     26px icon controls (104) minus the gaps (8 + 4x6 = 32) leaves 160 for the
+     two selects. 88 + 64 spends 156 of it, so the row fits with slack rather
+     than exactly - the first version of this fix fitted with a ZERO pixel gap
+     between the filter and the search button, which is not a fix, it is the
+     same bug one label away from coming back. */
+  min-width: 88px;
   max-width: 148px;
 }
+/* Shrinks FIRST: "By timecode" is the longest label in the row and the least
+   costly to clip, and a sort select already reads fine truncated. */
+.cp-review-sort { min-width: 64px; }
