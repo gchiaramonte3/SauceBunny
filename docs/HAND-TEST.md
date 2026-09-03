@@ -868,6 +868,30 @@ The contracts prove the rules; only eyes prove the pixels.
 18. **Settings > Keyboard.** A shortcut with a description shows it in the
     normal secondary grey under its name, not a dimmer one-off grey.
 
+### People tiles and the A/V mesh
+
+31. **Your own tile.** In a session, look at your tile: camera and mic buttons
+    in the LOWER RIGHT, "Presenting" in the UPPER RIGHT if you have the floor.
+    There must be exactly ONE mic indicator. Click mute: the button changes and
+    nothing else contradicts it. Unmute and mute a few times; no second glyph
+    should ever appear disagreeing with the button.
+32. **A peer's tile is clean.** No buttons over their face, no "Let them
+    present" floating in the picture. Right-click the tile: a menu with hide
+    their video, mute them (both marked "for me"), let them present, and
+    remove from session. Arrow keys move through it, Escape closes it, and
+    focus returns to where it was.
+33. **Right-clicking your OWN tile does nothing.** There are no actions to
+    take against yourself.
+34. **A peer who never connects (needs two machines, or one on a hotspot).**
+    If the mesh cannot establish, the tile must NOT sit on "Connecting"
+    forever: within about 30 seconds it reads "No connection". Open the
+    Pipeline panel and look for the ICE lines, including whether only
+    local-network candidates were gathered. That line is the one that tells
+    you a TURN server is needed rather than more patience.
+35. **Camera and mic actually reach the other side.** Turn your camera off:
+    the peer sees your avatar, not a frozen frame. Turn it back on: video
+    returns without rejoining. Same for the mic.
+
 ### Live telestration (needs two machines for the sharing half)
 
 19. **Solo first.** Start a session, open the review view. A pencil sits

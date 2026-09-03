@@ -123,3 +123,95 @@ describe("PeoplePanel roster announcements", () => {
     expect(el.className).toContain("cp-visually-hidden");
   });
 });
+
+// ── One mic, one truth ──────────────────────────────────────────────────
+//
+// A real session showed a mic BUTTON reading live while a mute GLYPH two
+// pixels below it read muted. They were computed from unrelated sources: the
+// button from the persisted intent flag, the glyph from the audio track. On
+// your own tile the track is a WebAudio destination track whose `.muted` is
+// permanently false and which never fires mute/unmute, and muting flips
+// `enabled` in place - so the glyph froze at its first reading and could
+// never re-converge with the button.
+
+// COVERAGE NOTE, stated because a break-test proved it: the assertions below
+// pin the GLYPH half of the fix (the self tile renders no second indicator).
+// The other half - `micMuted = p.isSelf ? selfMicMuted : trackMicMuted` - now
+// feeds only the speaking glow, and reverting it to the track source does NOT
+// fail these tests. Driving `speaking` needs a live AudioContext RMS loop that
+// jsdom cannot provide, so that half is deliberately unguarded rather than
+// falsely covered. If you touch it, check by hand that a muted self tile does
+// not glow while you talk.
+describe("the self tile's mic state", () => {
+  // This file renders into a shared document; without this the previous
+  // test's tile (and its open menu) is still in the DOM.
+  beforeEach(() => { document.body.innerHTML = ""; vi.clearAllMocks(); });
+
+  it("shows exactly ONE mic indicator, and it follows the control", () => {
+    const self = p("m0", "Gasper", { isSelf: true, isHost: true });
+    const { rerender } = render(
+      <PeoplePanel {...base} active participants={[self]} selfMicMuted onToggleMic={() => {}}
+        selfCamOff={false} onToggleCam={() => {}} />,
+    );
+    // Muted: the button says so. The separate glyph must not exist at all -
+    // it is what used to contradict the button.
+    expect(screen.getByLabelText("Unmute")).toBeTruthy();
+    expect(document.querySelectorAll(".cp-person.self .cp-person-muted")).toHaveLength(0);
+
+    // Unmute: the button flips. Under the old code the glyph stayed red here
+    // for the rest of the session.
+    rerender(
+      <PeoplePanel {...base} active participants={[self]} selfMicMuted={false} onToggleMic={() => {}}
+        selfCamOff={false} onToggleCam={() => {}} />,
+    );
+    expect(screen.getByLabelText("Mute")).toBeTruthy();
+    expect(document.querySelectorAll(".cp-person.self .cp-person-muted")).toHaveLength(0);
+  });
+});
+
+describe("a peer's tile", () => {
+  beforeEach(() => { document.body.innerHTML = ""; });
+
+  it("carries no control buttons over their face", () => {
+    render(
+      <PeoplePanel {...base} active participants={[p("m0", "Gasper", { isSelf: true, isHost: true }), p("m1", "Jamien")]}
+        canGrantPresenter onMakePresenter={() => {}} onToggleMuteForMe={() => {}}
+        onRemovePerson={() => {}} selfCamOff={false} selfMicMuted={false}
+        onToggleCam={() => {}} onToggleMic={() => {}} />,
+    );
+    // The three hover buttons and the button that floated over the picture.
+    expect(document.querySelectorAll(".cp-person-ctl.remote")).toHaveLength(0);
+    expect(document.querySelectorAll(".cp-person-grant")).toHaveLength(0);
+    expect(screen.queryByText("Let them present"), "the grant button is back on the tile").toBeNull();
+  });
+
+  it("puts every per-person action behind right-click", async () => {
+    const onMakePresenter = vi.fn();
+    render(
+      <PeoplePanel {...base} active participants={[p("m0", "Gasper", { isSelf: true, isHost: true }), p("m1", "Jamien")]}
+        canGrantPresenter onMakePresenter={onMakePresenter} onToggleMuteForMe={() => {}}
+        onRemovePerson={() => {}} selfCamOff={false} selfMicMuted={false}
+        onToggleCam={() => {}} onToggleMic={() => {}} />,
+    );
+    const tiles = document.querySelectorAll(".cp-person");
+    const peer = [...tiles].find((t) => !t.classList.contains("self"))!;
+    expect(document.querySelector(".cp-person-menu")).toBeNull();
+
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.contextMenu(peer);
+    expect(document.querySelector(".cp-person-menu"), "right-click opened no menu").toBeTruthy();
+    fireEvent.click(screen.getByText("Let them present"));
+    expect(onMakePresenter).toHaveBeenCalledWith("m1");
+  });
+
+  it("offers nothing on your OWN tile", async () => {
+    render(
+      <PeoplePanel {...base} active participants={[p("m0", "Gasper", { isSelf: true, isHost: true })]}
+        canGrantPresenter onMakePresenter={() => {}} onToggleMuteForMe={() => {}}
+        selfCamOff={false} selfMicMuted={false} onToggleCam={() => {}} onToggleMic={() => {}} />,
+    );
+    const { fireEvent } = await import("@testing-library/react");
+    fireEvent.contextMenu(document.querySelector(".cp-person.self")!);
+    expect(document.querySelector(".cp-person-menu"), "you can act on yourself").toBeNull();
+  });
+});

@@ -12,10 +12,26 @@
 
 export type MeshPeerState = "connecting" | "live" | "failed";
 
+/** How long an offerer waits for a peer to go live before offering again. */
+export const MESH_WATCHDOG_MS = 8000;
+/** Total offers per peer, including the first. Bounded so a genuinely
+ *  unreachable peer settles on "No connection" instead of retrying forever. */
+export const MESH_MAX_OFFERS = 4;
+
 export type MeshSignalPayload =
   | { t: "offer"; sdp: string }
   | { t: "answer"; sdp: string }
-  | { t: "ice"; candidate: RTCIceCandidateInit | null };
+  | { t: "ice"; candidate: RTCIceCandidateInit | null }
+  /** "I cannot fix this from my side; please offer again."
+   *
+   *  Only the LOWER member id offers (see isOfferer), so an answerer whose
+   *  connection dies has no legal way to restart it: restartIce() on a
+   *  non-offerer only raises `negotiationneeded`, which nothing listens for.
+   *  It burned its one recovery chance on a no-op and then waited forever.
+   *  Frontend-only addition - this rides the same opaque `rtc` payload the
+   *  Rust relay forwards as a string, so no backend change and no build-ID
+   *  bump. An older peer hits handleSignal's `default` and ignores it. */
+  | { t: "reoffer" };
 
 export type MeshDeps = {
   selfId: string;
@@ -52,6 +68,24 @@ type PeerSlot = {
   epoch: number;
   state: MeshPeerState;
   restarted: boolean;
+  /** Candidates that arrived before setRemoteDescription resolved.
+   *
+   *  addIceCandidate REJECTS with InvalidStateError while there is no remote
+   *  description, and the offer plus its trickled candidates ride one ordered
+   *  stream - so a candidate overtaking the setRemoteDescription await was
+   *  thrown away with a single warn line. Losing candidates does not fail the
+   *  connection loudly; it fails it SILENTLY, which is how a tile sits on
+   *  "Connecting" forever. */
+  pendingIce: RTCIceCandidateInit[];
+  /** Candidate types this connection managed to gather (host/srflx/relay).
+   *  "host only" is the signature of a peer that can never be reached from
+   *  another network. */
+  candTypes: Set<string>;
+  /** True once setRemoteDescription has resolved, so the queue can flush. */
+  hasRemote: boolean;
+  /** Offerer-side re-offer timer, and how many times we have tried. */
+  watchdog: ReturnType<typeof setTimeout> | null;
+  offers: number;
   /** Senders by kind, recorded at addTrack so replace/override never has
    *  to guess a null-track sender's kind. */
   videoSenders: RTCRtpSender[];
@@ -120,16 +154,41 @@ export class RtcMesh {
     try {
       if (payload.t === "offer") {
         await slot.pc.setRemoteDescription({ type: "offer", sdp: payload.sdp });
+        await this.flushIce(from, slot);
         const answer = await slot.pc.createAnswer();
         await slot.pc.setLocalDescription(answer);
         this.deps.sendSignal(from, { t: "answer", sdp: answer.sdp ?? "" });
       } else if (payload.t === "answer") {
         await slot.pc.setRemoteDescription({ type: "answer", sdp: payload.sdp });
+        await this.flushIce(from, slot);
+      } else if (payload.t === "reoffer") {
+        // Only the offerer may act on this; anyone else ignores it.
+        if (isOfferer(this.deps.selfId, from)) {
+          this.deps.log("info", `rtc ${from} asked for a fresh offer`);
+          void this.sendOffer(from, slot.pc);
+        }
       } else if (payload.t === "ice" && payload.candidate) {
-        await slot.pc.addIceCandidate(payload.candidate);
+        if (!slot.hasRemote) slot.pendingIce.push(payload.candidate);
+        else await slot.pc.addIceCandidate(payload.candidate);
       }
     } catch (err) {
       this.deps.log("warn", `rtc signal from ${from} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** Apply the candidates that arrived before the remote description did.
+   *  One bad candidate must not discard the rest, so each is applied
+   *  individually and a failure is logged rather than thrown. */
+  private async flushIce(from: string, slot: PeerSlot): Promise<void> {
+    slot.hasRemote = true;
+    if (slot.pendingIce.length === 0) return;
+    const queued = slot.pendingIce.splice(0);
+    this.deps.log("info", `rtc ${from}: applying ${queued.length} early candidate(s)`);
+    for (const c of queued) {
+      try { await slot.pc.addIceCandidate(c); }
+      catch (err) {
+        this.deps.log("warn", `rtc ${from}: queued candidate rejected: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 
@@ -219,9 +278,47 @@ export class RtcMesh {
   }
 
   private dropPeer(id: string, slot: PeerSlot): void {
+    this.clearWatchdog(slot);
     try { slot.pc.close(); } catch { /* already closed */ }
     this.slots.delete(id);
     this.deps.onRemoteStream(id, null);
+  }
+
+  private clearWatchdog(slot: PeerSlot): void {
+    if (slot.watchdog === null) return;
+    clearTimeout(slot.watchdog);
+    slot.watchdog = null;
+  }
+
+  /**
+   * Offerer-side only: end the silence.
+   *
+   * Every way this mesh could fail to connect produced the SAME screen - the
+   * word "Connecting", forever - because the label is the ABSENCE of an event
+   * and there was no timeout anywhere. An offer that is never answered fires
+   * nothing at all: connectionState sits at "new" and no failure ever arrives.
+   * So the offerer re-offers a bounded number of times and then says so.
+   *
+   * Offerer-side ONLY, deliberately: two peers re-offering at once is glare,
+   * and the answerer has the `reoffer` signal for the case where it is the one
+   * that noticed.
+   */
+  private armWatchdog(id: string, slot: PeerSlot): void {
+    this.clearWatchdog(slot);
+    slot.watchdog = setTimeout(() => {
+      slot.watchdog = null;
+      if (this.closed || this.slots.get(id) !== slot || slot.state === "live") return;
+      if (slot.offers >= MESH_MAX_OFFERS) {
+        this.deps.log("err",
+          `rtc to ${id}: no connection after ${slot.offers} offers. `
+          + `If you are on different networks this usually needs a TURN server (Settings > General).`);
+        this.setState(id, "failed");
+        return;
+      }
+      this.deps.log("warn", `rtc to ${id}: still not connected, offering again (${slot.offers + 1}/${MESH_MAX_OFFERS})`);
+      void this.sendOffer(id, slot.pc);
+      this.armWatchdog(id, slot);
+    }, MESH_WATCHDOG_MS);
   }
 
   private setState(id: string, state: MeshPeerState): void {
@@ -242,6 +339,8 @@ export class RtcMesh {
     const pc = this.deps.createPc({ iceServers: this.deps.iceServers });
     const slot: PeerSlot = {
       pc, epoch, state: "connecting", restarted: false,
+      pendingIce: [], hasRemote: false, watchdog: null, offers: 0,
+      candTypes: new Set<string>(),
       videoSenders: [], audioSenders: [], remote: this.deps.createStream(),
     };
     this.slots.set(id, slot);
@@ -309,6 +408,13 @@ export class RtcMesh {
     }
 
     pc.onicecandidate = (e) => {
+      // Record the TYPE as we go: the gathering-complete summary above is what
+      // tells a failed session apart from a NAT it could never cross.
+      const c = e.candidate?.candidate;
+      if (c) {
+        const m = / typ (host|srflx|prflx|relay)/.exec(c);
+        if (m) slot.candTypes.add(m[1]);
+      }
       this.deps.sendSignal(id, { t: "ice", candidate: e.candidate ? e.candidate.toJSON() : null });
     };
     pc.ontrack = (e) => {
@@ -326,33 +432,74 @@ export class RtcMesh {
       };
       this.deps.onRemoteStream(id, slot.remote);
     };
+    // ── Diagnostics ──────────────────────────────────────────────────
+    // Only connectionState was ever observed, so a session that never
+    // connected left NO record of why: whether STUN answered, whether any
+    // routable candidate existed, whether checks even started. A failed call
+    // is unreproducible without this.
+    pc.oniceconnectionstatechange = () => {
+      this.deps.log("info", `rtc ${id}: ice ${pc.iceConnectionState}`);
+    };
+    pc.onicegatheringstatechange = () => {
+      if (pc.iceGatheringState !== "complete") return;
+      const kinds = [...slot.candTypes].sort().join(", ") || "none";
+      this.deps.log("info", `rtc ${id}: gathering complete (${kinds})`);
+      // The single most useful line in a failed session. Only host candidates
+      // means STUN never answered, so anyone not on this LAN is unreachable
+      // and no amount of waiting will change it.
+      if (!slot.candTypes.has("srflx") && !slot.candTypes.has("relay")) {
+        this.deps.log("warn",
+          `rtc ${id}: only local-network candidates. A peer on another network needs `
+          + `a reachable STUN server, or a TURN server for strict NATs (Settings > General).`);
+      }
+    };
+    pc.onicecandidateerror = (e: Event) => {
+      // Where an unreachable STUN/TURN server actually surfaces.
+      const ev = e as Event & { url?: string; errorText?: string; errorCode?: number };
+      this.deps.log("warn", `rtc ${id}: ice server error ${ev.errorCode ?? ""} ${ev.url ?? ""} ${ev.errorText ?? ""}`.trim());
+    };
+
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
       if (st === "connected") {
+        this.clearWatchdog(slot);
         this.setState(id, "live");
       } else if (st === "failed") {
         if (!slot.restarted) {
-          // One ICE restart, then we call it: avatar + loud log.
           slot.restarted = true;
-          this.deps.log("warn", `rtc to ${id} failed; one ICE restart`);
+          this.deps.log("warn", `rtc to ${id} failed; recovering`);
           try {
             pc.restartIce();
-            if (isOfferer(this.deps.selfId, id)) void this.sendOffer(id, pc);
+            if (isOfferer(this.deps.selfId, id)) {
+              void this.sendOffer(id, pc);
+            } else {
+              // AN ANSWERER CANNOT RESTART ITSELF. restartIce() here only
+              // raises `negotiationneeded`, which nothing listens for, so this
+              // branch used to burn its one recovery chance on nothing and
+              // then wait forever. Ask the offerer instead.
+              this.deps.sendSignal(id, { t: "reoffer" });
+            }
           } catch {
             this.setState(id, "failed");
           }
         } else {
           this.deps.log("err", `rtc to ${id} failed after restart; showing avatar`);
+          this.clearWatchdog(slot);
           this.setState(id, "failed");
         }
       }
     };
 
-    if (isOfferer(this.deps.selfId, id)) void this.sendOffer(id, pc);
+    if (isOfferer(this.deps.selfId, id)) {
+      void this.sendOffer(id, pc);
+      this.armWatchdog(id, slot);
+    }
     return slot;
   }
 
   private async sendOffer(id: string, pc: RTCPeerConnection): Promise<void> {
+    const slot = this.slots.get(id);
+    if (slot) slot.offers += 1;
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);

@@ -65,6 +65,29 @@ a library tree whose chevrons had never actually worked.
 - The About panel credits **mediabunny**, which it had never named.
 
 ### Fixed
+- **A peer that never connects now says so.** A session where the other
+  person's tile read "Connecting" for its whole length had four separate
+  causes, and every one of them produced that same word because the label was
+  the ABSENCE of an event and nothing timed out. Trickled ICE candidates that
+  overtook the offer were thrown away (they must be queued until the remote
+  description lands). A guest that lost its connection had no legal way to
+  recover, because only one side may offer and the other side's restart was a
+  no-op; it now asks for a fresh offer. The offering side re-offers a bounded
+  number of times and then reports "No connection". And the connection now
+  logs what it gathered, including a warning when only local-network
+  candidates were found, which is the signature of a network the other person
+  cannot be reached across without a TURN server.
+- **One mic indicator on your own tile, not two.** The button and the glyph
+  below it were computed from unrelated sources and desynchronised on the
+  first toggle: your own audio track is a WebAudio destination track that
+  never fires mute events, and muting flips it in place, so the glyph froze at
+  whatever it read first. The button is the indicator now.
+- **Your camera and mic controls are in the tile's lower right**, and
+  "Presenting" is in the upper right.
+- **Everything you can do to someone else is on right-click.** Hide their
+  video, mute them (both only on your screen), hand them the floor, remove
+  them. They were hover buttons over the person's face plus a "Let them
+  present" button floating in the middle of the picture.
 - **The library tree's chevrons had never worked.** Rows were keyed one way
   and the expanded set another, so clicking a chevron did nothing at all.
   The same mismatch was breaking the selection highlight, the drop target,

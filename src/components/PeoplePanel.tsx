@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { useDismiss } from "../hooks/use-dismiss";
+import { useMenuKeys } from "../hooks/use-menu-keys";
 import { useReactionFlashes } from "../lib/reaction-store";
-import { IconCrown, IconMic, IconMicOff, IconVideo, IconVideoOff, IconChevronRight, IconCircleX } from "./Icons";
+import { IconCrown, IconMic, IconMicOff, IconVideo, IconVideoOff, IconChevronRight } from "./Icons";
 import { initialsOf } from "../lib/review";
 import { subscribeSessionCapture, getSessionCapture } from "../hooks/use-media-capture";
 import type { MeshPeerState } from "../lib/rtc-mesh";
@@ -183,7 +185,31 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
   // flowing (stopping it would need renegotiation and would tell the peer).
   const [videoHidden, setVideoHidden] = useState(false);
   const [speaking, setSpeaking] = useState(false);
-  const [micMuted, setMicMuted] = useState(false);
+  /** Remote-only. On your OWN tile this is the wrong source: see `micMuted`. */
+  const [trackMicMuted, setTrackMicMuted] = useState(false);
+  /**
+   * TWO INDICATORS, ONE TRUTH.
+   *
+   * The bottom mute glyph used to read the audio TRACK, while the mic button
+   * beside it read `selfMicMuted` (the persisted intent). They desynchronised
+   * on the very first toggle and could never re-converge, because:
+   *   · your own capture's audio track is a WebAudio destination track, whose
+   *     `.muted` is permanently false and which never fires mute/unmute;
+   *   · muting flips `t.enabled` on that same track in place, so neither the
+   *     event nor the `[stream]` effect re-runs.
+   * Join muted then unmute and the glyph stayed red for the whole session.
+   * For yourself the intent flag IS the truth; for a peer the track is the
+   * only signal there is.
+   */
+  const micMuted = p.isSelf ? !!selfMicMuted : trackMicMuted;
+  /** Anchor for the peer context menu (client coords), null when closed. */
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useDismiss(menuRef, () => setMenuAt(null), menuAt !== null);
+  // role="menu" is a promise about the keyboard: arrows, Home/End, type-ahead
+  // and focus returning to whatever opened it. menu-keyboard-contract enforces
+  // it, and caught this menu shipping the role without the behaviour.
+  useMenuKeys(menuRef, menuAt !== null, () => setMenuAt(null));
   const hasVideo = !!stream && stream.getVideoTracks().some((t) => t.enabled && !t.muted)
     && !(videoHidden && !p.isSelf);
 
@@ -198,8 +224,8 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
   // silence; muted flips when frames stop arriving).
   useEffect(() => {
     const at = stream?.getAudioTracks()[0];
-    if (!at) { setMicMuted(true); return; }
-    const update = () => setMicMuted(at.muted || !at.enabled);
+    if (!at) { setTrackMicMuted(true); return; }
+    const update = () => setTrackMicMuted(at.muted || !at.enabled);
     update();
     at.addEventListener("mute", update);
     at.addEventListener("unmute", update);
@@ -247,6 +273,10 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
     <div
       className={"cp-person" + (speaking && !micMuted ? " speaking" : "") + (p.isSelf ? " self" : "")}
       style={{ ["--pr-color" as string]: p.color }}
+      onContextMenu={p.isSelf ? undefined : (e) => {
+        e.preventDefault();
+        setMenuAt({ x: e.clientX, y: e.clientY });
+      }}
     >
       {hasVideo ? (
         <video ref={videoRef} className={p.isSelf && !sharing ? "mirror" : undefined} muted playsInline aria-hidden />
@@ -260,7 +290,7 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
       {/* Your own tile doubles as the device control: the camera and mic you
           see are the ones you click. Everyone else's tile stays read-only. */}
       {p.isSelf && onToggleCam && onToggleMic && (
-        <div className="cp-person-controls">
+        <div className="cp-person-controls self">
           <button
             type="button"
             className={"cp-person-ctl" + (selfCamOff ? " off" : "")}
@@ -283,48 +313,8 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
           </button>
         </div>
       )}
-      {/* Remote tiles: LOCAL-ONLY controls. Hiding a video or muting a voice
-          here affects this screen only - a remote mute is a social act the
-          app must not perform silently, so there is no remote capability. */}
-      {!p.isSelf && onToggleMuteForMe && (
-        <div className="cp-person-controls">
-          <button
-            type="button"
-            className={"cp-person-ctl remote" + (videoHidden ? " off" : "")}
-            aria-pressed={videoHidden}
-            title="Only affects your screen."
-            aria-label={videoHidden ? `Show ${p.name}'s video again` : `Hide ${p.name}'s video for me`}
-            onClick={() => setVideoHidden((h) => !h)}
-          >
-            {videoHidden ? <IconVideoOff size={13} /> : <IconVideo size={13} />}
-          </button>
-          <button
-            type="button"
-            className={"cp-person-ctl remote" + (mutedForMe ? " off" : "")}
-            aria-pressed={!!mutedForMe}
-            title="Only affects your screen."
-            aria-label={mutedForMe ? `Unmute ${p.name} for me` : `Mute ${p.name} for me`}
-            onClick={() => onToggleMuteForMe(p.id, !mutedForMe)}
-          >
-            {mutedForMe ? <IconMicOff size={13} /> : <IconMic size={13} />}
-          </button>
-          {/* The one control here that reaches the OTHER machine. Its two
-              siblings above are deliberately local-only - hiding a video or
-              muting a voice for yourself is not a social act - and this is,
-              so it is host-only and says what it does rather than hiding
-              behind an icon that could be mistaken for them. */}
-          {onRemovePerson && (
-            <button
-              type="button"
-              className="cp-person-ctl remote danger"
-              title={`Remove ${p.name} from the session`}
-              aria-label={`Remove ${p.name} from the session`}
-              onClick={() => onRemovePerson(p.id, p.name)}
-            >
-              <IconCircleX size={13} />
-            </button>
-          )}
-        </div>
+      {isPresenter && (
+        <span className="cp-person-presenting" title="Choosing what everyone watches">Presenting</span>
       )}
       {sharing && <span className="cp-person-share">Sharing screen</span>}
       {handUp && <span className="cp-person-hand" title="Hand raised" aria-label="Hand raised">✋</span>}
@@ -332,23 +322,51 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
       <div className="cp-person-meta">
         {p.isHost && <span className="cp-person-crown" title="Host"><IconCrown size={10} /></span>}
         <span className="cp-person-name" title={p.name}>{p.isSelf ? `${p.name} (You)` : p.name}</span>
-        {isPresenter && (
-          <span className="cp-person-presenting" title="Choosing what everyone watches">Presenting</span>
-        )}
-        {micMuted && <span className="cp-person-muted" title="Mic muted" aria-label="Mic muted"><IconMicOff size={11} /></span>}
+        {/* PEERS ONLY. On your own tile the mic BUTTON is the indicator, and a
+            second glyph beside it was the "microphone in two places" that read
+            muted while the button read live. One control, one truth. */}
+        {micMuted && !p.isSelf && <span className="cp-person-muted" title="Mic muted" aria-label="Mic muted"><IconMicOff size={11} /></span>}
       </div>
-      {/* Hand the floor over. Host-only, and never to whoever already has it.
-          This passes the PRESENTER role, not the network host: the invite
-          ticket points at the original machine, so the star itself can't move. */}
-      {canGrant && !isPresenter && !p.isSelf && onMakePresenter && (
-        <button
-          type="button"
-          className="btn btn-ghost btn-compact cp-person-grant"
-          title={`Let ${p.name} choose what everyone watches`}
-          onClick={() => onMakePresenter(p.id)}
+      {/* EVERYTHING YOU CAN DO TO SOMEONE ELSE lives in one right-click menu.
+          It used to be three hover buttons over their face plus a "Let them
+          present" button floating in the middle of the picture, which read as
+          controls over THEM (two of the three only ever affected this screen)
+          and covered the video besides. A context menu is where a per-person
+          action belongs, and it leaves the tile showing the person. */}
+      {menuAt && !p.isSelf && (
+        <div
+          ref={menuRef}
+          className="cp-person-menu"
+          role="menu"
+          style={{ left: menuAt.x, top: menuAt.y }}
         >
-          Let them present
-        </button>
+          {onToggleMuteForMe && (
+            <>
+              <button role="menuitem" onClick={() => { setVideoHidden((h) => !h); setMenuAt(null); }}>
+                {videoHidden ? "Show their video" : "Hide their video"}
+                <span className="cp-person-menu-note">for me</span>
+              </button>
+              <button role="menuitem" onClick={() => { onToggleMuteForMe(p.id, !mutedForMe); setMenuAt(null); }}>
+                {mutedForMe ? "Unmute them" : "Mute them"}
+                <span className="cp-person-menu-note">for me</span>
+              </button>
+            </>
+          )}
+          {canGrant && !isPresenter && onMakePresenter && (
+            <button role="menuitem" onClick={() => { onMakePresenter(p.id); setMenuAt(null); }}>
+              Let them present
+            </button>
+          )}
+          {onRemovePerson && (
+            <button
+              role="menuitem"
+              className="danger"
+              onClick={() => { onRemovePerson(p.id, p.name); setMenuAt(null); }}
+            >
+              Remove from session
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

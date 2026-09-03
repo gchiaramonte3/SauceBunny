@@ -363,6 +363,61 @@
    drawn in the same red rather than in body grey. */
 .cp-person-muted { color: var(--danger-text); display: flex; flex-shrink: 0; margin-left: auto; }
 
+/* YOUR OWN TILE: the controls you click sit bottom-right, under the picture's
+   quiet corner, and the "Presenting" badge takes the top-right. They used to
+   be the other way round, which put the two device buttons over the face and
+   left the badge sharing the name row with a mute glyph that contradicted it.
+   Raised above .cp-person-meta so the name row cannot overlap the buttons. */
+.cp-person-controls.self {
+  top: auto;
+  bottom: 5px;
+  right: 6px;
+  z-index: 3;
+}
+/* The name row yields the space rather than running under the buttons. */
+.cp-person.self .cp-person-meta { right: 62px; }
+.cp-person-presenting {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+}
+
+/* Per-person actions, on right-click. Everything you can do TO someone else
+   lives here now: hide or mute them for yourself, hand them the floor, remove
+   them. As hover buttons over their face, two of the three read as controls
+   over that person when they only ever affected this screen. */
+.cp-person-menu {
+  position: fixed;
+  z-index: var(--z-menu);
+  min-width: 190px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
+}
+.cp-person-menu button {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  text-align: left;
+  cursor: pointer;
+}
+.cp-person-menu button:hover { background: var(--bg-4); color: var(--fg-1); }
+.cp-person-menu button.danger:hover { color: var(--danger-text); }
+/* "for me" - the difference between a local view change and a social act. */
+.cp-person-menu-note { margin-left: auto; color: var(--fg-4); font-size: var(--text-sm); }
+
 /* Spine mode: 72px avatar column; tiles pop over on hover/focus. */
 .cp-people.spine { width: 72px; }
 .cp-people.spine .cp-people-title,
@@ -959,20 +1014,8 @@
   text-transform: uppercase;
 }
 /* Hover-revealed, like the rest of the tile affordances. */
-.cp-person-grant {
-  position: absolute;
-  left: 50%;
-  bottom: 30px;
-  transform: translateX(-50%);
-  opacity: 0;
-  white-space: nowrap;
-  transition: opacity var(--dur-fast) var(--ease-out);
-}
-.cp-person:hover .cp-person-grant,
-.cp-person-grant:focus-visible { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
-  .cp-person-grant { transition: none; }
-}
+  }
 
 /* Device controls on your OWN people tile. Hover/focus reveal, like the rest
    of the tile affordances; always visible while a device is off so "why can't
@@ -981,6 +1024,7 @@
   position: absolute;
   top: 6px;
   right: 6px;
+  z-index: 2;
   display: flex;
   gap: 4px;
   opacity: 0;
@@ -1003,11 +1047,6 @@
 /* Remote-tile controls are LOCAL-ONLY (hide video / mute for me): visually
    lighter than the self tile's real device switches so the two can't be
    mistaken for each other. */
-.cp-person-ctl.remote {
-  color: var(--fg-3);
-  border-color: var(--line-1);
-}
-.cp-person-ctl.remote:hover { color: var(--fg-1); }
 .cp-person-ctl:hover { background: var(--bg-0); }
 .cp-person-ctl:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 /* Off is a state, not an error: red so it reads as "you turned this off", and

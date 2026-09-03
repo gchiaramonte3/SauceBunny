@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { RtcMesh, isOfferer, memberNum, type MeshDeps, type MeshSignalPayload } from "./rtc-mesh";
+import {
+  RtcMesh, isOfferer, memberNum, MESH_MAX_OFFERS, MESH_WATCHDOG_MS,
+  type MeshDeps, type MeshSignalPayload,
+} from "./rtc-mesh";
 
 // ── Fakes (no browser RTC in vitest) ────────────────────────────────────
 
@@ -391,5 +394,132 @@ describe("remote tracks arriving separately (r131)", () => {
     video.onended?.();
     expect(seen[seen.length - 1]!.getVideoTracks().length,
       "a frozen last frame is worse than an avatar").toBe(0);
+  });
+});
+
+// ── Connecting forever: the failures that produced no event at all ──────
+//
+// A real two-person session sat on "Connecting" for its whole length. The
+// label is the ABSENCE of an event, and every one of these paths used to
+// produce exactly that and nothing else.
+
+describe("a candidate that overtakes the offer", () => {
+  it("is queued and applied, not thrown away", async () => {
+    // addIceCandidate REJECTS while there is no remote description. The offer
+    // and its trickled candidates ride ONE ordered stream, so a candidate can
+    // arrive while setRemoteDescription is still awaiting. Dropping it does
+    // not fail loudly - it just quietly removes a path to the peer.
+    const { mesh } = makeMesh("m0");
+    mesh.setMembers([{ id: "m1", epoch: 0 }]);
+    const pc = FakePc.instances[0];
+
+    await mesh.handleSignal("m1", { t: "ice", candidate: { candidate: "cand-early" } as RTCIceCandidateInit });
+    expect(pc.candidates, "a candidate before the remote description must be held, not applied").toEqual([]);
+
+    await mesh.handleSignal("m1", { t: "answer", sdp: "sdp" });
+    expect(pc.candidates, "the queued candidate was dropped instead of flushed").toEqual([{ candidate: "cand-early" }]);
+
+    // After the flush, later candidates go straight through.
+    await mesh.handleSignal("m1", { t: "ice", candidate: { candidate: "cand-late" } as RTCIceCandidateInit });
+    expect(pc.candidates).toHaveLength(2);
+  });
+
+  it("one bad queued candidate does not discard the rest", async () => {
+    const { mesh } = makeMesh("m0");
+    mesh.setMembers([{ id: "m1", epoch: 0 }]);
+    const pc = FakePc.instances[0];
+    let n = 0;
+    pc.addIceCandidate = (c: unknown) => {
+      n += 1;
+      if (n === 1) return Promise.reject(new Error("bad candidate"));
+      pc.candidates.push(c);
+      return Promise.resolve();
+    };
+    await mesh.handleSignal("m1", { t: "ice", candidate: { candidate: "bad" } as RTCIceCandidateInit });
+    await mesh.handleSignal("m1", { t: "ice", candidate: { candidate: "good" } as RTCIceCandidateInit });
+    await mesh.handleSignal("m1", { t: "answer", sdp: "sdp" });
+    expect(pc.candidates, "a rejected candidate aborted the whole flush").toEqual([{ candidate: "good" }]);
+  });
+});
+
+describe("an answerer that fails", () => {
+  it("asks the offerer to re-offer instead of restarting itself", async () => {
+    // m1 answers m0 (the LOWER id offers). restartIce() on an answerer only
+    // raises `negotiationneeded`, which nothing listens for - so this branch
+    // used to spend its single recovery chance on a no-op and wait forever.
+    const { mesh, sent } = makeMesh("m1");
+    mesh.setMembers([{ id: "m0", epoch: 0 }]);
+    await flush();
+    expect(sent.some((s) => s.payload.t === "offer"), "an answerer must not offer").toBe(false);
+
+    FakePc.instances[0].fireConnectionState("failed");
+    expect(
+      sent.filter((s) => s.to === "m0" && s.payload.t === "reoffer"),
+      "the answerer had no way to ask for recovery",
+    ).toHaveLength(1);
+  });
+
+  it("the offerer honours a reoffer request; a non-offerer ignores it", async () => {
+    const { mesh, sent } = makeMesh("m0");
+    mesh.setMembers([{ id: "m1", epoch: 0 }]);
+    await flush();
+    const before = sent.filter((s) => s.payload.t === "offer").length;
+    await mesh.handleSignal("m1", { t: "reoffer" });
+    await flush();
+    expect(sent.filter((s) => s.payload.t === "offer").length, "the offerer ignored a reoffer request").toBe(before + 1);
+
+    // m2 is not the offerer for m1 (m1 < m2), so it must not answer the call.
+    const other = makeMesh("m2");
+    other.mesh.setMembers([{ id: "m1", epoch: 0 }]);
+    await flush();
+    const n = other.sent.filter((s) => s.payload.t === "offer").length;
+    await other.mesh.handleSignal("m1", { t: "reoffer" });
+    await flush();
+    expect(other.sent.filter((s) => s.payload.t === "offer").length, "a non-offerer re-offered and caused glare").toBe(n);
+  });
+});
+
+describe("the watchdog", () => {
+  it("re-offers a silent peer and eventually stops saying Connecting", async () => {
+    // The decisive case: an offer that is never answered fires NO event at
+    // all. connectionState stays "new", so before the watchdog there was
+    // nothing to end the wait.
+    vi.useFakeTimers();
+    try {
+      const { mesh, sent, states } = makeMesh("m0");
+      mesh.setMembers([{ id: "m1", epoch: 0 }]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(states.at(-1)).toEqual({ id: "m1", state: "connecting" });
+
+      const offersAt = () => sent.filter((s) => s.payload.t === "offer").length;
+      const first = offersAt();
+      await vi.advanceTimersByTimeAsync(MESH_WATCHDOG_MS + 10);
+      expect(offersAt(), "the watchdog did not re-offer").toBeGreaterThan(first);
+
+      // Keep it silent: it must give up rather than retry forever.
+      for (let i = 0; i < MESH_MAX_OFFERS + 2; i += 1) {
+        await vi.advanceTimersByTimeAsync(MESH_WATCHDOG_MS + 10);
+      }
+      expect(states.at(-1), "a peer that never answers still says Connecting").toEqual({ id: "m1", state: "failed" });
+      expect(offersAt(), "the watchdog re-offered without bound").toBeLessThanOrEqual(MESH_MAX_OFFERS);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stands down the moment the peer goes live", async () => {
+    vi.useFakeTimers();
+    try {
+      const { mesh, sent, states } = makeMesh("m0");
+      mesh.setMembers([{ id: "m1", epoch: 0 }]);
+      await vi.advanceTimersByTimeAsync(0);
+      FakePc.instances[0].fireConnectionState("connected");
+      const after = sent.filter((s) => s.payload.t === "offer").length;
+      await vi.advanceTimersByTimeAsync(MESH_WATCHDOG_MS * (MESH_MAX_OFFERS + 2));
+      expect(sent.filter((s) => s.payload.t === "offer").length, "a live peer was re-offered").toBe(after);
+      expect(states.at(-1)).toEqual({ id: "m1", state: "live" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
