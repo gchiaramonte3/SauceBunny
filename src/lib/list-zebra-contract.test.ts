@@ -80,9 +80,17 @@ describe("list zebra", () => {
     expect(CSS, "selection fell back onto the neutral ladder").toMatch(
       /\.cp-lib-lrow\.selected \{ background: var\(--sel-fill\)/,
     );
-    expect(TOKENS, "the selection fill is not a distinct hue").toMatch(
-      /--sel-fill:\s*var\(--novella-violet\)/,
-    );
+    // The RULE is "a hue, not another grey step", not one token's spelling.
+    // The fill was deepened (--novella-violet-deep) after it read too bright
+    // over a dense list, so pinning the exact name would have failed a change
+    // that honours the rule perfectly.
+    const ref = /--sel-fill:\s*var\((--novella-violet(?:-deep)?)\)/.exec(TOKENS);
+    expect(ref, "the selection fill is not one of the violet tokens").not.toBeNull();
+    const hex = new RegExp(`${ref![1]}:\\s*(#[0-9A-Fa-f]{6})`).exec(TOKENS)?.[1];
+    expect(hex, `${ref![1]} has no hex value`).toBeTruthy();
+    // A grey has r=g=b. A hue does not - that is the whole point of the token.
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex!.slice(i, i + 2), 16));
+    expect(Math.max(r, g, b) - Math.min(r, g, b), `${hex} is a grey, not a hue`).toBeGreaterThan(40);
   });
 
   it("a selected row's secondary cells come up with the fill", () => {

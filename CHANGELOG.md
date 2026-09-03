@@ -68,6 +68,15 @@ a library tree whose chevrons had never actually worked.
 - The About panel credits **mediabunny**, which it had never named.
 
 ### Fixed
+- **The selection highlight is calmer.** The violet was the full brand colour
+  and read too bright over a dense list. It is now the deeper, less saturated
+  stop the export button's gradient already ends on, which also lifts white
+  text on a selected row from 4.72:1 to 6.44:1. It stops there rather than
+  going darker because a selected row still has to stand out from an
+  unselected one, and further down that number falls faster than it looks.
+- **Checkboxes and radios are no longer bright white.** They read
+  `accent-color: var(--accent)`, and that token became the neutral white, so a
+  ticked box was a white slab that read as an error before it read as "on".
 - **A peer that never connects now says so.** A session where the other
   person's tile read "Connecting" for its whole length had four separate
   causes, and every one of them produced that same word because the label was

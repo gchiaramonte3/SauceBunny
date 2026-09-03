@@ -92,7 +92,7 @@
 .cp-export-cta {
   background:
     radial-gradient(135% 120% at 50% -15%, rgba(255,255,255,0.22), rgba(255,255,255,0) 55%),
-    linear-gradient(143deg, #9D7BFF 0%, #6D52ED 50%, #5A39D6 100%);
+    linear-gradient(143deg, #9D7BFF 0%, #6D52ED 50%, var(--novella-violet-deep) 100%);
   color: var(--fg-0);
   border-color: transparent;
   text-shadow: 0 1px 1px rgba(0,0,0,0.28);
@@ -111,7 +111,7 @@
   filter: brightness(1.06) saturate(1.04);
   background:
     radial-gradient(135% 120% at 50% -15%, rgba(255,255,255,0.26), rgba(255,255,255,0) 55%),
-    linear-gradient(143deg, #9D7BFF 0%, #6D52ED 50%, #5A39D6 100%);
+    linear-gradient(143deg, #9D7BFF 0%, #6D52ED 50%, var(--novella-violet-deep) 100%);
   border-color: transparent;
   transform: translateY(-1px);
   box-shadow:

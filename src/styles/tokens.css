@@ -10,6 +10,18 @@
   --ella-green:      #6CFF8D;
   --novella-purple:  #8627FF;
   --novella-violet:  #6D52ED;
+  /* The brand violet, deeper and less saturated, for SELECTION.
+     hsl(253,66%,53%) against the brand's hsl(250,81%,63%).
+     Reported as "a little too bright" over a dense list, and the numbers
+     agree in both directions: white ink on it goes from 4.72:1 to 6.44:1,
+     while the fill against the page drops from 3.75:1 to 2.75:1. That second
+     number is the real constraint - it is how much a selected row stands out
+     from an unselected one, and it is why this stops here rather than going
+     darker. hsl(250,55%,42%) measured 2.04:1, which is the "you don't have a
+     highlight colour" complaint coming back.
+     Not a new colour: it is already the last stop of the export button's
+     gradient, which now reads it from here. */
+  --novella-violet-deep: #5A39D6;
 
   --bg-0:   #0A0A0D;
   --bg-1:   #0E0E10;
@@ -158,14 +170,15 @@
         already the primary button and --marker, and a selection that has to
         be retuned should not drag a button and every timeline marker with
         it. */
-  --sel-fill: var(--novella-violet);
+  --sel-fill: var(--novella-violet-deep);
   /* For a persistent NAVIGATION selection (the folder tree), where a full
      fill would shout all day. Finder makes the same distinction between its
      sidebar and its file list. */
-  --sel-soft: color-mix(in srgb, var(--novella-violet) 26%, transparent);
-  /* Text on the fill. Measured, not guessed: --fg-3 on --sel-fill is 2.0:1,
+  --sel-soft: color-mix(in srgb, var(--novella-violet-deep) 26%, transparent);
+  /* Text on the fill. Measured, not guessed: --fg-3 on --sel-fill is 2.3:1,
      so a selected row's Kind and Date cells have to come up to this or they
-     fail the moment the row is selected. --fg-1 on --sel-fill is 4.72:1. */
+     fail the moment the row is selected. --fg-1 on --sel-fill is 6.44:1,
+     which the deeper fill improved from 4.72:1. */
   --sel-ink: var(--fg-1);
 
   --color-surface-elevated:  #1A1A1D;

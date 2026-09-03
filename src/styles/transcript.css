@@ -777,7 +777,7 @@
   font-size: var(--text-base); color: var(--fg-3); cursor: pointer; line-height: var(--leading-snug);
 }
 .cp-tx-rename-scope input[type="radio"] {
-  margin-top: 2px; flex-shrink: 0; accent-color: var(--accent);
+  margin-top: 2px; flex-shrink: 0; accent-color: var(--fg-4);
 }
 .cp-tx-rename-scope strong { color: var(--fg-2); font-weight: var(--weight-semibold); }
 .cp-tx-rename-actions {
@@ -802,7 +802,11 @@
   user-select: none;
 }
 .cp-toggle-row input[type="checkbox"] {
-  accent-color: var(--accent);
+  /* NOT --accent. That token is the neutral WHITE, so a ticked box painted
+     as a bright white slab that read as an error before it read as "on".
+     A mid grey fills the box, WebKit picks a light tick against it, and the
+     control looks like a control. Same reasoning as the radio below. */
+  accent-color: var(--fg-4);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -1244,7 +1248,7 @@
   width: 13px;
   height: 13px;
   margin: 0;
-  accent-color: var(--fg-2);
+  accent-color: var(--fg-4);
   cursor: pointer;
 }
 .cp-spk-check:disabled { cursor: default; opacity: 0.3; }
