@@ -2,10 +2,11 @@ import { COMMENT_REACTION_EMOJI } from "../lib/reactions";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ReviewLedgerPicker } from "./ReviewLedgerPicker";
 import { loadScreeningsForSource } from "../lib/screening-store";
+import type { ScreeningDoc } from "../lib/screening";
 import { SCREENINGS_CHANGED } from "../lib/screening-store";
 import {
   ALL_NOTES, buildLedger, EMPTY_LEDGER, inLens, lensStillValid,
-  type Ledger, type LedgerLens,
+  type LedgerLens,
 } from "../lib/review-ledger";
 import { useMenuKeys } from "../hooks/use-menu-keys";
 import { useDismiss } from "../hooks/use-dismiss";
@@ -988,23 +989,47 @@ export function ReviewPanel({
   // A READ over data that already exists (screening files + this doc), never a
   // second copy of the notes. See lib/review-ledger.ts for why it reads the
   // screening's comment ids rather than the note's own sessionId.
-  const [ledger, setLedger] = useState<Ledger>(EMPTY_LEDGER);
   const [lens, setLens] = useState<LedgerLens>(ALL_NOTES);
+  /**
+   * The screening FILES, loaded from disk. Deliberately separate from the
+   * ledger built out of them: this effect must depend only on which source we
+   * are looking at, never on the doc. Keyed on `viewDoc` it re-read every
+   * screening file on disk after every keystroke and every relayed review op,
+   * because a doc is a new object on each of those.
+   */
+  const [screenings, setScreenings] = useState<ScreeningDoc[]>([]);
   useEffect(() => {
     // A session doc has no local source key to look up, and the ledger is a
     // question about THIS Mac's history of a source on disk.
-    if (!sourceKey || inSession) { setLedger(EMPTY_LEDGER); return; }
+    if (!sourceKey || inSession) { setScreenings([]); return; }
     let alive = true;
     const load = () => {
       void loadScreeningsForSource(sourceKey)
-        .then((docs) => { if (alive) setLedger(buildLedger(docs, sourceKey, viewDoc?.comments ?? [])); })
-        .catch(() => { if (alive) setLedger(EMPTY_LEDGER); });
+        .then((docs) => { if (alive) setScreenings(docs); })
+        .catch(() => { if (alive) setScreenings([]); });
     };
     load();
     // A session that ends while the panel is open adds a row to this history.
     window.addEventListener(SCREENINGS_CHANGED, load);
     return () => { alive = false; window.removeEventListener(SCREENINGS_CHANGED, load); };
-  }, [sourceKey, inSession, viewDoc]);
+  }, [sourceKey, inSession]);
+  /**
+   * SCOPED TO THE ACTIVE VERSION, because the list is.
+   *
+   * Fed the whole doc, a picker row counted notes from every cut: a source
+   * whose v1 was reviewed on Monday and whose v2 is active advertised
+   * "Monday screening - 10 notes", and choosing it showed nothing, because
+   * `roots` only ever holds the active version's comments. A row that names a
+   * number the lens beside it cannot produce is worse than no row.
+   */
+  const versionComments = useMemo(
+    () => (viewDoc ? viewDoc.comments.filter((c) => c.versionId === versionId) : []),
+    [viewDoc, versionId],
+  );
+  const ledger = useMemo(
+    () => (sourceKey && !inSession ? buildLedger(screenings, sourceKey, versionComments) : EMPTY_LEDGER),
+    [screenings, sourceKey, inSession, versionComments],
+  );
   // A lens can outlive what it named: sessions arrive asynchronously and the
   // doc can be re-keyed under the panel. Falling back to All is the only safe
   // answer - an empty list would read as "nothing was said here".
@@ -1063,6 +1088,12 @@ export function ReviewPanel({
       annotation: hasDrawing ? draft : null,
     });
     dispatchUndoable("add comment", { t: "add", comment }, (d) => insertComment(d, comment));
+    // A NEW NOTE BELONGS TO NOW, not to whichever past session is being read.
+    // Left scoped, the note was filtered straight back out of the list the
+    // instant it was posted - the composer cleared and nothing appeared, which
+    // reads as "it was not saved". Returning to All notes is the only outcome
+    // where what you just wrote is on screen.
+    setLens(ALL_NOTES);
     setText("");
     setAnchorSec(null);
     clearRange();
@@ -1077,6 +1108,9 @@ export function ReviewPanel({
     if (!ensureNamed()) return; // gate like submit() — no empty-author replies
     const reply = buildComment({ versionId, timeStart: atTime, body, author, parentId });
     dispatchUndoable("add reply", { t: "add", comment: reply }, (d) => insertComment(d, reply));
+    // A reply is attached to a root the current lens is already showing, so
+    // the lens is left alone here - unlike a new note, nothing can vanish.
+    
     setReplyDraft("");
     setReplyTo(null);
   };

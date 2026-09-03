@@ -31,7 +31,15 @@ let clears = 0;
 function pump(): number {
   const batch = queue;
   queue = [];
-  act(() => { for (const cb of batch) cb(performance.now()); });
+  // A browser isolates each rAF callback: a throw inside one is reported to
+  // the console and does NOT propagate to whoever scheduled it. Swallowing
+  // here is what makes this harness faithful - without it a paint that throws
+  // fails the test from the outside, which is not what the app would see.
+  act(() => {
+    for (const cb of batch) {
+      try { cb(performance.now()); } catch { /* as the browser does */ }
+    }
+  });
   return batch.length;
 }
 
@@ -112,5 +120,25 @@ describe("LiveDrawLayer, idle cost", () => {
     expect(queue.length).toBe(0);
     act(() => { root?.render(<LiveDrawLayer state={state([stroke("b")])} fadeSec={4} onExpire={() => {}} />); });
     expect(queue.length, "a stroke drawn after the layer idled never painted").toBe(1);
+  });
+});
+
+describe("LiveDrawLayer, resilience", () => {
+  it("survives a stroke that throws while painting, and still paints the next one", () => {
+    // A throw inside the paint body must not wedge the loop. The reschedule
+    // moved from the first statement of the frame to the last, which turned a
+    // self-healing exception into a permanent stop: `running` stayed true, so
+    // every later wake() was a no-op and the layer was dead for the session.
+    const bad = { ...stroke("bad"), pts: undefined } as unknown as DrawStroke;
+    render(state([bad]));
+    expect(queue.length, "the loop never started").toBe(1);
+    // The frame throws internally; the layer must not propagate a dead loop.
+    pump();
+    // A good stroke arrives afterwards and MUST still paint.
+    act(() => { root?.render(<LiveDrawLayer state={state([stroke("good")])} fadeSec={4} onExpire={() => {}} />); });
+    expect(
+      queue.length,
+      "the loop was wedged by the earlier throw and never painted again",
+    ).toBeGreaterThan(0);
   });
 });

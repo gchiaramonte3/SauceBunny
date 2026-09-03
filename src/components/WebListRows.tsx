@@ -176,13 +176,14 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
           // not offer to show it in Finder.
           revealPath={menuItem.path ?? null}
           onOpen={() => onOpenUrl(menuAt.url)}
-          onRemove={() => onForget(menuAt.url)}
-          // The grid's two verbs, kept apart for the reason CachedWebPane
-          // states: forgetting the entry is about this shelf, deleting the
-          // copy is about the disk, and one control doing both meant tidying
-          // the shelf threw away minutes of fetching.
-          deleteLabel="Delete the copy…"
-          onDelete={menuItem.path ? () => onForget(menuAt.url) : undefined}
+          // ONE verb, not two. The grid separates "forget the entry" from
+          // "delete the downloaded copy" because it holds both handlers. The
+          // list is handed a single `onForget`, which already adds the
+          // delete-the-copy confirm when a copy exists - so wiring both menu
+          // items to it produced two rows that did exactly the same thing and
+          // raised exactly the same prompt. The label says which case it is.
+          deleteLabel={menuItem.path ? "Delete the copy…" : "Forget this clip"}
+          onDelete={() => onForget(menuAt.url)}
           // A web source's poster comes from the site, so there is no local
           // frame to pick out of it - the same answer the frames list gives.
           canPickThumbnail={false}

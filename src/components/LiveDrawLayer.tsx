@@ -91,8 +91,20 @@ export function LiveDrawLayer({ state, fadeSec, onExpire }: {
       raf = requestAnimationFrame(frame);
     };
     const frame = () => {
-      const ctx = cv.getContext("2d");
+      // The whole body is guarded, and `running` is cleared in `finally`.
+      //
+      // The reschedule used to be the FIRST statement of this function, which
+      // made a throw self-healing: the next frame was already queued. It is
+      // now the last statement, so an exception mid-paint would both skip the
+      // reschedule AND leave `running` true - and a `running` that is stuck
+      // true makes every later wake() a no-op, killing the layer for the rest
+      // of the session with one console error as the only sign.
+      let ctx: CanvasRenderingContext2D | null = null;
+      try {
+        ctx = cv.getContext("2d");
+      } catch { ctx = null; }
       if (!ctx) { running = false; return; }
+      try {
       const w = cv.width, h = cv.height;
       const dpr = window.devicePixelRatio || 1;
       ctx.clearRect(0, 0, w, h);
@@ -114,15 +126,21 @@ export function LiveDrawLayer({ state, fadeSec, onExpire }: {
       }
       // Forget ids that are gone from state, or the map grows for the session.
       for (const id of seen.keys()) if (!alive.has(id)) seen.delete(id);
-      if (expired.length && expireRef.current) expireRef.current(expired);
-
-      // Stop rather than re-schedule once the room's marks are gone. The frame
-      // above has already cleared the canvas, so what is on screen is correct
-      // and stays correct until something wakes us. Note this reads state
-      // AFTER onExpire: a stroke that just faded is still in `strokes` until
-      // React re-renders, so we run one more frame and stop on the next.
-      if (stateRef.current.strokes.length === 0) { running = false; return; }
-      raf = requestAnimationFrame(frame);
+        if (expired.length && expireRef.current) expireRef.current(expired);
+      } finally {
+        // Stop rather than re-schedule once the room's marks are gone. The
+        // frame above has already cleared the canvas, so what is on screen is
+        // correct and stays correct until something wakes us. Note this reads
+        // state AFTER onExpire: a stroke that just faded is still in `strokes`
+        // until React re-renders, so we run one more frame and stop on the
+        // next.
+        //
+        // In `finally` so a throw leaves the loop in a WAKEABLE state: either
+        // still scheduled, or stopped with `running` false so the next stroke
+        // can start it again.
+        if (disposed || stateRef.current.strokes.length === 0) running = false;
+        else raf = requestAnimationFrame(frame);
+      }
     };
     wakeRef.current = wake;
     // A stroke may already be present on mount (re-mount mid-session).

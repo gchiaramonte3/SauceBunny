@@ -87,6 +87,25 @@ a library tree whose chevrons had never actually worked.
 - The About panel credits **mediabunny**, which it had never named.
 
 ### Fixed
+- **Session history survived a restart.** The screening index is parsed field
+  by field and rewritten from what that parse returns, and the new list of
+  sources a session watched was not among the fields it copied. So it was
+  dropped on every read and then erased from disk by the next save, taking
+  every session's copy with it. Found by review before any build shipped it.
+- **The session history counts what the list can actually show.** It was built
+  from every version of a clip while the notes list shows only the active one,
+  so a row could promise ten notes and produce none.
+- **A note posted while reading a past session no longer looks lost.** It was
+  filtered straight back out of the list the moment it was written. Posting
+  now returns you to All notes, where what you just wrote is visible.
+- **Reading the history no longer re-reads the disk on every keystroke.**
+- **The empty Source panel's mark is the right size.** A more specific
+  pre-existing rule was stretching it to fill the panel and pushing the status
+  text out of view entirely.
+- **A drawing that fails to paint no longer kills the drawing layer** for the
+  rest of the session.
+- **The toast's width limit no longer depends on the toast**, which is why it
+  kept wrapping in a box with room to spare.
 - **"A co-review session is already active" no longer traps you.** Session
   state only ever arrived as a pushed event, and the app emits one only when
   something changes, so a window that missed or reset past one had no way to

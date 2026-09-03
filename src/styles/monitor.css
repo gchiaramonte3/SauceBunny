@@ -891,7 +891,12 @@
      reason a reader could see. max-content asks for the width the words
      actually want; the clamp keeps a long one from crossing the picture. */
   width: max-content;
-  max-width: min(560px, 80%);
+  /* vw, NOT a percentage. The stack this sits in is absolutely positioned and
+     shrink-to-fit, so its width is derived FROM the toast - a percentage of it
+     is circular and resolved against a box the toast had just sized, which
+     left width:max-content inert and the copy still wrapping. A viewport unit
+     depends on nothing in the subtree. */
+  max-width: min(560px, 80vw);
   padding: 10px 14px 10px 12px;
   background: color-mix(in srgb, var(--bg-2) 92%, transparent);
   backdrop-filter: blur(14px);

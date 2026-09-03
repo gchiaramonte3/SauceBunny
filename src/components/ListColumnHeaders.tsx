@@ -471,7 +471,18 @@ export function ListColumnRules({ template, trackCount, lastColumnTrack }: {
       style={template ? { ["--lrow-cols" as string]: template } : undefined}
     >
       {Array.from({ length: trackCount }, (_, i) => (
-        <span key={i} className={i + 1 === lastColumnTrack ? "last-col" : undefined} />
+        <span
+          key={i}
+          className={
+            i + 1 === lastColumnTrack ? "last-col"
+              // Past the last real column: the filler track that absorbs slack
+              // when Name has an explicit width. It must draw NOTHING - its
+              // left border would land on the same device pixel as .last-col's
+              // right border and paint the table's edge twice as heavy.
+              : i + 1 > lastColumnTrack ? "filler"
+                : undefined
+          }
+        />
       ))}
     </div>
   );

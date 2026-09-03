@@ -123,6 +123,19 @@ export function parseScreeningIndex(text: unknown): Map<string, ScreeningIndexEn
       segmentCount: typeof entry.segmentCount === "number" ? entry.segmentCount : 0,
       commentCount: typeof entry.commentCount === "number" ? entry.commentCount : 0,
       bytes: typeof entry.bytes === "number" ? entry.bytes : 0,
+      // MUST be listed here. This is a whitelist parser - it rebuilds the
+      // entry field by field - and index.json is REWRITTEN from the map it
+      // returns on every save. So a field missing from this literal is not
+      // merely ignored on read: it is erased from disk the next time any
+      // screening is saved, taking every other entry's copy with it.
+      //
+      // Undefined rather than [] when absent, because absent means UNKNOWN
+      // (an entry written before this field existed) and [] would mean "this
+      // screening watched nothing", which would make loadScreeningsForSource
+      // skip it for ever.
+      sourceKeys: Array.isArray(entry.sourceKeys)
+        ? entry.sourceKeys.filter((k): k is string => typeof k === "string")
+        : undefined,
     });
   }
   return out;

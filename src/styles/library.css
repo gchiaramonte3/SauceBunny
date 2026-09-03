@@ -1264,6 +1264,10 @@
    an explicit Name width appends a filler track, and a line drawn there would
    float out at the pane's edge with no header divider above it. */
 .cp-lib-colrules > span.last-col { border-right: 1px solid var(--line-1); }
+/* The slack-absorbing track past the last column draws nothing: its left
+   border would sit on the same pixel as the right border above, doubling the
+   weight of the table's edge. */
+.cp-lib-colrules > span.filler { border-left: none; }
 /* Sortable column header. Inherits the header row's type so it reads as a
    label, not a button, until you point at it — the Finder behaviour. */
 .cp-lib-sorthead {

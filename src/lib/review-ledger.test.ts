@@ -92,14 +92,23 @@ describe("buildLedger, attribution", () => {
         { ...sc.segments[0], id: "other", localSourceKey: "/Movies/other.mov", commentIds: ["elsewhere"] },
       ],
     };
-    // Only THIS source's notes are in this source's doc - the other clip's
-    // note lives in its own. So the question is whether the other segment's
-    // ids can be pulled in here, and they must not be.
-    const led = buildLedger([multi], KEY, [note("mine")]);
+    // BOTH ids are real comments in THIS doc, which is what makes the
+    // localSourceKey guard the only thing separating them. That is not a
+    // contrived setup: linkAsReviewVersion deliberately points several cuts at
+    // one review doc, so one doc genuinely serves more than one source key and
+    // a single session can hold a segment for each.
+    //
+    // The first version of this test passed ids that were NOT in the doc, so
+    // `rootIds` filtered them out and the guard under test never ran - it
+    // could not have failed.
+    const led = buildLedger([multi], KEY, [note("mine"), note("elsewhere")]);
     expect(
       [...led.sessions[0].commentIds],
       "a segment for another clip contributed its ids to this source's ledger",
     ).toEqual(["mine"]);
+    // And the other clip's note is unclaimed HERE rather than credited to this
+    // source's session.
+    expect(led.soloIds.has("elsewhere")).toBe(true);
   });
 
   it("drops ids the doc no longer holds, so a deleted note leaves no phantom", () => {

@@ -69,6 +69,62 @@ describe("screeningFileName", () => {
   });
 });
 
+describe("the index survives a round trip", () => {
+  /**
+   * THE PARSER IS A WHITELIST, and index.json is REWRITTEN from what it
+   * returns on every save. So a field the writer emits and the parser forgets
+   * to name is not merely ignored on read - it is erased from disk the next
+   * time any screening is saved, taking every entry's copy with it.
+   *
+   * That is exactly what happened to `sourceKeys`: written by indexEntryFor,
+   * dropped by parseScreeningIndex, and therefore gone from every entry after
+   * the first restart-and-save. Nothing caught it, because every existing test
+   * checked hand-written literals rather than the writer's own output.
+   *
+   * This asserts the GENERAL property so the next field added cannot repeat
+   * it, rather than pinning sourceKeys by name.
+   */
+  const roundTrip = (e: ReturnType<typeof indexEntryFor>) =>
+    parseScreeningIndex(JSON.stringify({ version: 1, screenings: { s1: e } })).get("s1");
+
+  it("keeps every field indexEntryFor writes", () => {
+    const d = noteComment(
+      openSegment(
+        newScreening("s1", "Review", "host", 1000),
+        web("https://x.test/a", "A"),
+        "https://x.test/a",   // localSourceKey - the arg BEFORE `now`
+        1000,
+      ),
+      "c1",
+    );
+    const written = indexEntryFor(d, 4321);
+    const read = roundTrip(written);
+    expect(read, "the entry did not parse at all").toBeTruthy();
+    // Name the missing keys rather than just failing on deep equality, so the
+    // message says WHICH field the parser forgot.
+    const lost = Object.keys(written).filter(
+      (k) => JSON.stringify((read as Record<string, unknown>)[k])
+        !== JSON.stringify((written as Record<string, unknown>)[k]),
+    );
+    expect(
+      lost,
+      "parseScreeningIndex drops these fields, so the next save ERASES them from index.json:",
+    ).toEqual([]);
+    // Canary: a writer that emitted nothing would make the check above vacuous.
+    expect(Object.keys(written).length).toBeGreaterThan(6);
+  });
+
+  it("reads an entry written before sourceKeys existed as UNKNOWN, not as none", () => {
+    // The distinction the ledger depends on: [] would mean "watched nothing"
+    // and the loader would skip that screening for ever, hiding the entire
+    // history of anything reviewed before the field shipped.
+    const legacy = { file: "a.json", title: "T", startedAt: 1, endedAt: 2, participants: [],
+      segmentCount: 1, commentCount: 0, bytes: 10 };
+    const e = parseScreeningIndex(JSON.stringify({ version: 1, screenings: { s1: legacy } })).get("s1")!;
+    expect(e.sourceKeys).toBeUndefined();
+  });
+});
+
 describe("indexEntryFor", () => {
   it("summarises a screening without opening its segments", () => {
     let d = newScreening("s1", "Friday", "host", 1000);

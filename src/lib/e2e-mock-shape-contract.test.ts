@@ -57,6 +57,7 @@ function mockFields(command: string): string[] {
 const PAIRS: Array<{ command: string; binding: string }> = [
   { command: "get_cache_stats", binding: "CacheStats" },
   { command: "get_warm_start", binding: "WarmStart" },
+  { command: "session_state", binding: "SessionState" },
 ];
 
 describe("the e2e mock's object shapes", () => {
