@@ -954,6 +954,15 @@ The contracts prove the rules; only eyes prove the pixels.
 55. **Refusal with a number.** If the volume has under 2 GB free, Record must
     refuse and say how much is free rather than failing silently.
 
+56. **Scrub in a live session, on a web source.** Drag the playhead a long
+    way (outside what is buffered). You must see a held frame throughout, then
+    the new position - never a black rectangle. Do it on the FIRST scrub after
+    loading, which is the case that always failed.
+57. **Same, as a guest watching the host's file.** Same rule: held frame, then
+    the new position.
+58. **Leave a guest watching for a few minutes** so the quality can step up.
+    They must stay where they are, not jump to 00:00.
+
 ### People tiles and the A/V mesh
 
 31. **Your own tile.** In a session, look at your tile: camera and mic buttons

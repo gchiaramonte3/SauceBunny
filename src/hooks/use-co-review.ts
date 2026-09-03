@@ -379,6 +379,8 @@ export function useCoReview({
   const coLastSeqRef = useRef({ epoch: -1, seq: -1 });
   /** When we last issued a chase seek — feeds decideChase's cooldown. */
   const coLastChaseAtRef = useRef(0);
+  /** The chase target we have asked for and not yet reached. See decideChase. */
+  const coPendingChaseRef = useRef<number | null>(null);
   const coReadyRef = useRef(false); // has OUR player loaded the host's source yet?
   /** Latest persistDoc, so the message handler (registered once) can flush an
    *  outgoing doc without capturing a stale closure. */
@@ -862,7 +864,14 @@ export function useCoReview({
           justLoaded, localSeekHot, playing: m.playing,
           curSeconds: cur, expectedSeconds: expected, hostScrubbed, hostStepped,
           sinceLastChaseMs: now - coLastChaseAtRef.current,
+          pendingChaseSeconds: coPendingChaseRef.current,
         });
+        // Landed: the outstanding seek is done, so a later drift is a real
+        // correction rather than the same one repeating.
+        if (coPendingChaseRef.current != null
+            && Math.abs(cur - coPendingChaseRef.current) <= 0.02) {
+          coPendingChaseRef.current = null;
+        }
         if (decision.commitHostPos) {
           coLastHostPosRef.current = m.position;
         } else if (import.meta.env.DEV && Math.abs(cur - expected) > 0.5) {
@@ -876,6 +885,7 @@ export function useCoReview({
         // job; it was never read anywhere and is gone.)
         if (decision.seekSeconds != null) {
           coLastChaseAtRef.current = now;
+          coPendingChaseRef.current = decision.seekSeconds;
           onChaseSeek(Math.floor(decision.seekSeconds * r));
         }
         // Rate was broadcast but never applied - a guest sat at 1x while the
@@ -1970,6 +1980,13 @@ export type ChaseInput = {
    *  takes time to land (a web seek rebuilds the whole ffmpeg stream), and
    *  measuring drift mid-seek produces another seek. */
   sinceLastChaseMs: number;
+  /** The position the LAST chase asked for, or null if none is outstanding.
+   *  A web seek rebuilds the whole ffmpeg pipeline and takes seconds; the
+   *  cooldown is one. Without this the chase re-orders the same position it
+   *  is already waiting on, and each re-order tears down the rebuild that was
+   *  about to deliver the picture - so a guest never settles and the monitor
+   *  stays on .cp-monitor's own black. */
+  pendingChaseSeconds: number | null;
 };
 /**
  * What position a presenter should ADVERTISE, given where the playhead really
@@ -2010,6 +2027,15 @@ export function decideChase(i: ChaseInput): ChaseDecision {
   // mid-flight playhead would immediately order another one. The just-loaded
   // snap is exempt - that one must always fire.
   const cooling = !i.justLoaded && i.sinceLastChaseMs < CHASE_COOLDOWN_MS;
+  // ALREADY ON THE WAY THERE. Re-issuing a seek we have not landed yet is not
+  // a correction, it is a restart: on a web source it throws away the pipeline
+  // rebuild that was about to produce the frame. Only a target that has MOVED
+  // is worth a new seek; one within tolerance of what we already asked for is
+  // the same instruction arriving twice.
+  const stillHeadingThere = i.pendingChaseSeconds != null
+    && Math.abs(i.expectedSeconds - i.pendingChaseSeconds) <= PLAYING_TOLERANCE_SEC
+    && Math.abs(i.curSeconds - i.pendingChaseSeconds) > 0.02;
+  if (stillHeadingThere && !i.justLoaded) return { seekSeconds: null, commitHostPos: true };
   if (i.playing) {
     const drift = Math.abs(i.curSeconds - i.expectedSeconds);
     return {

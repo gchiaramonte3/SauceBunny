@@ -13,6 +13,7 @@ const base: ChaseInput = {
   curSeconds: 100,
   expectedSeconds: 100,
   hostScrubbed: false, hostStepped: false, sinceLastChaseMs: 9999,
+  pendingChaseSeconds: null,
 };
 
 /** The hook derives both from the same delta, so a scrub IS a step - any
@@ -174,5 +175,53 @@ describe("the scrub flag the heartbeat reads", () => {
     setScrubbing(true);   // nobody listening any more
     expect(seen).toEqual([true, false]);
     setScrubbing(false);
+  });
+});
+
+describe("the chase does not re-order a seek it is still waiting on", () => {
+  // A web seek rebuilds the whole ffmpeg pipeline and takes SECONDS; the
+  // cooldown is one. Without this guard the chase re-issues the same position
+  // it is already heading to, and each re-issue throws away the rebuild that
+  // was about to deliver the picture - so a guest never settles and the
+  // monitor stays on its own black. Reported twice as "scrubbing in a live
+  // session and not seeing the frames".
+  const chasing: ChaseInput = {
+    justLoaded: false, localSeekHot: false, playing: true,
+    curSeconds: 100, expectedSeconds: 140, hostScrubbed: true, hostStepped: true,
+    sinceLastChaseMs: 9999, pendingChaseSeconds: null,
+  };
+
+  it("orders the first correction", () => {
+    expect(decideChase(chasing).seekSeconds).toBe(140);
+  });
+
+  it("does NOT order it again while the player is still on its way", () => {
+    // Same destination, player has not arrived: this is the same instruction
+    // arriving twice, not a new correction.
+    const d = decideChase({ ...chasing, pendingChaseSeconds: 140 });
+    expect(d.seekSeconds, "the chase restarted the rebuild it was waiting on").toBeNull();
+    // It must still consume the host position, or the scrub edge is lost and
+    // a paused guest strands - the failure a previous fix here caused.
+    expect(d.commitHostPos).toBe(true);
+  });
+
+  it("DOES order a new one when the target has genuinely moved", () => {
+    // The presenter scrubbed somewhere else while we were catching up.
+    expect(decideChase({ ...chasing, expectedSeconds: 400, pendingChaseSeconds: 140 }).seekSeconds)
+      .toBe(400);
+  });
+
+  it("stops holding once the player has arrived", () => {
+    // Arrived at the pending target and the host has moved on a little: a
+    // real drift correction, which must not be suppressed.
+    const d = decideChase({ ...chasing, curSeconds: 140, expectedSeconds: 141.2, pendingChaseSeconds: 140 });
+    expect(d.seekSeconds).toBe(141.2);
+  });
+
+  it("never blocks the just-loaded snap", () => {
+    // That one must always fire: it is what puts a joining guest on the
+    // room's frame at all.
+    expect(decideChase({ ...chasing, justLoaded: true, pendingChaseSeconds: 140 }).seekSeconds)
+      .toBe(140);
   });
 });

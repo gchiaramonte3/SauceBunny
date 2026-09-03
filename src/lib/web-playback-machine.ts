@@ -52,7 +52,12 @@ export type WebPlaybackState =
   | { kind: "resolving"; seq: number; url: string; fresh: boolean; resumeAtSeconds: number }
   /** `fromCache: true` = playing cached signed URLs (warm boot). Its failure
    *  edge is a fresh resolve, not the download fallback. */
-  | { kind: "streaming"; seq: number; url: string; stream: StreamInfo; ready: boolean; fromCache: boolean; resumeAtSeconds: number }
+  | { kind: "streaming"; seq: number; url: string; stream: StreamInfo; ready: boolean; fromCache: boolean; resumeAtSeconds: number;
+      /** This stream comes from the HOST over the session, not from the web.
+       *  It matters on the failure edge: `url` is a `peer://<hash>` display
+       *  marker, not something yt-dlp can fetch, so the download fallback is
+       *  not available and must not be attempted. */
+      peer?: boolean }
   /** resumeAtSeconds: the playhead at the moment the stream died — the
    *  cached player boots there instead of 0 (RC4: a swap must never lose
    *  the position). REQUIRED so every future fallback transition has to
@@ -122,6 +127,7 @@ export function webPlaybackReducer(
           stream: action.stream,
           ready: false,
           fromCache: action.fromCache,
+          peer: action.stream.url.startsWith("peer://"),
           // Review fix: a fresh retry after a cached-stream death resumes
           // where that stream died, not at 0.
           resumeAtSeconds: state.resumeAtSeconds,
@@ -140,6 +146,20 @@ export function webPlaybackReducer(
         // genuinely can't play this source → download. No player swap
         // happens on the retry edge: the fresh URL lands in the SAME
         // streaming state / MSE path.
+        // A PEER stream has nowhere to fall back TO. Its `url` is the
+        // `peer://<hash>` display marker, and handing that to yt-dlp meant the
+        // download failed on the scheme - leaving `failed`, which nothing
+        // renders, so the stage stayed on .cp-monitor's own black with the
+        // duration still showing from the wire. That is one of the ways
+        // "scrubbing and not seeing the frames" was reported.
+        if (state.peer) {
+          return {
+            kind: "failed",
+            seq: state.seq,
+            url: state.url,
+            message: "The host's stream stopped. Ask them to send the file, or wait for them to share again.",
+          };
+        }
         return state.fromCache
           ? { kind: "resolving", seq: state.seq, url: state.url, fresh: true, resumeAtSeconds: action.atSeconds }
           : startDownload(state.seq, state.url, action.atSeconds);

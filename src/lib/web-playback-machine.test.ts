@@ -216,3 +216,53 @@ describe("web-playback machine: resume-position handoff (review fix)", () => {
     expect(s).toEqual({ kind: "cached", seq: 1, url: URL, cachePath: "/cache/a.mp4", resumeAtSeconds: 0 });
   });
 });
+
+describe("a peer stream has nowhere to fall back to", () => {
+  // THE BUG: the peer route resolves with fromCache:false, so a dead peer
+  // stream took the download edge - handing yt-dlp a `peer://<hash>` display
+  // marker it cannot fetch. The download failed on the scheme, the machine
+  // landed in `failed`, and NOTHING rendered or reported that state. What the
+  // user saw was a stage that had gone black with the duration still showing,
+  // which is one of the ways "scrubbing and not seeing the frames" arrived.
+  const peerStream = {
+    url: "peer://abc123def456",
+    audioUrl: null,
+    videoCodec: "h264",
+    audioCodec: "aac",
+  };
+
+  const streaming = () => {
+    let s = webPlaybackReducer(INITIAL_WEB_PLAYBACK, { t: "LOAD", seq: 1, url: "peer://abc123def456", mode: "stream-first" });
+    return webPlaybackReducer(s, { t: "RESOLVED", seq: 1, stream: peerStream, fromCache: false });
+  };
+
+  it("marks a peer stream as one", () => {
+    const s = streaming();
+    expect(s.kind).toBe("streaming");
+    expect(s.kind === "streaming" && s.peer, "a peer stream was not recognised as one").toBe(true);
+  });
+
+  it("does NOT hand a peer:// marker to the downloader", () => {
+    const s = webPlaybackReducer(streaming(), { t: "MEDIA_ERROR", seq: 1, atSeconds: 42 });
+    expect(
+      s.kind,
+      "a dead peer stream started a yt-dlp download of a peer:// URL, which cannot work",
+    ).toBe("failed");
+  });
+
+  it("says why, so the state cannot be swallowed into a black screen", () => {
+    const s = webPlaybackReducer(streaming(), { t: "WATCHDOG", seq: 1, atSeconds: 42 });
+    expect(s.kind).toBe("failed");
+    expect(s.kind === "failed" && s.message.length, "failed with no message to show").toBeGreaterThan(20);
+  });
+
+  it("leaves a genuine WEB stream's download fallback alone", () => {
+    // The fallback exists for a reason and must still fire for real URLs.
+    let s = webPlaybackReducer(INITIAL_WEB_PLAYBACK, { t: "LOAD", seq: 2, url: "https://x.test/v", mode: "stream-first" });
+    s = webPlaybackReducer(s, {
+      t: "RESOLVED", seq: 2, fromCache: false,
+      stream: { url: "https://x.test/stream.m3u8", audioUrl: null, videoCodec: "h264", audioCodec: "aac" },
+    });
+    expect(webPlaybackReducer(s, { t: "MEDIA_ERROR", seq: 2, atSeconds: 5 }).kind).toBe("downloading");
+  });
+});

@@ -5,6 +5,28 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Scrubbing in a session shows frames again.** Four separate causes, found
+  by reading the code rather than guessing, and the first one is the answer to
+  the report: seeking outside the buffered range rebuilds the stream, and the
+  rebuild hands the video element a new source, which throws away the frame it
+  was showing. The picture went to the monitor's own black for the whole
+  rebuild. The overlay that exists to cover exactly that window was only
+  revealed from its second decoded frame onward, so the first scrub of every
+  source showed nothing. It now freezes the outgoing frame the moment a scrub
+  begins, which needs no decoder and so works on a host's stream too.
+- **A guest no longer fights the presenter for the playhead.** The catch-up
+  seek re-fired every second against a position it had already asked for and
+  not yet reached, and each repeat threw away the rebuild that was about to
+  deliver the picture.
+- **A dead stream from the host says so.** It used to try to download the
+  host's stream from the internet, which cannot work, and then land in a
+  failed state that nothing displayed - so the stage simply went black with
+  the duration still showing.
+- **A quality change keeps your place.** It rebuilt from the start of the
+  file, so a guest watching at five minutes went black and came back at zero.
+
 ### Added
 
 - **Record the session.** The presenter can record the review to a real file:

@@ -117,6 +117,27 @@ export function shouldRetryWithoutCookies(message: string, hadCookies: boolean):
 export function useWebPlayback(helpers: Helpers): WebPlayback {
   const [state, dispatch] = useReducer(webPlaybackReducer, INITIAL_WEB_PLAYBACK);
 
+  /**
+   * SAY SO WHEN IT FAILS.
+   *
+   * `failed` is a terminal state that nothing rendered and nothing reported,
+   * so reaching it looked exactly like a working player showing a black
+   * picture - the duration still on the transport, because that came over the
+   * wire. It was one of the ways "scrubbing and not seeing the frames" got
+   * reported. Fires once per failure, keyed on the message so a re-render
+   * cannot repeat it.
+   */
+  const toldFailureRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (state.kind !== "failed") { toldFailureRef.current = null; return; }
+    const key = `${state.seq}:${state.message}`;
+    if (toldFailureRef.current === key) return;
+    toldFailureRef.current = key;
+    const h = helpersRef.current;
+    h.appendLog("err", "web-preview", `Playback failed: ${state.message}`);
+    h.pushNotification("error", "Playback stopped", state.message);
+  }, [state]);
+
   // Latest-value mirrors so async effects/callbacks never read stale props.
   const helpersRef = useRef(helpers);
   helpersRef.current = helpers;

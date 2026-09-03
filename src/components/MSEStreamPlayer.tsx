@@ -235,6 +235,12 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const previewTargetRef = useRef<number | null>(null);
   const previewBusyRef = useRef(false);
   const scrubCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** The live playhead in SOURCE seconds. `startAtSeconds` is zeroed once a
+   *  stream is playing (PLAYER_READY clears resumeAtSeconds), so a rebuild
+   *  triggered by anything other than a user seek - a quality change, say -
+   *  had nothing to resume from and restarted the file at 0. A guest watching
+   *  at 5:17 went black and came back at 00:00, paused. */
+  const livePosRef = useRef(0);
   /**
    * Has the preview overlay ever painted a frame for THIS source?
    *
@@ -351,6 +357,41 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       // hiding the video's laggier native seek. The 'seeked'/'loadeddata'
       // listeners hide it once the real video catches up post-gesture.
       // Peer streams skip it: no random access on the raw route.
+      // FREEZE THE OUTGOING FRAME, before anything can take it away.
+      //
+      // THE BUG THIS FIXES, which is "I scrub in a session and see no frames":
+      // an out-of-buffer seek rebuilds the pipeline, and the rebuild assigns
+      // `video.src = objectUrl` for a fresh MediaSource. That runs the media
+      // load algorithm, which DISCARDS the presented frame - so the element
+      // paints nothing and what you see is .cp-monitor's own `background:
+      // #000`, for the whole rebuild.
+      //
+      // The overlay exists to cover exactly that window, and it was not
+      // covering it. It is revealed by `if (previewPaintedRef.current)`, which
+      // is false until the decoder's SECOND frame, so the first scrub of every
+      // source showed black. The comment there reasoned that "the video
+      // underneath is a far better thing to look at than an opaque black
+      // rectangle" - true in general, and wrong in precisely this case,
+      // because the video underneath has just been blanked.
+      //
+      // Seeding from the <video> costs one drawImage, needs no decoder, and
+      // therefore also works on a peer stream, where the preview decoder is
+      // deliberately off. A stale frame is the right thing to hold: it is what
+      // the user was looking at a moment ago, and it is not black.
+      if (newGesture && v && v.readyState >= 2 && v.videoWidth > 0) {
+        const dst = scrubCanvasRef.current;
+        if (dst) {
+          if (dst.width !== v.videoWidth || dst.height !== v.videoHeight) {
+            dst.width = v.videoWidth;
+            dst.height = v.videoHeight;
+          }
+          try {
+            dst.getContext("2d")?.drawImage(v, 0, 0, dst.width, dst.height);
+            previewPaintedRef.current = true;
+            setScrubPreview(true);
+          } catch { /* tainted or not yet decodable: fall through to the decoder */ }
+        }
+      }
       if (!disableScrubPreviewRef.current) {
         // Fast-drag detection (mirrors MediaBunnyPlayer): closely-spaced
         // seeks covering real distance preview KEYFRAMES; a trailing pass
@@ -576,6 +617,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     failedRef.current = false;
     setScrubPreview(false);
     previewPaintedRef.current = false;
+    // A NEW SOURCE starts at its own beginning. Without this the resume
+    // fallback above would carry the previous clip's playhead into an
+    // unrelated one - which is a worse bug than the one it fixes.
+    livePosRef.current = 0;
 
     // One failure typically emits several error signals; only the first reaches
     // onError (App's fallback owns the rest), so a single fault can't surface a
@@ -1054,7 +1099,14 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     {
       // Fresh-retry resume: build from where the previous stream died and
       // land exactly there once buffered (same contract as a user seek).
-      const startAt = startAtSecondsRef.current;
+      //
+      // Falls back to the LIVE playhead, which is what makes a rebuild that
+      // is not a user seek keep its place. This effect re-runs on a rung
+      // change, and `startAtSeconds` is 0 for any stream past PLAYER_READY -
+      // so an automatic quality change used to restart the file from the top,
+      // taking a guest from 5:17 to 00:00 with a black gap in between and no
+      // sign of what happened.
+      const startAt = startAtSecondsRef.current || livePosRef.current;
       if (startAt > 0) pendingLandRef.current = startAt;
       buildPipeline(startAt);
     }
@@ -1128,7 +1180,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     const reportTime = () => {
       // Suppress while an out-of-buffer seek resolves — the old/transitional
       // video reports a stale position that would fight the playhead.
-      if (!seekingRef.current) onTimeUpdateRef.current?.(corrected(el.currentTime));
+      if (!seekingRef.current) {
+        const at = corrected(el.currentTime);
+        livePosRef.current = at;
+        onTimeUpdateRef.current?.(at);
+      }
     };
     // Drive the playhead from currentTime every frame via
     // requestVideoFrameCallback (smooth, ~display refresh); rAF is the fallback
