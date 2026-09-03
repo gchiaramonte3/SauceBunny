@@ -7,13 +7,17 @@ const segStyle = (active: number, count: number, extra?: CSSProperties): CSSProp
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { IconChevronDown, IconHeart, IconReveal, IconSparkles, IconInfo } from "./Icons";
+import { IconChevronDown, IconDiscord, IconHeart, IconLink, IconReveal, IconSparkles, IconInfo } from "./Icons";
 import { loadJson, saveJson } from "../lib/storage";
 import { DEVICE_CHOICE_KEY } from "../lib/media-devices";
 import { AvSettingsPane } from "./AvSettingsPane";
 import { ColorSwatches } from "./ColorSwatches";
 import { KeybindingEditor } from "./KeybindingEditor";
 import { loadKeybindings, KEYBINDINGS_STORAGE_KEY, type KeybindingOverrides } from "../lib/keybindings";
+
+/** The project's community server. One place, so a re-issued invite is a
+ *  one-line change rather than a hunt. */
+const DISCORD_URL = "https://discord.gg/u9qWcAkkT9";
 
 // localStorage keys an export/import round-trips. Mirror App's DEFAULTS_KEY +
 // the section store; kept here (not imported from App) to avoid a settings↔App
@@ -2073,6 +2077,22 @@ export function SettingsModal(props: Props) {
                 </div>
 
                 <UpdateRow />
+
+                {/* Community. A real link, so it goes through open_external_url
+                    rather than an <a href>: in WKWebView a plain anchor
+                    navigates the APP's own webview away from the UI, and the
+                    Rust side validates the scheme (r152, when the opener
+                    plugin was ejected for granting an unscoped reveal). */}
+                <button
+                  type="button"
+                  className="cp-about-discord"
+                  onClick={() => { void invoke("open_external_url", { url: DISCORD_URL }).catch(() => { /* browser refused */ }); }}
+                  title="Opens discord.gg in your browser"
+                >
+                  <IconDiscord size={18} />
+                  <span>Join our Discord</span>
+                  <IconLink size={13} className="cp-about-discord-go" />
+                </button>
 
                 <div className="cp-about-grid">
                   <div className="cp-about-row"><span className="k">Build</span><span className="v">{EXPECTED_BACKEND_BUILD_ID}</span></div>

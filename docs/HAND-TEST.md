@@ -868,6 +868,11 @@ The contracts prove the rules; only eyes prove the pixels.
 18. **Settings > Keyboard.** A shortcut with a description shows it in the
     normal secondary grey under its name, not a dimmer one-off grey.
 
+36. **Discord link.** Settings ▸ About: a row with the Discord mark and
+    "Join our Discord", under the update row. Clicking it opens
+    discord.gg in your DEFAULT BROWSER and the app stays exactly where it
+    was. If the app itself navigates, that is the bug this avoided.
+
 ### People tiles and the A/V mesh
 
 31. **Your own tile.** In a session, look at your tile: camera and mic buttons

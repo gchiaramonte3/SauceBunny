@@ -560,6 +560,36 @@
   font-size: var(--text-base);
   color: var(--fg-4);
 }
+/* Join our Discord. A community CTA, so it reads as an invitation rather
+   than a form control: full width under the update row, Discord's own
+   blurple on hover, and the link glyph pushed to the right so the row says
+   "this leaves the app" without extra words. */
+.cp-about-discord {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin: 10px 0 2px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: rgba(255,255,255,0.02);
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.cp-about-discord:hover {
+  color: var(--fg-0);
+  border-color: color-mix(in srgb, #5865F2 55%, transparent);
+  background: color-mix(in srgb, #5865F2 14%, transparent);
+}
+.cp-about-discord-go { margin-left: auto; color: var(--fg-4); }
+
 .cp-about-row .btn { height: 24px; font-size: var(--text-base); }
 .cp-about-row {
   display: flex;

@@ -14,6 +14,9 @@ Since build `2026082903`: **review links**, a Finder-style library list, and
 a library tree whose chevrons had never actually worked.
 
 ### Added
+- **Join our Discord**, from Settings ▸ About. It opens in your browser
+  through the app's validated external-link path rather than as a plain link,
+  which in this webview would navigate the app itself away from the UI.
 - **Tidy up a note with AI, and one undo puts your words back.** A wand beside
   Post rewrites the comment in the box for clarity, using whichever model you
   have set: the local one by default, or your own Claude/ChatGPT key. The
