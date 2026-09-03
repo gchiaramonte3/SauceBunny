@@ -70,12 +70,19 @@ describe("the Swift sidecar stays macOS-native and off WhisperKit", () => {
     expect(readFileSync(diarizer, "utf8")).toMatch(/^\s*import\s+AVFoundation\b/m);
   });
 
+  // The only case here that leaves the process. `git ls-files` is ~10ms on an
+  // idle machine and this ran for 21 SECONDS during a full `npm run verify`,
+  // blowing vitest's 5s default and failing a gate over machine load rather
+  // than over anything in the repo. A flake in a contract test is worse than a
+  // slow one: it teaches whoever meets it that a red gate can be ignored.
   it("keeps no Xcode project in git — SPM generates those on demand", () => {
-    const tracked = execFileSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" })
-      .split("\n")
-      .filter((f) => /\.(xcodeproj|xcworkspace)(\/|$)/.test(f));
-    expect(tracked).toEqual([]);
-  });
+    const all = execFileSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" }).split("\n");
+    // Assert the scan HAPPENED. Filtering an empty list yields an empty list,
+    // so a git call that returned nothing would report a clean bill of health
+    // for ever - the exact failure the register warns about.
+    expect(all.length, "git listed no tracked files - the scan found nothing to check").toBeGreaterThan(50);
+    expect(all.filter((f) => /\.(xcodeproj|xcworkspace)(\/|$)/.test(f))).toEqual([]);
+  }, 60_000);
 
   it("declares argmax-oss-swift for SpeakerKit, not for WhisperKit", () => {
     // Pins the reason the package is here. If someone ever adds the WhisperKit

@@ -906,6 +906,12 @@ The contracts prove the rules; only eyes prove the pixels.
     join or host: your tile starts with the camera off. In the green room,
     pressing "Enable camera and mic" must show your own preview.
 
+44. **Scrub speed in a session.** Load a YouTube link in the clip panel and
+    drag the playhead: note how quickly the picture follows. Start a session
+    with the same link and do it again. The two should feel the same. Then
+    watch a guest's screen while you drag: they should sit still on the frame
+    they were on and jump ONCE, when you let go, rather than chasing you.
+
 ### People tiles and the A/V mesh
 
 31. **Your own tile.** In a session, look at your tile: camera and mic buttons

@@ -5,7 +5,7 @@ import { filmstripCount, filmstripTimestamps } from "../lib/filmstrip";
 import { extractFilmstrip } from "../lib/mediabunny-helpers";
 import { extractWaveformPeaks, lruSet, type WaveformPeaks } from "../lib/waveform";
 import { TimelineWaveform } from "./TimelineWaveform";
-import { usePlayheadFrames } from "../lib/playhead-store";
+import { usePlayheadFrames, setScrubbing } from "../lib/playhead-store";
 import { getGhosts, subscribeGhosts } from "../lib/ghost-store";
 import { loadReviewer, reviewerColorFor } from "../lib/review";
 import { isRealSpan } from "../lib/review-range";
@@ -255,6 +255,10 @@ export function Timeline({
 
   useEffect(() => {
     if (!dragging) return;
+    // Tell the rest of the app a drag is in progress. The co-review heartbeat
+    // uses it to stop advertising positions the room was never meant to see;
+    // the cleanup below covers mouseup, Escape and unmount alike.
+    setScrubbing(true);
     // rAF-coalesce drag seeks: at most ONE seek per display frame. Raw
     // mousemove can fire far faster than a decode completes, and the player's
     // latest-wins guard then drops every in-flight frame — which is why
@@ -291,6 +295,7 @@ export function Timeline({
       if (rafId) cancelAnimationFrame(rafId);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      setScrubbing(false);
     };
   }, [dragging, seekFromX]);
 

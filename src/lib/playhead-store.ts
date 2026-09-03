@@ -65,6 +65,44 @@ export function getLastUserSeekAt(): number {
 }
 
 /**
+ * IS THE USER DRAGGING THE PLAYHEAD RIGHT NOW?
+ *
+ * A drag emits a seek per display frame, and locally that is exactly right:
+ * one seek per vsync is what makes scrubbing show every frame (see Timeline).
+ * But a co-review presenter also ADVERTISES its position twice a second, and
+ * a mid-drag position is one the room was never meant to look at. Each one
+ * costs a guest a real seek - on a web source that is a full ffmpeg stream
+ * rebuild - so a two-second drag spent every guest several rebuilds racing a
+ * target that had already moved, and the frame the presenter actually stopped
+ * on arrived last and slowest.
+ *
+ * So the drag is published here, next to the playhead it is dragging, rather
+ * than threaded as a prop through App: the Timeline already writes to this
+ * store and the heartbeat already reads from it. Listeners exist so settling
+ * can send at once instead of waiting out the next 500ms beat.
+ *
+ * Global by design - there is one playhead - and inert outside a session.
+ */
+let scrubbing = false;
+const scrubListeners = new Set<(active: boolean) => void>();
+
+export function setScrubbing(active: boolean): void {
+  if (scrubbing === active) return;
+  scrubbing = active;
+  for (const l of scrubListeners) l(active);
+}
+
+export function isScrubbing(): boolean {
+  return scrubbing;
+}
+
+/** Notified on every change. Returns an unsubscribe fn. */
+export function subscribeScrub(l: (active: boolean) => void): () => void {
+  scrubListeners.add(l);
+  return () => { scrubListeners.delete(l); };
+}
+
+/**
  * Move the playhead. No-ops (and doesn't notify) when the frame is unchanged,
  * so a paused player's timeupdate ticks don't cause re-renders.
  */

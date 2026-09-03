@@ -28,7 +28,7 @@ import {
   noteParticipants, markWatched, screeningIsWorthKeeping, type ScreeningDoc,
 } from "../lib/screening";
 import { saveScreening } from "../lib/screening-store";
-import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
+import { getLastUserSeekAt, getPlayheadFrames, isScrubbing, subscribeScrub } from "../lib/playhead-store";
 import {
   clearGhosts, pruneGhosts, shouldSendPresence, upsertGhost,
 } from "../lib/ghost-store";
@@ -1095,12 +1095,16 @@ export function useCoReview({
   // Host → peers: 2 Hz transport heartbeat (play/pause/seek/scrub-settle).
   useEffect(() => {
     if (!isPresenter) return;
+    /** The position advertised for the duration of the current drag. */
+    let held: number | null = null;
     const send = () => {
       const r = Math.max(1, Math.round(coFpsRef.current));
+      const advertised = advertisedPosition(getPlayheadFrames() / r, isScrubbing(), held);
+      held = advertised.held;
       const msg: SessionMsg = {
         kind: "transport",
         playing: coPlayingRef.current,
-        position: getPlayheadFrames() / r,
+        position: advertised.position,
         rate: coRateRef.current,
         atMs: Date.now(),
         seq: ++coSeqRef.current,
@@ -1113,7 +1117,11 @@ export function useCoReview({
     };
     send();
     const iv = window.setInterval(send, 500);
-    return () => window.clearInterval(iv);
+    // Settling sends AT ONCE rather than waiting out the next beat: the frame
+    // the presenter stopped on is the point of the whole gesture, and up to
+    // 500ms of extra wait on it is the part a viewer would call slow.
+    const offScrub = subscribeScrub((active) => { if (!active) { held = null; send(); } });
+    return () => { window.clearInterval(iv); offScrub(); };
   }, [isPresenter, sendSessionMsg]);
   // Everyone broadcasts their own playhead for ghost cursors: every 350ms
   // tick WHILE IT MOVES, a quiet keepalive beat while parked. The always-on
@@ -1784,6 +1792,26 @@ export type ChaseInput = {
    *  measuring drift mid-seek produces another seek. */
   sinceLastChaseMs: number;
 };
+/**
+ * What position a presenter should ADVERTISE, given where the playhead really
+ * is and whether the user is mid-drag.
+ *
+ * Holding the pre-drag position is the whole idea: guests stay parked on the
+ * frame the room was already looking at, then make ONE seek to wherever the
+ * presenter stopped. Sending the live position instead spends each guest a
+ * stream rebuild per beat on frames nobody chose to look at, and the chosen
+ * frame - the only one that matters - arrives behind all of them.
+ *
+ * Pure so the rule is testable without a session; the caller owns `held`.
+ */
+export function advertisedPosition(
+  live: number, scrubbing: boolean, held: number | null,
+): { position: number; held: number | null } {
+  if (!scrubbing) return { position: live, held: null };
+  const h = held ?? live;
+  return { position: h, held: h };
+}
+
 /** While playing, drift under this is left alone. Above the old 0.5s a normal
  *  clock offset kept the guest permanently "out of sync"; 0.75s is still well
  *  under a noticeable desync for review and stops the churn. */

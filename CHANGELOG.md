@@ -75,6 +75,21 @@ a library tree whose chevrons had never actually worked.
 - The About panel credits **mediabunny**, which it had never named.
 
 ### Fixed
+- **Scrubbing inside a session is as quick as scrubbing outside one again.**
+  The live-drawing layer is mounted for the whole session whether or not
+  anyone picks up the pen, and it was repainting a full-size canvas sixty
+  times a second with nothing on it. Nothing was visible, so nothing looked
+  wrong: the cost was paid by everything else on the stage, and the clearest
+  symptom was that dragging the playhead over a web source felt slower in a
+  review than the identical drag in the clip panel. It now paints only while
+  there are marks to fade.
+- **The frame you stop on reaches the room first, instead of last.** A
+  presenter advertised its position twice a second including mid-drag, and
+  each one cost every guest a seek - on a web source, a full stream rebuild.
+  So a two-second drag spent everyone several rebuilds chasing frames nobody
+  chose to look at, and the frame actually being pointed at arrived behind all
+  of them. The room now holds on the frame it was already watching and moves
+  once, the moment the drag settles.
 - **The co-review lobby is two choices instead of four boxes.** "Host a
   session" and "Join a session" now read as the headings they are, in that
   order. The "Default camera and default mic" strip is gone (devices belong in

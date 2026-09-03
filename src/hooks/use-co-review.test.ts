@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { decideChase, type ChaseInput } from "./use-co-review";
+import { advertisedPosition, decideChase, type ChaseInput } from "./use-co-review";
+import { setScrubbing, subscribeScrub } from "../lib/playhead-store";
 
 // The two confirmed RC3 failure modes from the 2026-07-18 review, pinned as
 // pure decision tests (the hook wires decideChase into the transport
@@ -126,5 +127,52 @@ describe("paused frame-stepping (the audit's top finding)", () => {
       curSeconds: 100 + 1 / 24, expectedSeconds: 100 + 1 / 24,
     });
     expect(d.seekSeconds).toBeNull();
+  });
+});
+
+describe("advertisedPosition, what a presenter tells the room mid-drag", () => {
+  it("advertises the live playhead when nobody is dragging", () => {
+    expect(advertisedPosition(12.5, false, null)).toEqual({ position: 12.5, held: null });
+  });
+
+  it("holds the frame the room was already on, for the whole drag", () => {
+    // THE FIX. Each distinct position advertised mid-drag costs every guest a
+    // seek, and on a web source a seek is a full ffmpeg stream rebuild - so a
+    // drag used to spend guests several rebuilds chasing frames nobody chose.
+    const a = advertisedPosition(20, true, null);
+    expect(a).toEqual({ position: 20, held: 20 });
+    // The playhead runs away under the pointer; the advertisement does not.
+    expect(advertisedPosition(41, true, a.held).position).toBe(20);
+    expect(advertisedPosition(78, true, a.held).position).toBe(20);
+    expect(advertisedPosition(9, true, a.held).position).toBe(20);
+  });
+
+  it("releases to wherever the drag stopped", () => {
+    const held = advertisedPosition(20, true, null).held;
+    // One seek for the room, to the only frame that was ever chosen.
+    expect(advertisedPosition(96.25, false, held)).toEqual({ position: 96.25, held: null });
+  });
+
+  it("holds a paused presenter's position at zero without treating it as unset", () => {
+    // `held ?? live` must not re-arm on a legitimate 0 - the top of a clip is
+    // exactly where a review starts, so this is the common case, not an edge.
+    const a = advertisedPosition(0, true, null);
+    expect(a.held).toBe(0);
+    expect(advertisedPosition(55, true, a.held).position).toBe(0);
+  });
+});
+
+describe("the scrub flag the heartbeat reads", () => {
+  it("notifies on real changes only, so settling sends exactly one beat", () => {
+    const seen: boolean[] = [];
+    const off = subscribeScrub((a) => seen.push(a));
+    setScrubbing(true);
+    setScrubbing(true);   // still the same drag
+    setScrubbing(false);
+    setScrubbing(false);
+    off();
+    setScrubbing(true);   // nobody listening any more
+    expect(seen).toEqual([true, false]);
+    setScrubbing(false);
   });
 });
