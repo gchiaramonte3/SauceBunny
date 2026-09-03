@@ -39,3 +39,35 @@ export function shouldFreezeOutgoingFrame(i: {
   if (i.previewPainted) return false;
   return i.readyState >= 2 && i.videoWidth > 0;
 }
+
+/**
+ * May the scrub overlay be hidden yet?
+ *
+ * THE 5-SECOND BUG. Scrubbing a web source a long way is covered by the
+ * decoder overlay, which paints the target frame in about 40ms - that is the
+ * frame-accurate feel. Then the pipeline rebuild starts, assigns a fresh
+ * MediaSource to the element, and the element fires `loadeddata` for the new,
+ * still-empty source. That event ran the same handler as the end of a normal
+ * seek, so the overlay was torn down at exactly the moment it was the only
+ * thing on screen holding a picture - and what remained was an element with
+ * no decoded frame, over the monitor's black, for the ~3 seconds ffmpeg needs
+ * to deliver the first fragment (measured: 2.79s to first bytes with -ss on a
+ * 1080p YouTube stream, before the proxy probe and MSE decode on top).
+ *
+ * The overlay is the ONLY thing that can cover a rebuild, so it has to
+ * outlive one. It may go once the gesture has settled AND no rebuild is
+ * pending or in flight; after that the rebuilt pipeline's own landing seek
+ * hides it through the ordinary path.
+ */
+export function mayHideScrubOverlay(i: {
+  /** A settle timer is armed - the gesture is still running. */
+  settleArmed: boolean;
+  /** A rebuild is debounced and about to start. */
+  rebuildPending: boolean;
+  /** The pipeline has a live SourceBuffer (false between teardown and open). */
+  hasSourceBuffer: boolean;
+}): boolean {
+  if (i.settleArmed) return false;
+  if (i.rebuildPending) return false;
+  return i.hasSourceBuffer;
+}

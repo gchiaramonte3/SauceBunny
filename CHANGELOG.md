@@ -6,6 +6,15 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Fixed
+- **The five-second wait after scrubbing a YouTube link is gone.** The frame
+  you scrub to is decoded and painted in about 40ms, which is what made
+  scrubbing feel instant. Rebuilding the stream then attached a fresh, empty
+  video source, and the browser event that fires for it was treated as "the
+  seek finished" - so the app hid that painted frame at the exact moment it
+  was the only picture on screen, leaving nothing for the three seconds the
+  stream needs to come back. The frame now stays up until the new stream can
+  actually show you something.
+
 
 - **Scrubbing a YouTube link is frame-accurate again.** Releasing the playhead
   snapped the picture back to where the drag started and held it there while

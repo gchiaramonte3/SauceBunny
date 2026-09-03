@@ -7,7 +7,7 @@ import type { PlayerHandle } from "./player-handle";
 import { base64UrlEncode } from "../lib/stream-proxy";
 import { encodedStreamMime, peerStreamMime } from "../lib/codec-strings";
 import { rebuildLogLine } from "../lib/seek-log";
-import { shouldFreezeOutgoingFrame } from "../lib/scrub-freeze";
+import { mayHideScrubOverlay, shouldFreezeOutgoingFrame } from "../lib/scrub-freeze";
 import { planFirstAppend } from "../lib/first-append";
 
 /**
@@ -1292,7 +1292,16 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     // the new position AND the gesture has ended (no pending settle). During
     // an active drag the settle timer is armed, so per-tick 'seeked's don't
     // prematurely reveal the laggy video.
-    const onSettled = () => { if (seekSettleRef.current == null) setScrubPreview(false); };
+    // The overlay must OUTLIVE A REBUILD - see mayHideScrubOverlay. The
+    // rebuild attaches a fresh, empty MediaSource, whose `loadeddata` used to
+    // reach this handler and hide the one thing holding a picture.
+    const onSettled = () => {
+      if (mayHideScrubOverlay({
+        settleArmed: seekSettleRef.current != null,
+        rebuildPending: rebuildTimerRef.current != null,
+        hasSourceBuffer: !!sbRef.current,
+      })) setScrubPreview(false);
+    };
     // Also hide the overlay the instant real playback resumes. The
     // out-of-buffer REBUILD path can fire 'loadeddata' while the settle
     // timer is still armed (so onSettled bails), then resume the rebuilt

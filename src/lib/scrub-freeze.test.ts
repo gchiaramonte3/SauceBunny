@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldFreezeOutgoingFrame } from "./scrub-freeze";
+import { mayHideScrubOverlay, shouldFreezeOutgoingFrame } from "./scrub-freeze";
 
 describe("shouldFreezeOutgoingFrame", () => {
   const drawable = { readyState: 2, videoWidth: 1920 };
@@ -27,5 +27,32 @@ describe("shouldFreezeOutgoingFrame", () => {
     // would swallow it - so the guard is here rather than in the try.
     expect(shouldFreezeOutgoingFrame({ previewPainted: false, readyState: 0, videoWidth: 1920 })).toBe(false);
     expect(shouldFreezeOutgoingFrame({ previewPainted: false, readyState: 2, videoWidth: 0 })).toBe(false);
+  });
+});
+
+describe("mayHideScrubOverlay", () => {
+  const settled = { settleArmed: false, rebuildPending: false, hasSourceBuffer: true };
+
+  it("hides once the gesture has settled and the pipeline is live", () => {
+    expect(mayHideScrubOverlay(settled)).toBe(true);
+  });
+
+  it("holds while the gesture is still running", () => {
+    expect(mayHideScrubOverlay({ ...settled, settleArmed: true })).toBe(false);
+  });
+
+  it("HOLDS ACROSS A REBUILD, which is the five-second bug", () => {
+    // The rebuild assigns a fresh MediaSource, and the element fires
+    // `loadeddata` for that still-empty source. Hiding on it tore the overlay
+    // down at exactly the moment it held the only picture, leaving black for
+    // the ~3s ffmpeg needs to deliver a fragment.
+    expect(
+      mayHideScrubOverlay({ ...settled, rebuildPending: true }),
+      "the overlay was hidden while a rebuild was about to start",
+    ).toBe(false);
+    expect(
+      mayHideScrubOverlay({ ...settled, hasSourceBuffer: false }),
+      "the overlay was hidden while the pipeline had no SourceBuffer",
+    ).toBe(false);
   });
 });
