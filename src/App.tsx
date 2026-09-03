@@ -3909,6 +3909,24 @@ export default function App() {
   // caveat in the popover rather than blocking the session.
   const coLocalSourceLoaded = hasSource && sourceKind === "file";
 
+  /**
+   * What a session is called when the host does not name one.
+   *
+   * Shown to them as the placeholder rather than applied behind their back:
+   * the name is how they find the session again in the library weeks later,
+   * and one they never saw is barely better than none. Source name first
+   * because that is what the session was ABOUT; the stamp only separates two
+   * sittings with the same cut.
+   */
+  const sessionDefaultTitle = useMemo(() => {
+    const d = new Date();
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`
+      + `_${p2(d.getHours())}-${p2(d.getMinutes())}`;
+    const base = (sessionSource.title ?? "").trim().replace(/\.[a-z0-9]{2,5}$/i, "");
+    return base ? `${base}_${stamp}` : `Review session_${stamp}`;
+  }, [sessionSource.title]);
+
   // Drawing-annotation state: draw mode (+ the label tool inside it) + the
   // live draft (attached to the next comment) + a saved annotation being
   // viewed read-only over the frame (with its author's colour for labels).
@@ -5459,6 +5477,7 @@ export default function App() {
               onLeave={leaveCoReview}
               initialCode={pendingJoinCode}
               onInitialCodeUsed={clearPendingJoinCode}
+              defaultTitle={sessionDefaultTitle}
             />
           </div>
         </div>

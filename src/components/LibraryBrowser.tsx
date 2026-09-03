@@ -11,6 +11,7 @@ import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useFinderTags } from "../hooks/use-finder-tags";
 import { CachedWebPane } from "./CachedWebPane";
 import { FramesPane } from "./FramesPane";
+import { ReviewSessionsPane } from "./ReviewSessionsPane";
 import { marqueeSelection } from "../lib/marquee";
 import { RenameDialog } from "./RenameDialog";
 import { LibraryQuickLook } from "./LibraryQuickLook";
@@ -114,7 +115,7 @@ export function LibraryBrowser({
   // Which special shelf is showing ("From the web", "Frames"), or null for
   // the folder pane. One value rather than a boolean per shelf: they are
   // mutually exclusive views of the same pane.
-  const [shelf, setShelf] = useState<"web" | "frames" | null>(null);
+  const [shelf, setShelf] = useState<"web" | "frames" | "sessions" | null>(null);
   const [prefs, setPrefs] = useState<BrowserPrefs>(() => normalizePrefs(loadJson<unknown>(BROWSER_KEY, {})));
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
@@ -707,7 +708,9 @@ export function LibraryBrowser({
         />
       )}
       <div className="cp-lib-main">
-        {shelf === "frames" ? (
+        {shelf === "sessions" ? (
+          <ReviewSessionsPane treeOpen={treeOpen} onShowTree={() => setTreeOpen(true)} />
+        ) : shelf === "frames" ? (
           <FramesPane
             treeOpen={treeOpen}
             onShowTree={() => setTreeOpen(true)}

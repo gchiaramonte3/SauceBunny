@@ -14,6 +14,13 @@ Since build `2026082903`: **review links**, a Finder-style library list, and
 a library tree whose chevrons had never actually worked.
 
 ### Added
+- **Review sessions in the library.** Every co-review session has been
+  recording itself all along, and the only way to see one was a shelf at the
+  bottom of the co-review lobby. There is now a Review sessions section beside
+  All, From the web and Frames, with the same list and grid views, sorting,
+  search and selection as every other section. Searching matches people as
+  well as titles, and a session that ends while the library is open appears
+  without a relaunch.
 - **Join our Discord**, from Settings ▸ About. It opens in your browser
   through the app's validated external-link path rather than as a plain link,
   which in this webview would navigate the app itself away from the UI.
@@ -68,6 +75,18 @@ a library tree whose chevrons had never actually worked.
 - The About panel credits **mediabunny**, which it had never named.
 
 ### Fixed
+- **The co-review lobby is two choices instead of four boxes.** "Host a
+  session" and "Join a session" now read as the headings they are, in that
+  order. The "Default camera and default mic" strip is gone (devices belong in
+  the step before, not on the screen you read to start one), and Review links
+  have left the lobby: a link is for someone who is not in the room, so it
+  belongs on the clip you want them to see, not here.
+- **You join with your camera off.** Joining a review is not joining a video
+  call, and a first-run user should not land in a session already broadcasting
+  their room. Asking to see yourself in the green room still shows you.
+- **An unnamed session names itself** after the source and the date and time,
+  and the name is shown in the field before you press Start rather than
+  applied behind your back.
 - **Tidy up actually edits now.** It used to hand the note back unchanged and
   say nothing, because the prompt never once used the words spelling,
   punctuation, grammar or capitalise: it asked for "clearer" and then gave

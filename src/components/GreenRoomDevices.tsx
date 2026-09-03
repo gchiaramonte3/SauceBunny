@@ -110,7 +110,12 @@ export function GreenRoomDevices({ cap, onContinue }: {
             <p className="cp-gr-state-line">
               {granted ? "Starting your camera…" : "Your camera is off until you enable it."}
             </p>
-            <button type="button" className="btn cp-colobby-cta" onClick={() => { void cap.acquire(cap.choice); }}>
+            {/* An explicit press for a button that SAYS "turn on camera" must
+                turn the camera on. The stored choice now defaults to camera
+                OFF (joining a review is not joining a video call), so
+                acquiring with it unchanged produced a green room where you
+                could not see yourself after asking to. */}
+            <button type="button" className="btn cp-colobby-cta" onClick={() => { void cap.acquire({ ...cap.choice, cameraOff: false }); }}>
               <IconVideo size={14} /><IconMic size={14} /> {granted ? "Turn on camera and mic" : "Enable camera and mic"}
             </button>
           </div>

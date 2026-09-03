@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePaneWidth } from "../hooks/use-pane-width";
-import { IconChevronRight, IconLink, IconPanelLeft, IconPlus, IconRefresh, IconStack, IconFolderSolid, IconCamera} from "./Icons";
+import { IconChevronRight, IconLink, IconPanelLeft, IconPlus, IconRefresh, IconStack, IconFolderSolid, IconCamera, IconReview,
+} from "./Icons";
 import type { LibraryFolder } from "../types";
 import { libraryPosterPaths, type LibraryCrumb, type LibraryKindFilter } from "../lib/library";
 import { FolderTagMenu } from "./FolderTagMenu";
@@ -33,8 +34,8 @@ type Props = {
   /** Which special shelf is showing, if any. These are views over a
    *  CATEGORY rather than folders on disk, so they are peers of "All"
    *  rather than of the roots. */
-  shelf: "web" | "frames" | null;
-  onSelectShelf: (shelf: "web" | "frames") => void;
+  shelf: "web" | "frames" | "sessions" | null;
+  onSelectShelf: (shelf: "web" | "frames" | "sessions") => void;
   /**
    * The folder a drag is hovering, or null. Finder's sidebar is a first-class
    * drop target - "drag files onto any folder listed there" - and it is very
@@ -70,7 +71,7 @@ type Row = {
    *  a hard-coded tabIndex={-1}, so the roving tabindex never reached them and
    *  neither did ↑/↓ - the Frames and web shelves had no keyboard route at
    *  all, and clicking was the only way in. One list is the truth again. */
-  shelf?: "web" | "frames";
+  shelf?: "web" | "frames" | "sessions";
 };
 
 const KIND_CHIPS: Array<{ kind: LibraryKindFilter; label: string }> = [
@@ -87,6 +88,10 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
     // somewhere. Below the roots they would read as one more drive.
     { key: "shelf:web", path: null, chain: null, depth: 0, name: "From the web", hasChildren: false, deeper: false, expanded: false, shelf: "web" },
     { key: "shelf:frames", path: null, chain: null, depth: 0, name: "Frames", hasChildren: false, deeper: false, expanded: false, shelf: "frames" },
+    // Sessions you have already held. The record was written all along
+    // (~/Documents/Sauce Bunny/Screenings), and until now the only way to see
+    // one was the shelf at the bottom of the co-review lobby.
+    { key: "shelf:sessions", path: null, chain: null, depth: 0, name: "Review sessions", hasChildren: false, deeper: false, expanded: false, shelf: "sessions" },
   ];
   const walk = (node: LibraryFolder, chain: LibraryCrumb[], depth: number, rootIdx: number) => {
     const isExp = expanded.has(node.path);
@@ -419,6 +424,7 @@ export function LibraryTree({
                   {row.key === "all" ? <IconStack size={13} /> : null}
                   {row.shelf === "web" ? <IconLink size={13} /> : null}
                   {row.shelf === "frames" ? <IconCamera size={13} /> : null}
+                  {row.shelf === "sessions" ? <IconReview size={13} /> : null}
                 </span>
               )}
               {row.key !== "all" && !row.shelf && (

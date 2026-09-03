@@ -891,6 +891,21 @@ The contracts prove the rules; only eyes prove the pixels.
     change." It must never just stop with no message, which is the bug.
 40. **Undo still works in one step** after any of the above.
 
+41. **Library ▸ Review sessions.** A new section under Frames. It lists past
+    sessions with who was there and how many notes were taken. Switch between
+    list and grid, sort by clicking the list headings, search a person's name,
+    lasso-select several. Double-click reveals the record in Finder. Hold a
+    short session, end it, and confirm the new row appears WITHOUT relaunching.
+42. **The lobby.** Review ▸ (not in a session). There should be no "Default
+    camera · Default mic" strip and no Review links block. "Host a session"
+    and "Join a session" are large headings, host first. Load a clip, then
+    look at the session name field: it should be pre-filled as a placeholder
+    with the clip name plus the date and time. Press Start without typing and
+    confirm the session is called that.
+43. **Camera off by default.** On a machine that has never used co-review,
+    join or host: your tile starts with the camera off. In the green room,
+    pressing "Enable camera and mic" must show your own preview.
+
 ### People tiles and the A/V mesh
 
 31. **Your own tile.** In a session, look at your tile: camera and mic buttons

@@ -38,7 +38,7 @@ function mount(onJoin: (t: string, n: string) => void | Promise<void>) {
   // A saved identity is what puts the wizard past the first step.
   localStorage.setItem("saucebunny.review.author", JSON.stringify("Ada"));
   render(
-    <CoReviewLobby
+    <CoReviewLobby defaultTitle="Test_2026-01-01_10-00"
       session={session}
       localSource={null as never}
       participants={[] as never}
@@ -101,7 +101,7 @@ describe("the unique-name rule stays current", () => {
     localStorage.setItem("saucebunny.review.author", JSON.stringify("Ada"));
     localStorage.setItem("saucebunny.sessionTitle", JSON.stringify(title));
     render(
-      <CoReviewLobby
+      <CoReviewLobby defaultTitle="Test_2026-01-01_10-00"
         session={session}
         localSource={null as never}
         participants={[] as never}

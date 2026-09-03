@@ -33,7 +33,7 @@ const SESSION: SessionState = {
 
 function draw(initialCode: string | null, onUsed = () => {}) {
   return render(
-    <CoReviewLobby
+    <CoReviewLobby defaultTitle="Test_2026-01-01_10-00"
       session={SESSION}
       localSource={false}
       participants={[]}

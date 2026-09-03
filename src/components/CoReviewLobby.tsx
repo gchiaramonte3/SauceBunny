@@ -30,7 +30,7 @@ import { ReviewGrants } from "./ReviewGrants";
  */
 type Step = "identity" | "devices" | "ready";
 
-export function CoReviewLobby({ session, localSource, participants, onStart, onJoin, onLeave, initialCode, onInitialCodeUsed }: {
+export function CoReviewLobby({ session, localSource, participants, onStart, onJoin, onLeave, initialCode, onInitialCodeUsed, defaultTitle }: {
   session: SessionState;
   /** A local file is loaded - guests can't receive it yet (hosting still allowed). */
   localSource: boolean;
@@ -45,6 +45,11 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   initialCode?: string | null;
   onInitialCodeUsed?: () => void;
   onLeave: () => void;
+  /** What the session will be called if the name is left blank. Shown as the
+   *  placeholder rather than applied silently: a session you cannot find
+   *  later because it was named something you never saw is worse than an
+   *  unnamed one. */
+  defaultTitle: string;
 }) {
   const cap = useMediaCapture();
   const [copied, setCopied] = useState(false);
@@ -145,7 +150,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
     const v = name.trim();
     if (v) persistIdentity(v, color);
     saveJson("saucebunny.sessionTitle", sessionTitle.trim());
-    onStart(sessionTitle.trim() || undefined);
+      onStart(sessionTitle.trim() || defaultTitle);
   };
   const joinSession = async () => {
     const v = name.trim(); const t = ticket.trim();
@@ -193,10 +198,6 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
     } catch { /* clipboard unavailable */ }
   };
 
-  const deviceSummary = [
-    cap.choice.cameraOff ? "Camera off" : (cap.devices.cameras.find((d) => d.deviceId === cap.choice.cameraId)?.label || "Default camera"),
-    cap.choice.micMuted ? "Mic muted" : (cap.devices.mics.find((d) => d.deviceId === cap.choice.micId)?.label || "Default mic"),
-  ].join(" · ");
 
   return (
     <main className="cp-coreview-lobby" aria-label="Co-Review">
@@ -262,19 +263,8 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
 
             {step === "ready" && (
               <>
-                <section className="cp-colobby-card" aria-label="Devices">
-                  <div className="cp-gr-strip">
-                    <GreenRoomThumb stream={cap.stream} cameraOff={cap.choice.cameraOff} />
-                    <span className="cp-gr-strip-names" title={deviceSummary}>{deviceSummary}</span>
-                    <button type="button" className="btn btn-ghost btn-compact"
-                      onClick={() => { steppedRef.current = true; setStep("devices"); }}>
-                      Change
-                    </button>
-                  </div>
-                </section>
-
                 <section className="cp-colobby-card">
-                  <h2 className="cp-colobby-card-title">Host</h2>
+                  <h2 className="cp-colobby-card-title big">Host a session</h2>
                   <label className="cp-colobby-field">
                     <span className="cp-colobby-field-label">Session name</span>
                     <input
@@ -282,7 +272,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                       value={sessionTitle}
                       onChange={(e) => setSessionTitle(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter" && !titleTaken) startSession(); }}
-                      placeholder="Rough cut review"
+                      placeholder={defaultTitle}
                       maxLength={80}
                       aria-invalid={titleTaken || undefined}
                       aria-describedby={titleTaken ? "cp-colobby-title-taken" : undefined}
@@ -328,16 +318,8 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                 )}
 
 
-                {/* Links issued to named people, available BEFORE a session.
-                    A grant is for someone who is not in the room yet, so
-                    requiring a running session to copy one had the shape
-                    exactly backwards: you would start a call for nobody in
-                    order to invite somebody. review_code mints the code from
-                    the persisted key, so this works idle. */}
-                <ReviewGrants sessionCode={session.code} />
-
                 <section className="cp-colobby-card">
-                  <h2 className="cp-colobby-card-title">Join</h2>
+                  <h2 className="cp-colobby-card-title big">Join a session</h2>
                   <label className="cp-colobby-field">
                     <span className="cp-colobby-field-label">Join code</span>
                     <input className="cp-colobby-input" value={ticket} spellCheck={false}
@@ -427,21 +409,4 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
       </div>
     </main>
   );
-}
-
-/** Tiny live preview thumb for the READY device strip (avatar-size). */
-function GreenRoomThumb({ stream, cameraOff }: { stream: MediaStream | null; cameraOff: boolean }) {
-  const ref = useRef<HTMLVideoElement | null>(null);
-  useEffect(() => {
-    const v = ref.current;
-    if (!v) return;
-    v.srcObject = stream;
-    if (stream) v.play().catch(() => { /* autoplay */ });
-  }, [stream]);
-  if (!stream || stream.getVideoTracks().length === 0 || cameraOff) {
-    // cameraOff: the track exists but is disabled - a live <video> would
-    // render solid black, not the styled placeholder.
-    return <span className="cp-gr-strip-thumb off" aria-hidden />;
-  }
-  return <video ref={ref} className="cp-gr-strip-thumb" muted playsInline aria-hidden />;
 }

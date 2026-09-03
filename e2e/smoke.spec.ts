@@ -604,8 +604,11 @@ test("green room: identity, devices, ready; saved identity skips ahead", async (
   await expect(lobby.locator(".cp-gr-selects select").first()).toBeVisible();
   await lobby.getByRole("button", { name: "Continue" }).click();
 
-  // READY: device strip + host/join faces.
-  await expect(lobby.locator(".cp-gr-strip")).toBeVisible();
+  // READY: the two verbs this screen exists for. The old proof of READY was a
+  // "Default camera · Default mic" strip, which was removed - devices belong
+  // in the step you just came through, not on the screen you read to start.
+  await expect(lobby.getByRole("heading", { name: "Host a session" })).toBeVisible();
+  await expect(lobby.getByRole("heading", { name: "Join a session" })).toBeVisible();
   await expect(lobby.getByRole("button", { name: "Start session" })).toBeEnabled();
   await expect(lobby.getByPlaceholder("Paste a join code")).toBeVisible();
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
@@ -619,10 +622,15 @@ test("green room: returning user with granted devices lands on READY", async ({ 
   await boot(page);
   await page.getByRole("button", { name: "Review" }).click();
   const lobby = page.locator(".cp-view-coreview");
-  // Straight to READY: compact device strip instead of the full step.
-  await expect(lobby.locator(".cp-gr-strip")).toBeVisible();
+  // Straight to READY: no devices step at all for someone who has granted.
+  await expect(lobby.getByRole("heading", { name: "Host a session" })).toBeVisible();
   await expect(lobby.getByRole("button", { name: "Start session" })).toBeEnabled();
   await expect(lobby.getByRole("button", { name: "Enable camera and mic" })).toHaveCount(0);
+  // Review links are issued from a clip in the library, not from here: a link
+  // is for someone who is not in the room, so the lobby was the wrong place
+  // to ask for one. And the device strip is gone with it.
+  await expect(lobby.getByRole("heading", { name: "Review links" })).toHaveCount(0);
+  await expect(lobby.locator(".cp-gr-strip")).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 

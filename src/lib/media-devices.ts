@@ -29,7 +29,12 @@ export const SPEAKER_OUTPUT_CHANGED_EVENT = "saucebunny:speaker-output-changed";
 const CHOICE_DEFAULTS: DeviceChoice = {
   cameraId: null,
   micId: null,
-  cameraOff: false,
+  // CAMERA OFF BY DEFAULT. Joining a review is not the same act as joining a
+  // video call: the thing everyone is looking at is the cut, and a first-run
+  // user who lands in a session already broadcasting their room has had a
+  // decision made for them that they cannot take back. Turning it on is one
+  // click and is theirs to make.
+  cameraOff: true,
   micMuted: false,
   echoCancel: true,
   speakerId: null,

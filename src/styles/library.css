@@ -2055,6 +2055,72 @@
   .cp-tagrow-dot { transition-duration: 0s; }
 }
 
+/* ── Review sessions ──────────────────────────────────────────────────
+   A reader over the screening store, wearing the same clothes as every other
+   shelf. Four columns rather than the file list's five: a session has no
+   size and no kind, and inventing a column to keep the grid identical would
+   be worse than a grid that fits what it holds. */
+.cp-sess-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 0.8fr) 64px 150px;
+  gap: 10px;
+  align-items: center;
+}
+.cp-sess-list .cp-lib-list-head button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cp-sess-list .cp-lib-list-head button:hover { color: var(--fg-2); }
+.cp-sess-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The card. No poster: a session is people and notes, not a picture, so the
+   card leads with its name instead of reserving 16:9 for a black rectangle. */
+.cp-sess-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 12px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-lg);
+  background: var(--bg-2);
+  text-align: left;
+  cursor: pointer;
+}
+.cp-sess-card:hover { border-color: var(--line-2); background: var(--bg-3); }
+.cp-sess-card.selected {
+  border-color: var(--sel-fill);
+  box-shadow: 0 0 0 2px var(--sel-fill);
+}
+.cp-sess-card-title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-sess-card-meta {
+  font-size: var(--text-base);
+  color: var(--fg-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-sess-card-foot {
+  margin-top: 4px;
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+}
+
 /* Web list rows. The row reuses .cp-lib-lrow and the shared column variables;
    the wrap exists so the armed forget control can overlay the row's right
    edge without living inside the row BUTTON (a button in a button is invalid

@@ -106,6 +106,16 @@
      outrank body copy regardless. */
   color: var(--fg-3);
 }
+/* The two verbs this screen exists for. They were the same size as the word
+   "Devices" on a strip above them, so the eye had nothing to land on and the
+   page read as four equal boxes rather than a choice between two. */
+.cp-colobby-card-title.big {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--track-tight);
+  text-transform: none;
+  color: var(--fg-1);
+}
 
 /* ── Fields — one style everywhere. Focus comes from the house
       focus-visible ring (base.css); no bespoke treatment. ── */
@@ -412,31 +422,6 @@ select.cp-colobby-input { padding-right: calc(var(--sel-chev) + 14px); }
 /* Identity swatches are the shared ColorSwatches (base.css); the card
    centers the row. */
 .cp-colobby-card .cp-swatches { justify-content: center; }
-.cp-gr-strip {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-}
-.cp-gr-strip-thumb {
-  width: 56px;
-  height: 32px;
-  border-radius: var(--r-md, 8px);
-  object-fit: cover;
-  transform: scaleX(-1);
-  background: var(--bg-0);
-  flex-shrink: 0;
-}
-.cp-gr-strip-thumb.off { display: inline-block; }
-.cp-gr-strip-names {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  color: var(--fg-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .cp-gr-editname {
   align-self: center;
   border: none;
