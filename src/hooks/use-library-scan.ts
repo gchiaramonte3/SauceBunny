@@ -175,6 +175,34 @@ export function invalidateThumb(path: string): void {
 
 /** Newest warm-up sweep wins; a rescan supersedes the previous walk. */
 let posterWarmupSweep = 0;
+/** Set while a foreground source open is in flight. */
+let posterWarmupPaused = false;
+/** What the paused sweep had left to do, so resuming is not a restart. */
+let posterWarmupRest: readonly string[] = [];
+
+/**
+ * Stop the background poster sweep while something the user is WAITING ON
+ * runs.
+ *
+ * The sweep walks every video in every library root and its only exit was
+ * "superseded by a newer scan" - switching view, opening a file, starting a
+ * transcription, none of them stopped it. So opening a local file raced a
+ * walk that decodes a poster per item and falls back to an ffmpeg subprocess
+ * for anything WebCodecs cannot handle, for as many items as the library
+ * holds.
+ *
+ * Paused, not cancelled: cancelling would mean posters never warm again until
+ * the next rescan, which is the whole feature. It resumes where it stopped.
+ */
+export function pausePosterWarmup(): void { posterWarmupPaused = true; }
+
+export function resumePosterWarmup(): void {
+  if (!posterWarmupPaused) return;
+  posterWarmupPaused = false;
+  const rest = posterWarmupRest;
+  posterWarmupRest = [];
+  if (rest.length) prefetchThumbnails(rest);
+}
 
 /**
  * Background poster warm-up: after a library scan lands, walk every video and
@@ -188,11 +216,17 @@ let posterWarmupSweep = 0;
 export function prefetchThumbnails(paths: readonly string[]): void {
   const sweep = ++posterWarmupSweep;
   void (async () => {
-    for (const path of paths) {
+    for (let i = 0; i < paths.length; i++) {
       if (sweep !== posterWarmupSweep) return; // superseded by a newer scan
+      // Checked INSIDE the loop, after each await: a pause that is only read
+      // once at the top stops the next sweep rather than this one, which is
+      // the sweep the user is actually waiting behind.
+      if (posterWarmupPaused) { posterWarmupRest = paths.slice(i); return; }
+      const path = paths[i];
       if (thumbCache.has(path) || thumbFailed.has(path) || thumbPending.has(path)) continue;
       await requestThumbnailInner(path, true).catch(() => null);
     }
+    posterWarmupRest = [];
   })();
 }
 

@@ -10,6 +10,7 @@ import { formatError, isAppError } from "../lib/error-format";
 import { chosenPosterFor } from "../lib/library";
 import { probeMediabunnyDecode, extractPosterBlob } from "../lib/mediabunny-helpers";
 import { setPlayheadFrames as publishPlayheadFrames } from "../lib/playhead-store";
+import { pausePosterWarmup, resumePosterWarmup } from "./use-library-scan";
 
 /** Enumerated by tsc from the moved block; each type read from the declaration
  *  the value still has in App.tsx. */
@@ -127,8 +128,26 @@ export function useLocalSource(p: LocalSourceProps) {
       setStatus("fetching");
       appendLog("info", "local", `Opening local file: ${picked}`);
 
+      // The background poster sweep walks every video in every library root,
+      // decoding one and falling back to an ffmpeg subprocess for anything
+      // WebCodecs cannot handle. Its only exit was "superseded by a newer
+      // scan", so it kept running straight through this open, competing for
+      // the decode slots and the main thread with the thing the user is
+      // watching a spinner for. Resumed in the finally below, where it left
+      // off rather than from the start.
+      pausePosterWarmup();
+
+      // MEASURED, not inferred. The pipeline log's timestamps come from
+      // nowHms() inside the setLogs updater, which React runs at RENDER time -
+      // so a main-thread stall inflates the printed gap and the log cannot
+      // tell "the probe was slow" from "the app was busy". A report of a four
+      // second wait here was spent chasing ffprobe, which measures 0.01-0.04s
+      // on the file in question. This number is the round trip itself.
+      const probeStarted = performance.now();
       const lf = await invoke<LocalFileMeta>("probe_local_file", { path: picked });
+      const probeMs = Math.round(performance.now() - probeStarted);
       if (sourceSeqRef.current !== seq) return null;
+      appendLog("info", "local", `Probed in ${probeMs}ms.`);
 
       // Adapt the local file shape to the existing Metadata so the rest of
       // the UI (sidebar, monitor, settings) can stay agnostic. webpage_url
@@ -360,6 +379,13 @@ export function useLocalSource(p: LocalSourceProps) {
       appendLog("err", "local", msg);
       setStatus("error");
       return { message: msg, kind: isAppError(err) ? err.kind : null };
+    } finally {
+      // ALWAYS, including the early returns above for a superseded open and
+      // the error path. A pause that can be left set is the same shape of bug
+      // as the scrub decoder's latch: the feature turns itself off and says
+      // nothing, and here it would mean posters silently stop warming for the
+      // rest of the session.
+      resumePosterWarmup();
     }
   }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep, recordRecentSource,
       openSourceView, seedFilename, tryAutoLoadTranscript, setErrorDetail, setExportOpts, setInFrames, setLocalFilePath, setLocalFileSize, setLocalPlayer, setMetadata, setOutFrames, setSourceKind, setStatus, setUrl, sourceSeqRef]);
