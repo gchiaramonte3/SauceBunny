@@ -2004,7 +2004,23 @@
   top: 2px; bottom: 2px; left: 4px;
   width: 1px;
   border-radius: var(--r-pill);
-  background: var(--line-2);
+  /* --line-1, the SEPARATOR weight, not --line-2's control-border weight.
+     A column boundary is drawn twice: this handle paints a short segment
+     inside the header, and .cp-lib-colrules paints a continuous full-height
+     rule at the same x. Measured, they are on the same pixel (1091 vs 1091) -
+     but at two different weights, so the boundary rendered as a BRIGHT stub
+     in the header sitting on a FAINT line below it, with a visible step at
+     the header's edge. Reported twice: "I would like to see a line go all the
+     way down from the top so there's no separation for the columns", and then
+     "the column line is fucking up with the held column".
+     Matching the WEIGHT was not enough: two 10% whites on the same pixel
+     composite to about 19%, so the header stub stayed visibly brighter than
+     the rule (measured 56 against 34). The static line here is REDUNDANT -
+     .cp-lib-colrules already paints a continuous rule at this exact x for
+     every one of the four tables (all render <ListColumnRules>, and ColDivider
+     is used nowhere else). So the handle paints nothing at rest and announces
+     itself on hover, focus and drag, which is where a control should. */
+  background: transparent;
   opacity: 1;
   /* background only. Transitioning `width` animates layout on the main thread
      every frame, which transition-target-contract rejects and which is the
