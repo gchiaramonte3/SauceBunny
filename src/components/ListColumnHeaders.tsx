@@ -460,8 +460,7 @@ export function ListColumnRules({ template, trackCount, lastColumnTrack }: {
    *  their own tracks in the stylesheet. */
   template?: string;
   trackCount: number;
-  /** 1-based track of the last real column, which carries the trailing line.
-   *  Not the last track: an explicit Name width appends a filler. */
+  /** 1-based track of the last real column, which carries the trailing line. */
   lastColumnTrack: number;
 }) {
   return (
@@ -473,15 +472,7 @@ export function ListColumnRules({ template, trackCount, lastColumnTrack }: {
       {Array.from({ length: trackCount }, (_, i) => (
         <span
           key={i}
-          className={
-            i + 1 === lastColumnTrack ? "last-col"
-              // Past the last real column: the filler track that absorbs slack
-              // when Name has an explicit width. It must draw NOTHING - its
-              // left border would land on the same device pixel as .last-col's
-              // right border and paint the table's edge twice as heavy.
-              : i + 1 > lastColumnTrack ? "filler"
-                : undefined
-          }
+          className={i + 1 === lastColumnTrack ? "last-col" : undefined}
         />
       ))}
     </div>

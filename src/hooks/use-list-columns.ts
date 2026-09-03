@@ -246,16 +246,30 @@ export function useListColumns<K extends string>(
   /* With an explicit Name width, NO track flexes any more - so without this
      the row would stop wherever the columns happen to end and leave a bare
      strip down the right of the pane where the hover and selection fills do
-     not reach. A trailing filler absorbs the slack when the pane is wider than
-     the columns, and collapses to nothing when it is narrower, which is what
-     lets the pane scroll sideways instead of squashing. Nothing is placed into
-     it: the row's cells are auto-placed in order and there is no cell left by
-     the time this track comes round. */
-  if (nameWidth != null) tracks.push("minmax(0, 1fr)");
+     not reach.
+     This USED to append a trailing filler track. The slack went somewhere the
+     table had no column for, so the row fill, the zebra stripe and the header
+     underline all ran a whole track further right than the table's own
+     right-hand line: measured, a 350px gap with Name at 400px, against 28px
+     (exactly the row's padding) with Name flexible. What that looks like is a
+     vertical line floating in open space to the left of where the rows end,
+     reported as "the position line is not where it should be".
+     The LAST REAL column takes the slack instead, which is what Finder does.
+     Its minimum stays the width the user set, so the pane still scrolls
+     sideways rather than squashing when it is too narrow, and the table now
+     ends where its rows end. With no columns besides Name, Name itself is the
+     last track and takes it. */
+  if (nameWidth != null) {
+    const last = tracks.length - 1;
+    const lastKey = visible[visible.length - 1];
+    const lastW = last === 1 ? nameWidth : cols[lastKey];
+    tracks[last] = `minmax(${lastW}px, 1fr)`;
+  }
   const template = tracks.join(" ");
   const trackCount = tracks.length;
-  // art + name + the visible columns. Deliberately NOT `tracks.length`, which
-  // counts the filler track when there is one.
+  // art + name + the visible columns. Equal to `tracks.length` now that no
+  // filler is appended, and kept as its own expression because it means
+  // something different: the track that carries the table's trailing line.
   const lastColumnTrack = 2 + visible.length;
 
 

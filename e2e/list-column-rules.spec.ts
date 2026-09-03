@@ -34,21 +34,25 @@ import { tauriMockInit } from "./tauri-mock";
  * tables by measuring the one that was fixed is worse than no test.
  */
 const VIEWS = [
-  { name: "library", pref: "saucebunny.libraryBrowser", tree: null },
-  { name: "frames", pref: "saucebunny.framesBrowser", tree: "Frames" },
+  { name: "library", pref: "saucebunny.libraryBrowser", cols: "saucebunny.libraryListCols", tree: null },
+  { name: "frames", pref: "saucebunny.framesBrowser", cols: "saucebunny.frameListCols", tree: "Frames" },
 ] as const;
 
-async function openList(page: Page, view: typeof VIEWS[number]) {
+async function openList(page: Page, view: typeof VIEWS[number], nameWidth?: number) {
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
-  await page.addInitScript((pref: string) => {
+  await page.addInitScript(([pref, nameW, colsKey]: [string, string, string]) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
     localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
     localStorage.setItem("e2e.manyFiles", "5");
     localStorage.setItem(pref, JSON.stringify({ view: "list" }));
-  }, view.pref);
+    // An explicit Name width is the state that used to append a filler track,
+    // and nothing covered it.
+    if (nameW) localStorage.setItem(colsKey,
+      JSON.stringify({ w: {}, order: null, hidden: [], name: Number(nameW) }));
+  }, [view.pref, nameWidth ? String(nameWidth) : "", view.cols] as [string, string, string]);
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("Meta+2");
@@ -90,6 +94,18 @@ async function lines(page: Page) {
     return {
       handles, ruleXs,
       shortBy: pb.bottom - parseFloat(getComputedStyle(pane).paddingBottom) - rb.bottom,
+      // How far the table's trailing line stops short of where its rows end.
+      // A filler track put a WHOLE COLUMN between them.
+      trailingGap: (() => {
+        const rowEl = list.querySelector(".cp-lib-lrow") as HTMLElement;
+        const last = [...rules.children].find((sp) => parseFloat(getComputedStyle(sp).borderRightWidth) > 0);
+        if (!last) return null;
+        return {
+          gap: rowEl.getBoundingClientRect().right - last.getBoundingClientRect().right,
+          pad: parseFloat(getComputedStyle(rowEl).paddingRight),
+        };
+      })(),
+      template: getComputedStyle(list).getPropertyValue("--lrow-cols").trim(),
     };
   });
 }
@@ -126,5 +142,25 @@ test(`${view.name}: a boundary is drawn once, so it is one weight all the way do
     .filter((h) => h.bg !== "rgba(0, 0, 0, 0)" && h.bg !== "transparent")
     .map((h) => `the divider at ${h.x} paints ${h.bg} on top of the body rule`);
   expect(doubled, doubled.join("\n")).toEqual([]);
+});
+
+test(`${view.name}: the table's last line ends where its rows end, with Name pinned`, async ({ page }) => {
+  // The reported symptom: "the position line is not where it should be". With
+  // an explicit Name width nothing flexed, so a trailing filler track absorbed
+  // the slack - and the row fill, the zebra stripe and the header underline all
+  // ran a whole track further right than the table's own right-hand line.
+  // Measured at 350px against the 28px of row padding that is correct.
+  await openList(page, view, 400);
+  const m = await lines(page);
+  expect(m.trailingGap, "no trailing line found, so this asserted nothing").not.toBeNull();
+  // Canary. Seeding the wrong table's column key leaves Name flexible, and
+  // then every assertion below is about a state this test never built.
+  expect(m.template, `Name was not pinned for ${view.name}; template is ${m.template}`)
+    .toContain("400px");
+  expect(m.template, "an explicit Name width still appends a filler track")
+    .not.toContain("minmax(0, 1fr)");
+  expect(m.trailingGap!.gap,
+    `the table's line stops ${m.trailingGap!.gap.toFixed(0)}px short of its rows (padding is ${m.trailingGap!.pad})`)
+    .toBeLessThanOrEqual(m.trailingGap!.pad + 1);
 });
 }

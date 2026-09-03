@@ -189,16 +189,33 @@ describe("the Name column resizes too", () => {
     expect(seen?.template).not.toContain("minmax(0, 1fr)");
   });
 
-  it("takes an explicit width, and grows a filler behind it", () => {
+  it("takes an explicit width, and the LAST COLUMN absorbs the slack", () => {
     render(<Probe />);
     act(() => seen?.nudgeName(50));
     expect(seen?.nameWidth).toBe(200);
     expect(seen?.template).toContain("200px");
     expect(seen?.template).not.toContain("1fr) 120px");
-    // With Name fixed, NO track flexes - so without a filler the row would
-    // end where the columns end and leave a dead strip down the pane where
-    // hover and selection do not paint.
-    expect(seen?.template?.endsWith("minmax(0, 1fr)")).toBe(true);
+
+    // With Name fixed, NO track flexes - so something has to take the slack,
+    // or the row ends where the columns end and leaves a dead strip down the
+    // pane where hover and selection do not paint.
+    //
+    // That used to be a FILLER track appended after the last column. It put
+    // the slack somewhere the table had no column for, so the row fill, the
+    // zebra stripe and the header underline all ran a whole track further
+    // right than the table's own right-hand line: measured at 350px, against
+    // the 28px of row padding that is correct. A vertical line floating in
+    // open space to the left of where the rows end, reported as "the position
+    // line is not where it should be".
+    //
+    // The last REAL column takes it now, which is what Finder does. Its
+    // minimum stays the width it had, so a narrow pane still scrolls sideways
+    // rather than squashing.
+    expect(seen?.template).not.toContain("minmax(0, 1fr)");
+    expect(seen?.template?.endsWith(", 1fr)"),
+      `the last track does not flex: ${seen?.template}`).toBe(true);
+    // The flexible track IS a column, not an extra one appended after them.
+    expect(seen?.trackCount).toBe(seen?.lastColumnTrack);
   });
 
   it("gives the column back to the layout", () => {
