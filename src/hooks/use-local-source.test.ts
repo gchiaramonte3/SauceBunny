@@ -31,6 +31,8 @@ const h = vi.hoisted(() => ({
    *  which is the all-or-nothing behaviour the older tests were written
    *  against. Set it to say "the picture is fine, the sound is not". */
   decodeProbe: null as null | { video: string; audio: string },
+  /** What happened, in order. Used only by the source-kind ordering test. */
+  order: [] as string[],
 }));
 
 vi.mock("../lib/mediabunny-helpers", () => ({
@@ -49,7 +51,7 @@ vi.mock("../lib/mediabunny-helpers", () => ({
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (cmd: string) => {
-    if (cmd === "probe_local_file") return h.probe;
+    if (cmd === "probe_local_file") { h.order.push("probe"); return h.probe; }
     return "";
   },
 }));
@@ -82,6 +84,7 @@ function harness(useWebCodecsDecoder: boolean) {
     /** Whether each prep was asked to COPY the video rather than re-encode it. */
     prepCopyVideo: [] as boolean[],
     logs: [] as string[],
+    kinds: [] as string[],
   };
   const noop = () => {};
   const props = {
@@ -91,7 +94,7 @@ function harness(useWebCodecsDecoder: boolean) {
     setLocalFilePath: noop,
     setLocalFileSize: noop,
     setLocalPlayer: (v: unknown) => { calls.player.push(String(v)); },
-    setSourceKind: noop,
+    setSourceKind: (k: unknown) => { calls.kinds.push(String(k)); h.order.push(`kind:${String(k)}`); },
     setStatus: noop,
     setErrorDetail: noop,
     setExportOpts: noop,
@@ -223,5 +226,50 @@ describe("only the audio is broken, so only the audio is re-encoded", () => {
     await load(ORDINARY.path);
     expect(calls.prep).toEqual([ORDINARY.path]);
     expect(calls.prepCopyVideo[0]).toBe(false);
+  });
+});
+
+
+/**
+ * What the screen SAYS while a local file is being probed.
+ *
+ * Reported as "loading a local file it routed first to yt-dlp, which was
+ * incorrect". It did not - probe_local_file spawns ffprobe and nothing else,
+ * measured at 0.01-0.04s on the reported 215MB ProRes file. But the app said
+ * it did: resetForNewSource hardcodes setSourceKind("youtube"), and the
+ * correction to "file" ran only AFTER the probe resolved, so for the whole
+ * wait the Monitor rendered the web copy ("RESOLVING SOURCE STREAM...",
+ * "yt-dlp - probing manifests"), the sidebar said "Resolving..." and the logs
+ * panel said "RESOLVING".
+ *
+ * The copy was already correct and already commented as having been fixed
+ * once for exactly this reason. The ORDERING defeated it, which is why this
+ * pins the order rather than the strings.
+ */
+describe("what the UI claims during a local probe", () => {
+  beforeEach(() => {
+    h.order = [];
+    h.canDecode = true;
+    h.probe = ORDINARY;
+  });
+
+  it("says 'file' BEFORE the probe runs, never after", async () => {
+    const { load } = harness(true);
+    await load("/Users/x/Calls/call.mp4");
+
+    const kindAt = h.order.indexOf("kind:file");
+    const probeAt = h.order.indexOf("probe");
+    // Canary: an ordering assertion over events that never happened passes.
+    expect(probeAt, "the probe never ran, so this asserted nothing").toBeGreaterThanOrEqual(0);
+    expect(kindAt, "the source kind was never set to file at all").toBeGreaterThanOrEqual(0);
+    expect(kindAt, "the UI called this a web source for the whole probe window")
+      .toBeLessThan(probeAt);
+  });
+
+  it("never claims a web source at any point in a local open", async () => {
+    const { calls, load } = harness(true);
+    await load("/Users/x/Calls/call.mp4");
+    expect(calls.kinds.filter((k) => k !== "file"),
+      "a local import set a non-file source kind").toEqual([]);
   });
 });

@@ -112,6 +112,17 @@ export function useLocalSource(p: LocalSourceProps) {
       // content must not bounce you out of the session).
       openSourceView();
       resetForNewSource(picked);
+      // BEFORE the probe, not after it. resetForNewSource hardcodes
+      // setSourceKind("youtube"), and this used to be set once the probe had
+      // returned - so for the whole probe window a LOCAL file open rendered
+      // the web copy: "RESOLVING SOURCE STREAM..." over "yt-dlp - probing
+      // manifests" in the Monitor, "Resolving..." in the sidebar, "RESOLVING"
+      // in the logs panel. Reported as "loading a local file routed first to
+      // yt-dlp", which is not a misreading of anything: the app said so.
+      // Monitor.tsx already carries a comment explaining that this copy was
+      // corrected once because it lied about local opens. The copy was fine;
+      // the ORDERING defeated it.
+      setSourceKind("file");
       const seq = ++sourceSeqRef.current;
       setStatus("fetching");
       appendLog("info", "local", `Opening local file: ${picked}`);
@@ -192,7 +203,6 @@ export function useLocalSource(p: LocalSourceProps) {
           }
         })();
       }
-      setSourceKind("file");
       setLocalFilePath(lf.path);
       setLocalFileSize(lf.size_bytes ?? null);
       setUrl("");

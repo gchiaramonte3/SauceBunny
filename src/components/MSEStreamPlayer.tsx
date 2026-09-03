@@ -698,6 +698,23 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
      *  overlay gives up and says so. Generous - it is one ranged read plus an
      *  index - but finite, which is the point. */
     const PREVIEW_OPEN_TIMEOUT_MS = 6000;
+    /** How long ONE frame may take before it counts as a miss. The open has a
+     *  deadline; the decode did not, and the two layers under it are both
+     *  unbounded - so a single hung getCanvas held `previewBusyRef` true for
+     *  ever and every later seek returned at the latch, silently. A deadline
+     *  on the open alone does not close that; it only moves it one await
+     *  along. Generous, because a real cold frame over the network is slow. */
+    const PREVIEW_FRAME_TIMEOUT_MS = 4000;
+    /** Distinguishes "the deadline fired" from "the open failed and already
+     *  said why". Both resolve falsy, and treating them alike logged a SECOND,
+     *  FALSE line blaming a 6000ms timeout for a source whose real problem was
+     *  an undecodable codec - inventing a symptom on top of a real one. */
+    const TIMED_OUT = Symbol("preview-open-timeout");
+    /** Resolve `p`, or TIMED_OUT if it takes longer than `ms`. */
+    const withDeadline = <T,>(p: Promise<T>, ms: number) => Promise.race([
+      p,
+      new Promise<typeof TIMED_OUT>((res) => window.setTimeout(() => res(TIMED_OUT), ms)),
+    ]);
     /** Consecutive undecodable frames before the overlay admits defeat. More
      *  than one because a single miss mid-drag is ordinary (a target that
      *  moved on before the decode landed); a run of them is a broken source. */
@@ -717,19 +734,17 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         // is exactly what a user's pipeline log showed: 239 seeks in one drag
         // and not a single line from this decoder, neither ready nor
         // unavailable. Silence was the bug.
-        const sink = await Promise.race([
-          ensurePreviewSink(),
-          new Promise<null>((res) => window.setTimeout(() => res(null), PREVIEW_OPEN_TIMEOUT_MS)),
-        ]);
-        if (!sink) {
+        const sink = await withDeadline(ensurePreviewSink(), PREVIEW_OPEN_TIMEOUT_MS);
+        if (sink === TIMED_OUT) {
           // Drop the memo so a later gesture can try again rather than
           // inheriting a promise that never settles.
-          if (previewSinkPromise) {
-            previewSinkPromise = null;
-            previewUnavailable(`opening the stream took longer than ${PREVIEW_OPEN_TIMEOUT_MS}ms`);
-          }
+          previewSinkPromise = null;
+          previewUnavailable(`opening the stream took longer than ${PREVIEW_OPEN_TIMEOUT_MS}ms`);
           return;
         }
+        // Null means ensurePreviewSink already reported the real reason. Say
+        // nothing further: a second line here would contradict the first.
+        if (!sink) return;
         while (previewTargetRef.current != null && !disposed) {
           const t = previewTargetRef.current;
           previewTargetRef.current = null;
@@ -740,7 +755,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             if (pkt) decodeAt = pkt.timestamp;
           }
           let decodeErr: unknown = null;
-          const wrapped = await sink.getCanvas(decodeAt).catch((e) => { decodeErr = e; return null; });
+          const got = await withDeadline(
+            sink.getCanvas(decodeAt).catch((e) => { decodeErr = e; return null; }),
+            PREVIEW_FRAME_TIMEOUT_MS);
+          if (got === TIMED_OUT) decodeErr = new Error(`the frame took longer than ${PREVIEW_FRAME_TIMEOUT_MS}ms`);
+          const wrapped = got === TIMED_OUT ? null : got;
           if (!wrapped) {
             // THE SECOND WAY THIS DECODER WENT SILENT. The open above reports
             // itself now, but a frame that will not decode was swallowed by a

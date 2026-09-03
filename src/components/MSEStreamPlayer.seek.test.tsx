@@ -286,6 +286,43 @@ describe("the scrub preview overlay", () => {
     expect(diag.some((l) => l.msg.includes("scrub preview unavailable"))).toBe(false);
   });
 
+  it("blames the real reason ONCE, never inventing a timeout on top of it", async () => {
+    // The open path resolves null for two completely different reasons: the
+    // deadline fired, or ensurePreviewSink failed and ALREADY said why. Both
+    // are falsy, and treating them alike logged a second line blaming a
+    // 6000ms timeout for a source whose actual problem was its codec. Two
+    // contradictory explanations for one fault is worse than one.
+    h.noVideoTrack = true;
+    const ref = mountPlayer(diag, { preview: true });
+    ref.current!.seekTo(1298.8);
+    await vi.advanceTimersByTimeAsync(10_000);   // well past the open deadline
+
+    const said = diag.filter((l) => l.msg.includes("scrub preview unavailable"));
+    expect(said.map((l) => l.msg), "one fault, one explanation").toHaveLength(1);
+    expect(said[0].msg).toContain("no video track");
+    expect(said[0].msg, "a real failure was reported as a timeout").not.toContain("took longer than");
+  });
+
+  it("a hung frame does not switch the overlay off for the rest of the source", async () => {
+    // The latch that serialises this decoder is released in a `finally`, which
+    // never runs while an await is still pending. So the open having a
+    // deadline did not close the hole; it moved it one await along, and one
+    // getCanvas that never settles still disabled scrubbing permanently and
+    // silently. mediabunny retries a throwing fetch for ever and the loopback
+    // proxy has no read timeout, so "never settles" is reachable, not
+    // theoretical.
+    h.frameDelay = 60_000;                       // this frame is never coming
+    const ref = mountPlayer(diag, { preview: true });
+    ref.current!.seekTo(100);
+    await vi.advanceTimersByTimeAsync(6_000);    // past the frame deadline
+    expect(overlayShown(), "nothing decoded, so nothing may be shown").toBe(false);
+
+    h.frameDelay = 20;                           // the next one is fine
+    ref.current!.seekTo(4_000);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(overlayShown(), "the decoder never recovered: the latch stayed set").toBe(true);
+  });
+
   it("keeps showing the last frame across a later seek, rather than blanking", async () => {
     // Once it holds a real frame, a slightly stale frame beats black while the
     // next one decodes. This is what an NLE does.
