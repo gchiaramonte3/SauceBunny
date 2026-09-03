@@ -29,7 +29,7 @@ import type { PlayerHandle } from "./player-handle";
  * `h.noVideoTrack` makes the decoder fail to open, which is the case that
  * fails FOREVER and used to do so in silence.
  */
-const h = vi.hoisted(() => ({ frameDelay: 0, noVideoTrack: false }));
+const h = vi.hoisted(() => ({ frameDelay: 0, noVideoTrack: false, frameFails: false }));
 
 vi.mock("mediabunny", () => ({
   ALL_FORMATS: [],
@@ -43,7 +43,9 @@ vi.mock("mediabunny", () => ({
   CanvasSink: class {
     getCanvas(_t: number) {
       const canvas = { width: 320, height: 180 };
-      return new Promise((resolve) => setTimeout(() => resolve({ canvas }), h.frameDelay));
+      return new Promise((resolve, reject) => setTimeout(
+        () => (h.frameFails ? reject(new Error("range request failed")) : resolve({ canvas })),
+        h.frameDelay));
     }
   },
   EncodedPacketSink: class { getKeyPacket() { return Promise.resolve(null); } },
@@ -208,7 +210,7 @@ describe("what the player actually did with the reported gestures", () => {
  * It was the overlay showing its own background.
  */
 describe("the scrub preview overlay", () => {
-  beforeEach(() => { h.frameDelay = 0; h.noVideoTrack = false; });
+  beforeEach(() => { h.frameDelay = 0; h.noVideoTrack = false; h.frameFails = false; });
 
   it("is NOT shown before it has a frame to show", async () => {
     // The whole bug, in one assertion. A slow decode must leave the video
@@ -247,6 +249,41 @@ describe("the scrub preview overlay", () => {
     ref.current!.seekTo(1298.8);
     await vi.advanceTimersByTimeAsync(500);
     expect(diag.some((l) => l.msg.startsWith("scrub preview ready"))).toBe(true);
+  });
+
+  it("says so when the decoder opens but no frame will decode", async () => {
+    // THE SECOND SILENCE, and the one that survived the first fix.
+    //
+    // The open is reported now, so a decoder that never opens is loud. But a
+    // decoder that opens and then fails on every FRAME was swallowed by a bare
+    // `.catch(() => null)` followed by `continue`. A drag refills the loop
+    // condition on every vsync, so it span for the whole gesture and exited
+    // quietly, and the finally released the latch as though it had worked.
+    //
+    // The user's log is the specification here: five drags, 250+ seeks, and
+    // not one line from this decoder - neither ready nor unavailable.
+    h.frameFails = true;
+    const ref = mountPlayer(diag, { preview: true });
+    for (let i = 0; i < 8; i++) {
+      ref.current!.seekTo(100 + i * 50);
+      await vi.advanceTimersByTimeAsync(20);
+    }
+    const said = diag.find((l) => l.msg.includes("scrub preview unavailable"));
+    expect(said, "a decoder that cannot decode ANY frame must not be silent").toBeTruthy();
+    expect(said!.msg, "the reason must name the real failure, not a guess")
+      .toContain("range request failed");
+    expect(overlayShown(), "nothing decoded, so nothing may be painted over the video").toBe(false);
+  });
+
+  it("does not cry failure over one missed frame mid-drag", async () => {
+    // The counter exists so an ordinary miss (a target that moved on before
+    // its decode landed) is not reported as a broken source. Without a budget
+    // this warning would fire on every healthy drag and mean nothing.
+    h.frameFails = true;
+    const ref = mountPlayer(diag, { preview: true });
+    ref.current!.seekTo(100);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(diag.some((l) => l.msg.includes("scrub preview unavailable"))).toBe(false);
   });
 
   it("keeps showing the last frame across a later seek, rather than blanking", async () => {

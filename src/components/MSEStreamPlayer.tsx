@@ -235,6 +235,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const previewInputRef = useRef<Input | null>(null);
   const previewTargetRef = useRef<number | null>(null);
   const previewBusyRef = useRef(false);
+  /** Consecutive decode misses, so a dead decoder says so exactly once. */
+  const previewMissRef = useRef(0);
   const scrubCanvasRef = useRef<HTMLCanvasElement | null>(null);
   /** The live playhead in SOURCE seconds. `startAtSeconds` is zeroed once a
    *  stream is playing (PLAYER_READY clears resumeAtSeconds), so a rebuild
@@ -634,6 +636,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     failedRef.current = false;
     setScrubPreview(false);
     previewPaintedRef.current = false;
+    previewMissRef.current = 0;
     // A NEW SOURCE starts at its own beginning. Without this the resume
     // fallback above would carry the previous clip's playhead into an
     // unrelated one - which is a worse bug than the one it fixes.
@@ -695,6 +698,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
      *  overlay gives up and says so. Generous - it is one ranged read plus an
      *  index - but finite, which is the point. */
     const PREVIEW_OPEN_TIMEOUT_MS = 6000;
+    /** Consecutive undecodable frames before the overlay admits defeat. More
+     *  than one because a single miss mid-drag is ordinary (a target that
+     *  moved on before the decode landed); a run of them is a broken source. */
+    const PREVIEW_MISS_LIMIT = 8;
     const requestPreview = (seconds: number) => {
       previewTargetRef.current = seconds;
       if (previewBusyRef.current) return;
@@ -732,8 +739,29 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             const pkt = await keySink.getKeyPacket(decodeAt, { verifyKeyPackets: false }).catch(() => null);
             if (pkt) decodeAt = pkt.timestamp;
           }
-          const wrapped = await sink.getCanvas(decodeAt).catch(() => null);
-          if (!wrapped) continue;
+          let decodeErr: unknown = null;
+          const wrapped = await sink.getCanvas(decodeAt).catch((e) => { decodeErr = e; return null; });
+          if (!wrapped) {
+            // THE SECOND WAY THIS DECODER WENT SILENT. The open above reports
+            // itself now, but a frame that will not decode was swallowed by a
+            // bare `.catch(() => null)` and a `continue`. During a drag the
+            // loop condition keeps being refilled, so a decoder failing every
+            // single frame span the whole gesture and then exited quietly, and
+            // the finally released the latch as if it had worked. A user's log
+            // showed five drags, 250+ seeks, and not one line from here -
+            // neither ready nor unavailable. Silence is the bug, twice.
+            //
+            // Reported once per run of misses, not per frame: a drag issues a
+            // seek per vsync and each log line is App state.
+            previewMissRef.current += 1;
+            if (previewMissRef.current === PREVIEW_MISS_LIMIT) {
+              previewUnavailable(decodeErr
+                ? `the frame would not decode (${decodeErr instanceof Error ? decodeErr.message : String(decodeErr)})`
+                : `${PREVIEW_MISS_LIMIT} frames in a row would not decode`);
+            }
+            continue;
+          }
+          previewMissRef.current = 0;
           const dst = scrubCanvasRef.current;
           if (dst) {
             const src = wrapped.canvas;
