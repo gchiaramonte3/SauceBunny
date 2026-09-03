@@ -2085,6 +2085,18 @@
      the padding it cancels is declared - the two must not drift. */
   --lib-bleed: var(--s-4);
   flex: 1;
+  /* A COLUMN, for the same reason .cp-lib-pane is one: a list inside a BLOCK
+     pane is exactly as tall as its rows, so the striped filler and the
+     full-height column rules have nowhere to paint.
+     This pane holds THREE of the four tables (frames, the web shelf, review
+     sessions) and was left as `block` when .cp-lib-pane was changed - so those
+     three kept stopping at the last row while the library reached the floor,
+     measured at 277.9px short in review sessions. The test that was supposed
+     to cover this asserted it of the library only, which is a test certifying
+     four tables by measuring the one that was fixed. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   min-height: 0;
   overflow-y: auto;
   /* Bottom room for the floating selection bar, so it never covers the last
@@ -2093,7 +2105,20 @@
   /* The marquee band is painted in this box's CONTENT coordinates, so it
      stays glued to the cards while the pane scrolls under it. */
   position: relative;
+}/* The LAST shelf claims the leftover height, so the list inside it can paint
+   its striped filler and run its column rules to the pane's floor. Only the
+   last: the web pane groups clips into one shelf per source, and stretching
+   every shelf would put empty space between sections instead of under them. */
+.cp-web-pane > .cp-web-shelf:last-child {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  /* A shelf separates itself from the NEXT shelf. The last one has no next,
+     and that trailing --s-5 was leaving a 20px unstriped band under the
+     filler, which is the same hard edge this whole change removes. */
+  margin-bottom: 0;
 }
+
 .cp-web-empty {
   padding: var(--s-6) var(--s-5);
   max-width: 46ch;

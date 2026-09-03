@@ -24,20 +24,35 @@ import { tauriMockInit } from "./tauri-mock";
  * itself on hover, focus and drag instead.
  */
 
-async function libraryList(page: Page) {
+/**
+ * BOTH pane types. The library list sits in `.cp-lib-pane`; frames, the web
+ * shelf and review sessions sit in `.cp-web-pane`, which is a different
+ * element with its own layout. Only .cp-lib-pane was made a flex column at
+ * first, so the stripes and the full-height rules worked in the library and
+ * nowhere else - review sessions measured 277.9px short - while this file
+ * asserted the property of the library alone. A test that certifies four
+ * tables by measuring the one that was fixed is worse than no test.
+ */
+const VIEWS = [
+  { name: "library", pref: "saucebunny.libraryBrowser", tree: null },
+  { name: "frames", pref: "saucebunny.framesBrowser", tree: "Frames" },
+] as const;
+
+async function openList(page: Page, view: typeof VIEWS[number]) {
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
-  await page.addInitScript(() => {
+  await page.addInitScript((pref: string) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
     localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
     localStorage.setItem("e2e.manyFiles", "5");
-    localStorage.setItem("saucebunny.libraryBrowser", JSON.stringify({ view: "list" }));
-  });
+    localStorage.setItem(pref, JSON.stringify({ view: "list" }));
+  }, view.pref);
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("Meta+2");
+  if (view.tree) await page.getByRole("treeitem", { name: view.tree }).first().click();
   await expect(page.locator(".cp-lib-lrow").first()).toBeVisible({ timeout: 15_000 });
 }
 
@@ -69,7 +84,7 @@ async function lines(page: Page) {
     // `inset: 0` on the list, so "does the overlay match the list" is true by
     // construction and cannot fail - the first version of this asserted
     // exactly that and passed under a mutation that shortened the list.
-    const pane = list.closest(".cp-lib-pane") as HTMLElement;
+    const pane = list.closest(".cp-lib-pane, .cp-web-pane") as HTMLElement;
     const pb = pane.getBoundingClientRect();
     const rb = rules.getBoundingClientRect();
     return {
@@ -79,8 +94,9 @@ async function lines(page: Page) {
   });
 }
 
-test("every header divider sits exactly on a body rule", async ({ page }) => {
-  await libraryList(page);
+for (const view of VIEWS) {
+test(`${view.name}: every header divider sits exactly on a body rule`, async ({ page }) => {
+  await openList(page, view);
   const m = await lines(page);
   // Canary: no dividers means every assertion below is vacuous.
   expect(m.handles.length, "no column dividers found").toBeGreaterThanOrEqual(3);
@@ -91,8 +107,8 @@ test("every header divider sits exactly on a body rule", async ({ page }) => {
   expect(orphans, orphans.join("\n")).toEqual([]);
 });
 
-test("the rule runs to the bottom of the pane, not just to the last row", async ({ page }) => {
-  await libraryList(page);
+test(`${view.name}: the rule runs to the bottom of the pane, not just to the last row`, async ({ page }) => {
+  await openList(page, view);
   const m = await lines(page);
   // "A line all the way down from the top so there's no separation." Stopping
   // at the last row is what leaves the columns looking cut off half way.
@@ -100,8 +116,8 @@ test("the rule runs to the bottom of the pane, not just to the last row", async 
     .toBeLessThanOrEqual(1);
 });
 
-test("a boundary is drawn once, so it is one weight all the way down", async ({ page }) => {
-  await libraryList(page);
+test(`${view.name}: a boundary is drawn once, so it is one weight all the way down`, async ({ page }) => {
+  await openList(page, view);
   const m = await lines(page);
   expect(m.handles.length).toBeGreaterThanOrEqual(3);
   // Two lines on one pixel composite brighter than either, which is what made
@@ -111,3 +127,4 @@ test("a boundary is drawn once, so it is one weight all the way down", async ({ 
     .map((h) => `the divider at ${h.x} paints ${h.bg} on top of the body rule`);
   expect(doubled, doubled.join("\n")).toEqual([]);
 });
+}
