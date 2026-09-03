@@ -5,10 +5,15 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
-`0.4.4`, `0.4.5` and `0.4.6` were bumped in the manifests but never tagged
-or released, so everything below is unreleased and sits on top of `v0.4.3`.
-The build in your hands is identified by its CFBundleVersion, shown in
-Settings ▸ About.
+Nothing yet.
+
+## [0.4.9] — 2026-09-02
+
+The first tagged build since `0.4.3`. `0.4.4` through `0.4.8` were bumped in
+the manifests but never released, so everything that had accumulated under
+Unreleased ships here under one version.
+
+The exact build is identified by its CFBundleVersion, shown in Settings ▸ About.
 
 Since build `2026082903`: **review links**, a Finder-style library list, and
 a library tree whose chevrons had never actually worked.

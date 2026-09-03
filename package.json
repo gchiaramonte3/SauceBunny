@@ -1,7 +1,7 @@
 {
   "name": "sauce-bunny",
   "private": true,
-  "version": "0.4.8",
+  "version": "0.4.9",
   "engines": {
     "node": ">=20.19.0 <21 || >=22.13.0 <23 || >=24"
   },
