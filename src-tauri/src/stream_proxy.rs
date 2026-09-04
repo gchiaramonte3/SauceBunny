@@ -598,13 +598,16 @@ pub(crate) fn probe_stream_epoch(upstream: &str, start: f64) -> Option<f64> {
     static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<(String, u64), f64>>> =
         OnceLock::new();
     let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-    // QUANTISED TO THE SECOND, not the exact float. The key used to be
-    // `start.to_bits()`, and the frontend sends a distinct three-decimal
-    // position for every scrub - 623.3, 631.0, 745.0 - so the memo could
-    // never hit on a real gesture and EVERY seek paid the full probe on the
-    // critical path. The epoch is a property of the keyframe the seek lands
-    // on, and seeks within the same second land on the same keyframe, so a
-    // whole-second bucket is the coarsest key that is still correct.
+    // Exact, because `parse_start_query` has already floored the value every
+    // caller can reach this through. The key used to be `start.to_bits()`,
+    // and the frontend sent a distinct three-decimal position for every scrub
+    // - 623.3, 631.0, 745.0 - so the memo could never hit on a real gesture
+    // and EVERY seek paid the full probe on the critical path.
+    //
+    // Flooring only the KEY fixed that and broke correctness: two starts in
+    // one second shared a cached epoch while ffmpeg performed two DIFFERENT
+    // seeks. The quantisation belongs to the value, not the lookup - see
+    // parse_start_query.
     let key = (upstream.to_string(), start.floor() as u64);
     if let Ok(map) = cache.lock() {
         if let Some(&e) = map.get(&key) {
@@ -725,6 +728,27 @@ fn parse_start_query(url_path: &str) -> f64 {
         // ffmpeg that does no useful work. 24h is far past any real media.
         .filter(|f| f.is_finite())
         .map(|f| f.clamp(0.0, 86_400.0))
+        // QUANTISED TO THE WHOLE SECOND, here, so that ffmpeg's `-ss`, the
+        // epoch probe and the memo that caches it are given ONE number.
+        //
+        // They used to disagree. The memo was keyed on `start.floor()` while
+        // the probe and ffmpeg both got the exact float, on the stated premise
+        // that "seeks within the same second land on the same keyframe". That
+        // is false whenever a keyframe falls inside the second: measured with
+        // the shipped ffprobe on a 5.4s GOP, start=32.1 probes an epoch of
+        // 27.000 and start=32.9 probes 32.417, and both land in bucket 32. The
+        // second seek then serves a stream built at ITS keyframe while the
+        // player is handed the FIRST one's epoch, so `timestampOffset` is out
+        // by up to a whole GOP and the entire absolute timeline is displaced
+        // against the audio. That is what "the problem is audio, everything is
+        // out of sync" describes, and it appears only after a seek.
+        //
+        // Quantising the VALUE rather than only the key makes the memo exact
+        // by construction. Nothing is lost: the stream already starts at the
+        // preceding keyframe, which is up to a GOP earlier than this rounding,
+        // and the exact sub-second target is landed by the player's own
+        // `pendingLand` seek (see planFirstAppend), not by `-ss`.
+        .map(f64::floor)
         .unwrap_or(0.0)
 }
 
@@ -1449,7 +1473,10 @@ mod tests {
         // They share a query string; a malformed one must not eat the other.
         let p = "/peer/fmp4/v1/abc?rung=banana&start=12.5";
         assert_eq!(parse_rung_query(p), None);
-        assert!((parse_start_query(p) - 12.5).abs() < 1e-9);
+        // 12.0, not 12.5: parse_start_query quantises. This test is about the
+        // two parsers not eating each other's query, so the value only has to
+        // be the one start parsing produces.
+        assert_eq!(parse_start_query(p), 12.0);
         let q = "/peer/fmp4/v1/abc?start=nope&rung=540";
         assert_eq!(parse_rung_query(q), Some(540));
         assert_eq!(parse_start_query(q), 0.0);
@@ -1493,9 +1520,38 @@ mod tests {
 
     // ── parse_start_query — feeds ffmpeg -ss; attacker-reachable ────────
     #[test]
-    fn start_query_parses_fractional_seconds() {
-        assert!((parse_start_query("/fmp4/v1/abc?start=19.933") - 19.933).abs() < 1e-9);
-        assert!((parse_start_query("/fmp4/v1/abc?start=0") - 0.0).abs() < 1e-9);
+    fn start_query_quantises_to_whole_seconds() {
+        // A fractional start used to survive to ffmpeg while the epoch memo
+        // was keyed on its FLOOR, so two seeks in one second could share a
+        // cached epoch while ffmpeg performed two different seeks. Measured
+        // with the shipped ffprobe on a 5.4s GOP: start=32.1 probes 27.000,
+        // start=32.9 probes 32.417, and both land in bucket 32. The second
+        // seek is then served a stream built at its own keyframe while the
+        // player is handed the first one's epoch, displacing the whole
+        // absolute timeline against the audio by up to a GOP.
+        //
+        // One number for ffmpeg, the probe and the memo. The sub-second
+        // target is not lost - it rides in pendingLand and is landed by the
+        // player's own seek.
+        assert_eq!(parse_start_query("/fmp4/v1/abc?start=19.933"), 19.0);
+        assert_eq!(parse_start_query("/fmp4/v1/abc?start=0"), 0.0);
+    }
+
+    #[test]
+    fn two_starts_in_one_second_are_the_same_request() {
+        // The collision, stated directly: these differ only below the second,
+        // and the memo caches by the value it is given. If they can disagree,
+        // the cache can serve one seek's epoch to another seek's stream.
+        let a = parse_start_query("/fmp4/v1/abc?start=32.100");
+        let b = parse_start_query("/fmp4/v1/abc?start=32.900");
+        assert_eq!(a, b, "two starts in one second must resolve to one -ss");
+        assert_eq!(a, 32.0);
+        // And two starts in DIFFERENT seconds must stay different, or the
+        // quantisation would be hiding real seeks from each other.
+        assert_ne!(
+            parse_start_query("/fmp4/v1/abc?start=32.900"),
+            parse_start_query("/fmp4/v1/abc?start=33.000"),
+        );
     }
 
     #[test]

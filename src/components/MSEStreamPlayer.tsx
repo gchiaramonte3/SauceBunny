@@ -1106,13 +1106,23 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
 
           // Fetch the ffmpeg-remuxed fMP4 and feed it to the SourceBuffer.
           const startFetch = async (from: number, g: number) => {
+            // WHOLE SECONDS on the wire. The proxy floors `start` anyway (see
+            // parse_start_query: it is what makes ffmpeg, the epoch probe and
+            // the probe's memo agree on one number), so sending the exact
+            // float only meant the player believed the stream began somewhere
+            // the stream did not begin. Rebased mode asserts this value as
+            // baseTime, so a mismatch there is a straight offset between the
+            // playhead and the audio.
+            // The exact sub-second target is unaffected: it rides in
+            // pendingLand and is landed by planFirstAppend's seek, not by -ss.
+            const startArg = Math.floor(from);
             try {
               // path is the RAW proxy URL …/v1/<b64>; the fMP4 route is the
               // same b64 under /fmp4/v1/ with an optional ?start= seek, plus an
               // optional ?audio=<b64> second input for DASH-split sources so the
               // proxy merges video+audio into one fMP4 (full audio, no download).
               const qs: string[] = [];
-              if (from > 0) qs.push(`start=${from.toFixed(3)}`);
+              if (startArg > 0) qs.push(`start=${startArg}`);
               if (audioStreamUrl) qs.push(`audio=${base64UrlEncode(audioStreamUrl)}`);
               // Tier B quality rung. Omitted entirely for a web source and for
               // passthrough, so the request is byte-identical to what every
@@ -1142,9 +1152,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
               // response's own header — never from a previous pipeline's
               // mode. Absolute → base 0 (currentTime IS source time after the
               // epoch shift below); rebased → base asserts the seek target.
-              baseTimeRef.current = timelineAbsRef.current ? 0 : from;
+              baseTimeRef.current = timelineAbsRef.current ? 0 : startArg;
               {
-                const localDur = timelineAbsRef.current ? total : (total > from ? total - from : 0);
+                const localDur = timelineAbsRef.current ? total : (total > startArg ? total - startArg : 0);
                 const msNow = msRef.current;
                 if (localDur > 0 && msNow && msNow.readyState === "open") {
                   try { msNow.duration = localDur; } catch { /* ignore */ }
