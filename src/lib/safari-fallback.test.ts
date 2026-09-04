@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { browserLabel, safariGuidance } from "./safari-fallback";
+import { browserLabel, safariGuidance, shouldCheckSafariFda } from "./safari-fallback";
 
 /**
  * The Safari cookie prompt used to be a dead end: it asked for a system-wide
@@ -56,6 +56,33 @@ describe("guidance when Safari has no Full Disk Access", () => {
     // A toast here cannot carry a button, so every word is followed by recall.
     for (const ready of [["chrome"], []]) {
       expect(safariGuidance(ready).body.length, JSON.stringify(ready)).toBeLessThan(190);
+    }
+  });
+});
+
+describe("when the Safari cookie check may appear at all", () => {
+  /**
+   * Reported with a screenshot of "Safari needs Full Disk Access / Chrome does
+   * not..." sitting over a LOCAL mp4 that was mid-playback: "I should not be
+   * getting the Safari message when I'm just running a localized video."
+   *
+   * The check ran on a mount effect keyed only on the SETTING, so it had no
+   * relationship to whether anything was fetching cookies. Cookies are read by
+   * one thing - yt-dlp, fetching a web source.
+   */
+  it("does not appear for a local file, whatever the cookie setting says", () => {
+    expect(shouldCheckSafariFda({ cookieBrowser: "safari", webSourceActive: false })).toBe(false);
+  });
+
+  it("appears once a web source is actually in play", () => {
+    expect(shouldCheckSafariFda({ cookieBrowser: "safari", webSourceActive: true })).toBe(true);
+  });
+
+  it("never appears for a browser that needs no permission", () => {
+    // Chrome, Brave, Firefox and Edge keep their cookies where the app can
+    // already read them; there is nothing to grant.
+    for (const b of ["chrome", "brave", "firefox", "edge", "none"]) {
+      expect(shouldCheckSafariFda({ cookieBrowser: b, webSourceActive: true }), b).toBe(false);
     }
   });
 });

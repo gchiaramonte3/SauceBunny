@@ -19,7 +19,7 @@ import {
   tcDigitsToDisplay,
 } from "./lib/timecode";
 import { currentQueueSource, queuedRangesForSource } from "./lib/queue-ranges";
-import { FDA_GRANTED, NO_PERMISSION_BROWSERS, safariGuidance } from "./lib/safari-fallback";
+import { FDA_GRANTED, NO_PERMISSION_BROWSERS, safariGuidance, shouldCheckSafariFda } from "./lib/safari-fallback";
 import { hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
 import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { decodeHtmlEntities } from "./lib/text";
@@ -1549,11 +1549,15 @@ export default function App() {
   const safariFdaPromptedRef = useRef(false);
   /** Removes the grant-watch listener when the choice changes or we unmount. */
   const fdaFocusCleanupRef = useRef<(() => void) | null>(null);
+  // Out of `inactive` exactly when a WEB source is in play; a local open never
+  // moves this machine. See shouldCheckSafariFda.
+  const webSourceActive = webPlayback.state.kind !== "inactive";
   useEffect(() => {
     if (defaults.ytCookiesBrowser !== "safari") {
       safariFdaPromptedRef.current = false;
       return;
     }
+    if (!shouldCheckSafariFda({ cookieBrowser: defaults.ytCookiesBrowser, webSourceActive })) return;
     if (safariFdaPromptedRef.current) return;
     safariFdaPromptedRef.current = true;
     let cancelled = false;
@@ -1600,7 +1604,7 @@ export default function App() {
       fdaFocusCleanupRef.current?.();
       fdaFocusCleanupRef.current = null;
     };
-  }, [defaults.ytCookiesBrowser, pushNotification]);
+  }, [defaults.ytCookiesBrowser, pushNotification, webSourceActive]);
 
   // Pipeline-log channel label for transcription ("whisper" | "parakeet"), in a
   // ref so the long-lived transcript-log listener tags lines with the engine

@@ -72,3 +72,35 @@ export const FDA_GRANTED = {
   title: "Safari sign-ins are on",
   body: "Full Disk Access is granted. Load the video again and your Safari session will be used.",
 } as const;
+
+/**
+ * Whether the Safari cookie check belongs on screen at all.
+ *
+ * Cookies are read by ONE thing: yt-dlp, fetching a web source. The check used
+ * to run on nothing but the setting - a mount effect keyed on
+ * `defaults.ytCookiesBrowser === "safari"` - so anyone who had picked Safari
+ * got "Safari needs Full Disk Access. Chrome does not..." pushed at them
+ * during whatever they happened to be doing. It was reported arriving over a
+ * LOCAL mp4, mid-playback, which is a permission prompt for a subsystem the
+ * user was not using and could not have been about to use.
+ *
+ * `webSourceActive` is the web playback machine being out of `inactive`. A
+ * local open never moves it, so a local file cannot raise this. Note that
+ * `sourceKind` is NOT a usable gate here: it initialises to "youtube" before
+ * any source exists at all.
+ *
+ * Covered by the unit tests below and NOT by an end-to-end one. An e2e was
+ * written and deleted: with the gate removed the notice fires at mount, on the
+ * home view, where no toast host is rendered - so it is never seen, the
+ * once-per-session ref is spent, and the test passes with the bug fully
+ * present. Reproducing it faithfully needs the setting changed while a local
+ * source is already open, which is a Settings-modal flow, not a seed. If you
+ * add that test, break-test it by deleting the call site rather than the rule.
+ */
+export function shouldCheckSafariFda(i: {
+  cookieBrowser: string;
+  webSourceActive: boolean;
+}): boolean {
+  if (i.cookieBrowser !== "safari") return false;
+  return i.webSourceActive;
+}
