@@ -128,3 +128,29 @@ it("a cancelled reader's late EOF cannot end the replacement stream", async () =
   cleanup();
   await landing;
 });
+
+it("keeps reading until a rebuilt absolute stream reaches its landing frame", async () => {
+  let requests = 0;
+  let appends = 0;
+  vi.spyOn(BufferDouble.prototype, "appendBuffer").mockImplementation(function (this: BufferDouble) {
+    const end = [2, 67, 74][appends++];
+    this.buffered = { length: 1, start: () => 0, end: () => end };
+    queueMicrotask(() => this.dispatchEvent(new Event("updateend")));
+  });
+  vi.stubGlobal("fetch", vi.fn(async () => {
+    const chunks = ++requests === 1 ? 1 : 2;
+    return new Response(new ReadableStream({ start(controller) {
+      for (let i = 0; i < chunks; i++) controller.enqueue(new Uint8Array([1]));
+      controller.close();
+    } }), { headers: { "x-timeline": "absolute", "x-stream-epoch": "0" } });
+  }));
+  const { player, video } = await mount();
+  const landing = player.current!.seekTo(68.3);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+  // The first post-seek fragment ends at 67s. Comparing buffer-ahead to
+  // currentTime=0 would stop reads there, so the 68.3s frame never arrives.
+  expect(appends).toBe(3);
+  expect(video.currentTime).toBeCloseTo(68.3);
+  await act(async () => { video.dispatchEvent(new Event("seeked")); });
+  expect((await landing).status).toBe("presented");
+});

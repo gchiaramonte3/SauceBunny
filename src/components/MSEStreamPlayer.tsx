@@ -881,7 +881,12 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       const v = videoRef.current;
       if (!sb || !ms || ms.readyState !== "open" || sb.updating || currentRef.current) return;
       if (v && sb.buffered.length > 0) {
-        const ahead = sb.buffered.end(sb.buffered.length - 1) - v.currentTime;
+        // Before an absolute landing, the fresh element can still be at 0.
+        // Throttling against that clock stalls a 68s seek at its first 67s
+        // fragment: it looks 67s ahead, yet the requested frame is absent.
+        const position = timelineAbsRef.current && pendingLandRef.current != null
+          ? pendingLandRef.current : v.currentTime;
+        const ahead = sb.buffered.end(sb.buffered.length - 1) - position;
         if (ahead > BUFFER_AHEAD_SECONDS) return;
       }
       const item = queueRef.current.shift();

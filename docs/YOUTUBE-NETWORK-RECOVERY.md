@@ -103,9 +103,9 @@ guards, no-rVFC fallback, a failed high-resolution landing, and Pause mid-handof
 It also exercises late cancelled EOF and teardown before response headers.
 These simulated media events supplement, not replace, installed WebKit testing.
 
-## Test installer: 0.5.0 (2026090903)
+## Superseded test installer: 0.5.0 (2026090903)
 
-The final test image is `Sauce Bunny 0.5.0 (2026090903).dmg`.
+The superseded test image is `Sauce Bunny 0.5.0 (2026090903).dmg`.
 SHA-256: `f4445181d59613ab9f30b9e3315225abaffed46008918b3b490dad8b5bb76b47`.
 It contains Premiere companion 0.1.6 and the verified NDI runtime 6.3.2.0;
 this batch does not alter the previously committed NDI continuity code.
@@ -116,7 +116,7 @@ its signature verified again. Staging uses `ditto --norsrc --noextattr` so
 Finder metadata from the build folder does not invalidate the sealed app.
 The standard package-content and sidecar checks passed as well.
 
-The installed final image resolved the public test source to 1080p split
+The installed 2026090903 image resolved the public test source to 1080p split
 presentation, played from the start, rebuilt at 110.4 seconds and resumed
 past 131 seconds without a no-data timeout or fallback to the 480p review
 copy. This final open used the previously verified downloaded copy; the
@@ -134,17 +134,58 @@ native gate passed 480 tests (21 ignored); the native network implementation
 has not changed since that run. Both new cancellation tests failed against
 the previous implementation before passing against the fix.
 
+The subsequent reverse seek to 68.3 seconds timed out. This image is retained
+for comparison, **not accepted as the final fix**. Its first remuxed fragment
+ended before the requested frame. Measuring buffer-ahead from the fresh
+element's zero clock stopped delivery before the next fragment could reach
+that frame. A new component test reproduced the deadlock. While an absolute
+landing is pending, backpressure now measures from the requested position;
+the existing buffer limit stays intact after landing.
+
+## Accepted internal test installer: 0.5.0 (2026090904)
+
+`Sauce Bunny 0.5.0 (2026090904).dmg` supersedes 2026090903.
+SHA-256: `6ce6a25217134a5a3a6a7d1628ab1c780d8573208c5836c53241a8b2436b57b2`.
+The mounted and installed executable hashes match:
+`56b571de064fd2866132c218be5e40eff795d7cac0c4d0cf6440dccb2f6c09e5`.
+
+The final image passed `hdiutil verify`, read-only mounting, strict deep app
+signature verification, package-content verification and sidecar checks.
+The exact staged app was installed, verified again, and opened for native
+WebKit testing. It retains companion 0.1.6 and NDI runtime 6.3.2.0. This remains
+**ad-hoc signed and not notarized**, suitable for internal testing, not a
+Developer-ID-signed public release. Previous installers were preserved.
+
+In the installed 2026090904 app, 1080p presentation played from the beginning,
+then after a forward seek to 110.4 seconds advanced past 127 seconds. A reverse
+seek to 68.3 seconds resumed and advanced past 102 seconds without the previous
+20-second timeout, no-data error or review-copy fallback. The app was left
+paused. This was a warmed, buffered session; it does not replace the earlier
+cold-download evidence or independently prove every network fragment split.
+The controlled-buffer regression test specifically proves the rebuilt-stream
+case where the first fragment ends at 67 seconds before the 68.3-second target:
+it fails against the old code and passes against the fix.
+
+Final checks: 3,541 frontend tests passed (2 skipped), lint and TypeScript
+passed. The browser suite passed 359 tests (4 skipped) before the final small
+buffer-origin change. The native network code is unchanged since the full
+480-test native gate (21 ignored). No GitHub push, release or tag was made.
+
 ## Review verdict: Ship it for internal testing
 
 Scope: the download-network and playback delta after `62e6b3b`, not a new
 audit of every pending change on the branch or a long-run NDI acceptance test.
+The scoped regression fixes and installed test package passed the checks above;
+public distribution still needs publication approval and release signing.
 
 ### Bugs
 
 Fixed the cancelled-reader EOF ending its replacement stream, cancellation
 before response headers, stale buffer callbacks, and a hidden/paused layer
 waiting indefinitely for a new compositor submission. Source changes also
-invalidate local frame confirmations.
+invalidate local frame confirmations. Fixed pre-landing backpressure measured
+against the fresh element's zero clock. No unresolved bugs were found in this
+scoped review; the explicit test boundaries above still apply.
 
 ### Principles
 
