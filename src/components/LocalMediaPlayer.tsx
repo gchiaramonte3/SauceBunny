@@ -4,6 +4,7 @@ import {
 import { assetUrl } from "../lib/asset-url";
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle, SeekResult } from "./player-handle";
+import { confirmDecodedFrame } from "../lib/confirm-decoded-frame";
 
 type Props = {
   path: string;
@@ -117,24 +118,22 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
 
     return new Promise<SeekResult>((resolve) => {
       let finished = false;
-      let frameId = 0;
-      const video = el instanceof HTMLVideoElement ? el as HTMLVideoElement & {
-        requestVideoFrameCallback?: (cb: (_now: number, meta: { mediaTime: number }) => void) => number;
-        cancelVideoFrameCallback?: (id: number) => void;
-      } : null;
+      let cancelFrame: (() => void) | undefined;
       const finish = (status: SeekResult["status"], presented = el.currentTime || target) => {
         if (finished) return;
         finished = true;
         window.clearTimeout(timeout);
         el.removeEventListener("seeked", onSeeked);
-        if (frameId && video?.cancelVideoFrameCallback) video.cancelVideoFrameCallback(frameId);
+        cancelFrame?.();
         resolve({ requestedSeconds: target, presentedSeconds: presented, status });
       };
       const onSeeked = () => {
         if (generation !== seekGenerationRef.current) { finish("superseded"); return; }
-        if (video?.requestVideoFrameCallback) {
-          frameId = video.requestVideoFrameCallback((_now, meta) => finish("presented", meta.mediaTime));
-        } else finish("presented");
+        cancelFrame?.();
+        cancelFrame = confirmDecodedFrame(el,
+          () => generation === seekGenerationRef.current && mediaRef.current === el
+            && Math.abs(el.currentTime - target) < 0.25,
+          (at) => finish("presented", at));
       };
       const timeout = window.setTimeout(() => finish(
         generation === seekGenerationRef.current ? "unavailable" : "superseded",
@@ -404,6 +403,9 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       if (preShuttleMutedRef.current != null) { el.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
       el.playbackRate = userRateRef.current; // clear any shuttle override, keep the user rate
       // New source → reset scrub bookkeeping + the one-shot duration retry.
+      // Invalidate the latest command, not the generation at effect mount.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      seekGenerationRef.current++;
       scrubbingRef.current = false;
       wasPlayingRef.current = false;
       retriedLoadRef.current = false;

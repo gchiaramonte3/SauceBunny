@@ -187,8 +187,10 @@ async fn output_timed(
 /// binaries are triple-suffixed and unfindable by name.
 pub(crate) fn ytdlp(
     app: &AppHandle,
+    url: &str,
 ) -> Result<tauri_plugin_shell::process::Command, crate::AppError> {
     let sidecars = super::sidecar_dir();
+    let network_args = ytdlp_network_args(url);
     if let Ok(data) = app.path().app_data_dir() {
         let bin_dir = data.join("bin");
         if bin_dir.join("yt-dlp").is_file() {
@@ -200,7 +202,7 @@ pub(crate) fn ytdlp(
             // without it every spawn of an >90-day binary dumps a 4-line
             // "run yt-dlp -U" lecture into the pipeline log that users can't
             // act on (the bundled copy isn't theirs to -U).
-            return Ok(app.shell().command("yt-dlp").arg("--no-update").env("PATH", path));
+            return Ok(app.shell().command("yt-dlp").arg("--no-update").args(network_args).env("PATH", path));
         }
     }
     eprintln!("[yt-dlp] using {} copy (sidecar)", resolved_ytdlp_kind(false));
@@ -212,7 +214,27 @@ pub(crate) fn ytdlp(
         // established message text must survive the r108 AppError sweep.
         .map_err(|e| crate::AppError::invalid(format!("sidecar yt-dlp not found: {e}")))?
         .arg("--no-update")
+        .args(network_args)
         .env("PATH", super::compose_spawn_path(None, sidecars.as_deref())))
+}
+
+/// YouTube CDN connections can spend an entire socket timeout on each broken
+/// IPv6 route before falling through to IPv4. A measured 8.6 MB review copy
+/// spent 45s connecting, versus <1s transferring the same formats over IPv4.
+/// Resolve AND download with the same address family (signed media URLs may
+/// be IP-bound). Do not change other sites or the Mac's network settings.
+pub(crate) fn ytdlp_network_args(url: &str) -> Vec<&'static str> {
+    let host = tauri::Url::parse(url).ok()
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase));
+    if host.as_deref().is_some_and(|h| {
+        h == "youtu.be" || h == "youtube.com" || h.ends_with(".youtube.com")
+            || h == "youtube-nocookie.com" || h.ends_with(".youtube-nocookie.com")
+            || h == "googlevideo.com" || h.ends_with(".googlevideo.com")
+    }) {
+        vec!["--force-ipv4", "--socket-timeout", "15"]
+    } else {
+        vec![]
+    }
 }
 
 /// Pure (unit-tested): the resolution order in one word - an existing
@@ -265,7 +287,7 @@ pub async fn ytdlp_version(app: AppHandle) -> Result<YtdlpStatus, crate::AppErro
     let updated = updated_ytdlp_path(&app)
         .map(|p| p.is_file())
         .unwrap_or(false);
-    let out = ytdlp(&app)?
+    let out = ytdlp(&app, "")?
         .arg("--version")
         .output()
         .await
@@ -610,11 +632,22 @@ pub(crate) fn humanize_ytdlp_error(stderr: &str) -> String {
     if trimmed.contains("age") && trimmed.contains("restricted") {
         return "Age-restricted video — set Settings → Web sources so yt-dlp can use your signed-in cookies.".into();
     }
+    if trimmed.contains("HTTP Error 429") || trimmed.contains("Too Many Requests") {
+        return "The site is rate-limiting downloads (HTTP 429). Wait before retrying; changing sign-in settings will not clear a rate limit.".into();
+    }
+    if trimmed.contains("HTTP Error 403") {
+        return "The site refused the media download (HTTP 403). Retry to request a fresh media URL. This is not necessarily a sign-in problem.".into();
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return "The media connection timed out. Check your connection and retry; the download has not completed.".into();
+    }
     // Generic fall-through: surface the first non-empty line so we don't
     // dump the whole Python stack into the UI.
     trimmed
         .lines()
-        .find(|l| !l.trim().is_empty())
+        .find(|l| l.trim_start().starts_with("ERROR:"))
+        .or_else(|| trimmed.lines().find(|l| !l.trim().is_empty()))
         .unwrap_or("yt-dlp failed")
         .to_string()
 }
@@ -680,7 +713,7 @@ async fn run_metadata_ytdlp(
     url: &str,
     cookies_browser: Option<&str>,
 ) -> Result<tauri_plugin_shell::process::Output, crate::AppError> {
-    let cmd = ytdlp(app)?;
+    let cmd = ytdlp(app, url)?;
     let mut args: Vec<String> = vec![
         "--dump-json".into(),
         "--no-warnings".into(),
@@ -1075,7 +1108,7 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
         .ok_or_else(|| crate::AppError::internal("template path is not valid utf-8"))?
         .to_string();
 
-    let cmd = ytdlp(&app)?;
+    let cmd = ytdlp(&app, &args.url)?;
 
     // Requested-locale (plus base form) or the English defaults — one list
     // drives yt-dlp's download, the other scan_best's preference ladder.
@@ -1253,7 +1286,7 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
             // Never resurrect a user cancel (signalled), and keep the second
             // child registered under the SAME job_id so Stop still works.
             if found.is_none() && attempt == 1 && cookied && !signalled {
-                if let Ok(cmd2) = ytdlp(&app_for) {
+                if let Ok(cmd2) = ytdlp(&app_for, &url_for) {
                     let mut second = base_args.clone();
                     second.push(url_for.clone());
                     if let Ok((rx2, child2)) = cmd2.args(second).spawn() {
@@ -1487,7 +1520,7 @@ async fn resolve_presentation_tiers(
     url: &str,
     cookies_browser: Option<&str>,
 ) -> Result<ResolvedPresentationSource, crate::AppError> {
-    let yt = ytdlp(app)?;
+    let yt = ytdlp(app, url)?;
     let mut args: Vec<String> = vec![
         "--no-playlist".into(),
         "--no-warnings".into(),
@@ -1647,7 +1680,7 @@ async fn resolve_stream_tiers(
     cookies_browser: Option<&str>,
     max_height: Option<u32>,
 ) -> Result<DirectStreamResult, crate::AppError> {
-    let yt = ytdlp(app)?;
+    let yt = ytdlp(app, url)?;
     // The protocol filters (`http`-prefixed, never `m3u8`) plus the muxed-only
     // clause are the same pattern mpv and VLC use to get a single playable URL.
     // WKWebView claims native HLS support, but an m3u8 served from
@@ -1778,7 +1811,7 @@ pub async fn download_web_preview(
     let prefix = format!("webcache-{}", args.job_id);
     let template = scratch_download_template(&cache, &prefix);
 
-    let cmd = ytdlp(&app)?;
+    let cmd = ytdlp(&app, &args.url)?;
     // Bundled ffmpeg for the DASH merge below — without it yt-dlp falls back to
     // PATH/Homebrew, absent on a distributed app (DISTRIBUTION.md).
     let ffmpeg_str = sidecar_path("ffmpeg")?
@@ -1856,6 +1889,12 @@ pub async fn download_web_preview(
         "--no-part".into(),
         "--newline".into(),
         "--progress".into(),
+        "--socket-timeout".into(), "15".into(),
+        "--retries".into(), "2".into(),
+        "--fragment-retries".into(), "2".into(),
+        // A preview with skipped fragments is not a successful review copy:
+        // missing media would shift notes/scrubbing against the source.
+        "--abort-on-unavailable-fragments".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
         YT_JS_RUNTIME_ARGS[0].into(),
@@ -1898,6 +1937,7 @@ pub async fn download_web_preview(
 
     tokio::spawn(async move {
         let mut saw_auth_error = false;
+        let mut last_error = String::new();
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
@@ -1906,10 +1946,15 @@ pub async fn download_web_preview(
                         let line = line.trim_end();
                         if line.is_empty() { continue; }
                         if is_youtube_auth_error_line(line) { saw_auth_error = true; }
+                        if line.starts_with("ERROR:") {
+                            last_error = line.chars().take(2048).collect();
+                        }
                         if is_ytdlp_progress(line) {
                             if let Some(pct) = regex_lite_percent(line) {
                                 let _ = app_for.emit("playback-prep-progress", ProgressEvent {
-                                    job_id: job_for.clone(), percent: pct,
+                                    // Each split track reports 100%; the copy
+                                    // is not ready until audio + merge finish.
+                                    job_id: job_for.clone(), percent: pct.min(99.0),
                                 });
                             }
                         }
@@ -1934,6 +1979,8 @@ pub async fn download_web_preview(
                             path: None,
                             error: Some(if payload.signal.is_some() {
                                 "Cancelled".into()
+                            } else if !last_error.is_empty() {
+                                humanize_ytdlp_error(&last_error)
                             } else if saw_auth_error {
                                 // Host-neutral: this path serves ALL web sources,
                                 // and Reddit/others now also gate on login cookies.
@@ -1944,7 +1991,7 @@ pub async fn download_web_preview(
                                 format!("Preview download failed (yt-dlp exit {:?})", payload.code)
                             }),
                         });
-                        break;
+                        return;
                     }
                     // Locate the file yt-dlp actually wrote — the ext
                     // depends on what it picked from the format selector —
@@ -1981,11 +2028,28 @@ pub async fn download_web_preview(
                             Some("yt-dlp exited cleanly but no file was found in cache".into())
                         },
                     });
-                    break;
+                    return;
+                }
+                CommandEvent::Error(error) => {
+                    last_error = error.chars().take(2048).collect();
                 }
                 _ => {}
             }
         }
+        // A closed event channel without Terminated must settle the renderer's
+        // promise as well; otherwise the preparation banner waits forever.
+        let registry = app_for.state::<JobRegistry>();
+        if let Some(child) = registry.take(&job_for) { let _ = child.kill(); }
+        let error = if registry.is_cancelled(&job_for) {
+            "Cancelled".into()
+        } else if last_error.is_empty() {
+            "The downloader stopped before reporting completion. Retry the source.".into()
+        } else {
+            humanize_ytdlp_error(&last_error)
+        };
+        let _ = app_for.emit("playback-prep-done", PreparePlaybackDone {
+            job_id: job_for, success: false, path: None, error: Some(error),
+        });
     });
 
     Ok(args.job_id)
@@ -2380,7 +2444,7 @@ pub async fn download_audio_track(
         }
     }
 
-    let cmd = ytdlp(&app)?;
+    let cmd = ytdlp(&app, &args.url)?;
     // Bundled ffmpeg for any DASH audio merge — never PATH/Homebrew (DISTRIBUTION.md).
     let ffmpeg_str = sidecar_path("ffmpeg")?
         .to_str()
@@ -2549,6 +2613,49 @@ mod warm_cache_tests {
     }
 }
 
+#[cfg(test)]
+mod youtube_network_tests {
+    use super::{humanize_ytdlp_error, ytdlp_network_args};
+
+    #[test]
+    fn youtube_extraction_and_download_use_the_same_ipv4_route() {
+        for url in [
+            "https://www.youtube.com/watch?v=test", "https://youtu.be/test",
+            "https://m.youtube.com/shorts/test", "https://www.youtube-nocookie.com/embed/test",
+            "https://rr1---sn-example.googlevideo.com/videoplayback?expire=123",
+        ] {
+            assert_eq!(ytdlp_network_args(url), ["--force-ipv4", "--socket-timeout", "15"]);
+        }
+    }
+
+    #[test]
+    fn unrelated_sites_and_version_checks_keep_their_network_defaults() {
+        for url in ["", "https://vimeo.com/123", "https://[2001:4860::1]/media",
+            "https://youtube.com.example.com/watch", "https://notyoutube.com/watch",
+            "https://example.com/?url=https://youtube.com/watch"] {
+            assert!(ytdlp_network_args(url).is_empty(), "{url}");
+        }
+    }
+
+    #[test]
+    fn both_installed_and_bundled_commands_apply_the_network_policy() {
+        let source = include_str!("download.rs");
+        let factory = source.split("pub(crate) fn ytdlp(").nth(1).unwrap()
+            .split("pub(crate) fn ytdlp_network_args").next().unwrap();
+        assert!(factory.contains("let network_args = ytdlp_network_args(url)"));
+        assert_eq!(factory.matches(".args(network_args)").count(), 2);
+    }
+
+    #[test]
+    fn download_errors_describe_the_cause_not_an_extractor_status_line() {
+        assert_eq!(humanize_ytdlp_error("[youtube] Downloading webpage\nERROR: Disk full"), "ERROR: Disk full");
+        assert!(humanize_ytdlp_error("ERROR: HTTP Error 403: Forbidden").contains("HTTP 403"));
+        assert!(humanize_ytdlp_error("ERROR: HTTP Error 429: Too Many Requests").contains("rate-limiting"));
+        assert!(humanize_ytdlp_error("ERROR: Read timed out").contains("connection timed out"));
+        assert!(humanize_ytdlp_error("ERROR: Sign in to confirm you're not a bot").contains("sign-in"));
+    }
+}
+
 // ─── Nightly real-sidecar smoke (see src/nightly.rs; run with --ignored) ────
 //
 // yt-dlp's CLI churns on a near-weekly cadence and the nightly workflow pulls
@@ -2585,13 +2692,13 @@ mod nightly_ytdlp_tests {
                 continue; // prose can mention hypothetical flags
             }
             // Collect "--flag" string literals: a quote, two dashes, then
-            // [a-z-] up to the closing quote.
+            // [a-z0-9-] up to the closing quote (including --force-ipv4).
             let mut rest = t;
             while let Some(i) = rest.find("\"--") {
                 let after = &rest[i + 1..];
                 if let Some(end) = after.find('"') {
                     let cand = &after[..end];
-                    if cand.len() >= 4 && cand[2..].chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+                    if cand.len() >= 4 && cand[2..].chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
                         flags.push(cand.to_string());
                     }
                     rest = &after[end + 1..];

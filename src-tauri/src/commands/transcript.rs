@@ -1302,7 +1302,7 @@ pub async fn generate_transcript(
             format!("Downloading audio for {} → {}…", args.start, args.end),
         );
 
-        let yt = match ytdlp(&app_for) {
+        let yt = match ytdlp(&app_for, &args.url) {
             Ok(c) => c,
             Err(e) => {
                 emit_transcript_done(

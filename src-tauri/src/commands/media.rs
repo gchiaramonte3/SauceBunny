@@ -483,7 +483,7 @@ async fn spawn_video_clip(
         // them — some sites (LinkedIn) serve a logged-in page yt-dlp can't
         // parse. Mirrors the stream resolver's cookie-fallback.
         let mut outcome =
-            run_video_attempt(&app, &job_id, with(cookies_browser.as_deref()), total_seconds).await;
+            run_video_attempt(&app, &job_id, &url_for_cut, with(cookies_browser.as_deref()), total_seconds).await;
         if !outcome.success && !outcome.signalled && cookied {
             emit_clip_log(&app, &job_id, "info",
                 "Export failed with sign-in cookies — retrying without…".into());
@@ -515,7 +515,7 @@ async fn spawn_video_clip(
                     }
                 }
             }
-            outcome = run_video_attempt(&app, &job_id, with(None), total_seconds).await;
+            outcome = run_video_attempt(&app, &job_id, &url_for_cut, with(None), total_seconds).await;
         }
         // ── Phase 2: cut the range out of the full download ──────────
         let mut success = outcome.success;
@@ -587,10 +587,11 @@ async fn spawn_video_clip(
 async fn run_video_attempt(
     app: &AppHandle,
     job_id: &str,
+    url: &str,
     cmd_args: Vec<String>,
     total_seconds: f64,
 ) -> ClipOutcome {
-    let cmd = match ytdlp(app) {
+    let cmd = match ytdlp(app, url) {
         Ok(c) => c,
         Err(e) => {
             emit_clip_log(app, job_id, "err", format!("yt-dlp unavailable: {e}"));
@@ -657,9 +658,8 @@ async fn spawn_audio_clip(
     // onto a single throttled connection, cancelling the very flags three
     // lines above. Phase 2 already runs ffmpeg over the result, so the range
     // costs nothing there.
+    let cmd = ytdlp(&app, &url)?;
     yt_args.push(url);
-
-    let cmd = ytdlp(&app)?;
     let (mut rx, child) = cmd
         .args(yt_args)
         .spawn()
@@ -1095,7 +1095,7 @@ pub async fn extract_frame(app: AppHandle, args: ExtractFrameArgs) -> Result<Ext
     let (direct_url, format_id, width, height, vcodec) = if let Some(e) = cached {
         (e.0, e.1, e.2, e.3, e.4)
     } else {
-    let yt = ytdlp(&app)?;
+    let yt = ytdlp(&app, &args.url)?;
     let mut yt_invocation: Vec<String> = vec![
         "--no-playlist".into(),
         "--no-warnings".into(),

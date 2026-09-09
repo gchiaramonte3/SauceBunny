@@ -88,9 +88,26 @@ export const ProxyPresentationPlayer = memo(forwardRef<PlayerHandle, Props>(func
         await high.play();
         publishPlaying(true);
       }
+    } else if (result.status === "unavailable") {
+      // A bounded native seek failure must not leave Play retrying the same
+      // dead handoff forever while a complete, playable local copy is ready.
+      presentationFailedRef.current = true;
+      presentationReadyRef.current = false;
+      setPresentationReady(false);
+      high.pause();
+      setShowProxy(true);
+      onDiag?.("warn", "Presentation seek unavailable; continuing with the downloaded review copy.");
+      const proxy = proxyRef.current;
+      const fallback = proxy?.isReady() ? await proxy.seekTo(seconds) : unavailable(seconds, seconds);
+      if (generation !== generationRef.current) return { ...fallback, status: "superseded" };
+      if (fallback.status === "presented") {
+        onTimeUpdate?.(fallback.presentedSeconds);
+        if (resume) { await proxy?.play(); publishPlaying(true); }
+      }
+      return fallback;
     }
     return result;
-  }, [onTimeUpdate, publishPlaying, setShowProxy]);
+  }, [onTimeUpdate, onDiag, publishPlaying, setShowProxy]);
 
   const handlePresentationReady = () => {
     presentationReadyRef.current = true;
@@ -129,21 +146,23 @@ export const ProxyPresentationPlayer = memo(forwardRef<PlayerHandle, Props>(func
   }, [presentation, setShowProxy]);
 
   useImperativeHandle(ref, () => ({
-    play: () => {
+    play: async () => {
       const high = presentationRef.current;
       if (!showProxyRef.current && high?.isReady()) {
-        void high.play();
+        await high.play();
         return;
       }
       if (presentationReadyRef.current && !presentationFailedRef.current) {
         const at = proxyRef.current?.getCurrentTime() ?? 0;
         landingRef.current = true;
-        void handoffToPresentation(at, true).finally(() => { landingRef.current = false; });
+        await handoffToPresentation(at, true).finally(() => { landingRef.current = false; });
       } else {
-        void proxyRef.current?.play();
+        await proxyRef.current?.play();
       }
     },
     pause: () => {
+      generationRef.current += 1;
+      landingRef.current = false;
       resumeAfterScrubRef.current = false;
       proxyRef.current?.pause();
       presentationRef.current?.pause();

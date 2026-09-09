@@ -11,18 +11,22 @@ const h = vi.hoisted(() => ({
   fireHighReady: null as null | (() => void),
   deferredResolve: null as null | ((result: SeekResult) => void),
   deferHigh: false,
+  highUnavailable: false,
+  proxyPlays: 0,
+  highPlays: 0,
 }));
 
 function fakeHandle(kind: "proxy" | "high"): PlayerHandle {
   let time = 0;
   let playing = false;
   return {
-    play: () => { playing = true; },
+    play: () => { playing = true; if (kind === "proxy") h.proxyPlays++; else h.highPlays++; },
     pause: () => { playing = false; },
     seekTo: async (seconds) => {
       time = seconds;
       if (kind === "high") {
         h.highSeeks.push(seconds);
+        if (h.highUnavailable) return { requestedSeconds: seconds, presentedSeconds: time, status: "unavailable" };
         if (h.deferHigh) {
           return await new Promise<SeekResult>((resolve) => { h.deferredResolve = resolve; });
         }
@@ -99,9 +103,45 @@ beforeEach(() => {
   h.highSeeks.length = 0;
   h.deferredResolve = null;
   h.deferHigh = false;
+  h.highUnavailable = false;
+  h.proxyPlays = 0;
+  h.highPlays = 0;
 });
 
 describe("downloaded proxy + presentation boundary", () => {
+  it("keeps a failed native handoff playable using the completed review copy", async () => {
+    const player = createRef<PlayerHandle>();
+    const diag = vi.fn();
+    render(<ProxyPresentationPlayer ref={player} proxyPath="/cache/review.mp4" presentation={presentation}
+      initialVolume={1} scrubAudio={false} onDiag={diag} />);
+    await act(async () => { h.fireHighReady?.(); });
+    h.highUnavailable = true;
+    await act(async () => { await player.current?.seekTo(68); });
+    await act(async () => { await player.current?.play(); });
+    expect(h.proxyPlays).toBe(1);
+    expect(h.highPlays).toBe(0);
+    expect(player.current?.getCurrentTime()).toBe(68);
+    expect(diag).toHaveBeenCalledWith("warn", expect.stringContaining("downloaded review copy"));
+  });
+
+  it("a delayed handoff cannot restart playback after Pause", async () => {
+    const player = createRef<PlayerHandle>();
+    render(<ProxyPresentationPlayer ref={player} proxyPath="/cache/review.mp4" presentation={presentation}
+      initialVolume={1} scrubAudio={false} />);
+    h.deferHigh = true;
+    act(() => { h.fireHighReady?.(); });
+    let playing!: ReturnType<PlayerHandle["play"]>;
+    act(() => { playing = player.current!.play(); });
+    await waitFor(() => expect(h.deferredResolve).not.toBeNull());
+    act(() => player.current!.pause());
+    await act(async () => {
+      h.deferredResolve?.({ requestedSeconds: 0, presentedSeconds: 0, status: "presented" });
+      await playing;
+    });
+    expect(h.highPlays).toBe(0);
+    expect(h.proxyPlays).toBe(0);
+  });
+
   it("never seeks the split presentation during drag and lands it exactly once", async () => {
     const player = createRef<PlayerHandle>();
     render(<ProxyPresentationPlayer ref={player} proxyPath="/cache/review.mp4" presentation={presentation}

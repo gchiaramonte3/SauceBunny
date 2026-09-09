@@ -9,6 +9,7 @@ import { encodedStreamMime, peerStreamMime } from "../lib/codec-strings";
 import { rebuildLogLine } from "../lib/seek-log";
 import { mayHideScrubOverlay, shouldFreezeOutgoingFrame } from "../lib/scrub-freeze";
 import { planFirstAppend } from "../lib/first-append";
+import { confirmDecodedFrame } from "../lib/confirm-decoded-frame";
 
 /**
  * Streams a web source (YouTube/Vimeo/…) into a NATIVE `<video>` element via
@@ -195,6 +196,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const sbRef = useRef<SourceBuffer | null>(null);
   const probeInputRef = useRef<Input | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  const fetchAbortRef = useRef<AbortController | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const queueRef = useRef<Array<{ data: Uint8Array; resolve: () => void }>>([]);
   const currentRef = useRef<{ resolve: () => void } | null>(null);
@@ -212,6 +214,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const scrubResumeRef = useRef(false);
   const resumeOverrideRef = useRef<boolean | null>(null);
   const seekCommandRef = useRef(0);
+  const settleDecodedFrameRef = useRef<(() => void) | null>(null);
   const seekCompletionRef = useRef<{
     id: number;
     target: number;
@@ -452,6 +455,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             // updateend landing from later yanking currentTime back to it.
             pendingLandRef.current = null;
             try { v.currentTime = localTarget; } catch { /* ignore */ }
+            // A zero-distance seek need not emit seeked or a new compositor
+            // frame. The existing decoded frame can settle this request.
+            settleDecodedFrameRef.current?.();
             if (newGesture) {
               onDiagRef.current?.("ok", `seek in-buffer → currentTime ${localTarget.toFixed(1)}`);
             }
@@ -915,6 +921,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
 
     const teardownPipeline = () => {
       genRef.current++;
+      // A seek can replace the pipeline BEFORE fetch has returned headers,
+      // when there is no reader to cancel yet. Hold cancellation from launch.
+      fetchAbortRef.current?.abort();
+      fetchAbortRef.current = null;
       const reader = readerRef.current;
       const probe = probeInputRef.current;
       const objUrl = objectUrlRef.current;
@@ -1079,6 +1089,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             // reveals THIS pipeline's timeline mode (review fix: sizing it
             // here used the previous pipeline's mode).
             sb.addEventListener("updateend", () => {
+              if (disposed || gen !== genRef.current) return;
               // Capture the timeline origin from the first buffered range (later
               // ranges shift forward as old data is evicted, so capture ONCE).
               if (sb.buffered.length > 0) sawData = true;
@@ -1125,7 +1136,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
               c?.resolve();
               pump();
             });
-            sb.addEventListener("error", () => fail("SourceBuffer error during append"));
+            sb.addEventListener("error", () => {
+              if (!disposed && gen === genRef.current) fail("SourceBuffer error during append");
+            });
 
             readyRef.current = true;
             // onReady (which clears App's 15s stall watchdog + drops the
@@ -1186,7 +1199,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
               if (rungRef.current) qs.push(`rung=${rungRef.current}`);
               const fmp4Url = path.replace("/v1/", "/fmp4/v1/")
                 + (qs.length ? `?${qs.join("&")}` : "");
-              const resp = await fetch(fmp4Url);
+              const controller = new AbortController();
+              fetchAbortRef.current = controller;
+              const resp = await fetch(fmp4Url, { signal: controller.signal });
               if (disposed || g !== genRef.current) { try { await resp.body?.cancel(); } catch { /* ignore */ } return; }
               if (!resp.ok || !resp.body) { fail(`fMP4 stream HTTP ${resp.status}`); return; }
               // What the presenter really did, which can differ from the ask:
@@ -1234,6 +1249,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
               for (;;) {
                 if (disposed || g !== genRef.current) { try { await reader.cancel(); } catch { /* ignore */ } return; }
                 const { done, value } = await reader.read();
+                // cancel() resolves an outstanding read with EOF. A check
+                // only BEFORE await let that old EOF end the NEW MediaSource
+                // during a seek, or let an old chunk enter its append queue.
+                if (disposed || g !== genRef.current) return;
                 if (done) { endedRef.current = true; pump(); break; }
                 if (value && value.byteLength) {
                   // Resolve fires on appendBuffer's updateend; pump won't
@@ -1438,7 +1457,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     // The overlay must OUTLIVE A REBUILD - see mayHideScrubOverlay. The
     // rebuild attaches a fresh, empty MediaSource, whose `loadeddata` used to
     // reach this handler and hide the one thing holding a picture.
+    let cancelSettleFrame: (() => void) | undefined;
     const onSettled = () => {
+      cancelSettleFrame?.();
       if (mayHideScrubOverlay({
         settleArmed: scrubbingRef.current,
         rebuildPending: rebuildTimerRef.current != null,
@@ -1456,12 +1477,18 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             el.play().catch(() => { /* gesture/autoplay — ignore */ });
           }
         };
-        if (hasRVFC) {
-          rvfc.requestVideoFrameCallback((_now: number, meta: { mediaTime?: number }) =>
-            confirm(meta.mediaTime ?? el.currentTime));
-        } else confirm();
+        const generation = genRef.current;
+        const command = seekCommandRef.current;
+        cancelSettleFrame = confirmDecodedFrame(el, () => {
+          const pending = seekCompletionRef.current;
+          return generation === genRef.current && command === seekCommandRef.current
+            && !scrubbingRef.current && rebuildTimerRef.current == null && !!sbRef.current
+            && pendingLandRef.current == null
+            && (!pending || Math.abs(corrected(el.currentTime) - pending.target) < 0.25);
+        }, confirm);
       }
     };
+    settleDecodedFrameRef.current = onSettled;
     // Also hide the overlay the instant real playback resumes. The
     // out-of-buffer REBUILD path can fire 'loadeddata' while the settle
     // timer is still armed (so onSettled bails), then resume the rebuilt
@@ -1486,6 +1513,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     el.addEventListener("seeked", onSettled);
     el.addEventListener("loadeddata", onSettled);
     return () => {
+      cancelSettleFrame?.();
+      settleDecodedFrameRef.current = null;
       if (rafId) cancelAnimationFrame(rafId);
       if (rvfcId) { try { rvfc.cancelVideoFrameCallback(rvfcId); } catch { /* ignore */ } rvfcId = 0; }
       if (shuttleRafRef.current) { cancelAnimationFrame(shuttleRafRef.current); shuttleRafRef.current = 0; }

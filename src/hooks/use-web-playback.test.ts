@@ -203,6 +203,11 @@ describe("shouldRetryWithoutCookies", () => {
     expect(shouldRetryWithoutCookies("download failed (yt-dlp exit Some(1))", false)).toBe(false);
   });
 
+  it("does not turn network timeouts or rate limits into cookie retries", () => {
+    for (const message of ["The media connection timed out.", "socket timeout", "HTTP Error 429: Too Many Requests", "The site is rate-limiting downloads (HTTP 429)."])
+      expect(shouldRetryWithoutCookies(message, true)).toBe(false);
+  });
+
   it("treats cancellation and a source switch as the user, not a failure", () => {
     expect(shouldRetryWithoutCookies("Cancelled", true)).toBe(false);
     expect(shouldRetryWithoutCookies("Source changed", true)).toBe(false);

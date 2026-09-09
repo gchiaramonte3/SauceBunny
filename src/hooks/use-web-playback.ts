@@ -120,6 +120,9 @@ export function shouldRetryWithoutCookies(message: string, hadCookies: boolean):
   if (!hadCookies) return false;
   if (message.includes("exited cleanly")) return false;
   if (message.includes("Cancelled") || message.includes("Source changed")) return false;
+  // Dropping cookies cannot repair a broken route or a server rate limit.
+  // In either case another automatic full download only prolongs the wait.
+  if (/timed out|timeout|HTTP (?:Error )?429|rate.limit/i.test(message)) return false;
   return true;
 }
 

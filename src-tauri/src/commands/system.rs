@@ -1553,7 +1553,7 @@ pub fn default_export_path(app: AppHandle) -> Result<String, crate::AppError> {
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-09-08-ndi-fragment-continuity";
+pub const BACKEND_BUILD_ID: &str = "2026-09-08-youtube-network-continuity";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {
