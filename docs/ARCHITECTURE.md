@@ -102,7 +102,8 @@ fetch_metadata    OR    probe_local_file    (Rust)
                           ▼
                     Native <video>
 
-   WEB SOURCE ──► MSEStreamPlayer  (the only path that streams web video WITH AUDIO in WKWebView)
+   WEB SOURCE (no completed copy / live) ──► existing stream-first path:
+                 MSEStreamPlayer
                  │
                  │   yt-dlp -g (resolve direct CDN url)
                  ▼
@@ -113,12 +114,35 @@ fetch_metadata    OR    probe_local_file    (Rust)
                  ▼
                  WebKit NATIVE decode (H.264 + AAC) → <video>
                  │
-                 └─ on any failure → yt-dlp download-to-cache → LocalMediaPlayer (fallback)
+                 └─ on failure → yt-dlp download-to-cache → completed-copy path below
 
-   Why this shape: WKWebView blocks the YouTube IFrame (Error 153), refuses
-   cross-origin <video src>, and lacks a WebCodecs AudioDecoder (< Safari 26).
-   MSE fed by a same-origin blob + ffmpeg's reference fMP4 is the only
-   combination that yields full audio. See CLAUDE.md "Media playback path".
+   The streaming path feeds native A/V decoding with FFmpeg's reference fMP4
+   through a same-origin MediaSource blob. Completed review copies use the
+   separate in-app local decoder below. See CLAUDE.md "Media playback path".
+
+   COMPLETED WEB REVIEW COPY (Clip and Preview)
+      ProxyPresentationPlayer / presentation-playback.ts
+         ├─ local MediaBunny: authoritative scrub/seek and immediate Play
+         └─ paused candidate: MSE split A/V, or native HLS/progressive
+              resolve → confirm parked frame → observe contiguous A/V buffer
+              → promote ONLY while paused
+
+   Play never resolves URLs or seeks the candidate. It synchronously checks
+   the confirmed source frame, current generation, seek/error state and >=2s
+   contiguous playable media (or the remaining duration). Otherwise it starts
+   the local copy. No late preparation callback can promote during playback.
+   Native waiting/fatal errors fall back to local at the confirmed position;
+   the run stays local until another pause. Only the selected engine publishes
+   time/playing state or plays audio. Native rate preference is retained, but
+   the proxy reports its actual 1× capability.
+
+   beginScrub disposes the candidate's fetch/decoder; endScrub resolves on the
+   local frame without waiting for high quality. Paused preparation is one
+   operation per source/settled frame. Matching pending requests reuse it;
+   changed targets supersede it. Source epochs and transport command IDs gate
+   callbacks. Signed-URL refresh holds the working source until a safe pause.
+   MSE retains its ~30s ahead cap; native candidates use metadata preload and
+   actual buffer observations (preload is only a browser hint).
 
 ─────── Playback + Mark in/out ───────
 

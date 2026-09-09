@@ -20,8 +20,20 @@ export type SeekResult = {
   status: "presented" | "superseded" | "unavailable";
 };
 
+/** A fresh observation, not a promise that a resolved URL will play. Times
+ * are absolute source seconds; a missing confirmed frame is never ready. */
+export type PlaybackReadiness = {
+  generation: number;
+  confirmedSeconds: number | null;
+  bufferedAheadSeconds: number;
+  durationSeconds: number;
+  seeking: boolean;
+  failed: boolean;
+  hasFutureData: boolean;
+};
+
 export type PlayerHandle = {
-  play: () => void;
+  play: () => void | Promise<void>;
   pause: () => void;
   /** One complete, programmatic seek (comment/cue/frame-step/chase). */
   seekTo: (seconds: number) => Promise<SeekResult>;
@@ -35,6 +47,8 @@ export type PlayerHandle = {
   getDuration: () => number;
   isReady: () => boolean;
   isPlaying: () => boolean;
+  /** Optional for native presentation adapters. Always inspect at Play time. */
+  getPlaybackReadiness?: () => PlaybackReadiness;
   /** Volume 0..1 (normalised across players' native scales). */
   setVolume: (v: number) => void;
   getVolume: () => number;

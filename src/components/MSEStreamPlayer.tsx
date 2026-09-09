@@ -10,6 +10,7 @@ import { rebuildLogLine } from "../lib/seek-log";
 import { mayHideScrubOverlay, shouldFreezeOutgoingFrame } from "../lib/scrub-freeze";
 import { planFirstAppend } from "../lib/first-append";
 import { confirmDecodedFrame } from "../lib/confirm-decoded-frame";
+import { contiguousBufferAhead } from "../lib/presentation-readiness";
 
 /**
  * Streams a web source (YouTube/Vimeo/…) into a NATIVE `<video>` element via
@@ -47,6 +48,8 @@ type Props = {
   onTimeUpdate?: (seconds: number) => void;
   onPlayStateChange?: (playing: boolean) => void;
   onReady?: (duration: number) => void;
+  /** Preparation observations only; never a transport command. */
+  onReadinessChange?: () => void;
   onError?: (message: string) => void;
   onSurfaceClick?: () => void;
   /** Authoritative duration (seconds) from yt-dlp metadata. Preferred over the
@@ -93,12 +96,15 @@ type Props = {
 const BUFFER_AHEAD_SECONDS = 30;
 
 export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSEStreamPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec, onDiag, startAtSeconds, disableScrubPreview, rung, onStall, onStreamInfo },
+  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onReadinessChange, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec, onDiag, startAtSeconds, disableScrubPreview, rung, onStall, onStreamInfo },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readyRef = useRef(false);
   const playingRef = useRef(false);
+  const confirmedFrameRef = useRef<{ generation: number; seconds: number } | null>(null);
+  const readinessChangedRef = useRef(onReadinessChange);
+  readinessChangedRef.current = onReadinessChange;
   const [isPlaying, setIsPlaying] = useState(false);
 
   const baseTimeRef = useRef(0);
@@ -319,6 +325,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       presentedSeconds: presentedSeconds ?? pending.target,
       status,
     });
+    gestureSeeksRef.current = 0;
+    gestureFromRef.current = null;
   }, []);
 
   const armSeek = useCallback((target: number): Promise<SeekResult> => {
@@ -568,6 +576,19 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     },
     getDuration: () => totalDurationRef.current || 0,
     isReady: () => readyRef.current,
+    getPlaybackReadiness: () => {
+      const el = videoRef.current;
+      const confirmed = confirmedFrameRef.current;
+      return {
+        generation: genRef.current,
+        confirmedSeconds: confirmed?.generation === genRef.current ? confirmed.seconds : null,
+        bufferedAheadSeconds: el ? contiguousBufferAhead(el.buffered, el.currentTime) : 0,
+        durationSeconds: Math.max(totalDurationRef.current, knownDurationRef.current),
+        seeking: !el || el.seeking || seekingRef.current || !!seekCompletionRef.current,
+        failed: failedRef.current || !!el?.error,
+        hasFutureData: !!el && el.readyState >= 3,
+      };
+    },
     isPlaying: () => playingRef.current,
     setVolume: (v) => {
       const c = Math.max(0, Math.min(1, v));
@@ -1136,6 +1157,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
                 readyOnceRef.current = true;
                 onReady?.(total);
               }
+              readinessChangedRef.current?.();
               const c = currentRef.current;
               currentRef.current = null;
               c?.resolve();
@@ -1365,6 +1387,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       if (!seekingRef.current) {
         const at = corrected(el.currentTime);
         livePosRef.current = at;
+        if (el.readyState >= 2 && !el.seeking) confirmedFrameRef.current = { generation: genRef.current, seconds: at };
         onTimeUpdateRef.current?.(at);
       }
     };
@@ -1477,6 +1500,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           onTimeUpdateRef.current?.(at);
           setScrubPreview(false);
           finishSeek("presented", at);
+          confirmedFrameRef.current = { generation: genRef.current, seconds: at };
+          readinessChangedRef.current?.();
           if (wantPlayRef.current) {
             wantPlayRef.current = false;
             el.play().catch(() => { /* gesture/autoplay — ignore */ });

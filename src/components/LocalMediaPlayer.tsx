@@ -5,6 +5,7 @@ import { assetUrl } from "../lib/asset-url";
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle, SeekResult } from "./player-handle";
 import { confirmDecodedFrame } from "../lib/confirm-decoded-frame";
+import { contiguousBufferAhead } from "../lib/presentation-readiness";
 
 type Props = {
   path: string;
@@ -15,6 +16,10 @@ type Props = {
   onTimeUpdate?: (seconds: number) => void;
   onPlayStateChange?: (playing: boolean) => void;
   onReady?: (duration: number) => void;
+  onReadinessChange?: () => void;
+  onStall?: () => void;
+  /** Only standby web presentation overrides this; local-file loading stays unchanged. */
+  preload?: "auto" | "metadata";
   /** Surface any HTML5 media error (decode, network, src missing, etc). */
   onError?: (message: string) => void;
   onSurfaceClick?: () => void;
@@ -28,12 +33,17 @@ type Props = {
  * the same imperative handle as YouTubePlayer.
  */
 export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function LocalMediaPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, onDiag },
+  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onReadinessChange, onStall, preload = "auto", onError, onSurfaceClick, onDiag },
   ref,
 ) {
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const readyRef = useRef(false);
   const playingRef = useRef(false);
+  const confirmedFrameRef = useRef<number | null>(null);
+  const readinessChangedRef = useRef(onReadinessChange);
+  readinessChangedRef.current = onReadinessChange;
+  const stallRef = useRef(onStall);
+  stallRef.current = onStall;
   /**
    * Resume-after-idle forensics, LOCAL half.
    *
@@ -111,6 +121,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     const el = mediaRef.current;
     const target = clampTarget(seconds);
     const generation = ++seekGenerationRef.current;
+    confirmedFrameRef.current = null;
     if (!el) return Promise.resolve({ requestedSeconds: target, presentedSeconds: target, status: "unavailable" });
     onTimeUpdateRef.current?.(target);
     try { el.currentTime = target; }
@@ -125,6 +136,10 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
         window.clearTimeout(timeout);
         el.removeEventListener("seeked", onSeeked);
         cancelFrame?.();
+        if (status === "presented") {
+          confirmedFrameRef.current = presented;
+          readinessChangedRef.current?.();
+        }
         resolve({ requestedSeconds: target, presentedSeconds: presented, status });
       };
       const onSeeked = () => {
@@ -225,6 +240,18 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     getCurrentTime: () => mediaRef.current?.currentTime ?? 0,
     getDuration: () => mediaRef.current?.duration ?? 0,
     isReady: () => readyRef.current,
+    getPlaybackReadiness: () => {
+      const el = mediaRef.current;
+      return {
+        generation: seekGenerationRef.current,
+        confirmedSeconds: confirmedFrameRef.current,
+        bufferedAheadSeconds: el ? contiguousBufferAhead(el.buffered, el.currentTime) : 0,
+        durationSeconds: el?.duration ?? 0,
+        seeking: !el || el.seeking,
+        failed: !!el?.error,
+        hasFutureData: !!el && el.readyState >= 3,
+      };
+    },
     isPlaying: () => playingRef.current,
     setVolume: (v) => { if (mediaRef.current) mediaRef.current.volume = Math.max(0, Math.min(1, v)); },
     getVolume: () => mediaRef.current?.volume ?? 1,
@@ -329,7 +356,10 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     // than skipping ~4 frames per tick. App floors to a frame number and React
     // bails when it's unchanged, so this only re-renders on a real frame change.
     let rafId = 0;
-    const reportTime = () => onTimeUpdateRef.current?.(el.currentTime);
+    const reportTime = () => {
+      if (!el.seeking && el.readyState >= 2) confirmedFrameRef.current = el.currentTime;
+      onTimeUpdateRef.current?.(el.currentTime);
+    };
     const tick = () => { rafId = 0; if (!playingRef.current) return; reportTime(); rafId = requestAnimationFrame(tick); };
     const startTick = () => { if (!rafId) rafId = requestAnimationFrame(tick); };
     // While scrubbing we pause/resume the element internally — don't surface
@@ -407,6 +437,8 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       // eslint-disable-next-line react-hooks/exhaustive-deps
       seekGenerationRef.current++;
       scrubbingRef.current = false;
+      confirmedFrameRef.current = null;
+      readyRef.current = false;
       wasPlayingRef.current = false;
       retriedLoadRef.current = false;
       el.removeEventListener("loadedmetadata", onLoaded);
@@ -533,7 +565,10 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
           /* `auto` actually pulls bytes so the first frame renders without
              waiting for a user gesture — black canvas was the symptom of
              "metadata only loaded". */
-          preload="auto"
+          preload={preload}
+          onProgress={() => readinessChangedRef.current?.()}
+          onCanPlay={() => readinessChangedRef.current?.()}
+          onWaiting={() => stallRef.current?.()}
           playsInline
           muted={false}
           className="cp-local-video"
@@ -544,7 +579,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
           <audio
             ref={(el) => { mediaRef.current = el; }}
             src={src}
-            preload="auto"
+            preload={preload}
           />
           {/* Visible card so the user can tell something is loaded and playing. */}
           <div className="cp-audio-card">

@@ -1769,6 +1769,7 @@ export default function App() {
   }, [playbackController]);
 
   const onRepresentationChange = useCallback((representation: "proxy" | "presentation") => {
+    setRateSupported(representation === "presentation");
     playbackController.reportRepresentation(representation);
   }, [playbackController]);
 

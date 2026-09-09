@@ -1,0 +1,10 @@
+{
+  "productName": "Sauce Playback Test",
+  "identifier": "com.saucebunny.playback-test",
+  "build": {
+    "beforeBuildCommand": "npx vite build --config harness-playback/vite.config.mjs",
+    "frontendDist": "/private/tmp/sauce-playback-harness-dist"
+  },
+  "app": { "windows": [{ "label": "main", "title": "Playback-first native test", "width": 1120, "height": 760, "resizable": true }] },
+  "bundle": { "targets": ["app"] }
+}

@@ -22,6 +22,7 @@ const h = vi.hoisted(() => ({
   handlers: new Map<string, (e: { payload: unknown }) => void>(),
   unlistened: 0,
   invoked: [] as Array<{ cmd: string; args: unknown }>,
+  resolveSource: null as null | (() => Promise<unknown>),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -33,6 +34,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (cmd: string, args?: unknown) => {
     h.invoked.push({ cmd, args });
+    if (cmd === "resolve_presentation_source") return h.resolveSource?.() ?? null;
     if (cmd === "get_stream_proxy_base") return "http://127.0.0.1:1234/t/tok";
     if (cmd === "get_direct_stream_url") throw new Error("no stream");
     return null;   // download_web_preview settles via playback-prep-done
@@ -52,8 +54,8 @@ const helpers = () => ({
 
 const fire = (n: string, payload: unknown) => h.handlers.get(n)?.({ payload });
 
-beforeEach(() => { h.handlers.clear(); h.unlistened = 0; h.invoked.length = 0; });
-afterEach(() => vi.clearAllMocks());
+beforeEach(() => { h.handlers.clear(); h.unlistened = 0; h.invoked.length = 0; h.resolveSource = null; });
+afterEach(() => { vi.clearAllMocks(); vi.useRealTimers(); });
 
 describe("the download listeners", () => {
   it("subscribes to all three prep channels and releases them", async () => {
@@ -148,6 +150,39 @@ describe("driving a real download", () => {
 
 describe("independent presentation representation", () => {
   const base = "http://127.0.0.1:1234/t/token";
+
+  it("retains the working source while an expiry refresh is pending or fails", async () => {
+    vi.useFakeTimers();
+    const hp = helpers();
+    const source = { kind: "progressive", videoUrl: "https://cdn.example/video", expiresAt: Date.now() / 1000 + 61,
+      width: 1920, height: 1080, videoCodec: "avc1", audioCodec: "mp4a" };
+    let reject!: (error: Error) => void;
+    h.resolveSource = vi.fn().mockResolvedValueOnce(source).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+    const { result, unmount } = renderHook(() => useWebPlayback(hp));
+    await act(async () => { result.current.loadCached("https://y.tld/1", "/cache/review.mp4", 1); });
+    const original = result.current.presentationSource;
+    expect(original).not.toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(result.current.presentationSource).toBe(original);
+    await act(async () => { reject(new Error("expired https://cdn.example/?secret=private")); });
+    expect(result.current.presentationSource).toBe(original);
+    expect(JSON.stringify(hp.appendLog.mock.calls)).not.toContain("secret=");
+    unmount();
+  });
+
+  it("rejects a late resolution after another source or unmount", async () => {
+    let resolve!: (source: unknown) => void;
+    h.resolveSource = () => new Promise((done) => { resolve = done; });
+    const hp = helpers(); const { result, unmount } = renderHook(() => useWebPlayback(hp));
+    await act(async () => { result.current.loadCached("https://y.tld/old", "/cache/old.mp4", 1); });
+    act(() => { result.current.loadWeb("https://y.tld/live", "stream-first", 1); });
+    await act(async () => { resolve({ kind: "progressive", videoUrl: "https://cdn.example/old", expiresAt: 99 }); });
+    expect(result.current.presentationSource).toBeNull();
+    await act(async () => { result.current.loadCached("https://y.tld/next", "/cache/next.mp4", 2); });
+    unmount();
+    await act(async () => { resolve({ kind: "progressive", videoUrl: "https://cdn.example/next", expiresAt: 99 }); });
+    expect(hp.appendLog.mock.calls.some((call) => String(call[2]).startsWith("High-quality source resolved"))).toBe(false);
+  });
 
   it("routes HLS through the manifest rewriter", () => {
     const source = proxyPresentationSource({

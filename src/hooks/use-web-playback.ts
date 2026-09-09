@@ -189,6 +189,8 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   // download of a peer:// marker.
   const peerStreamRef = useRef<{ seq: number; url: string; videoCodec: string | null; audioCodec: string | null } | null>(null);
   const presentationSeqRef = useRef(-1);
+  const presentationRequestRef = useRef(0);
+  useEffect(() => () => { presentationRequestRef.current++; }, []);
 
   // Effect keys: only kind / seq / streaming-readiness re-trigger work — NOT
   // download progress (which keeps kind+seq stable, so the download isn't
@@ -412,9 +414,11 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     if (id) void invoke("cancel_job", { jobId: id }).catch(() => { /* best-effort */ });
   }, []);
 
-  const resolvePresentation = useCallback((url: string, seqArg: number) => {
+  const resolvePresentation = useCallback((url: string, seqArg: number, refresh = false) => {
     presentationSeqRef.current = seqArg;
-    setPresentationSource(null);
+    const request = ++presentationRequestRef.current;
+    // A refresh is a candidate, not permission to remount the active player.
+    if (!refresh) setPresentationSource(null);
     void (async () => {
       const h = helpersRef.current;
       try {
@@ -422,23 +426,23 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
           url,
           cookiesBrowser: h.cookiesBrowser(),
         });
-        if (!source || presentationSeqRef.current !== seqArg) return;
+        if (!source || presentationSeqRef.current !== seqArg || presentationRequestRef.current !== request) return;
         if (!proxyBaseFetchedRef.current) {
           proxyBaseRef.current = await invoke<string | null>("get_stream_proxy_base").catch(() => null);
           proxyBaseFetchedRef.current = true;
         }
-        if (presentationSeqRef.current !== seqArg) return;
+        if (presentationSeqRef.current !== seqArg || presentationRequestRef.current !== request) return;
         setPresentationSource(proxyPresentationSource(source, proxyBaseRef.current));
         h.appendLog(
           "ok",
           "yt-dlp",
-          `Presentation ready · ${source.height ?? "?"}p · ${source.kind}`,
+          `High-quality source resolved · ${source.height ?? "?"}p · ${source.kind}`,
         );
-      } catch (error) {
-        if (presentationSeqRef.current !== seqArg) return;
+      } catch {
+        if (presentationSeqRef.current !== seqArg || presentationRequestRef.current !== request) return;
         // The completed proxy remains a fully playable source. Presentation
         // resolution is an enhancement and must never fail the review copy.
-        h.appendLog("warn", "yt-dlp", `High-resolution presentation unavailable: ${formatError(error)}`);
+        h.appendLog("warn", "yt-dlp", "High-quality source unavailable; the local review copy remains playable.");
       }
     })();
   }, []);
@@ -451,7 +455,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
       const latest = stateRef.current;
       if (latest.kind !== "inactive" && latest.seq === presentationSeqRef.current) {
         helpersRef.current.appendLog("info", "yt-dlp", "Refreshing the expiring presentation source…");
-        resolvePresentation(latest.url, latest.seq);
+        resolvePresentation(latest.url, latest.seq, true);
       }
     }, presentationRefreshDelayMs(presentationSource.expiresAt, Date.now()));
     return () => window.clearTimeout(timer);
@@ -463,7 +467,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
       ? { seq: seqArg, stream: warmStream }
       : null;
     if (mode === "download-first") resolvePresentation(url, seqArg);
-    else { presentationSeqRef.current = seqArg; setPresentationSource(null); }
+    else { presentationRequestRef.current++; presentationSeqRef.current = seqArg; setPresentationSource(null); }
     dispatch({ t: "LOAD", seq: seqArg, url, mode });
   }, [resolvePresentation]);
 
@@ -493,6 +497,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   const loadPeerStream = useCallback((markerUrl: string, stream: { url: string; videoCodec: string | null; audioCodec: string | null }, seqArg: number) => {
     warmStreamRef.current = null;
     peerStreamRef.current = { seq: seqArg, ...stream };
+    presentationRequestRef.current++;
     presentationSeqRef.current = seqArg;
     setPresentationSource(null);
     dispatch({ t: "LOAD", seq: seqArg, url: markerUrl, mode: "stream-first" });

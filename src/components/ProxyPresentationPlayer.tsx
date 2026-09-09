@@ -1,9 +1,10 @@
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, memo, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { ResolvedPresentationSource } from "../bindings/ResolvedPresentationSource";
-import type { PlayerHandle, SeekResult } from "./player-handle";
+import type { PlayerHandle } from "./player-handle";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
 import { MediaBunnyPlayer } from "./MediaBunnyPlayer";
 import { MSEStreamPlayer } from "./MSEStreamPlayer";
+import { createPresentationPlayback, type PresentationMount } from "../lib/presentation-playback";
 
 type Props = {
   proxyPath: string;
@@ -12,6 +13,7 @@ type Props = {
   initialVolume: number;
   scrubAudio: boolean;
   knownDuration?: number;
+  fps?: number;
   onTimeUpdate?: (seconds: number) => void;
   onPlayStateChange?: (playing: boolean) => void;
   onRepresentationChange?: (representation: "proxy" | "presentation") => void;
@@ -22,299 +24,96 @@ type Props = {
   onSurfaceClick?: () => void;
 };
 
-const unavailable = (target: number, presented: number): SeekResult => ({
-  requestedSeconds: target,
-  presentedSeconds: presented,
-  status: "unavailable",
-});
-
-/**
- * One mounted playback stage with two explicit representations:
- *
- * - the completed local MediaBunny copy owns every active-drag frame;
- * - the expiring native/MSE source owns A/V once a landing is confirmed.
- *
- * The proxy canvas stays painted above presentation during a landing, so a
- * source swap or slow CDN seek can never replace the last useful frame with
- * black. Split A/V reaches MSE/ffmpeg only from `endScrub`/`seekTo`, once.
- */
-export const ProxyPresentationPlayer = memo(forwardRef<PlayerHandle, Props>(function ProxyPresentationPlayer(
-  {
-    proxyPath, presentation, filename, initialVolume, scrubAudio, knownDuration,
-    onTimeUpdate, onPlayStateChange, onReady, onError, onDiag, onAudioDiag,
-    onSurfaceClick, onRepresentationChange,
-  },
-  ref,
-) {
+const PlaybackStage = forwardRef<PlayerHandle, Props>(function PlaybackStage(props, ref) {
+  const { proxyPath, presentation, filename, initialVolume, scrubAudio, knownDuration, onAudioDiag, onSurfaceClick } = props;
+  const latest = useRef(props);
+  latest.current = props;
   const proxyRef = useRef<PlayerHandle | null>(null);
-  const presentationRef = useRef<PlayerHandle | null>(null);
-  const proxyReadyRef = useRef(false);
-  const presentationReadyRef = useRef(false);
-  const presentationFailedRef = useRef(false);
-  const showProxyRef = useRef(true);
-  const scrubbingRef = useRef(false);
-  const landingRef = useRef(false);
-  const resumeAfterScrubRef = useRef(false);
-  const playingRef = useRef(false);
-  const generationRef = useRef(0);
-  const [showProxy, setShowProxyState] = useState(true);
-  const [presentationReady, setPresentationReady] = useState(false);
-
-  const representationChangedRef = useRef(onRepresentationChange);
-  representationChangedRef.current = onRepresentationChange;
-  const setShowProxy = useCallback((value: boolean) => {
-    showProxyRef.current = value;
-    setShowProxyState(value);
-    representationChangedRef.current?.(value ? "proxy" : "presentation");
-  }, []);
-  const publishPlaying = useCallback((value: boolean) => {
-    if (playingRef.current === value) return;
-    playingRef.current = value;
-    onPlayStateChange?.(value);
-  }, [onPlayStateChange]);
-
-  const handoffToPresentation = useCallback(async (seconds: number, resume: boolean): Promise<SeekResult> => {
-    const high = presentationRef.current;
-    const generation = generationRef.current;
-    if (!high?.isReady() || presentationFailedRef.current) {
-      return unavailable(seconds, proxyRef.current?.getCurrentTime() ?? seconds);
-    }
-    const result = await high.seekTo(seconds);
-    if (generation !== generationRef.current) return { ...result, status: "superseded" };
-    if (result.status === "presented") {
-      setShowProxy(false);
-      onTimeUpdate?.(result.presentedSeconds);
-      if (resume) {
-        await high.play();
-        publishPlaying(true);
-      }
-    } else if (result.status === "unavailable") {
-      // A bounded native seek failure must not leave Play retrying the same
-      // dead handoff forever while a complete, playable local copy is ready.
-      presentationFailedRef.current = true;
-      presentationReadyRef.current = false;
-      setPresentationReady(false);
-      high.pause();
-      setShowProxy(true);
-      onDiag?.("warn", "Presentation seek unavailable; continuing with the downloaded review copy.");
-      const proxy = proxyRef.current;
-      const fallback = proxy?.isReady() ? await proxy.seekTo(seconds) : unavailable(seconds, seconds);
-      if (generation !== generationRef.current) return { ...fallback, status: "superseded" };
-      if (fallback.status === "presented") {
-        onTimeUpdate?.(fallback.presentedSeconds);
-        if (resume) { await proxy?.play(); publishPlaying(true); }
-      }
-      return fallback;
-    }
-    return result;
-  }, [onTimeUpdate, onDiag, publishPlaying, setShowProxy]);
-
-  const handlePresentationReady = () => {
-    presentationReadyRef.current = true;
-    setPresentationReady(true);
-    if (scrubbingRef.current || landingRef.current) return;
-    const proxy = proxyRef.current;
-    const at = proxy?.getCurrentTime() ?? 0;
-    const resume = playingRef.current || !!proxy?.isPlaying();
-    proxy?.pause();
-    landingRef.current = true;
-    void handoffToPresentation(at, resume).finally(() => { landingRef.current = false; });
-  };
-
-  const handlePresentationError = (message: string) => {
-    presentationFailedRef.current = true;
-    presentationReadyRef.current = false;
-    setPresentationReady(false);
-    onDiag?.("warn", `presentation fallback: ${message}`);
-    const high = presentationRef.current;
-    const at = high?.getCurrentTime() ?? proxyRef.current?.getCurrentTime() ?? 0;
-    const resume = playingRef.current || !!high?.isPlaying();
-    high?.pause();
-    setShowProxy(true);
-    void proxyRef.current?.seekTo(at).then((result) => {
-      if (result.status === "presented") onTimeUpdate?.(result.presentedSeconds);
-      if (resume) void proxyRef.current?.play();
-    });
-  };
-
-  useEffect(() => {
-    generationRef.current += 1;
-    presentationReadyRef.current = false;
-    presentationFailedRef.current = false;
-    setPresentationReady(false);
-    setShowProxy(true);
-  }, [presentation, setShowProxy]);
+  const highRef = useRef<PlayerHandle | null>(null);
+  const [mount, setMount] = useState<PresentationMount | null>(null);
+  const [showProxy, setShowProxy] = useState(true);
+  const [controller] = useState(() => createPresentationPlayback({
+    proxy: () => proxyRef.current,
+    high: () => highRef.current,
+    fps: () => latest.current.fps ?? 30,
+    mount: setMount,
+    representation: (value) => {
+      setShowProxy(value === "proxy");
+      latest.current.onRepresentationChange?.(value);
+    },
+    time: (seconds) => latest.current.onTimeUpdate?.(seconds),
+    playing: (value) => latest.current.onPlayStateChange?.(value),
+    diag: (tag, message) => latest.current.onDiag?.(tag, message),
+    error: (message) => latest.current.onError?.(message),
+  }));
+  useEffect(() => { controller.activate(); return () => controller.dispose(); }, [controller]);
+  useEffect(() => { controller.updateSource(presentation); }, [controller, presentation]);
+  useEffect(() => { controller.setVolume(initialVolume); }, [controller, initialVolume]);
 
   useImperativeHandle(ref, () => ({
-    play: async () => {
-      const high = presentationRef.current;
-      if (!showProxyRef.current && high?.isReady()) {
-        await high.play();
-        return;
-      }
-      if (presentationReadyRef.current && !presentationFailedRef.current) {
-        const at = proxyRef.current?.getCurrentTime() ?? 0;
-        landingRef.current = true;
-        await handoffToPresentation(at, true).finally(() => { landingRef.current = false; });
-      } else {
-        await proxyRef.current?.play();
-      }
-    },
-    pause: () => {
-      generationRef.current += 1;
-      landingRef.current = false;
-      resumeAfterScrubRef.current = false;
-      proxyRef.current?.pause();
-      presentationRef.current?.pause();
-      publishPlaying(false);
-    },
-    seekTo: async (seconds) => {
-      const target = Math.max(0, seconds);
-      const generation = ++generationRef.current;
-      landingRef.current = true;
-      setShowProxy(true);
-      presentationRef.current?.pause();
-      const proxyResult = proxyRef.current?.isReady()
-        ? await proxyRef.current.seekTo(target)
-        : unavailable(target, proxyRef.current?.getCurrentTime() ?? 0);
-      if (generation !== generationRef.current) return { ...proxyResult, status: "superseded" };
-      if (!presentationReadyRef.current || presentationFailedRef.current) {
-        landingRef.current = false;
-        if (proxyResult.status === "presented") onTimeUpdate?.(proxyResult.presentedSeconds);
-        return proxyResult;
-      }
-      const result = await handoffToPresentation(target, playingRef.current);
-      if (generation === generationRef.current) landingRef.current = false;
-      return result;
-    },
-    beginScrub: () => {
-      if (scrubbingRef.current) return;
-      scrubbingRef.current = true;
-      landingRef.current = false;
-      generationRef.current += 1;
-      resumeAfterScrubRef.current = playingRef.current
-        || !!presentationRef.current?.isPlaying()
-        || !!proxyRef.current?.isPlaying();
-      presentationRef.current?.pause();
-      proxyRef.current?.beginScrub();
-      setShowProxy(true);
-    },
-    scrubTo: (seconds) => {
-      if (!scrubbingRef.current) proxyRef.current?.beginScrub();
-      scrubbingRef.current = true;
-      proxyRef.current?.scrubTo(Math.max(0, seconds));
-    },
-    endScrub: async (seconds) => {
-      const target = Math.max(0, seconds);
-      const resume = resumeAfterScrubRef.current;
-      resumeAfterScrubRef.current = false;
-      scrubbingRef.current = false;
-      landingRef.current = true;
-      const generation = ++generationRef.current;
-      const proxyResult = proxyRef.current?.isReady()
-        ? await proxyRef.current.endScrub(target)
-        : unavailable(target, proxyRef.current?.getCurrentTime() ?? 0);
-      if (generation !== generationRef.current) return { ...proxyResult, status: "superseded" };
-      if (!presentationReadyRef.current || presentationFailedRef.current) {
-        landingRef.current = false;
-        if (resume && !proxyRef.current?.isPlaying()) void proxyRef.current?.play();
-        if (proxyResult.status === "presented") onTimeUpdate?.(proxyResult.presentedSeconds);
-        return proxyResult;
-      }
-      const result = await handoffToPresentation(target, resume);
-      if (generation === generationRef.current) landingRef.current = false;
-      return result;
-    },
-    getCurrentTime: () => showProxyRef.current
-      ? proxyRef.current?.getCurrentTime() ?? 0
-      : presentationRef.current?.getCurrentTime() ?? 0,
+    play: controller.play,
+    pause: controller.pause,
+    seekTo: controller.seekTo,
+    beginScrub: controller.beginScrub,
+    scrubTo: controller.scrubTo,
+    endScrub: controller.endScrub,
+    getCurrentTime: controller.position,
     getDuration: () => proxyRef.current?.getDuration() ?? knownDuration ?? 0,
-    isReady: () => proxyReadyRef.current,
-    isPlaying: () => playingRef.current,
-    setVolume: (value) => {
-      proxyRef.current?.setVolume(value);
-      presentationRef.current?.setVolume(value);
-    },
-    getVolume: () => (showProxyRef.current ? proxyRef.current : presentationRef.current)?.getVolume() ?? initialVolume,
-    setMuted: (value) => {
-      proxyRef.current?.setMuted(value);
-      presentationRef.current?.setMuted(value);
-    },
-    isMuted: () => (showProxyRef.current ? proxyRef.current : presentationRef.current)?.isMuted() ?? false,
-    setShuttle: (rate) => (showProxyRef.current ? proxyRef.current : presentationRef.current)?.setShuttle(rate),
-    setPlaybackRate: (rate) => {
-      proxyRef.current?.setPlaybackRate(rate);
-      presentationRef.current?.setPlaybackRate(rate);
-    },
-    supportsPlaybackRate: presentationReady,
+    isReady: () => proxyRef.current?.isReady() ?? false,
+    isPlaying: controller.isPlaying,
+    setVolume: controller.setVolume,
+    getVolume: () => controller.current()?.getVolume() ?? initialVolume,
+    setMuted: controller.setMuted,
+    isMuted: () => controller.current()?.isMuted() ?? false,
+    setShuttle: controller.setShuttle,
+    setPlaybackRate: controller.setRate,
+    supportsPlaybackRate: !showProxy,
     getFrameBlob: (seconds, opts) => proxyRef.current?.getFrameBlob?.(seconds, opts) ?? Promise.resolve(null),
-    getPosterDataUrl: () => (showProxyRef.current ? proxyRef.current : presentationRef.current)?.getPosterDataUrl?.()
-      ?? Promise.resolve(null),
-    getCaptureElement: () => (showProxyRef.current ? proxyRef.current : presentationRef.current)?.getCaptureElement?.() ?? null,
-  }), [initialVolume, knownDuration, presentationReady, handoffToPresentation, onTimeUpdate, publishPlaying, setShowProxy]);
+    getPosterDataUrl: () => controller.current()?.getPosterDataUrl?.() ?? Promise.resolve(null),
+    getCaptureElement: () => controller.current()?.getCaptureElement?.() ?? null,
+  }), [controller, showProxy, initialVolume, knownDuration]);
 
-  const proxyLayerStyle = { opacity: showProxy ? 1 : 0, pointerEvents: showProxy ? "auto" : "none" } as const;
-  const presentationLayerStyle = { opacity: showProxy ? 0 : 1, pointerEvents: showProxy ? "none" : "auto" } as const;
+  const highEvents = mount ? {
+    onTimeUpdate: (seconds: number) => controller.reportTime("presentation", seconds, mount.epoch),
+    onPlayStateChange: (playing: boolean) => controller.reportPlaying("presentation", playing, mount.epoch),
+    onReady: () => controller.ready(mount.epoch),
+    onReadinessChange: () => controller.inspect(mount.epoch),
+    onError: () => controller.error(mount.epoch),
+    onStall: () => controller.waiting(mount.epoch),
+  } : {};
   return (
     <div className="cp-proxy-presentation">
-      <div className="cp-playback-layer cp-playback-presentation" style={presentationLayerStyle} aria-hidden={showProxy}>
-        {presentation && (presentation.kind === "split" ? (
-          <MSEStreamPlayer
-            ref={presentationRef}
-            path={presentation.videoUrl}
-            filename={filename}
-            hasVideo
-            audioStreamUrl={presentation.audioUrl}
-            videoCodec={presentation.videoCodec ?? undefined}
-            audioCodec={presentation.audioCodec ?? undefined}
-            knownDuration={knownDuration}
-            initialVolume={initialVolume}
-            onTimeUpdate={(seconds) => { if (!showProxyRef.current && !landingRef.current) onTimeUpdate?.(seconds); }}
-            onPlayStateChange={(playing) => { if (!showProxyRef.current && !scrubbingRef.current) publishPlaying(playing); }}
-            onReady={handlePresentationReady}
-            onError={handlePresentationError}
-            onDiag={onDiag}
-            onSurfaceClick={onSurfaceClick}
-          />
+      <div className="cp-playback-layer cp-playback-presentation"
+        style={{ opacity: showProxy ? 0 : 1, pointerEvents: showProxy ? "none" : "auto" }} aria-hidden={showProxy}>
+        {mount && (mount.source.kind === "split" ? (
+          <MSEStreamPlayer key={mount.epoch} ref={highRef}
+            path={mount.source.videoUrl} filename={filename} hasVideo
+            audioStreamUrl={mount.source.audioUrl}
+            videoCodec={mount.source.videoCodec ?? undefined} audioCodec={mount.source.audioCodec ?? undefined}
+            knownDuration={knownDuration} startAtSeconds={mount.target} disableScrubPreview
+            initialVolume={initialVolume} {...highEvents}
+            onDiag={props.onDiag} onSurfaceClick={onSurfaceClick} />
         ) : (
-          <LocalMediaPlayer
-            ref={presentationRef}
-            path={presentation.kind === "hls" ? presentation.manifestUrl : presentation.videoUrl}
-            filename={filename}
-            hasVideo
-            initialVolume={initialVolume}
-            onTimeUpdate={(seconds) => { if (!showProxyRef.current && !landingRef.current) onTimeUpdate?.(seconds); }}
-            onPlayStateChange={(playing) => { if (!showProxyRef.current && !scrubbingRef.current) publishPlaying(playing); }}
-            onReady={handlePresentationReady}
-            onError={handlePresentationError}
-            onDiag={onDiag}
-            onSurfaceClick={onSurfaceClick}
-          />
+          <LocalMediaPlayer key={mount.epoch} ref={highRef}
+            path={mount.source.kind === "hls" ? mount.source.manifestUrl : mount.source.videoUrl}
+            filename={filename} hasVideo initialVolume={initialVolume} preload="metadata"
+            {...highEvents} onDiag={props.onDiag} onSurfaceClick={onSurfaceClick} />
         ))}
       </div>
-      <div className="cp-playback-layer cp-playback-proxy" style={proxyLayerStyle} aria-hidden={!showProxy}>
-        <MediaBunnyPlayer
-          ref={proxyRef}
-          path={proxyPath}
-          filename={filename}
-          hasVideo
-          initialVolume={initialVolume}
-          scrubAudio={scrubAudio}
-          onTimeUpdate={(seconds) => {
-            if (showProxyRef.current && !scrubbingRef.current && !landingRef.current) onTimeUpdate?.(seconds);
-          }}
-          onPlayStateChange={(playing) => {
-            if (showProxyRef.current && !scrubbingRef.current && !landingRef.current) publishPlaying(playing);
-          }}
-          onReady={(duration) => {
-            proxyReadyRef.current = true;
-            onReady?.(duration);
-          }}
-          onError={onError}
-          onSurfaceClick={onSurfaceClick}
-          onDiag={onAudioDiag}
-        />
+      <div className="cp-playback-layer cp-playback-proxy"
+        style={{ opacity: showProxy ? 1 : 0, pointerEvents: showProxy ? "auto" : "none" }} aria-hidden={!showProxy}>
+        <MediaBunnyPlayer ref={proxyRef} path={proxyPath} filename={filename} hasVideo
+          initialVolume={initialVolume} scrubAudio={scrubAudio}
+          onTimeUpdate={(seconds) => controller.reportTime("proxy", seconds)}
+          onPlayStateChange={(playing) => controller.reportPlaying("proxy", playing)}
+          onReady={(duration) => { props.onReady?.(duration); controller.proxyReady(); }}
+          onError={props.onError} onSurfaceClick={onSurfaceClick} onDiag={onAudioDiag} />
       </div>
     </div>
   );
+});
+
+/** A new represented file disposes all old preparation and transport promises. */
+export const ProxyPresentationPlayer = memo(forwardRef<PlayerHandle, Props>(function ProxyPresentationPlayer(props, ref) {
+  return <PlaybackStage key={props.proxyPath} {...props} ref={ref} />;
 }));

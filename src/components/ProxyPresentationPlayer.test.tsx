@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, render, waitFor } from "@testing-library/react";
-import { createRef } from "react";
+import { createRef, StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlayerHandle, SeekResult } from "./player-handle";
 
@@ -14,23 +14,29 @@ const h = vi.hoisted(() => ({
   highUnavailable: false,
   proxyPlays: 0,
   highPlays: 0,
+  highMounts: 0,
+  ahead: 10,
 }));
 
-function fakeHandle(kind: "proxy" | "high"): PlayerHandle {
+function fakeHandle(kind: "proxy" | "high", report: (value: boolean) => void): PlayerHandle {
   let time = 0;
   let playing = false;
+  let confirmed: number | null = null;
   return {
-    play: () => { playing = true; if (kind === "proxy") h.proxyPlays++; else h.highPlays++; },
-    pause: () => { playing = false; },
+    play: () => { playing = true; if (kind === "proxy") h.proxyPlays++; else h.highPlays++; report(true); },
+    pause: () => { playing = false; report(false); },
     seekTo: async (seconds) => {
       time = seconds;
       if (kind === "high") {
         h.highSeeks.push(seconds);
         if (h.highUnavailable) return { requestedSeconds: seconds, presentedSeconds: time, status: "unavailable" };
         if (h.deferHigh) {
-          return await new Promise<SeekResult>((resolve) => { h.deferredResolve = resolve; });
+          return await new Promise<SeekResult>((resolve) => { h.deferredResolve = (result) => {
+            confirmed = result.presentedSeconds; resolve(result);
+          }; });
         }
       }
+      confirmed = seconds;
       return { requestedSeconds: seconds, presentedSeconds: seconds, status: "presented" };
     },
     beginScrub: () => {},
@@ -44,6 +50,8 @@ function fakeHandle(kind: "proxy" | "high"): PlayerHandle {
     getDuration: () => 100,
     isReady: () => true,
     isPlaying: () => playing,
+    getPlaybackReadiness: () => ({ generation: 1, confirmedSeconds: confirmed,
+      bufferedAheadSeconds: h.ahead, durationSeconds: 100, seeking: false, failed: false, hasFutureData: true }),
     setVolume: () => {}, getVolume: () => 1,
     setMuted: () => {}, isMuted: () => false,
     setShuttle: () => {}, setPlaybackRate: () => {}, supportsPlaybackRate: kind === "high",
@@ -52,21 +60,24 @@ function fakeHandle(kind: "proxy" | "high"): PlayerHandle {
 
 vi.mock("./MediaBunnyPlayer", async () => {
   const React = await import("react");
-  return { MediaBunnyPlayer: React.forwardRef<PlayerHandle, { onReady?: (duration: number) => void }>((props, ref) => {
-    React.useImperativeHandle(ref, () => fakeHandle("proxy"), []);
-    React.useEffect(() => { props.onReady?.(100); }, [props]);
+  return { MediaBunnyPlayer: React.forwardRef<PlayerHandle, { onReady?: (duration: number) => void; onPlayStateChange?: (value: boolean) => void }>((props, ref) => {
+    const latest = React.useRef(props); latest.current = props;
+    React.useImperativeHandle(ref, () => fakeHandle("proxy", (v) => latest.current.onPlayStateChange?.(v)), []);
+    React.useEffect(() => { latest.current.onReady?.(100); }, []);
     return <div data-testid="proxy-engine" />;
   }) };
 });
 
 vi.mock("./MSEStreamPlayer", async () => {
   const React = await import("react");
-  const High = React.forwardRef<PlayerHandle, { onReady?: (duration: number) => void }>((props, ref) => {
-    React.useImperativeHandle(ref, () => fakeHandle("high"), []);
+  const High = React.forwardRef<PlayerHandle, { onReady?: (duration: number) => void; onPlayStateChange?: (value: boolean) => void }>((props, ref) => {
+    const latest = React.useRef(props); latest.current = props;
+    React.useImperativeHandle(ref, () => fakeHandle("high", (v) => latest.current.onPlayStateChange?.(v)), []);
     React.useEffect(() => {
-      h.fireHighReady = () => props.onReady?.(100);
+      h.highMounts++;
+      h.fireHighReady = () => latest.current.onReady?.(100);
       return () => { h.fireHighReady = null; };
-    }, [props]);
+    }, []);
     return <div data-testid="high-engine" />;
   });
   return { MSEStreamPlayer: High };
@@ -74,7 +85,7 @@ vi.mock("./MSEStreamPlayer", async () => {
 vi.mock("./LocalMediaPlayer", async () => {
   const React = await import("react");
   const High = React.forwardRef<PlayerHandle, { onReady?: (duration: number) => void }>((props, ref) => {
-    React.useImperativeHandle(ref, () => fakeHandle("high"), []);
+    React.useImperativeHandle(ref, () => fakeHandle("high", () => {}), []);
     React.useEffect(() => {
       h.fireHighReady = () => props.onReady?.(100);
       return () => { h.fireHighReady = null; };
@@ -106,6 +117,8 @@ beforeEach(() => {
   h.highUnavailable = false;
   h.proxyPlays = 0;
   h.highPlays = 0;
+  h.highMounts = 0;
+  h.ahead = 10;
 });
 
 describe("downloaded proxy + presentation boundary", () => {
@@ -121,7 +134,7 @@ describe("downloaded proxy + presentation boundary", () => {
     expect(h.proxyPlays).toBe(1);
     expect(h.highPlays).toBe(0);
     expect(player.current?.getCurrentTime()).toBe(68);
-    expect(diag).toHaveBeenCalledWith("warn", expect.stringContaining("downloaded review copy"));
+    expect(diag).toHaveBeenCalledWith("warn", expect.stringContaining("local playback remains ready"));
   });
 
   it("a delayed handoff cannot restart playback after Pause", async () => {
@@ -139,7 +152,8 @@ describe("downloaded proxy + presentation boundary", () => {
       await playing;
     });
     expect(h.highPlays).toBe(0);
-    expect(h.proxyPlays).toBe(0);
+    expect(h.proxyPlays).toBe(1);
+    expect(player.current!.isPlaying()).toBe(false);
   });
 
   it("never seeks the split presentation during drag and lands it exactly once", async () => {
@@ -160,6 +174,7 @@ describe("downloaded proxy + presentation boundary", () => {
     expect(h.highSeeks).toEqual([]);
 
     await act(async () => { await player.current?.endScrub(12); });
+    await act(async () => { h.fireHighReady?.(); });
     expect(h.proxyEnds).toEqual([12]);
     expect(h.highSeeks).toEqual([12]);
   });
@@ -178,6 +193,8 @@ describe("downloaded proxy + presentation boundary", () => {
     });
     let landing!: Promise<SeekResult>;
     act(() => { landing = player.current!.endScrub(42); });
+    await act(async () => { await landing; });
+    act(() => { h.fireHighReady?.(); });
     await waitFor(() => expect(h.deferredResolve).not.toBeNull());
     expect((view.container.querySelector(".cp-playback-proxy") as HTMLElement).style.opacity).toBe("1");
 
@@ -186,5 +203,30 @@ describe("downloaded proxy + presentation boundary", () => {
       await landing;
     });
     expect((view.container.querySelector(".cp-playback-proxy") as HTMLElement).style.opacity).toBe("0");
+  });
+
+  it("keeps a playing engine mounted across a source refresh", async () => {
+    const player = createRef<PlayerHandle>();
+    const props = { proxyPath: "/cache/review.mp4", presentation, initialVolume: 1, scrubAudio: false };
+    const view = render(<ProxyPresentationPlayer ref={player} {...props} />);
+    await act(async () => { h.fireHighReady?.(); });
+    await act(async () => { await player.current!.play(); });
+    expect(h.highPlays).toBe(1);
+    view.rerender(<ProxyPresentationPlayer ref={player} {...props} presentation={{ ...presentation, expiresAt: 200 }} />);
+    expect(h.highMounts).toBe(1);
+    expect(player.current!.isPlaying()).toBe(true);
+  });
+
+  it("survives strict effect replay and reports the active engine's speed capability", async () => {
+    const player = createRef<PlayerHandle>();
+    render(<StrictMode><ProxyPresentationPlayer ref={player} proxyPath="/cache/review.mp4"
+      presentation={presentation} initialVolume={1} scrubAudio={false} /></StrictMode>);
+    expect(player.current!.supportsPlaybackRate).toBe(false);
+    await act(async () => { h.fireHighReady?.(); });
+    expect(player.current!.supportsPlaybackRate).toBe(true);
+    h.ahead = 0;
+    await act(async () => { await player.current!.play(); });
+    expect(player.current!.supportsPlaybackRate).toBe(false);
+    expect(h.proxyPlays).toBe(1);
   });
 });

@@ -48,11 +48,11 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-async function mount() {
+async function mount(onError?: (message: string) => void) {
   const player = createRef<PlayerHandle>();
   const view = render(<MSEStreamPlayer ref={player} path="http://127.0.0.1/v1/media"
     hasVideo initialVolume={1} knownDuration={149} videoCodec="avc1.640028"
-    audioCodec="mp4a.40.2" disableScrubPreview />);
+    audioCodec="mp4a.40.2" disableScrubPreview onError={onError} />);
   const video = view.container.querySelector("video")!;
   Object.defineProperties(video, {
     readyState: { configurable: true, value: 2 },
@@ -73,6 +73,21 @@ it("confirms an already-decoded zero-distance seek without another seeked/rVFC e
   expect(await landing).toEqual({ requestedSeconds: 0, presentedSeconds: 0, status: "presented" });
 });
 
+it("reports playable element A/V intersection, not a larger SourceBuffer range", async () => {
+  const { player, video } = await mount();
+  const landing = player.current!.seekTo(10);
+  await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+  await landing;
+  Object.defineProperties(video, {
+    readyState: { configurable: true, value: 3 },
+    buffered: { configurable: true, value: { length: 2, start: (i: number) => [0, 30][i], end: (i: number) => [11, 60][i] } },
+  });
+  expect(player.current!.getPlaybackReadiness!()).toMatchObject({ confirmedSeconds: 10,
+    bufferedAheadSeconds: 1, seeking: false, failed: false, hasFutureData: true });
+  Object.defineProperty(video, "buffered", { configurable: true, value: { length: 0 } });
+  expect(player.current!.getPlaybackReadiness!().bufferedAheadSeconds).toBe(0);
+});
+
 it("only the newest command can settle after the compositor stays quiet", async () => {
   const { player } = await mount();
   const first = player.current!.seekTo(42);
@@ -88,6 +103,15 @@ it("a media clock with no decoded frame never passes the seek gate", async () =>
   const landing = player.current!.seekTo(68);
   await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
   expect((await landing).status).toBe("unavailable");
+});
+
+it.each([403, 502])("reports failed readiness for an expired URL / FFmpeg HTTP %s response", async (status) => {
+  const error = vi.fn();
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("unavailable", { status })));
+  const { player } = await mount(error);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+  expect(player.current!.getPlaybackReadiness!()).toMatchObject({ failed: true, bufferedAheadSeconds: 0 });
+  expect(error).toHaveBeenCalledTimes(1);
 });
 
 it("aborts a pending response before replacing its pipeline", async () => {

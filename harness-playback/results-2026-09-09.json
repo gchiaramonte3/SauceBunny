@@ -1,0 +1,194 @@
+{
+  "date": "2026-09-09",
+  "platform": "macOS 26.5.1, packaged Tauri/WKWebView, unsigned isolated test app",
+  "fixture": "Completed 854x480 H.264/AAC web review copy; matching 1920x1080 H.264/AAC test transcode from an already-cached export. 24000/1001 fps.",
+  "scope": "Local test files, real Rust FFmpeg remux and MSE; no Internet CDN request. Rendered PCM measurement, not acoustic speaker measurement.",
+  "warmResumes": [
+    {
+      "target": 43,
+      "mode": "unresolved",
+      "frameMs": 18,
+      "audioMs": 9,
+      "seekMs": 23.000000000003638
+    },
+    {
+      "target": 67.8,
+      "mode": "unresolved",
+      "frameMs": 27,
+      "audioMs": 9,
+      "seekMs": 24
+    },
+    {
+      "target": 105.7,
+      "mode": "unresolved",
+      "frameMs": 41,
+      "audioMs": 29.000000000007276,
+      "seekMs": 40
+    },
+    {
+      "target": 68.3,
+      "mode": "unresolved",
+      "frameMs": 28,
+      "audioMs": 9,
+      "seekMs": 36.999999999992724
+    },
+    {
+      "target": 20,
+      "mode": "unresolved",
+      "frameMs": 33,
+      "audioMs": 9,
+      "seekMs": 49
+    },
+    {
+      "target": 43,
+      "mode": "unresolved",
+      "frameMs": 24,
+      "audioMs": 14,
+      "seekMs": 25
+    },
+    {
+      "target": 67.8,
+      "mode": "unresolved",
+      "frameMs": 28,
+      "audioMs": 10,
+      "seekMs": 25
+    },
+    {
+      "target": 105.7,
+      "mode": "unresolved",
+      "frameMs": 42,
+      "audioMs": 36,
+      "seekMs": 29
+    },
+    {
+      "target": 68.3,
+      "mode": "unresolved",
+      "frameMs": 27,
+      "audioMs": 8,
+      "seekMs": 30
+    },
+    {
+      "target": 20,
+      "mode": "unresolved",
+      "frameMs": 32,
+      "audioMs": 14,
+      "seekMs": 45
+    },
+    {
+      "target": 43,
+      "mode": "high-quality fetch delayed 1800ms",
+      "frameMs": 17,
+      "audioMs": 10.000000000007276,
+      "seekMs": 15
+    },
+    {
+      "target": 67.8,
+      "mode": "high-quality fetch delayed 1800ms",
+      "frameMs": 29,
+      "audioMs": 10,
+      "seekMs": 22.000000000007276
+    },
+    {
+      "target": 105.7,
+      "mode": "high-quality fetch delayed 1800ms",
+      "frameMs": 42,
+      "audioMs": 30,
+      "seekMs": 28
+    },
+    {
+      "target": 68.3,
+      "mode": "high-quality fetch delayed 1800ms",
+      "frameMs": 23,
+      "audioMs": 11,
+      "seekMs": 30
+    },
+    {
+      "target": 20,
+      "mode": "high-quality fetch delayed 1800ms",
+      "frameMs": 34,
+      "audioMs": 10,
+      "seekMs": 48
+    },
+    {
+      "target": 43,
+      "mode": "high-quality fetch delayed 1800ms",
+      "frameMs": 18,
+      "audioMs": 8,
+      "seekMs": 21
+    },
+    {
+      "target": 67.8,
+      "mode": "high-quality fetch delayed 1800ms",
+      "frameMs": 27,
+      "audioMs": 15,
+      "seekMs": 24
+    },
+    {
+      "target": 105.7,
+      "mode": "high-quality fetch delayed 1800ms",
+      "frameMs": 40,
+      "audioMs": 28,
+      "seekMs": 36
+    },
+    {
+      "target": 68.3,
+      "mode": "high-quality fetch delayed 1800ms",
+      "frameMs": 27,
+      "audioMs": 15,
+      "seekMs": 30.999999999992724
+    },
+    {
+      "target": 20,
+      "mode": "high-quality fetch delayed 1800ms",
+      "frameMs": 29,
+      "audioMs": 9,
+      "seekMs": 55.000000000007276
+    }
+  ],
+  "frameP95Ms": 42,
+  "renderedAudioP95Ms": 30,
+  "recovery": {
+    "check": "native promotion and genuine buffer starvation",
+    "parkedSeconds": 43,
+    "fallbackPositionSeconds": 46.013333333333335,
+    "msFromPlayUntilFallbackAndRenderedAudio": 3294,
+    "diagnostics": [
+      {
+        "tag": "info",
+        "message": "audio: track ready - aac 44100Hz/2ch"
+      },
+      {
+        "tag": "ok",
+        "message": "pipeline open at 43.0s → playhead 43.0s"
+      },
+      {
+        "tag": "info",
+        "message": "Preparing high-quality buffer at 43.00s (source 2)"
+      },
+      {
+        "tag": "info",
+        "message": "seek req 43.0 → target 43.0 (base 0.0, total 148.8, rel 43.0, clockOrigin 0.00)"
+      },
+      {
+        "tag": "ok",
+        "message": "seek in-buffer → currentTime 43.0"
+      },
+      {
+        "tag": "ok",
+        "message": "High-quality buffer ready at 43.00s"
+      },
+      {
+        "tag": "ok",
+        "message": "High-quality picture selected while paused at 43.00s"
+      },
+      {
+        "tag": "info",
+        "message": "Play: buffered high quality"
+      },
+      {
+        "tag": "warn",
+        "message": "Using local playback at 46.01s: high-quality buffer ran dry"
+      }
+    ]
+  }
+}

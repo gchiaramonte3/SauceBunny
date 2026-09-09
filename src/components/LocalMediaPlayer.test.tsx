@@ -46,6 +46,24 @@ function renderPlayer(onDiag: (tag: string, msg: string) => void) {
   return { el, utils };
 }
 
+it("uses metadata preload and exposes confirmed buffered readiness for native candidates", async () => {
+  const ref = createRef<PlayerHandle>();
+  const props = { hasVideo: true, initialVolume: 1, preload: "metadata" as const };
+  const view = render(<LocalMediaPlayer ref={ref} path="/tmp/a.mp4" {...props} />);
+  const el = view.container.querySelector("video")!;
+  expect(el.preload).toBe("metadata");
+  Object.defineProperties(el, { readyState: { configurable: true, value: 3 }, videoWidth: { value: 1920 },
+    duration: { value: 149 }, buffered: { value: { length: 1, start: () => 9, end: () => 13 } } });
+  await act(async () => { await ref.current!.seekTo(10); });
+  expect(ref.current!.getPlaybackReadiness!()).toMatchObject({ confirmedSeconds: 10, bufferedAheadSeconds: 3,
+    seeking: false, failed: false, hasFutureData: true });
+  const generation = ref.current!.getPlaybackReadiness!().generation;
+  view.rerender(<LocalMediaPlayer ref={ref} path="/tmp/b.mp4" {...props} />);
+  expect(ref.current!.getPlaybackReadiness!().generation).toBeGreaterThan(generation);
+  expect(ref.current!.getPlaybackReadiness!().confirmedSeconds).toBeNull();
+  view.unmount();
+});
+
 /** Park the element: fire `pause`, then let the idle clock run past 10s. */
 function parkFor(el: HTMLMediaElement, seconds: number) {
   act(() => { el.dispatchEvent(new Event("pause")); });

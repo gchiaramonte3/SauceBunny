@@ -93,6 +93,18 @@ const rebuilds = () => diag.filter((l) => l.msg.includes("rebuilding from")).map
 const reqs = () => diag.filter((l) => l.msg.startsWith("seek req")).map((l) => l.msg);
 
 describe("a click", () => {
+  it("does not inherit an earlier drag count for the next direct request", async () => {
+    const ref = mountPlayer(diag);
+    ref.current!.beginScrub();
+    ref.current!.scrubTo(68.3); ref.current!.scrubTo(105.7);
+    const drag = ref.current!.endScrub(105.7);
+    await vi.advanceTimersByTimeAsync(20_001);
+    await drag;
+    ref.current!.seekTo(67.8);
+    vi.advanceTimersByTime(SETTLE);
+    expect(rebuilds().at(-1)).toContain("click, landed as asked");
+    expect(rebuilds().at(-1)).not.toContain("drag");
+  });
   it("logs one request and rebuilds exactly where it was asked", () => {
     // The FIRST line of the reported log, which was always correct:
     //   seek req 1298.8 → target 1298.8

@@ -59,14 +59,14 @@ export function SpeedControl({ rate, supported, disabledReason, onRateChange }: 
         title={supported
           ? "Playback speed · right-click resets to 1×"
           : disabledReason ?? "Speed control isn't available for the WebCodecs player"}
-        aria-label={`Playback speed: ${formatPlaybackRate(rate)}`}
+        aria-label={`Playback speed: ${formatPlaybackRate(supported ? rate : 1)}`}
         aria-expanded={open}
         aria-haspopup="menu"
         disabled={!supported}
         onClick={() => setOpen((o) => !o)}
         onContextMenu={(e) => { e.preventDefault(); if (supported) onRateChange(1); }}
       >
-        {formatPlaybackRate(rate)}
+        {formatPlaybackRate(supported ? rate : 1)}
       </button>
       {open && (
         <div className="cp-speed-popover" role="menu" aria-label="Playback speed">

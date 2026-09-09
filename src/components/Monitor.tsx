@@ -618,6 +618,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               ref={ref}
               proxyPath={webStreamUrl}
               presentation={presentationSource}
+              fps={metadata?.fps ?? undefined}
               filename={metadata?.title}
               initialVolume={initialVolume}
               scrubAudio={!!scrubAudio}
