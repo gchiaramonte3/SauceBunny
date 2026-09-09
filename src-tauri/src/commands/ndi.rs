@@ -152,7 +152,16 @@ struct NativeDiscoveryResult {
 }
 
 #[derive(Default)]
-struct Buffer { init: Option<Arc<[u8]>>, segments: VecDeque<(u64, Arc<[u8]>)>, next: u64, status: NdiTelemetry, telemetry: Option<Arc<[u8]>>, status_seq:u64 }
+struct Buffer {
+    init: Option<Arc<[u8]>>,
+    segments: VecDeque<(u64, Arc<[u8]>)>,
+    // Only the SDK receiver (or its test publisher) allocates segment ids.
+    #[cfg(any(sauce_ndi, test))]
+    next: u64,
+    status: NdiTelemetry,
+    telemetry: Option<Arc<[u8]>>,
+    status_seq: u64,
+}
 pub struct Program {
     pub id: String,
     pub name: String,

@@ -257,18 +257,44 @@ pub(crate) fn parse_ytdlp_version(output: &str) -> Option<String> {
         .iter()
         .enumerate()
         .all(|(i, c)| if i == 4 || i == 7 { *c == b'.' } else { c.is_ascii_digit() });
-    if !date_ok || v.lines().count() != 1 {
+    if !date_ok { return None; }
+    let suffix_ok = b.len() == 10 || v[10..].strip_prefix('.').is_some_and(|suffix| {
+        suffix.split('.').all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit()))
+    });
+    if !suffix_ok || v.lines().count() != 1 {
         return None;
     }
     Some(v.to_string())
 }
 
 /// Path to the user-updated yt-dlp binary in app-data (whether or not it exists).
-fn updated_ytdlp_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+fn updated_ytdlp_path(app: &AppHandle) -> Result<std::path::PathBuf, crate::AppError> {
     app.path()
         .app_data_dir()
-        .ok()
+        .map_err(|e| crate::AppError::internal(format!("app_data_dir: {e}")))
         .map(|d| d.join("bin").join("yt-dlp"))
+}
+
+// One process-wide gate covers every entry point, including the error-overlay
+// repair action and a reopened Settings pane. Changes fail visibly while an
+// operation owns it; read-only status requests wait for the committed result.
+static YTDLP_MAINTENANCE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn try_ytdlp_change() -> Result<tokio::sync::MutexGuard<'static, ()>, crate::AppError> {
+    YTDLP_MAINTENANCE.try_lock().map_err(|_| crate::AppError::invalid(
+        "Another yt-dlp operation is in progress. Wait for it to finish, then try again."
+    ))
+}
+
+fn checked_ytdlp_version(code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Result<String, crate::AppError> {
+    if code != Some(0) {
+        return Err(crate::AppError::SidecarFailed {
+            name: "yt-dlp".into(), exit_code: code,
+            tail: short_err(&String::from_utf8_lossy(stderr)),
+        });
+    }
+    parse_ytdlp_version(&String::from_utf8_lossy(stdout))
+        .ok_or_else(|| crate::AppError::internal("yt-dlp returned invalid version output"))
 }
 
 /// Reported back to the YouTube Settings tab: the resolved yt-dlp version string
@@ -284,15 +310,19 @@ pub struct YtdlpStatus {
 /// else bundled).
 #[tauri::command]
 pub async fn ytdlp_version(app: AppHandle) -> Result<YtdlpStatus, crate::AppError> {
-    let updated = updated_ytdlp_path(&app)
-        .map(|p| p.is_file())
-        .unwrap_or(false);
-    let out = ytdlp(&app, "")?
+    let _operation = YTDLP_MAINTENANCE.lock().await;
+    read_ytdlp_status(&app).await
+}
+
+// Call only with YTDLP_MAINTENANCE held, including after an install or reset.
+async fn read_ytdlp_status(app: &AppHandle) -> Result<YtdlpStatus, crate::AppError> {
+    let updated = updated_ytdlp_path(app)?.is_file();
+    let out = ytdlp(app, "")?
         .arg("--version")
         .output()
         .await
         .map_err(|e| crate::AppError::internal(format!("yt-dlp --version failed: {e}")))?;
-    let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let version = checked_ytdlp_version(out.status.code(), &out.stdout, &out.stderr)?;
     Ok(YtdlpStatus { version, updated })
 }
 
@@ -342,6 +372,7 @@ pub(crate) fn ytdlp_release_base(channel: &str, tag: &str) -> String {
 /// `--version` probe run. Writes to a temp path + atomically renames.
 #[tauri::command]
 pub async fn update_ytdlp(app: AppHandle, channel: Option<String>) -> Result<YtdlpStatus, crate::AppError> {
+    let _operation = try_ytdlp_change()?;
     let channel = channel.unwrap_or_else(|| "stable".into());
     let data = app
         .path()
@@ -457,28 +488,35 @@ pub async fn update_ytdlp(app: AppHandle, channel: Option<String>) -> Result<Ytd
             let _ = std::fs::remove_file(&tmp);
             crate::AppError::internal(format!("downloaded yt-dlp would not run: {e}"))
         })?;
-    let version_out = String::from_utf8_lossy(&probe.stdout).to_string();
-    if !probe.status.success() || parse_ytdlp_version(&version_out).is_none() {
+    if let Err(error) = checked_ytdlp_version(probe.status.code(), &probe.stdout, &probe.stderr) {
         let _ = std::fs::remove_file(&tmp);
         return Err(crate::AppError::internal(format!(
-            "downloaded yt-dlp failed verification (output: {:?}); keeping the previous copy",
-            version_out.trim()
+            "downloaded yt-dlp failed verification: {error}; keeping the previous copy"
         )));
     }
     std::fs::rename(&tmp, bin_dir.join("yt-dlp"))
         .map_err(|e| crate::AppError::internal(format!("install yt-dlp: {e}")))?;
     // No cached resolved path exists to clear - ytdlp() re-resolves on every
     // spawn (same reason Reset needs no invalidation beyond removing the file).
-    ytdlp_version(app).await
+    read_ytdlp_status(&app).await
 }
 
 /// Remove the user-updated yt-dlp so the app falls back to the bundled sidecar.
 #[tauri::command]
-pub fn reset_ytdlp(app: AppHandle) -> Result<(), crate::AppError> {
-    if let Some(p) = updated_ytdlp_path(&app) {
-        let _ = std::fs::remove_file(p);
+pub async fn reset_ytdlp(app: AppHandle) -> Result<YtdlpStatus, crate::AppError> {
+    let _operation = try_ytdlp_change()?;
+    remove_updated_ytdlp(&updated_ytdlp_path(&app)?)?;
+    // Return the verified fallback while still holding the gate. The frontend
+    // must not turn a failed follow-up probe into a successful reset message.
+    read_ytdlp_status(&app).await
+}
+
+fn remove_updated_ytdlp(path: &std::path::Path) -> Result<(), crate::AppError> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(crate::AppError::Io(format!("Could not reset yt-dlp: {e}"))),
     }
-    Ok(())
 }
 
 /// macOS app name for a browser id, for `open -a`.
@@ -2747,12 +2785,79 @@ mod ytdlp_update_tests {
         assert!(parse_ytdlp_version("404: Not Found").is_none());
         assert!(parse_ytdlp_version("<!DOCTYPE html>").is_none());
         assert!(parse_ytdlp_version("error\n2026.07.04").is_none());
+        for invalid in ["2026.08.19junk", "2026.08.19 warning", "2026.08.19.", "2026.08.19..1", "2026.08.19.abc", "日本語のエラー"] {
+            assert!(parse_ytdlp_version(invalid).is_none(), "{invalid}");
+        }
     }
 
     #[test]
     fn updated_copy_always_outranks_bundled() {
         assert_eq!(resolved_ytdlp_kind(true), "updated");
         assert_eq!(resolved_ytdlp_kind(false), "bundled");
+    }
+
+    #[test]
+    fn version_status_requires_a_successful_process_and_valid_stdout() {
+        assert_eq!(checked_ytdlp_version(Some(0), b"2026.08.19\n", b"warning").unwrap(), "2026.08.19");
+        assert_eq!(checked_ytdlp_version(Some(0), b"2026.08.30.232658\n", b"").unwrap(), "2026.08.30.232658");
+        for code in [Some(1), None] {
+            let error = checked_ytdlp_version(code, b"2026.08.19", b"executable failed").unwrap_err();
+            assert!(matches!(error, crate::AppError::SidecarFailed { exit_code, .. } if exit_code == code));
+            assert!(error.to_string().contains("executable failed"));
+        }
+        for output in [b"".as_slice(), b"404 Not Found", b"2026.08.19junk", b"\xff\xfe", b"2026.08.19\nextra"] {
+            assert!(checked_ytdlp_version(Some(0), output, b"").is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn maintenance_gate_rejects_overlapping_changes_and_releases_after_failure() {
+        let first = try_ytdlp_change().unwrap();
+        let second = tokio::spawn(async { try_ytdlp_change().err().unwrap().to_string() }).await.unwrap();
+        assert!(second.contains("in progress"));
+        // A failed operation drops the guard through `?`, just as the command
+        // does on a network/probe/removal error. A subsequent click can retry.
+        drop(first);
+        let failed: Result<(), crate::AppError> = async {
+            let _operation = try_ytdlp_change()?;
+            checked_ytdlp_version(Some(1), b"", b"probe failed")?;
+            Ok(())
+        }.await;
+        assert!(failed.is_err());
+        assert!(try_ytdlp_change().is_ok());
+    }
+
+    #[test]
+    fn reset_removes_only_the_override_and_missing_is_already_reset() {
+        let dir = std::env::temp_dir().join(format!("sb-ytdlp-reset-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("yt-dlp");
+        let bundled = dir.join("bundled-yt-dlp");
+        std::fs::write(&path, b"updated").unwrap();
+        std::fs::write(&bundled, b"bundled").unwrap();
+        remove_updated_ytdlp(&path).unwrap();
+        assert!(!path.exists());
+        remove_updated_ytdlp(&path).unwrap();
+        assert_eq!(std::fs::read(&bundled).unwrap(), b"bundled");
+        std::fs::remove_file(bundled).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn reset_propagates_filesystem_failure_and_keeps_the_copy() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("sb-ytdlp-denied-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("yt-dlp");
+        std::fs::write(&path, b"still installed").unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let result = remove_updated_ytdlp(&path);
+        // Restore our temporary directory before asserting, even on failure.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(result, Err(crate::AppError::Io(_))));
+        assert_eq!(std::fs::read(&path).unwrap(), b"still installed");
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(dir).unwrap();
     }
 }
 

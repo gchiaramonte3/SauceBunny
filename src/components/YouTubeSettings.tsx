@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { CollapsibleSection } from "./CollapsibleSection";
@@ -10,7 +10,7 @@ import { browserLabel } from "../lib/safari-fallback";
 
 const BROWSERS = ["none", "chrome", "safari", "firefox", "brave", "edge"] as const;
 const PREVIEW_HEIGHTS = [480, 720, 1080] as const;
-
+type EngineAction = "checking" | "updating" | "resetting";
 
 
 /**
@@ -47,7 +47,9 @@ export function YouTubeSettings({
       return raw ? (JSON.parse(raw) as YtdlpStatus) : null;
     } catch { return null; }
   });
-  const [busy, setBusy] = useState<"idle" | "checking" | "updating" | "resetting">("checking");
+  const [busy, setBusy] = useState<"idle" | EngineAction>("checking");
+  const busyRef = useRef(false);
+  const operationRef = useRef(0);
   const [msg, setMsg] = useState<string | null>(null);
   /** Shown only after a stable update turned out to be a no-op. Nightly is not
    *  advertised up front: it is the escalation for someone already stuck. */
@@ -57,21 +59,6 @@ export function YouTubeSettings({
     setStatus(s);
     try { localStorage.setItem("saucebunny.ytdlpVersion", JSON.stringify(s)); } catch { /* quota */ }
   };
-  const refresh = async () => {
-    setBusy("checking");
-    try {
-      applyStatus(await invoke<YtdlpStatus>("ytdlp_version"));
-    } catch (e) {
-      setMsg(formatError(e));
-    } finally {
-      setBusy("idle");
-    }
-  };
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   /**
    * Update the downloader, and be honest when there was nothing to update to.
    *
@@ -82,14 +69,27 @@ export function YouTubeSettings({
    * button did nothing, and no idea what to try next. So a no-op says so, and
    * names the one thing left.
    */
-  const update = async (channel: "stable" | "nightly" = "stable") => {
-    setBusy("updating");
+  const runEngineAction = async (action: EngineAction, channel: "stable" | "nightly" = "stable") => {
+    // The ref claims the operation synchronously, before disabled can render.
+    // The backend also owns a gate for calls from other UI entry points.
+    if (busyRef.current) return;
+    busyRef.current = true;
+    const operation = ++operationRef.current;
+    setBusy(action);
     setMsg(null);
+    if (action !== "updating") setOfferNightly(false);
     const before = status?.version ?? null;
     try {
-      const s = await invoke<YtdlpStatus>("update_ytdlp", { channel });
+      const command = action === "updating" ? "update_ytdlp"
+        : action === "resetting" ? "reset_ytdlp" : "ytdlp_version";
+      const s = await invoke<YtdlpStatus>(command, action === "updating" ? { channel } : undefined);
+      if (operation !== operationRef.current) return;
       applyStatus(s);
-      if (before && s.version === before && channel === "stable") {
+      if (action === "resetting") {
+        setMsg("Reverted to the bundled yt-dlp.");
+      } else if (action === "checking") {
+        setMsg(null);
+      } else if (before && s.version === before && channel === "stable") {
         setOfferNightly(true);
         setMsg(`Already on the newest stable build (${s.version}). If downloads are still failing, YouTube has probably changed something the stable build has not caught up with yet.`);
       } else {
@@ -97,25 +97,30 @@ export function YouTubeSettings({
         setMsg(`Updated to ${s.version}.`);
       }
     } catch (e) {
-      setMsg(`Update failed: ${formatError(e)}`);
+      if (operation !== operationRef.current) return;
+      setMsg(`${action === "updating" ? "Update" : action === "resetting" ? "Reset" : "Version check"} failed: ${formatError(e)}`);
+      // A failed read (including Reset's fallback probe) leaves the active
+      // version unknown. Keep Reset available to recover a broken override.
+      if (action !== "updating") {
+        setStatus(null);
+        try { localStorage.removeItem("saucebunny.ytdlpVersion"); } catch { /* storage unavailable */ }
+      }
     } finally {
-      setBusy("idle");
+      if (operation === operationRef.current) {
+        busyRef.current = false;
+        setBusy("idle");
+      }
     }
   };
 
-  const reset = async () => {
-    setBusy("resetting");
-    setMsg(null);
-    try {
-      await invoke("reset_ytdlp");
-      await refresh();
-      setMsg("Reverted to the bundled yt-dlp.");
-    } catch (e) {
-      setMsg(formatError(e));
-    } finally {
-      setBusy("idle");
-    }
-  };
+  useEffect(() => {
+    void runEngineAction("checking");
+    return () => {
+      operationRef.current += 1;
+      busyRef.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const browser = defaults.ytCookiesBrowser;
   const signIn = () =>
@@ -263,14 +268,15 @@ export function YouTubeSettings({
             yt-dlp version
             <span className="desc">
               The tool that reads web video sites. Update if videos stop loading.{" "}
-              {status?.updated ? "Using your updated copy." : "Using the bundled copy."}
+              {status ? (status.updated ? "Using your updated copy." : "Using the bundled copy.")
+                : busy === "checking" ? "Checking the active copy." : "Active copy could not be verified."}
             </span>
           </div>
           <div className="v cp-ytdlp-actions">
             <code className="cp-ytdlp-version">
               {status?.version ?? (busy === "checking" ? "checking…" : "unknown")}
             </code>
-            <button className="btn btn-primary" onClick={() => update("stable")} disabled={busy === "updating"}>
+            <button className="btn btn-primary" onClick={() => runEngineAction("updating", "stable")} disabled={busy !== "idle"}>
               {busy === "updating" ? "Updating…" : "Update yt-dlp"}
             </button>
             {/* Appears only once a stable update has proved to be a no-op. Not
@@ -280,15 +286,15 @@ export function YouTubeSettings({
             {offerNightly && (
               <button
                 className="btn btn-ghost"
-                onClick={() => update("nightly")}
-                disabled={busy === "updating"}
+                onClick={() => runEngineAction("updating", "nightly")}
+                disabled={busy !== "idle"}
                 title="Nightly carries YouTube fixes days before they reach stable"
               >
                 Try the nightly build
               </button>
             )}
-            {status?.updated && (
-              <button className="btn btn-ghost" onClick={reset} disabled={busy === "resetting"}>
+            {status?.updated !== false && (
+              <button className="btn btn-ghost" onClick={() => runEngineAction("resetting")} disabled={busy !== "idle"}>
                 Reset to bundled
               </button>
             )}

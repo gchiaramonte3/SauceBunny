@@ -171,6 +171,9 @@ int main(int argc,char** argv) {
     return capture.segments>=(continuous?200:10) && capture.sawLive && (continuous || (capture.sawStale && capture.recovered)) && capture.sawInitialPlaceholder && preview.segments>=3 && refreshWorked && capture.sawInputRate && capture.maxOutputFps<31.5
         // SDK/frame-sync may omit metadata. Helper tests validate our bounded
         // copy even when propagation is absent; report absence, do not fake it.
-        && capture.timingSamples>20 && capture.acceptedTimingSamples>20 && capture.sawRepeatedTiming
+        // A continuous 30/60-fps sender need not repeat input timing at a
+        // 30-fps receiver. Only recovery mode deliberately parks the source;
+        // keep the repeated-frame assertion there, where it is guaranteed.
+        && capture.timingSamples>20 && capture.acceptedTimingSamples>20 && (continuous || capture.sawRepeatedTiming)
         && !capture.invalidTimingPacket && preview.timingSamples==0 ? 0 : 4;
 }
