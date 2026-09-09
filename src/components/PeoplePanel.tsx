@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useDismiss } from "../hooks/use-dismiss";
 import { useMenuKeys } from "../hooks/use-menu-keys";
 import { useReactionFlashes } from "../lib/reaction-store";
-import { IconCrown, IconMic, IconMicOff, IconVideo, IconVideoOff, IconChevronRight } from "./Icons";
+import { IconCrown, IconMic, IconMicOff, IconVideo, IconVideoOff, IconChevronRight, IconScreenShare, IconRecord, IconAlert } from "./Icons";
 import { initialsOf } from "../lib/review";
 import { subscribeSessionCapture, getSessionCapture } from "../hooks/use-media-capture";
 import type { MeshPeerState } from "../lib/rtc-mesh";
@@ -17,7 +18,7 @@ export type Participant = { id: string; name: string; color: string; isHost: boo
  * live from the green-room capture the moment you enter), then every other
  * member: their mesh stream when live, the avatar card when not (declined,
  * failed, camera off). Collapsible to a 72px avatar spine (auto below
- * ~1100px via CSS); tiles pop over on hover/focus in spine mode. Folds in
+ * ~1100px via CSS); each picture opens accessible participant details. Folds in
  * the old participant rail's roster duties; leave/end lives in the room
  * control bar.
  */
@@ -210,16 +211,61 @@ function PersonTile({ p, stream, state, sharing, recording, handUp, flash, isPre
    * only signal there is.
    */
   const micMuted = p.isSelf ? !!selfMicMuted : trackMicMuted;
-  /** Anchor for the peer context menu (client coords), null when closed. */
+  /** Details keep the real per-person actions, outside the picture mask. */
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  useDismiss(menuRef, () => setMenuAt(null), menuAt !== null);
+  const menuId = useId();
+  const closeMenu = useCallback(() => setMenuAt(null), []);
+  useDismiss(menuRef, closeMenu, menuAt !== null);
   // role="menu" is a promise about the keyboard: arrows, Home/End, type-ahead
   // and focus returning to whatever opened it. menu-keyboard-contract enforces
   // it, and caught this menu shipping the role without the behaviour.
-  useMenuKeys(menuRef, menuAt !== null, () => setMenuAt(null));
+  useMenuKeys(menuRef, menuAt !== null, closeMenu);
+  const openMenu = (point?: { x: number; y: number }) => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    trigger.focus();
+    const rect = trigger.getBoundingClientRect();
+    setMenuAt(point ?? { x: rect.right + 8, y: rect.top });
+  };
+  // A body portal escapes the scrolling roster. Measure the real menu rather
+  // than guessing its height: names, device states and permissions all vary.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menuAt || !menu) return;
+    const fit = () => {
+      const bounds = menu.getBoundingClientRect();
+      const x = Math.max(12, Math.min(menuAt.x, window.innerWidth - bounds.width - 12));
+      const y = Math.max(12, Math.min(menuAt.y, window.innerHeight - bounds.height - 12));
+      setMenuAt(current => current && (current.x !== x || current.y !== y) ? { x, y } : current);
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(menu);
+    return () => observer.disconnect();
+  }, [menuAt]);
+  useEffect(() => {
+    if (!menuAt) return;
+    const onScroll = (event: Event) => {
+      if (!(event.target instanceof Node) || !menuRef.current?.contains(event.target)) closeMenu();
+    };
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [menuAt, closeMenu]);
   const hasVideo = !!stream && stream.getVideoTracks().some((t) => t.enabled && !t.muted)
     && !(videoHidden && !p.isSelf);
+  const connection = !p.isSelf && state !== "live" ? (state === "failed" ? "No connection" : "Connecting") : null;
+  const cameraState = !p.isSelf && videoHidden ? "Video hidden for me"
+    : p.isSelf && selfCamOff ? "Camera off" : hasVideo ? "Camera on" : "No camera picture";
+  const details = [p.isSelf && "You", p.isHost && "Host", isPresenter && "Presenting",
+    micMuted ? "Mic muted" : "Mic on", cameraState, sharing && "Sharing screen",
+    recording && "Recording camera and mic", handUp && "Hand raised",
+    !p.isSelf && mutedForMe && "Muted for me", connection].filter(Boolean).join(", ");
 
   useEffect(() => {
     const v = videoRef.current;
@@ -280,23 +326,56 @@ function PersonTile({ p, stream, state, sharing, recording, handUp, flash, isPre
   return (
     <div
       className={"cp-person" + (speaking && !micMuted ? " speaking" : "") + (p.isSelf ? " self" : "")}
+      data-member-id={p.id}
       style={{ ["--pr-color" as string]: p.color }}
-      onContextMenu={p.isSelf ? undefined : (e) => {
+      onContextMenu={(e) => {
         e.preventDefault();
-        setMenuAt({ x: e.clientX, y: e.clientY });
+        openMenu({ x: e.clientX, y: e.clientY });
       }}
     >
+      <button ref={triggerRef} type="button" className="cp-person-trigger"
+        aria-label={`${p.name}, ${details}. Participant details`}
+        aria-haspopup="menu" aria-expanded={menuAt !== null} aria-controls={menuAt ? menuId : undefined}
+        onMouseDown={event => { if (menuAt) event.stopPropagation(); }}
+        onClick={() => { if (menuAt) closeMenu(); else openMenu(); }}
+        onKeyDown={event => {
+          // Keep native button activation without also toggling the room's
+          // global Space-to-play shortcut.
+          if (event.key === " " && !event.altKey && !event.ctrlKey && !event.metaKey) event.stopPropagation();
+          if ((event.shiftKey && event.key === "F10") || event.key === "ContextMenu") {
+            event.preventDefault(); openMenu();
+          }
+        }}>
+      <span className="cp-person-picture" aria-hidden="true">
       {hasVideo ? (
         <video ref={videoRef} className={p.isSelf && !sharing ? "mirror" : undefined} muted playsInline aria-hidden />
       ) : (
-        <div className="cp-person-avatar" aria-hidden>
+        <span className="cp-person-avatar">
           <span className="cp-person-initials">{initialsOf(p.name)}</span>
-          {state === "connecting" && !p.isSelf && <span className="cp-person-conn">Connecting</span>}
-          {state === "failed" && <span className="cp-person-conn">No connection</span>}
-        </div>
+        </span>
       )}
-      {/* Your own tile doubles as the device control: the camera and mic you
-          see are the ones you click. Everyone else's tile stays read-only. */}
+      </span>
+      {isPresenter && <span className="cp-person-presenter-pin" aria-hidden="true"><IconScreenShare size={11} /></span>}
+      <span className="cp-person-meta" aria-hidden="true">
+        <span className="cp-person-identity">
+          {p.isHost && <span className="cp-person-crown"><IconCrown size={10} /></span>}
+          <span className="cp-person-name">{p.isSelf ? `${p.name} (You)` : p.name}</span>
+        </span>
+        {isPresenter && <span className="cp-person-presenting">Presenting</span>}
+      </span>
+      </button>
+      <div className="cp-person-signals" aria-hidden="true">
+        {micMuted && !p.isSelf && <span className="cp-person-signal cp-person-muted" title="Mic muted"><IconMicOff size={12} /><span className="cp-person-signal-label">Muted</span></span>}
+        {!p.isSelf && mutedForMe && <span className="cp-person-signal cp-person-local-muted" title="Muted for me"><IconMicOff size={12} /><span className="cp-person-signal-label">Muted for me</span></span>}
+        {!hasVideo && <span className="cp-person-signal cp-person-camera" title={cameraState}><IconVideoOff size={12} /><span className="cp-person-signal-label">{cameraState}</span></span>}
+        {sharing && <span className="cp-person-signal cp-person-share" title="Sharing screen"><IconScreenShare size={12} /><span className="cp-person-signal-label">Sharing</span></span>}
+        {recording && <span className="cp-person-signal cp-person-rec" title="Recording their own camera and mic"><IconRecord size={12} /><span className="cp-person-signal-label">Recording</span></span>}
+        {handUp && <span className="cp-person-signal cp-person-hand" title="Hand raised"><span>✋</span><span className="cp-person-signal-label">Hand raised</span></span>}
+        {connection && <span className="cp-person-signal cp-person-conn" title={connection}><IconAlert size={12} /><span className="cp-person-signal-label">{connection}</span></span>}
+        {flash && <span className="cp-person-signal cp-person-flash">{flash}</span>}
+      </div>
+      {/* Your own controls change real devices. Peer actions remain in their
+          details menu and retain the existing host/local-only permissions. */}
       {p.isSelf && onToggleCam && onToggleMic && (
         <div className="cp-person-controls self">
           <button
@@ -305,6 +384,7 @@ function PersonTile({ p, stream, state, sharing, recording, handUp, flash, isPre
             aria-pressed={!selfCamOff}
             title={selfCamOff ? "Turn camera on" : "Turn camera off"}
             aria-label={selfCamOff ? "Turn camera on" : "Turn camera off"}
+            onKeyDown={event => { if (event.key === " " && !event.altKey && !event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
             onClick={onToggleCam}
           >
             {selfCamOff ? <IconVideoOff size={13} /> : <IconVideo size={13} />}
@@ -315,60 +395,49 @@ function PersonTile({ p, stream, state, sharing, recording, handUp, flash, isPre
             aria-pressed={!selfMicMuted}
             title={selfMicMuted ? "Unmute" : "Mute"}
             aria-label={selfMicMuted ? "Unmute" : "Mute"}
+            onKeyDown={event => { if (event.key === " " && !event.altKey && !event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
             onClick={onToggleMic}
           >
             {selfMicMuted ? <IconMicOff size={13} /> : <IconMic size={13} />}
           </button>
         </div>
       )}
-      {isPresenter && (
-        <span className="cp-person-presenting" title="Choosing what everyone watches">Presenting</span>
-      )}
-      {sharing && <span className="cp-person-share">Sharing screen</span>}
-      {recording && (
-        <span className="cp-person-rec" title="Recording their own camera and mic">Recording</span>
-      )}
-      {handUp && <span className="cp-person-hand" title="Hand raised" aria-label="Hand raised">✋</span>}
-      {flash && <span className="cp-person-flash" aria-hidden>{flash}</span>}
-      <div className="cp-person-meta">
-        {p.isHost && <span className="cp-person-crown" title="Host"><IconCrown size={10} /></span>}
-        <span className="cp-person-name" title={p.name}>{p.isSelf ? `${p.name} (You)` : p.name}</span>
-        {/* PEERS ONLY. On your own tile the mic BUTTON is the indicator, and a
-            second glyph beside it was the "microphone in two places" that read
-            muted while the button read live. One control, one truth. */}
-        {micMuted && !p.isSelf && <span className="cp-person-muted" title="Mic muted" aria-label="Mic muted"><IconMicOff size={11} /></span>}
-      </div>
-      {/* EVERYTHING YOU CAN DO TO SOMEONE ELSE lives in one right-click menu.
-          It used to be three hover buttons over their face plus a "Let them
-          present" button floating in the middle of the picture, which read as
-          controls over THEM (two of the three only ever affected this screen)
-          and covered the video besides. A context menu is where a per-person
-          action belongs, and it leaves the tile showing the person. */}
-      {menuAt && !p.isSelf && (
+      {/* The same permission-gated actions are available by click, keyboard
+          and context menu. The portal escapes the scrolling People rail. */}
+      {menuAt && createPortal(
         <div
           ref={menuRef}
+          id={menuId}
           className="cp-person-menu"
           role="menu"
+          aria-label={`${p.name} participant details`}
           style={{ left: menuAt.x, top: menuAt.y }}
+          // The menu's native key handler runs before this portal boundary.
+          // Keep activation/typeahead keys away from global playback shortcuts.
+          onKeyDown={event => { if (!event.altKey && !event.ctrlKey && !event.metaKey) event.stopPropagation(); }}
+          onContextMenu={event => event.stopPropagation()}
         >
-          {onToggleMuteForMe && (
+          <div className="cp-person-menu-head"><strong>{p.name}</strong><span>{details}</span></div>
+          {p.isSelf && onToggleCam && <button type="button" role="menuitem" onClick={() => { onToggleCam(); closeMenu(); }}>{selfCamOff ? "Turn camera on" : "Turn camera off"}</button>}
+          {p.isSelf && onToggleMic && <button type="button" role="menuitem" onClick={() => { onToggleMic(); closeMenu(); }}>{selfMicMuted ? "Unmute" : "Mute"}</button>}
+          {!p.isSelf && onToggleMuteForMe && (
             <>
               <button role="menuitem" onClick={() => { setVideoHidden((h) => !h); setMenuAt(null); }}>
-                {videoHidden ? "Show their video" : "Hide their video"}
+                {videoHidden ? "Show their video" : "Hide their video"}{" "}
                 <span className="cp-person-menu-note">for me</span>
               </button>
               <button role="menuitem" onClick={() => { onToggleMuteForMe(p.id, !mutedForMe); setMenuAt(null); }}>
-                {mutedForMe ? "Unmute them" : "Mute them"}
+                {mutedForMe ? "Unmute them" : "Mute them"}{" "}
                 <span className="cp-person-menu-note">for me</span>
               </button>
             </>
           )}
-          {canGrant && !isPresenter && onMakePresenter && (
+          {!p.isSelf && canGrant && !isPresenter && onMakePresenter && (
             <button role="menuitem" onClick={() => { onMakePresenter(p.id); setMenuAt(null); }}>
               Let them present
             </button>
           )}
-          {onRemovePerson && (
+          {!p.isSelf && onRemovePerson && (
             <button
               role="menuitem"
               className="danger"
@@ -377,7 +446,8 @@ function PersonTile({ p, stream, state, sharing, recording, handUp, flash, isPre
               Remove from session
             </button>
           )}
-        </div>
+          <button type="button" role="menuitem" onClick={closeMenu}>Close details</button>
+        </div>, document.body
       )}
     </div>
   );

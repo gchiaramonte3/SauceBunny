@@ -23,7 +23,7 @@ async function boot(page: Page, pending: string | null): Promise<void> {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
     localStorage.setItem("saucebunny.permissioned", "1");
-    localStorage.setItem("saucebunny.review.author", "Dana");
+    localStorage.setItem("saucebunny.review.author", JSON.stringify("Dana"));
     const w = window as unknown as {
       __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
     };
@@ -40,12 +40,8 @@ async function boot(page: Page, pending: string | null): Promise<void> {
     .toBeVisible({ timeout: 15_000 });
 }
 
-/** The JOIN CODE field specifically. Three inputs share .cp-colobby-input
- *  (name, session title, join code), so .first() picks the name field and the
- *  assertion measures the wrong box. */
-/** The banner that says a link arrived. The join field itself is two steps
- *  away on purpose - the device defaults are camera and mic ON, so a link must
- *  not skip that step - and CoReviewLobby.test.tsx covers the field fill. */
+/** Incoming links select the Join form without connecting or acquiring any
+ * devices. The visible arrival banner remains a separate acknowledgement. */
 const arrived = (page: Page) => page.locator(".cp-colobby-linkbanner");
 
 test("a cold launch claims the buffered link", async ({ page }) => {
@@ -53,6 +49,8 @@ test("a cold launch claims the buffered link", async ({ page }) => {
   // The view moves on its own: the code is useless on a screen you cannot see.
   await expect(page.locator(".cp-view-coreview")).toBeVisible({ timeout: 10_000 });
   await expect(arrived(page), "nothing tells the user their link was received").toBeVisible();
+  await expect(page.getByRole("tab", { name: "Join a session" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("textbox", { name: "Join code" })).toHaveValue("SAUC-COLD1-COLD2");
 });
 
 test("a link clicked while running arrives as an event", async ({ page }) => {
@@ -71,6 +69,8 @@ test("a link clicked while running arrives as an event", async ({ page }) => {
 
   await expect(page.locator(".cp-view-coreview")).toBeVisible({ timeout: 10_000 });
   await expect(arrived(page)).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Join a session" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("textbox", { name: "Join code" })).toHaveValue("SAUC-WARM1-WARM2");
 });
 
 test("it fills the field and does not join", async ({ page }) => {
@@ -100,6 +100,8 @@ test("it fills the field and does not join", async ({ page }) => {
   });
   await boot(page, "SAUC-NOJOIN");
   await expect(arrived(page)).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Join code" })).toHaveValue("SAUC-NOJOIN");
+  await expect(page.getByRole("button", { name: "Join", exact: true })).toBeEnabled();
   await page.waitForTimeout(400);
 
   // CANARY: the recorder saw SOMETHING, so "no session_join" is a real
@@ -107,4 +109,5 @@ test("it fills the field and does not join", async ({ page }) => {
   expect(calls.length, "the invoke recorder captured nothing").toBeGreaterThan(3);
   expect(calls, "the link joined by itself; a link is an instruction from someone else")
     .not.toContain("session_join");
+  expect(await page.evaluate(() => localStorage.getItem("e2e.avGranted"))).toBeNull();
 });

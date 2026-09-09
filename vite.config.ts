@@ -27,7 +27,9 @@ export default defineConfig({
   test: {
     // e2e/ is Playwright's turf (npm run test:e2e) — vitest must not collect it.
     // .claude/ holds agent worktrees (full repo copies) — same rule applies.
-    exclude: [...configDefaults.exclude, "e2e/**", ".claude/**"],
+    // The NDI script fixtures use Node's test runner; npm test runs them after
+    // Vitest. Collecting it here would run fixtures but register zero tests.
+    exclude: [...configDefaults.exclude, "e2e/**", ".claude/**", "premiere-companion/**", "scripts/prepare-ndi-bundle.test.mjs", "scripts/verify-ndi-package.test.mjs", "scripts/profile-ndi-processes.test.mjs"],
     // The default environment stays `node`. jsdom is roughly 200ms of setup
     // per file, and the overwhelming majority of these tests are pure
     // functions that have no use for a DOM. Component tests opt in with a
@@ -39,7 +41,9 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     host: host || false,
-    hmr: host
+    // Browser assertions must not be invalidated by filesystem hydration or
+    // an editor save reloading the app mid-session. Normal dev keeps HMR.
+    hmr: process.env.SAUCE_BROWSER_TEST === "1" ? false : host
       ? { protocol: "ws", host, port: 1421 }
       : undefined,
     watch: { ignored: ["**/src-tauri/**"] },

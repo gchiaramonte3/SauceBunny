@@ -52,6 +52,14 @@
   object-fit: cover;
   display: block;
 }
+/* Accessibility boundary only. Do not hide or resize a published file player
+   while a private program feed covers it; its outgoing clock must continue. */
+.cp-monitor-file-layer {
+  display: contents;
+}
+/* A live input can be connecting before its first frame. The covered file
+   onboarding is not that input's waiting state and must not show through. */
+.cp-empty[inert] { visibility: hidden; }
 
 /* On-video caption overlay (transport CC toggle). Burned-in subtitle look,
    anchored to the bottom of the video box (.cp-monitor is position:relative).
@@ -157,6 +165,7 @@
   pointer-events: none;
 }
 .cp-monitor-stack > * { pointer-events: auto; }
+.cp-monitor-stack > .cp-prep-banner { pointer-events: none; }
 
 .cp-stream-rung {
   padding: 3px 8px;
@@ -273,12 +282,9 @@
   justify-content: center;
   gap: 16px;
   color: var(--fg-3);
-  /* Ambient brand wash — three soft radial gradients (green + violet +
-     pink) bloom behind the empty-state copy, kept low-opacity so the
-     dominant impression is still dark/quiet, but the canvas no longer
-     reads as "flat black panel". Same wash is used on a couple of
-     other hero surfaces — see --grad-brand-wash. */
-  background: var(--grad-brand-wash);
+  /* A clean tonal canvas: no gradient quantization or visible dither pattern
+     behind the empty-state instructions. The panel bevel supplies depth. */
+  background: var(--bg-1);
 }
 .cp-empty h3 {
   margin: 0;
@@ -428,12 +434,8 @@
   box-shadow: var(--shadow-card);
   font-family: var(--font-ui);
   animation: cp-fade-in var(--dur-fast) var(--ease-out);
-  /* r55: was pointer-events: none so it never blocked clicks on the
-     player underneath. Now we need the inline Cancel button to be
-     clickable, so the banner accepts pointer events. The Cancel
-     button is the only interactive child; the rest of the banner
-     ignores clicks via pointer-events: none on the text wrapper. */
-  pointer-events: auto;
+  /* Only Cancel consumes input; the banner must not cover annotation controls. */
+  pointer-events: none;
 }
 .cp-prep-cancel {
   pointer-events: auto;
@@ -661,6 +663,23 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+.cp-proxy-presentation,
+.cp-playback-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-0);
+}
+.cp-playback-layer {
+  transition: opacity 80ms linear;
+}
+.cp-playback-proxy {
+  z-index: 2;
+}
+.cp-playback-presentation {
+  z-index: 1;
 }
 .cp-local-media video {
   width: 100%;

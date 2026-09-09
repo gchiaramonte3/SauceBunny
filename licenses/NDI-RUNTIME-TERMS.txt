@@ -1,0 +1,51 @@
+NDI runtime component terms
+
+These terms apply only to the proprietary NDI runtime distributed inside Sauce
+Bunny. They do not replace the MIT license for Sauce Bunny's own source, or the
+licenses of other components.
+
+NDI runtime copyright (C) 2023-2026 Vizrt NDI AB. All rights reserved.
+NDI, Inc. and its licensors retain their applicable copyrights and proprietary
+rights. The accompanying libndi_licenses.txt preserves the vendor's copyright
+and third-party notices.
+
+NDI® is a registered trademark of Vizrt NDI AB. Sauce Bunny is not sponsored
+or endorsed by NDI. Information and tools: https://ndi.video/
+
+Use of the included NDI runtime is subject to these component terms. You must
+not modify the NDI SDK, Specific SDK, NDI Products, or included runtime, nor
+reverse engineer, disassemble, decompile, recompile, or attempt to derive their
+source code or protocols. You must not circumvent their technical limitations
+or remove, obscure, or alter their proprietary notices or labels. These
+restrictions concern NDI components, not Sauce Bunny's independently licensed
+source. Any rights that applicable law does not permit restricting remain
+unaffected.
+
+The NDI components are provided as is and with all faults. To the extent
+permitted by applicable law, all warranties on behalf of NDI and its licensors,
+express or implied, are disclaimed, including merchantability, fitness for a
+particular purpose, non-infringement, title, and quiet enjoyment. To the extent
+permitted by applicable law, NDI and its licensors disclaim liability for all
+direct, indirect, incidental, special, or consequential damages arising from
+use of Sauce Bunny or the bundled NDI components.
+
+You must comply with applicable United States export-control and trade-sanctions
+laws and regulations. Do not export or re-export the bundled product or any of
+its components in violation of those laws, directly or indirectly.
+
+Third-party developers using Sauce Bunny to develop products that use NDI must
+comply with the current NDI SDK license, maintain current and complete NDI
+compatibility, and include the terms required by paragraph 3(d) of that license
+in their end-user license agreements. These terms grant no permission to
+redistribute the entire SDK, NDI Tools, or Premiere output plugin.
+
+The NDI SDK license and distribution requirements are available from:
+https://ndi.link/ndisdk_license
+https://docs.ndi.video/all/developing-with-ndi/sdk/licensing
+
+The editor installs the official NDI Tools Premiere plugin separately:
+https://ndi.video/tools/
+
+Codec patent and other third-party licensing obligations, where applicable,
+are separate from the NDI SDK license. Redistribution requires reviewing the
+then-current vendor terms and the product's use and distribution model.

@@ -20,6 +20,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { TranscriptFile } from "../bindings/TranscriptFile";
 import { getHistory, type TranscriptHistoryEntry } from "./transcript-history";
+import { withoutHidden } from "./library-hidden";
 
 /** One transcript in the library view. `entry` is real or synthesized and is
  *  always safe to pass to App's transcript-open handler. */
@@ -135,7 +136,7 @@ export async function loadTranscriptLibrary(libraryPath: string): Promise<Librar
       /* missing library / scan failure → fall back to history alone */
     }
   }
-  return mergeTranscriptLibrary(files, getHistory());
+  return withoutHidden(mergeTranscriptLibrary(files, getHistory()));
 }
 
 /** Group a transcript list by its folder label (the YYYY-MM month), newest

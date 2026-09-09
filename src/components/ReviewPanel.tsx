@@ -1,6 +1,15 @@
 import { COMMENT_REACTION_EMOJI } from "../lib/reactions";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from "react";
+import { createPortal } from "react-dom";
+import { noProgramSource, noProgramSubscription, noInspectionBlock, type ReviewSession } from "../lib/review-session";
+import { liveNoteTiming, noteTimingLabel, loadLiveReviewPass, saveLiveReviewPass } from "../lib/live-review";
+import { subscribeReviewDoc } from "../lib/review-store";
+import type { PremiereAnchor } from "../bindings/PremiereAnchor";
+import { capturePremiereAnchor } from "../lib/premiere-notes";
+import { lastPremiereFrame } from "../lib/premiere-frames";
+import { getPremiereLink, premiereBindingForSource, subscribePremiereLink } from "../lib/premiere-link";
 import { ReviewLedgerPicker } from "./ReviewLedgerPicker";
+import { PremiereMarkerStatus } from "./PremiereMarkerStatus";
 import { loadScreeningsForSource } from "../lib/screening-store";
 import type { ScreeningDoc } from "../lib/screening";
 import { SCREENINGS_CHANGED } from "../lib/screening-store";
@@ -159,7 +168,7 @@ const NO_REPLIES: ReviewComment[] = [];
 export function ReviewPanel({
   sourceKey,
   sourceTitle,
-  playheadActive,
+  playheadActive: filePlayheadActive,
   fps,
   durationSec = null,
   onSeek, onMarkRange, onQueueRange,
@@ -181,7 +190,9 @@ export function ReviewPanel({
   sessionDoc = null,
   onSessionOp,
   outboxDepth = 0,
+  reviewSession,
 }: {
+  reviewSession?: ReviewSession;
   /** Notes queued because a send failed; shown above the composer. */
   outboxDepth?: number;
   /** Stable id for the current source (local path or URL); null when none loaded. */
@@ -276,7 +287,27 @@ export function ReviewPanel({
   sessionDoc?: ReviewDoc | null;
   onSessionOp?: (op: ReviewOp) => void;
 }) {
-
+  const program = useSyncExternalStore(reviewSession?.subscribeProgram ?? noProgramSubscription,
+    reviewSession?.getProgramSource ?? noProgramSource);
+  const inspectionBlock = useSyncExternalStore(reviewSession?.subscribeProgram ?? noProgramSubscription,
+    reviewSession?.getInspectionBlock ?? noInspectionBlock);
+  const playheadActive = filePlayheadActive && !program && !inspectionBlock;
+  const noteBlock=inspectionBlock ?? program?.notesBlocked ?? (program?.privatePreview?"Preview only. Room notes continue syncing. Return to the room picture or share this source to add notes.":null);
+  const passSourceId = program?.id ?? null;
+  const restoredPass = useMemo(() => loadLiveReviewPass(passSourceId), [passSourceId]);
+  const [passDraft, setPassDraft] = useState<{ sourceId: string | null; value: string } | null>(null);
+  const livePass = passDraft?.sourceId === passSourceId ? passDraft.value : restoredPass;
+  const setLivePass = (value: string) => {
+    setPassDraft({ sourceId: passSourceId, value });
+    if (passSourceId) saveLiveReviewPass(passSourceId, value);
+  };
+  const [manualTc, setManualTc] = useState("");
+  const premiereLink = useSyncExternalStore(subscribePremiereLink, getPremiereLink);
+  const boundPremiere = program?.kind === "ndi" ? premiereBindingForSource(program.id) : null;
+  const [premiereModeSource, setPremiereModeSource] = useState<string | null>(null);
+  const sendToPremiere = !!program && premiereModeSource === program.id;
+  const premiereDraft = useRef<PremiereAnchor | null>(null);
+  const [postError, setPostError] = useState<string | null>(null);
 
   // NOTE: this component deliberately does NOT subscribe to the playhead at
   // the top. It used to, and the cost was the whole thread list — every
@@ -309,11 +340,20 @@ export function ReviewPanel({
    * the comment is posted or the composer is emptied.
    */
   const [anchorSec, setAnchorSec] = useState<number | null>(null);
-  const latchAnchor = () => setAnchorSec((prev) => prev ?? playheadAt() ?? 0);
+  const draftProgramRef = useRef<string | null | undefined>(undefined);
+  const latchAnchor = () => {
+    if (draftProgramRef.current === undefined) {
+      draftProgramRef.current = program?.id ?? null;
+      const visible = getPremiereLink().visible;
+      premiereDraft.current = boundPremiere && program ? capturePremiereAnchor(boundPremiere, program.id,
+        visible?.sourceId === program.id ? lastPremiereFrame(visible.streamId) : null) : null;
+    }
+    setAnchorSec((prev) => prev ?? playheadAt() ?? 0);
+  };
   /** Latch on the first character, release when the box goes back to empty. */
   const setTextLatching = (next: string) => {
     if (next.trim() && !text.trim()) latchAnchor();
-    else if (!next.trim() && !drawActive) setAnchorSec(null);
+    else if (!next.trim() && !drawActive) { setAnchorSec(null); draftProgramRef.current = undefined; premiereDraft.current = null; }
     setText(next);
   };
 
@@ -322,7 +362,7 @@ export function ReviewPanel({
   // moment so that frame stops moving under the stroke.
   useEffect(() => {
     if (drawActive) latchAnchor();
-    else if (!text.trim()) setAnchorSec(null);
+    else if (!text.trim()) { setAnchorSec(null); draftProgramRef.current = undefined; premiereDraft.current = null; }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- latch on the EDGE
   }, [drawActive]);
   const [replyTo, setReplyTo] = useState<string | null>(null);
@@ -603,6 +643,9 @@ export function ReviewPanel({
       setRecording(false);
       return;
     }
+    // Speaking starts the note too. Do this before microphone permission or
+    // transcription awaits; partial results must not choose a later picture.
+    latchAnchor();
     setDictError(null);
     setDictNote(null);
     micLevelRef.current = 0;
@@ -918,13 +961,9 @@ export function ReviewPanel({
   // Echoes of our own saves are harmless — same data re-read.
   useEffect(() => {
     if (sessionActive || !sourceKey) return;
-    const onChanged = (e: Event) => {
-      const detail = (e as CustomEvent<{ sourceKey?: string }>).detail;
-      if (!detail || detail.sourceKey === sourceKey) setDoc(loadReview(sourceKey));
-    };
-    window.addEventListener(REVIEW_CHANGED_EVENT, onChanged);
-    return () => window.removeEventListener(REVIEW_CHANGED_EVENT, onChanged);
-  }, [sessionActive, sourceKey]);
+    return (reviewSession?.subscribeDocument ?? subscribeReviewDoc)(sourceKey,
+      () => setDoc(loadReview(sourceKey)));
+  }, [sessionActive, sourceKey, reviewSession]);
   // On leaving a session, reload the local doc — App persisted the merged
   // collaborative doc to storage, so the panel must re-read it (its local
   // `doc` state predates the session's comments).
@@ -1059,6 +1098,17 @@ export function ReviewPanel({
     });
   }, [roots, filter, search, lens, ledger]);
 
+  // Composer text is deliberately not a list input. The renderer ref supplies
+  // current handlers while this immutable input object gates list work.
+  const rowRenderRef = useRef<(comment: ReviewComment) => React.ReactNode>(() => null);
+  const rowInputs = useMemo(() => ({
+    viewDoc, now, fps, author, authorColor, repliesByParent, collapsedThreads,
+    replyTo, replyDraft, onSeek, onMarkRange, onQueueRange, onShowAnnotation,
+    inSession, onSessionOp, sourceKey, versionId, program,
+  }), [viewDoc, now, fps, author, authorColor, repliesByParent, collapsedThreads,
+    replyTo, replyDraft, onSeek, onMarkRange, onQueueRange, onShowAnnotation,
+    inSession, onSessionOp, sourceKey, versionId, program]);
+
   if (connecting) {
     return (
       <div className="cp-pane-empty cp-review-empty">
@@ -1068,6 +1118,10 @@ export function ReviewPanel({
     );
   }
   if (!viewDoc || !versionId || (!inSession && !sourceKey)) {
+    if(program?.privatePreview) return <div className="cp-pane-empty cp-review-empty" role="status">
+      <p className="cp-pane-empty-title">Preview only</p>
+      <p className="cp-pane-empty-body">{program.label} is private. Share it with the room to start its notes, or cancel preview to return to the room picture.</p>
+    </div>;
     return (
       <div className="cp-pane-empty cp-review-empty">
         <p className="cp-pane-empty-title">Load a source to start a review.</p>
@@ -1077,9 +1131,14 @@ export function ReviewPanel({
   }
 
   const submit = () => {
+    if (noteBlock) { setPostError(`${noteBlock} Your draft is still here.`); return; }
     const body = text.trim();
     const hasDrawing = annotationHasContent(draft);
     if (!body && !hasDrawing) return;
+    if (draftProgramRef.current !== undefined && draftProgramRef.current !== (program?.id ?? null)) {
+      setPostError("The monitor source changed while you were writing. Your draft is still here; review it before using the current picture.");
+      return;
+    }
     if (!ensureNamed()) return;
     // Post column of the range machine: a SET range posts as-is; an ARMED
     // range commits the live span the pill is showing — the SAME clamped
@@ -1097,7 +1156,24 @@ export function ReviewPanel({
       author,
       annotation: hasDrawing ? draft : null,
     });
-    dispatchUndoable("add comment", { t: "add", comment }, (d) => insertComment(d, comment));
+    try {
+      if (program) {
+        comment.timing = liveNoteTiming(program, livePass, manualTc);
+        if (sendToPremiere) {
+          if (!premiereDraft.current || premiereDraft.current.sourceId !== program.id)
+            throw new Error("No Premiere sequence was bound when this note started. Save it as a general note, or clear the draft and start after binding.");
+          comment.premiere = structuredClone(premiereDraft.current);
+        }
+        // Compatibility fields remain present, but are not a media anchor.
+        comment.timeStart = 0;
+        comment.timeEnd = null;
+      }
+      dispatchUndoable("add comment", { t: "add", comment }, (d) => insertComment(d, comment));
+      setPostError(null);
+    } catch (error) {
+      setPostError(error instanceof Error ? error.message : "Could not save this note. Your draft is still here.");
+      return;
+    }
     // A NEW NOTE BELONGS TO NOW, not to whichever past session is being read.
     // Left scoped, the note was filtered straight back out of the list the
     // instant it was posted - the composer cleared and nothing appeared, which
@@ -1106,6 +1182,8 @@ export function ReviewPanel({
     setLens(ALL_NOTES);
     setText("");
     setAnchorSec(null);
+    draftProgramRef.current = undefined;
+    premiereDraft.current = null;
     clearRange();
     // Re-measure after React flushes the cleared text — collapses in auto
     // mode, holds the dragged height in manual mode.
@@ -1113,11 +1191,19 @@ export function ReviewPanel({
     if (hasDrawing) onDraftConsumed?.();
   };
   const submitReply = (parentId: string, atTime: number) => {
+    if (noteBlock) { setPostError(`${noteBlock} Your draft is still here.`); return; }
     const body = replyDraft.trim();
     if (!body) return;
     if (!ensureNamed()) return; // gate like submit() — no empty-author replies
     const reply = buildComment({ versionId, timeStart: atTime, body, author, parentId });
-    dispatchUndoable("add reply", { t: "add", comment: reply }, (d) => insertComment(d, reply));
+    reply.timing = viewDoc.comments.find((c) => c.id === parentId)?.timing;
+    try {
+      dispatchUndoable("add reply", { t: "add", comment: reply }, (d) => insertComment(d, reply));
+      setPostError(null);
+    } catch (error) {
+      setPostError(error instanceof Error ? error.message : "Could not save this reply. Your draft is still here.");
+      return;
+    }
     // A reply is attached to a root the current lens is already showing, so
     // the lens is left alone here - unlike a new note, nothing can vanish.
     
@@ -1128,6 +1214,11 @@ export function ReviewPanel({
   const doExport = async (kind: ExportKind) => {
     setExportOpen(false);
     if (!viewDoc) return;
+    const liveNotes = viewDoc.comments.filter((c) => c.parentId === null && c.versionId === versionId && c.timing).length;
+    if (kind !== "md" && liveNotes && liveNotes === roots.length) {
+      setExportMsg("These live notes have no verified file positions. Choose Markdown to export their manual timecodes and pass names.");
+      return;
+    }
     const title = sourceTitle ?? "Sauce Bunny Review";
     const f = {
       md:       { ext: "md",     name: "Markdown",            text: reviewToMarkdown(viewDoc, sourceTitle ?? "Review") },
@@ -1142,11 +1233,42 @@ export function ReviewPanel({
       const path = await saveDialog({ defaultPath: `${base}-review.${f.ext}`, filters: [{ name: f.name, extensions: [f.ext] }] });
       if (typeof path !== "string" || !path) return;
       await invoke("write_text_to_path", { path, text: f.text, atomic: true });
-      setExportMsg(`Exported ${f.name} → ${path.split("/").pop()}`);
+      setExportMsg(`Exported ${f.name} → ${path.split("/").pop()}${kind !== "md" && liveNotes ? ` · ${liveNotes} unverified live notes are available in Markdown only.` : ""}`);
     } catch {
       setExportMsg("Export failed.");
     }
   };
+
+  rowRenderRef.current = (c) => (
+          <CommentRow
+            key={c.id}
+            c={c}
+            liveProgram={!!program}
+            now={now}
+            fps={fps}
+            myName={author}
+            myColor={authorColor}
+            replies={repliesByParent.get(c.id) ?? NO_REPLIES}
+            onSeek={onSeek}
+            onMarkRange={onMarkRange}
+            onQueueRange={onQueueRange}
+            onShowAnnotation={onShowAnnotation}
+            onResolve={() => { const at = Date.now(), v = !c.resolved; dispatchUndoable(v ? "resolve comment" : "reopen comment", { t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
+            onDelete={() => { dispatchUndoable("delete comment", { t: "del", id: c.id }, (d) => deleteComment(d, c.id)); catchFocus(); }}
+            onEdit={(body) => { const at = Date.now(); dispatchUndoable("edit comment", { t: "edit", id: c.id, body, at }, (d) => editComment(d, c.id, body, at)); }}
+            onLike={(emoji) => { if (!ensureNamed()) return; const liked = !(reactionsOf(c)[emoji] ?? []).includes(author); dispatch({ t: "like", id: c.id, name: author, liked, emoji }, (d) => setLike(d, c.id, author, liked, emoji)); }}
+            onEditReply={(replyId, body) => { const at = Date.now(); dispatchUndoable("edit reply", { t: "editReply", versionId, commentId: c.id, replyId, body, at }, (d) => editReply(d, versionId, c.id, replyId, body, at)); }}
+            onDeleteReply={(replyId) => { dispatchUndoable("delete reply", { t: "delReply", versionId, commentId: c.id, replyId }, (d) => removeReply(d, versionId, c.id, replyId)); catchFocus(); }}
+            onLikeReply={(replyId, emoji) => { if (!ensureNamed()) return; const r = viewDoc.comments.find((x) => x.id === replyId); if (!r) return; const liked = !(reactionsOf(r)[emoji] ?? []).includes(author); dispatch({ t: "like", id: replyId, name: author, liked, emoji }, (d) => setLike(d, replyId, author, liked, emoji)); }}
+            collapsed={collapsedThreads.has(c.id)}
+            onToggleCollapse={() => toggleThread(c.id)}
+            replyOpen={replyTo === c.id}
+            onToggleReply={() => { setReplyTo(replyTo === c.id ? null : c.id); setReplyDraft(""); }}
+            replyDraft={replyTo === c.id ? replyDraft : ""}
+            setReplyDraft={setReplyDraft}
+            onSubmitReply={() => submitReply(c.id, c.timeStart)}
+          />
+  );
 
   return (
     <div className="cp-review" ref={rootRef}>
@@ -1272,7 +1394,7 @@ export function ReviewPanel({
       {/* Comment list */}
       <div className="cp-review-list" ref={listRef} tabIndex={-1}>
         {roots.length === 0 && carried.length === 0 && (
-          <div className="cp-review-hint">No comments yet. Scrub to a spot and add one below.</div>
+          <div className="cp-review-hint">{program ? "No comments yet. Add a general note below, or enter manual sequence timecode." : "No comments yet. Scrub to a spot and add one below."}</div>
         )}
         {roots.length > 0 && visible.length === 0 && (
           <div className="cp-review-hint">
@@ -1286,35 +1408,7 @@ export function ReviewPanel({
                 : filter === "open" ? "No open comments. All signed off." : "No resolved comments yet."}
           </div>
         )}
-        {visible.map((c) => (
-          <CommentRow
-            key={c.id}
-            c={c}
-            now={now}
-            fps={fps}
-            myName={author}
-            myColor={authorColor}
-            replies={repliesByParent.get(c.id) ?? NO_REPLIES}
-            onSeek={onSeek}
-            onMarkRange={onMarkRange}
-            onQueueRange={onQueueRange}
-            onShowAnnotation={onShowAnnotation}
-            onResolve={() => { const at = Date.now(), v = !c.resolved; dispatchUndoable(v ? "resolve comment" : "reopen comment", { t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
-            onDelete={() => { dispatchUndoable("delete comment", { t: "del", id: c.id }, (d) => deleteComment(d, c.id)); catchFocus(); }}
-            onEdit={(body) => { const at = Date.now(); dispatchUndoable("edit comment", { t: "edit", id: c.id, body, at }, (d) => editComment(d, c.id, body, at)); }}
-            onLike={(emoji) => { if (!ensureNamed()) return; const liked = !(reactionsOf(c)[emoji] ?? []).includes(author); dispatch({ t: "like", id: c.id, name: author, liked, emoji }, (d) => setLike(d, c.id, author, liked, emoji)); }}
-            onEditReply={(replyId, body) => { const at = Date.now(); dispatchUndoable("edit reply", { t: "editReply", versionId, commentId: c.id, replyId, body, at }, (d) => editReply(d, versionId, c.id, replyId, body, at)); }}
-            onDeleteReply={(replyId) => { dispatchUndoable("delete reply", { t: "delReply", versionId, commentId: c.id, replyId }, (d) => removeReply(d, versionId, c.id, replyId)); catchFocus(); }}
-            onLikeReply={(replyId, emoji) => { if (!ensureNamed()) return; const r = viewDoc.comments.find((x) => x.id === replyId); if (!r) return; const liked = !(reactionsOf(r)[emoji] ?? []).includes(author); dispatch({ t: "like", id: replyId, name: author, liked, emoji }, (d) => setLike(d, replyId, author, liked, emoji)); }}
-            collapsed={collapsedThreads.has(c.id)}
-            onToggleCollapse={() => toggleThread(c.id)}
-            replyOpen={replyTo === c.id}
-            onToggleReply={() => { setReplyTo(replyTo === c.id ? null : c.id); setReplyDraft(""); }}
-            replyDraft={replyDraft}
-            setReplyDraft={setReplyDraft}
-            onSubmitReply={() => submitReply(c.id, c.timeStart)}
-          />
-        ))}
+        <ReviewThreadList rows={visible} inputs={rowInputs} renderRowRef={rowRenderRef} />
 
         {/* Carry-forward: unresolved notes from the stack's other versions,
             LIVE while the new cut plays. This is the divergence from
@@ -1329,10 +1423,11 @@ export function ReviewPanel({
               <div key={c.id} className="cp-review-carried">
                 <button
                   className="cp-review-carried-tc"
+                  disabled={!!c.timing || !!program}
                   onClick={() => onSeek(c.timeStart)}
                   title="Jump to this point"
                 >
-                  {secondsToHms(c.timeStart).replace(/^00:/, "")}
+                  {noteTimingLabel(c, secondsToHms(c.timeStart).replace(/^00:/, ""))}
                 </button>
                 <span className="cp-review-carried-ver" title={`Noted on ${versionLabel}`}>{versionLabel}</span>
                 <span className="cp-review-carried-body">
@@ -1354,8 +1449,46 @@ export function ReviewPanel({
         )}
       </div>
 
+      {noteBlock && <p className="cp-review-outbox" role="status">{noteBlock}</p>}
+      {program && (
+        <fieldset className="cp-live-note-context" disabled={!!noteBlock}>
+          <legend>Live input · {program.label}</legend>
+          <label>Sequence / pass
+            <input value={livePass} maxLength={120} onChange={(e) => setLivePass(e.target.value)} />
+          </label>
+          <label>Manual sequence timecode (optional)
+            <input value={manualTc} placeholder="HH:MM:SS:FF" maxLength={11}
+              onChange={(e) => setManualTc(e.target.value)} />
+          </label>
+          <p>Timing is unverified. The presenter controls playback; the hidden file is not used for note timing.</p>
+          {program.kind === "ndi" && (boundPremiere || premiereDraft.current) && <>
+            <label><input type="checkbox" checked={sendToPremiere} onChange={event => setPremiereModeSource(event.target.checked ? program.id : null)} /> Send this note to Premiere</label>
+            {sendToPremiere && <p role="status">{premiereDraft.current?.binding.sequenceName ?? boundPremiere?.sequenceName} · Needs timeline position.
+              {premiereDraft.current?.frameId ? " Displayed moment captured; sequence timecode unverified." : " The editor must confirm the position in Premiere."}</p>}
+          </>}
+          {premiereLink.error && sendToPremiere && <p role="status">{premiereLink.error}</p>}
+        </fieldset>
+      )}
+      {postError && <p className="cp-review-outbox" role="alert">{postError}</p>}
+      {draftProgramRef.current !== undefined && draftProgramRef.current !== (program?.id ?? null)
+        && (text.trim() || annotationHasContent(draft)) && (
+        <button type="button" className="btn btn-compact" onClick={() => {
+          draftProgramRef.current = program?.id ?? null;
+          const visible = getPremiereLink().visible;
+          premiereDraft.current = boundPremiere && program ? capturePremiereAnchor(boundPremiere, program.id,
+            visible?.sourceId === program.id ? lastPremiereFrame(visible.streamId) : null) : null;
+          setAnchorSec(playheadAt() ?? 0);
+          clearRange();
+          setManualTc("");
+          setPostError(null);
+          // A drawing on the previous picture cannot safely transfer.
+          if (annotationHasContent(draft)) onDraftConsumed?.();
+        }}>Use current picture for this draft</button>
+      )}
+      <fieldset className="cp-preview-composer-gate" disabled={!!noteBlock}>
       <ReviewComposer
         outboxDepth={outboxDepth}
+        inSession={inSession}
         drawActive={drawActive}
         onToggleDraw={onToggleDraw}
         labelActive={labelActive}
@@ -1379,6 +1512,7 @@ export function ReviewPanel({
         rangeColor={authorColor}
         onPasteNotes={() => setPasteOpen(true)}
       />
+      </fieldset>
 
       {pasteOpen && (
         <PasteNotesModal
@@ -1642,10 +1776,11 @@ function ReviewComposer({
   submit, hasDraft, playheadActive, fps,
   rangeIn, rangeOut, onRangeTap, onRangeClear, rangeColor,
   onPasteNotes,
-  outboxDepth = 0,
+  outboxDepth = 0, inSession = false,
 }: {
   /** Notes queued because a send failed. Zero when everything has gone. */
   outboxDepth?: number;
+  inSession?: boolean;
   drawActive: boolean;
   /** The latched moment this comment is about, or null before composing. */
   anchorSec: number | null;
@@ -1857,11 +1992,12 @@ function ReviewComposer({
           failed appeared on screen and was simply gone. It reports and asks
           for nothing, because there is nothing useful to press - the notes go
           out on their own the moment the host is back. */}
-      {outboxDepth > 0 && (
-        <p className="cp-review-outbox" role="status">
+      {inSession && (
+        <p className="cp-review-outbox" role="status" aria-live="polite">
           {outboxDepth === 1
-            ? "1 note waiting to send. It will go out when you reconnect."
-            : `${outboxDepth} notes waiting to send. They will go out when you reconnect.`}
+            ? "Saved locally · 1 edit waiting to sync. Retrying automatically."
+            : outboxDepth > 1 ? `Saved locally · ${outboxDepth} edits waiting to sync. Retrying automatically.`
+            : "Synced · the host has saved your edits."}
         </p>
       )}
       {/* Composer — draw + voice + comment, anchored at the current playhead. */}
@@ -1892,7 +2028,7 @@ function ReviewComposer({
           // Placeholder uses coarse h:mm:ss (no frames, no zero-padded hour) so
           // it fits a narrow panel without wrapping; posted comments still
           // carry the full SMPTE timecode via secondsToTc.
-          placeholder={drawActive
+          placeholder={!playheadActive ? "General note about the live picture…" : drawActive
             ? "Describe the drawing…"
             // Once latched this stops counting up, which is the only signal a
             // user gets that the stamp is fixed rather than following them.
@@ -2003,7 +2139,7 @@ function ReviewComposer({
           </button>
         </Tooltip>
           <span className="cp-review-composer-spacer" />
-        <button className="btn btn-primary btn-compact" onClick={submit} disabled={!text.trim() && !hasDraft}>Post</button>
+        <button className="btn btn-primary btn-compact cp-review-post" onClick={submit} disabled={!text.trim() && !hasDraft}>Post</button>
         </div>
       </div>
     </>
@@ -2074,12 +2210,22 @@ function NameGateModal({
   );
 }
 
-function CommentRow({
+/** The entire thread list skips composer keystrokes, not just row internals. */
+const ReviewThreadList = memo(function ReviewThreadList({ rows, renderRowRef }: {
+  rows: ReviewComment[];
+  inputs: object;
+  renderRowRef: React.MutableRefObject<(comment: ReviewComment) => React.ReactNode>;
+}) {
+  return <>{rows.map((comment) => renderRowRef.current(comment))}</>;
+});
+
+const MemoCommentRow = memo(function CommentRow({
   c, now, fps, myName, myColor, replies, onSeek, onMarkRange, onQueueRange, onShowAnnotation, onResolve, onDelete, onEdit, onLike,
   onEditReply, onDeleteReply, onLikeReply, collapsed, onToggleCollapse,
-  replyOpen, onToggleReply, replyDraft, setReplyDraft, onSubmitReply,
+  replyOpen, onToggleReply, replyDraft, setReplyDraft, onSubmitReply, liveProgram,
 }: {
   c: ReviewComment;
+  liveProgram: boolean;
   now: number;
   fps: number;
   myName: string;
@@ -2108,7 +2254,7 @@ function CommentRow({
   const hasDrawing = annotationHasContent(c.annotation);
   /** A real span, not a point. The same test the timecode chip already makes
    *  twice; named once so the three cannot drift apart. */
-  const isRange = c.timeEnd != null && c.timeEnd > c.timeStart;
+  const isRange = c.timeEnd != null && c.timeEnd > c.timeStart && !c.timing;
   // Label chips on the overlay are tinted to the note author's colour —
   // same resolution the Avatar uses (my chosen colour for me, hash otherwise).
   const authorTint = c.author === myName ? myColor : avatarColor(c.author);
@@ -2137,15 +2283,18 @@ function CommentRow({
       <div className="cp-review-chiprow">
         <button
           className={"cp-review-tc" + (isRange ? " range" : "")}
+          disabled={!!c.timing || liveProgram}
           onClick={() => { onSeek(c.timeStart); if (hasDrawing) onShowAnnotation?.(c.annotation, authorTint, c.timeStart); }}
           title={isRange ? "Jump to range start" : (hasDrawing ? "Jump + show drawing" : "Jump to this point")}
         >
-          <ClockGlyph /> {secondsToTc(c.timeStart, fps)}
+          <ClockGlyph /> {noteTimingLabel(c, secondsToTc(c.timeStart, fps))}
           {isRange && <> → {secondsToTc(c.timeEnd as number, fps)}</>}
         </button>
-        {hasDrawing && (
+        {c.premiere && <PremiereMarkerStatus comment={c} />}
+        {hasDrawing && !c.timing && (
           <button
             className="cp-review-drawbadge"
+            disabled={liveProgram}
             onClick={() => { onSeek(c.timeStart); onShowAnnotation?.(c.annotation, authorTint, c.timeStart); }}
             title="Show this drawing on the frame"
           >
@@ -2165,6 +2314,7 @@ function CommentRow({
         {isRange && onMarkRange && (
           <button
             className="cp-review-adopt"
+            disabled={liveProgram}
             onClick={() => onMarkRange(c.timeStart, c.timeEnd as number)}
             title="Set your in and out marks to this range"
           >
@@ -2174,6 +2324,7 @@ function CommentRow({
         {isRange && onQueueRange && (
           <button
             className="cp-review-adopt"
+            disabled={liveProgram}
             onClick={() => onQueueRange(c.timeStart, c.timeEnd as number)}
             title="Add this range to your export queue"
           >
@@ -2230,13 +2381,41 @@ function CommentRow({
             placeholder="Reply…"
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onSubmitReply(); } if (e.key === "Escape") onToggleReply(); }} />
           <EmojiPicker onPick={(em) => insertAtCaret(replyInputRef, replyDraft, setReplyDraft, em)} />
-          <button className="btn btn-primary btn-compact" onClick={onSubmitReply} disabled={!replyDraft.trim()}>Post</button>
+          <button className="btn btn-primary btn-compact cp-review-post" onClick={onSubmitReply} disabled={!replyDraft.trim()}>Post</button>
         </div>
       ) : (
         <button className="cp-review-replylink" onClick={onToggleReply}>Reply</button>
       )}
     </div>
   );
+});
+
+/** Stable event adapters keep composer keystrokes out of memoized rows without
+ * closing over stale documents or dropping updated action implementations. */
+function CommentRow(props: ComponentProps<typeof MemoCommentRow>) {
+  const latest = useRef(props);
+  latest.current = props;
+  const stable = useMemo(() => ({
+    onSeek: (s: number) => latest.current.onSeek(s),
+    onMarkRange: (a: number, b: number) => latest.current.onMarkRange?.(a, b),
+    onQueueRange: (a: number, b: number) => latest.current.onQueueRange?.(a, b),
+    onShowAnnotation: (a: AnnotationStrokes | null, color?: string, time?: number) => latest.current.onShowAnnotation?.(a, color, time),
+    onResolve: () => latest.current.onResolve(),
+    onDelete: () => latest.current.onDelete(),
+    onEdit: (body: string) => latest.current.onEdit(body),
+    onLike: (emoji: string) => latest.current.onLike(emoji),
+    onEditReply: (id: string, body: string) => latest.current.onEditReply(id, body),
+    onDeleteReply: (id: string) => latest.current.onDeleteReply(id),
+    onLikeReply: (id: string, emoji: string) => latest.current.onLikeReply(id, emoji),
+    onToggleCollapse: () => latest.current.onToggleCollapse(),
+    onToggleReply: () => latest.current.onToggleReply(),
+    setReplyDraft: (text: string) => latest.current.setReplyDraft(text),
+    onSubmitReply: () => latest.current.onSubmitReply(),
+  }), []);
+  return <MemoCommentRow {...props} {...stable}
+    onMarkRange={props.onMarkRange ? stable.onMarkRange : undefined}
+    onQueueRange={props.onQueueRange ? stable.onQueueRange : undefined}
+    onShowAnnotation={props.onShowAnnotation ? stable.onShowAnnotation : undefined} />;
 }
 
 /** One reply under a comment's thread-line — same avatar+name+time header as
@@ -2295,10 +2474,33 @@ function ReplyRow({
  *  palette IS the picker. */
 function ReactionBar({ c, myName, onReact }: { c: ReviewComment; myName: string; onReact: (emoji: string) => void }) {
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ left: 0, top: 0 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLSpanElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(popRef, close, open);
   // A single horizontal row of emoji. role="menu" was already here promising
   // arrow navigation; this is what keeps it.
-  useMenuKeys(popRef, open, () => setOpen(false));
+  useMenuKeys(popRef, open, close);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const trigger = triggerRef.current?.getBoundingClientRect();
+      const popup = popRef.current?.getBoundingClientRect();
+      if (!trigger || !popup) return;
+      const above = trigger.top - popup.height - 6;
+      setPosition({
+        left: Math.max(8, Math.min(trigger.right - popup.width, window.innerWidth - popup.width - 8)),
+        top: Math.max(8, Math.min(above >= 8 ? above : trigger.bottom + 6, window.innerHeight - popup.height - 8)),
+      });
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    if (popRef.current) observer.observe(popRef.current);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => { observer.disconnect(); window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
+  }, [open]);
   const map = reactionsOf(c);
   const entries = Object.entries(map);
   return (
@@ -2318,8 +2520,10 @@ function ReactionBar({ c, myName, onReact }: { c: ReviewComment; myName: string;
       ))}
       <span className="cp-react-add-wrap">
         <button
+          ref={triggerRef}
           className={"cp-review-like" + (open ? " liked" : "")}
-          onClick={() => setOpen((v) => !v)}
+          onMouseDown={event => event.stopPropagation()}
+          onClick={event => { event.currentTarget.focus(); setOpen((v) => !v); }}
           aria-haspopup="menu"
           aria-expanded={open}
           title="Add a reaction"
@@ -2327,15 +2531,15 @@ function ReactionBar({ c, myName, onReact }: { c: ReviewComment; myName: string;
         >
           <SmileGlyph />
         </button>
-        {open && (
-          <span ref={popRef} className="cp-react-pop" role="menu" aria-orientation="horizontal" aria-label="Pick a reaction">
+        {open && createPortal(
+          <span ref={popRef} className="cp-react-pop" style={position} role="menu" aria-orientation="horizontal" aria-label="Pick a reaction">
             {COMMENT_REACTION_EMOJI.map((emoji) => (
               <button key={emoji} role="menuitem" className="cp-react-pop-btn"
                 onClick={() => { onReact(emoji); setOpen(false); }} aria-label={`React with ${emoji}`}>
                 {emoji}
               </button>
             ))}
-          </span>
+          </span>, document.body
         )}
       </span>
     </span>

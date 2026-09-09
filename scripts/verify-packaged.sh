@@ -28,10 +28,25 @@ skip() { printf '  \033[33m–\033[0m %s\n' "$1"; }
 # this repo before; a variable sidesteps it entirely.
 BIN_STRINGS=$(strings "$BIN" 2>/dev/null || true)
 has()  { case "$BIN_STRINGS" in *"$1"*) return 0;; *) return 1;; esac; }
+PLIST="$APP/Contents/Info.plist"
+plist_get() { /usr/libexec/PlistBuddy -c "Print :$1" "$PLIST" 2>/dev/null; }
 
 echo "Packaged checks — $APP"
 echo
 echo "In the shipped binary:"
+
+# LTO can lower a command-name match into machine instructions, so missing
+# command names in strings are not evidence of an unregistered handler.
+# ipc-surface-contract checks registration; these distinctive implementation
+# literals corroborate that pairing and the resource opener reached the binary.
+has 'Cannot create Premiere pairing' && has 'companion/SauceBunnyPremiere.ccx' \
+  && ok "Premiere pairing and packaged installer implementations shipped" \
+  || bad "Premiere companion implementation evidence missing"
+if node "$(dirname "$0")/verify-premiere-package.mjs" "$APP"; then
+  ok "Premiere CCX resource matches the verified local package"
+else
+  bad "Premiere companion package verification failed"
+fi
 
 # The lazy MP3 encoder must have been bundled. It loads via `await import()` on
 # the first audio-MP3 export, so a chunk that failed to bundle fails at exactly
@@ -51,6 +66,34 @@ has 'read_clipboard_text' \
 has 'wasm-unsafe-eval' \
   && ok "CSP permits WebAssembly instantiation" \
   || bad "no wasm-unsafe-eval in the CSP — WASM decoders will hang SILENTLY"
+
+# A release accidentally built without SAUCE_NDI_SDK_DIR looks fine until the
+# picker opens. This message lives in the Objective-C++ bridge itself (not the
+# Rust fallback) and survives symbol stripping as an actionable error.
+has 'NDI runtime could not be loaded' \
+  && ok "native NDI bridge compiled" \
+  || bad "native NDI bridge MISSING — build with SAUCE_NDI_SDK_DIR"
+
+case "$(otool -L "$BIN" 2>/dev/null || true)" in
+  *libndi.dylib*) bad "app directly links libndi.dylib — NDI must remain lazy-loaded" ;;
+  *) ok "NDI runtime is dynamically loaded, not linked" ;;
+esac
+if node "$(dirname "$0")/verify-ndi-package.mjs" "$APP"; then
+  ok "approved standard NDI runtime, notices, and signature verified"
+else
+  bad "NDI package verification failed"
+fi
+
+if [ -n "$(plist_get NSLocalNetworkUsageDescription)" ]; then
+  ok "local-network purpose string shipped"
+else
+  bad "NSLocalNetworkUsageDescription missing from packaged Info.plist"
+fi
+if [ "$(plist_get 'NSBonjourServices:0')" = "_ndi._tcp" ]; then
+  ok "NDI Bonjour service declaration shipped"
+else
+  bad "_ndi._tcp missing from packaged Info.plist"
+fi
 
 # Ejected in r152. A stale grant for a plugin that is gone should have failed
 # the build, but checking the artefact costs nothing.

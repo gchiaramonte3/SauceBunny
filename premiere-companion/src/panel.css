@@ -1,0 +1,80 @@
+@import "../../src/styles/tokens.css";
+html, body, #app { height: 100%; }
+
+/* Same application tokens, with the native-UXP exceptions documented in
+   DESIGN.md beside this package. No browser font loader or media imports. */
+body {
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  font-weight: var(--weight-normal);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-normal);
+  margin: 0;
+  padding: 0;
+}
+.cp-companion { padding: var(--s-4); height: 100%; box-sizing: border-box; overflow-y: auto; overflow-wrap: anywhere; }
+.cp-companion-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+.cp-companion h1 { font-size: var(--text-3xl); font-weight: var(--weight-bold); margin: 0; }
+.cp-companion h2 { font-size: var(--text-lg); font-weight: var(--weight-bold); margin: 0 0 var(--s-2); }
+.cp-companion h3 { font-size: var(--text-md); font-weight: var(--weight-bold); margin: 0; }
+.cp-companion p { margin: var(--s-2) 0; }
+.cp-companion-muted { color: var(--fg-3); }
+.cp-companion-beta {
+  background: var(--gold); color: var(--bg-0); border-radius: var(--r-xs);
+  padding: 2px 6px; font-size: var(--text-sm); font-weight: var(--weight-bold);
+}
+.cp-companion-section { margin-top: var(--s-5); }
+.cp-companion label { display: block; margin: var(--s-2) 0 var(--s-1); }
+.cp-companion input[type="text"], .cp-companion input[type="password"] {
+  display: block; width: 100%; min-height: 30px; box-sizing: border-box;
+  background: var(--bg-0); color: var(--fg-1); border: 1px solid var(--line-2);
+  border-radius: var(--r-md); padding: 6px var(--s-2); font: inherit;
+  margin: 0; box-shadow: none;
+}
+.cp-companion .cp-companion-pair-field { display: flex; flex-direction: column; align-items: stretch; text-align: left; margin-top: var(--s-3); }
+.cp-companion-pair-field > span { width: 100%; text-align: left; margin-bottom: var(--s-1); }
+.cp-companion input::placeholder { color: var(--fg-3); opacity: 1; }
+.cp-companion button {
+  min-height: 30px; min-width: 24px; margin-top: var(--s-2); margin-right: var(--s-2);
+  max-width: 100%; box-sizing: border-box; white-space: normal;
+  border: 1px solid var(--line-2); border-radius: var(--r-md);
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)); color: var(--fg-1);
+  box-shadow: var(--bevel-raised);
+  padding: 6px var(--s-3); font-family: inherit; font-size: var(--text-md);
+  font-weight: var(--weight-semibold); line-height: var(--leading-tight);
+  letter-spacing: var(--track-tight); cursor: pointer;
+}
+.cp-companion button:hover:enabled { border-color: var(--line-3); box-shadow: var(--bevel-raised-hover); }
+.cp-companion button:active:enabled { box-shadow: var(--bevel-pressed); }
+/* Brighten the existing contour; don't surround it with a second rectangle. */
+.cp-companion button:focus, .cp-companion input:focus { border-color: var(--fg-0); outline: none; }
+/* The tiny checkbox needs a ring of its own, unlike full-size fields. */
+.cp-companion input[type="checkbox"]:focus { outline: 2px solid var(--fg-0); outline-offset: 2px; }
+.cp-companion button:disabled, .cp-companion input:disabled { opacity: .5; cursor: not-allowed; }
+.cp-companion .cp-companion-primary { background: var(--bg-4); }
+.cp-companion .cp-companion-primary:hover:enabled { background: var(--bg-5); }
+.cp-companion .cp-companion-toggle { display: flex; align-items: center; min-height: 30px; margin-top: var(--s-3); }
+.cp-companion-toggle input { width: 13px; height: 13px; flex-shrink: 0; margin-right: var(--s-2); accent-color: var(--bg-5); }
+.cp-companion-toggle span { min-width: 0; flex: 1; }
+.cp-companion-identity { font-weight: var(--weight-semibold); }
+.cp-companion-note { background: var(--bg-2); border: 1px solid var(--line-1); border-radius: var(--r-md); padding: var(--s-3); margin-top: var(--s-3); }
+.cp-companion-note-body { white-space: pre-wrap; overflow-wrap: break-word; }
+.cp-companion-confirm { border-top: 1px solid var(--line-2); margin-top: var(--s-2); padding-top: var(--s-1); }
+.cp-companion-error { color: var(--danger-text); }
+/* UXP paints its own inset field and button chrome. Layering the app's
+   border, padding and bevel over it produces two unrelated control outlines.
+   Keep native controls/keyboard semantics and remove only the duplicate coat. */
+.cp-companion-native input[type="password"], .cp-companion-native input[type="text"] {
+  border: none; border-radius: 0; padding: 0; background: transparent;
+}
+.cp-companion-native button {
+  border: none; border-radius: 0; padding: 0; background: transparent; box-shadow: none;
+}
+.cp-companion-native button:hover:enabled, .cp-companion-native button:active:enabled,
+.cp-companion-native .cp-companion-primary, .cp-companion-native .cp-companion-primary:hover:enabled {
+  background: transparent; box-shadow: none;
+}
+/* No animated transforms/transitions: docked host controls stay still, also
+   satisfying reduced motion without a second animation implementation. */

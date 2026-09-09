@@ -166,7 +166,7 @@ export function useLocalSource(p: LocalSourceProps) {
         vcodec: lf.vcodec,
         acodec: lf.acodec,
         ext: lf.filename.split(".").pop() ?? null,
-        has_subs: false, chapters: [], description: null,
+        has_subs: false, is_live: false, chapters: [], description: null,
       };
       setMetadata(m);
 

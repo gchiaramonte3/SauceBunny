@@ -54,6 +54,7 @@ export type FetchSourceProps = {
     warmStream?: CachedStream | null,
   ) => void;
   loadCachedWebPlayback: (url: string, cachePath: string, seq: number) => void;
+  promoteLiveWebPlayback: (url: string, seq: number) => void;
 
   // Shell affordances
   appendLog: (tag: ClientLog["tag"], source: string, message: string) => void;
@@ -128,6 +129,7 @@ export function useFetchSource(p: FetchSourceProps) {
     decodeMetaTitle,
     loadWebPlayback,
     loadCachedWebPlayback,
+    promoteLiveWebPlayback,
     appendLog,
     pushNotification,
     maybePromptYtAuth,
@@ -212,7 +214,7 @@ export function useFetchSource(p: FetchSourceProps) {
       vcodec: null,
       acodec: null,
       ext: null,
-      has_subs: false, chapters: [], description: null,
+      has_subs: false, is_live: false, chapters: [], description: null,
     };
     setMetadata(stub);
     setSourceKind("youtube");
@@ -271,8 +273,9 @@ export function useFetchSource(p: FetchSourceProps) {
     // lifecycle lives in the `useWebPlayback` state machine now. Here we just
     // kick it off in the user's chosen mode; the hook logs its own progress
     // and exposes a read-model the Monitor consumes (see webPlayback.* below).
-    // `streamPreview` ON = stream-first (instant, fall back to download on any
-    // failure); OFF = download-first (slower, max reliability on flaky links).
+    // Downloaded-proxy is the normal path: a completed, cached review copy is
+    // the scrub source. Instant-stream keeps the legacy MSE/FFmpeg path as an
+    // explicit experiment and falls back to the same download on failure.
     //
     // Warm boot (r112), strongest fast path first:
     //   1. A COMPLETE downloaded copy on disk → play the file immediately
@@ -287,7 +290,8 @@ export function useFetchSource(p: FetchSourceProps) {
       appendLog("ok", "cache", `Playing the saved copy of ${hostnameOf(full)} from disk`);
       loadCachedWebPlayback(full, warm.cached_copy, seq);
     } else {
-      const warmStream = defaults.streamPreview ? warm?.stream ?? null : null;
+      const instantStream = defaults.webLoadMode === "instant-stream" || !!warm?.metadata?.is_live;
+      const warmStream = instantStream ? warm?.stream ?? null : null;
       if (!warmStream) {
         // The cookie source is stated on EVERY yt-dlp line that can hit a
         // bot-check. Proven necessary: a user hit "Sign in to confirm you're
@@ -299,13 +303,13 @@ export function useFetchSource(p: FetchSourceProps) {
         appendLog(
           "info",
           "yt-dlp",
-          (defaults.streamPreview
+          (instantStream
             ? `Resolving stream URL for ${hostnameOf(full)}…`
             : `Downloading ${hostnameOf(full)} for in-app playback…`)
           + (ck ? ` (cookies: ${ck})` : " (no cookies)"),
         );
       }
-      loadWebPlayback(full, defaults.streamPreview ? "stream-first" : "download-first", seq, warmStream);
+      loadWebPlayback(full, instantStream ? "stream-first" : "download-first", seq, warmStream);
     }
 
     // ─── Background metadata hydration ───────────────────────────────────
@@ -344,6 +348,10 @@ export function useFetchSource(p: FetchSourceProps) {
       // export filename, and the stored recents title - sees the same string.
       const m = decodeMetaTitle(raw);
       setMetadata(m);
+      if (m.is_live && defaults.webLoadMode === "downloaded-proxy") {
+        appendLog("info", "media", "Active live source detected. Keeping the streaming playback path.");
+        promoteLiveWebPlayback(full, seq);
+      }
       setFetchPhase("success"); // metadata hydrated → success flash
       // Re-attach a transcript previously associated with THIS url (imported or
       // caption/whisper-generated), keyed by the canonical webpage_url — the same
@@ -429,7 +437,7 @@ export function useFetchSource(p: FetchSourceProps) {
     } finally {
       if (sourceSeqRef.current === seq) setMetadataLoading(false);
     }
-  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, classifyExtractorRot, loadWebPlayback, loadCachedWebPlayback, recordRecentSource,
+  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, classifyExtractorRot, loadWebPlayback, loadCachedWebPlayback, promoteLiveWebPlayback, recordRecentSource,
       seedFilename, tryAutoLoadTranscript, cookiesBrowserOrNone, decodeMetaTitle, activeSourceUrlRef, metadataRef, setActiveSourceUrl, setClipQueue, setErrorDetail, setExportOpts, setFetchPhase, setInFrames, setMetadata, setMetadataLoading, setOutFrames, setSourceKind, setStatus, sourceSeqRef]);
 
   // Mirrored so the retry above can call the LATEST handleFetch without making

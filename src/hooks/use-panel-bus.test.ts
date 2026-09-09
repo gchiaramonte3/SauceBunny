@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { panelSnapshotsEqual, type PanelSnapshot } from "./use-panel-bus";
+import { panelSnapshotsEqual, panelCanTargetSource, coercePanelSnapshot, type PanelSnapshot } from "./use-panel-bus";
 
 /**
  * panelSnapshotsEqual is the publish gate for the cross-window panel bus:
@@ -10,6 +10,8 @@ import { panelSnapshotsEqual, type PanelSnapshot } from "./use-panel-bus";
 
 function snap(): PanelSnapshot {
   return {
+    sourceIdentity: "src-key",
+    programInputActive: false,
     queue: [],
     fps: 30,
     running: false,
@@ -52,6 +54,8 @@ describe("panelSnapshotsEqual", () => {
   it("detects a change in every scalar field", () => {
     const base = snap();
     const changed: Array<Partial<PanelSnapshot>> = [
+      { sourceIdentity: "another-file" },
+      { programInputActive: true },
       { fps: 24 },
       { running: true },
       { hasFolder: true },
@@ -76,5 +80,23 @@ describe("panelSnapshotsEqual", () => {
     const a = snap();
     const b = { ...snap(), queue: a.queue, transcriptPlayhead: a.transcriptPlayhead! + 1 / 30 };
     expect(panelSnapshotsEqual(a, b)).toBe(false);
+  });
+});
+
+describe("detached source targeting", () => {
+  it("accepts actions only for the currently displayed file identity", () => {
+    expect(panelCanTargetSource(snap(), { sourceIdentity: "src-key" })).toBe(true);
+    expect(panelCanTargetSource(snap(), { sourceIdentity: "old-file" })).toBe(false);
+    expect(panelCanTargetSource(snap(), {})).toBe(false);
+    expect(panelCanTargetSource({ ...snap(), sourceIdentity: null }, { sourceIdentity: null })).toBe(false);
+  });
+  it("rejects even correctly scoped file actions while an NDI preview or stopped room source is visible", () => {
+    expect(panelCanTargetSource({ ...snap(), programInputActive: true }, { sourceIdentity: "src-key" })).toBe(false);
+  });
+  it("keeps old persisted panels readable without granting unscoped seek authority", () => {
+    const restored = coercePanelSnapshot({ queue: [], sourceIdentity: 42, programInputActive: "no" });
+    expect(restored.sourceIdentity).toBeNull();
+    expect(restored.programInputActive).toBe(false);
+    expect(panelCanTargetSource(restored, {})).toBe(false);
   });
 });

@@ -60,7 +60,7 @@ export class ViewerShareController {
     // element - and pushing null here would silence the presenter's MIC as
     // well, since the mesh treats an override of null as "use the camera
     // track" only when there is no override set at all.
-    if (cap.audio) this.deps.setAudioOverride(cap.audio);
+    this.deps.setAudioOverride(cap.audio ?? null);
     this.state = "live";
     this.deps.announce(true);
     this.deps.onChange("live");
@@ -104,6 +104,6 @@ export class ViewerShareController {
       return;
     }
     this.deps.setOverride(cap.video);
-    if (cap.audio) this.deps.setAudioOverride(cap.audio);
+    this.deps.setAudioOverride(cap.audio ?? null);
   }
 }

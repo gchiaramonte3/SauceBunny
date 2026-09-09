@@ -17,22 +17,69 @@ import { useFinderTags } from "./use-finder-tags";
  * not re-read when there is nothing listed.
  */
 
-const h = vi.hoisted(() => ({ calls: [] as string[][], rows: [] as unknown[] }));
+const h = vi.hoisted(() => ({ calls: [] as string[][], rows: [] as unknown[],
+  read: null as null | (() => Promise<unknown[]>),
+  write: null as null | ((args: Record<string, unknown>) => Promise<unknown>),
+}));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (cmd: string, args: Record<string, unknown>) => {
     if (cmd === "read_finder_tags") {
       h.calls.push(args.paths as string[]);
-      return h.rows;
+      return h.read ? h.read() : h.rows;
     }
+    if (cmd === "set_finder_tags" && h.write) return h.write(args);
     return null;
   },
 }));
 
-beforeEach(() => { h.calls = []; h.rows = []; });
+beforeEach(() => { h.calls = []; h.rows = []; h.read = null; h.write = null; });
 afterEach(cleanup);
 
 describe("useFinderTags", () => {
+  it("does not cancel a pending read on equivalent rerenders or duplicate paths", async () => {
+    let finish!: (rows: unknown[]) => void;
+    h.read = () => new Promise((resolve) => { finish = resolve; });
+    const { result, rerender } = renderHook(({ paths }) => useFinderTags(paths), { initialProps: { paths: ["/b", "/a", "/a"] } });
+    rerender({ paths: ["/a", "/b"] });
+    await act(async () => finish([{ path: "/a", tags: [{ name: "Blue", color: 4 }] }]));
+    expect(result.current.tags.get("/a")?.[0].name).toBe("Blue");
+    expect(h.calls).toEqual([["/a", "/b"]]);
+  });
+
+  it("discards an obsolete read after a source-path change", async () => {
+    const pending: ((rows: unknown[]) => void)[] = [];
+    h.read = () => new Promise((resolve) => pending.push(resolve));
+    const { result, rerender } = renderHook(({ path }) => useFinderTags([path]), { initialProps: { path: "/old" } });
+    rerender({ path: "/new" });
+    await act(async () => pending[1]([{ path: "/new", tags: [{ name: "Green", color: 2 }] }]));
+    await act(async () => pending[0]([{ path: "/old", tags: [{ name: "Red", color: 6 }] }]));
+    expect(result.current.tags.has("/old")).toBe(false);
+    expect(result.current.tags.has("/new")).toBe(true);
+  });
+
+  it("rolls a failed native write back without refreshing other views", async () => {
+    h.rows = [{ path: "/a", tags: [{ name: "Archive", color: 0 }] }];
+    h.write = async () => { throw new Error("Permission denied"); };
+    const { result } = renderHook(() => useFinderTags(["/a"]));
+    await waitFor(() => expect(result.current.tags.has("/a")).toBe(true));
+    await act(async () => result.current.toggle("/a", 6));
+    expect(result.current.tags.get("/a")).toEqual([{ name: "Archive", color: 0 }]);
+    expect(h.calls).toHaveLength(1);
+  });
+
+  it("updates another mounted representation after a successful native write", async () => {
+    h.rows = [{ path: "/a", tags: [] }];
+    h.write = async ({ path, tags }) => { h.rows = [{ path, tags }]; };
+    const editor = renderHook(() => useFinderTags(["/a"]));
+    const home = renderHook(() => useFinderTags(["/a"]));
+    const unrelated = renderHook(() => useFinderTags(["/elsewhere"]));
+    await waitFor(() => expect(editor.result.current.tags.has("/a")).toBe(true));
+    await act(async () => editor.result.current.toggle("/a", 5));
+    await waitFor(() => expect(home.result.current.tags.get("/a")?.[0].name).toBe("Yellow"));
+    expect(h.calls.filter((paths) => paths.includes("/elsewhere"))).toHaveLength(1);
+    unrelated.unmount();
+  });
   it("reads the listed paths once, in one call", async () => {
     h.rows = [{ path: "/a", tags: [{ name: "Purple", color: 5 }] }];
     const { result } = renderHook(() => useFinderTags(["/a", "/b"]));

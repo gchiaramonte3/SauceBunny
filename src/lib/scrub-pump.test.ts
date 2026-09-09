@@ -114,4 +114,19 @@ describe("createScrubPump", () => {
     await d.finish();
     expect(pump.isBusy()).toBe(false);
   });
+
+  it("reports whether a request actually remained the newest painted frame", async () => {
+    const d = deferredDrain();
+    const pump = createScrubPump(d.drain);
+    const first = pump.request(1);
+    await Promise.resolve();
+    const dropped = pump.request(2);
+    const latest = pump.request(3);
+
+    await expect(dropped).resolves.toBe(false);
+    await d.finish();
+    await expect(first).resolves.toBe(false);
+    await d.finish();
+    await expect(latest).resolves.toBe(true);
+  });
 });

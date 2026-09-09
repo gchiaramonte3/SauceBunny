@@ -28,6 +28,8 @@ import { coercePanelSnapshot, panelSnapshotsEqual, type PanelSnapshot } from "./
  * sixteenth.
  */
 const BASE: PanelSnapshot = {
+  sourceIdentity: null,
+  programInputActive: false,
   queue: [],
   fps: 24,
   running: false,

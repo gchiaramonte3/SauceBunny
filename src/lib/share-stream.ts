@@ -20,6 +20,7 @@ export async function openShareStream(
   video.src = objectUrl;
 
   let closed = false;
+  let wakeReader: (() => void) | null = null;
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   const died = () => { if (!closed) onDied(); };
 
@@ -34,6 +35,8 @@ export async function openShareStream(
    *  the flag is what makes that a no-op. */
   const teardown = () => {
     closed = true;
+    wakeReader?.();
+    wakeReader = null;
     try { void reader?.cancel(); } catch { /* already done */ }
     try { if (ms.readyState === "open") ms.endOfStream(); } catch { /* torn */ }
     video.pause();
@@ -58,10 +61,25 @@ export async function openShareStream(
     reader = resp.body.getReader();
 
     const queue: Uint8Array[] = [];
+    let queuedBytes = 0;
+    const MAX_QUEUED_BYTES = 4 * 1024 * 1024;
     const pump = () => {
       if (closed || sb.updating) return;
+      // Seek within complete buffered media; the decoder chooses the needed
+      // keyframe. Never throw away arbitrary H.264 bytes to catch up.
+      if (sb.buffered?.length) {
+        const edge = sb.buffered.end(sb.buffered.length - 1);
+        if (!video.seeking && edge - video.currentTime > 1.25) video.currentTime = Math.max(0, edge - 0.2);
+        const keepFrom = video.currentTime - 2;
+        if (keepFrom > 0 && sb.buffered.start(0) < keepFrom - 2) {
+          try { sb.remove(0, keepFrom); return; } catch { /* retry after append */ }
+        }
+      }
       const chunk = queue.shift();
       if (!chunk) return;
+      queuedBytes -= chunk.byteLength;
+      wakeReader?.();
+      wakeReader = null;
       try {
         sb.appendBuffer(chunk as BufferSource);
       } catch (err) {
@@ -72,6 +90,7 @@ export async function openShareStream(
         // player uses). Only a NON-quota failure is a real death.
         if ((err as DOMException)?.name === "QuotaExceededError") {
           queue.unshift(chunk);
+          queuedBytes += chunk.byteLength;
           const keepFrom = Math.max(0, video.currentTime - 10);
           // The `return` belongs INSIDE the guard. With keepFrom === 0 - which
           // is every quota hit in the first ten seconds of playback - the old
@@ -110,6 +129,11 @@ export async function openShareStream(
     void (async () => {
       try {
         for (;;) {
+          if (closed) return;
+          if (queuedBytes >= MAX_QUEUED_BYTES) {
+            await new Promise<void>((resolve) => { wakeReader = resolve; });
+            if (closed) return;
+          }
           const { done, value } = await reader.read();
           if (done) {
             failFirst(new Error("share stream ended before sending any data"));
@@ -118,6 +142,7 @@ export async function openShareStream(
           }
           if (value && value.byteLength) {
             queue.push(value);
+            queuedBytes += value.byteLength;
             pump();
             signalFirst();
           }

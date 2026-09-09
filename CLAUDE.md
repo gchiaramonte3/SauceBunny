@@ -24,6 +24,12 @@ should.
 
 ## What this app is
 
+**September 7 Review corrections:** consult `docs/REVIEW-CORRECTIONS-2026-09-07.md`
+and the evening addendum in `docs/DESIGN.md`. The user explicitly authorized
+confirmed SRT/VTT-only Finder Trash in Transcripts. This is not permission for a
+general media-delete command. Native Premiere audio/jitter and verified timeline
+timecode remain separate acceptance gates; do not claim a mock proves them.
+
 Sauce Bunny is a **local-first macOS desktop app** for transcribing, diarizing, and editing video/audio content. It runs entirely on the user's machine — **no cloud _by default_**, no accounts, no telemetry. (r135: an OPT-IN cloud-AI path exists — the AI Summary + reader Analysis features can use the user's own Claude/OpenAI key instead of local Qwen. Off unless the user configures it in Settings ▸ AI APIs; see the cloud-AI entry under "What this app is NOT".)
 
 - **Shell:** Tauri 2 (Rust backend → WKWebView frontend)
@@ -236,7 +242,20 @@ Do not add new Tauri plugins without explaining what existing capability is insu
 > follows here is only the part that needs the project's own history to make
 > sense; the reference is not duplicated.
 
-- All styles live in `src/styles/app.css`, organized by component name in comment blocks.
+- Before UI edits, read the [current audit](docs/DESIGN-SYSTEM-AUDIT.md) and
+  [catalog guide](docs/DESIGN-CATALOG.md), then inspect the relevant production
+  component and its catalog example. `npm run design:catalog` opens isolated
+  fixtures; `npm run check:design-catalog` verifies them without saved data,
+  live sessions or media. Only the People indicator/details and theater-parity
+  fixes, plus Preview's passive Live status and Premiere disclosure, are an
+  approved production migration. Other prototypes do not supersede
+  `docs/DESIGN.md`; this is not permission for an application-wide restyle.
+- Reuse production `GenerateButton` and `StatefulButton` for their specialized
+  actions, preserving phase/progress/resolution behavior. Generate, Export
+  and transport are intentional contextual controls, not candidates for a
+  mechanical replacement with the catalog's generic 30/26px Button.
+- Component styles live in `src/styles/<area>.css`; `src/styles/app.css`
+  orchestrates their imports. Shared values live in `src/styles/tokens.css`.
 - Use tokens from `tokens.css` for colors, spacing, font sizes, radii.
   **Colours: never hardcode a hex that a token already holds** — enforced by
   `src/lib/token-usage-contract.test.ts`, which reports exact duplicates only

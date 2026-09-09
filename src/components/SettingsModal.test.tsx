@@ -67,7 +67,7 @@ function props(over: Record<string, unknown> = {}) {
       captionBgOpacity: 0.5, whisperModel: "tiny", transcriptionEngine: "whisper",
       transcriptionLanguage: "auto", transcriptLibrary: "/T", llmSummarizationModel: "qwen-7b",
       summaryFormat: "bullets", summaryLength: "short", scrubAudio: true,
-      streamPreview: true, useWebCodecsDecoder: false, clearCacheOnQuit: false,
+      webLoadMode: "downloaded-proxy", useWebCodecsDecoder: false, clearCacheOnQuit: false,
       mediaCacheCapGb: 20, stunUrl: "", turnUrl: "", turnUsername: "", turnPassword: "",
     },
     setDefaults: vi.fn(),

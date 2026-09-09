@@ -684,11 +684,19 @@
 /* Tools left, Post right, on their own line under the field. */
 .cp-review-composer-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
 .cp-review-composer-spacer { flex: 1; }
 .cp-review-composer .btn { flex-shrink: 0; }
+.cp-review-post.btn { margin-left: auto; text-transform: none; min-height: 26px; }
+/* Explicitly approved publication action; not a global primary-button change. */
+.cp-review-post.btn:not(:disabled) {
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--bg-0);
+}
 /* Composer height handle — placement only; visuals come from
    .cp-resize-handle (resize.css). Straddles the composer's top hairline. */
 .cp-review-vresize {
@@ -807,6 +815,7 @@
   position: fixed;
   z-index: var(--z-popover);
   width: 324px;
+  max-width: calc(100vw - 16px);
   max-height: 360px;
   display: flex;
   flex-direction: column;
@@ -1121,10 +1130,10 @@
 .cp-react-emoji { font-size: var(--text-base); line-height: var(--leading-none); }
 .cp-react-add-wrap { position: relative; display: inline-flex; }
 .cp-react-pop {
-  position: absolute;
-  bottom: 22px;
-  right: 0;
-  z-index: 30;
+  position: fixed;
+  z-index: var(--z-popover);
+  max-width: calc(100vw - 16px);
+  flex-wrap: wrap;
   display: flex;
   gap: 2px;
   padding: 4px;

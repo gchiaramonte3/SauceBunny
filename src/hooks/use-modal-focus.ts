@@ -16,10 +16,11 @@ import { useEffect, type RefObject } from "react";
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function useModalFocus(open: boolean, ref: RefObject<HTMLElement | null>) {
+export function useModalFocus(open: boolean, ref: RefObject<HTMLElement | null>, returnFocus?: RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!open) return;
-    const prev = document.activeElement as HTMLElement | null;
+    // A dialog opened by a transient menu returns to the menu's stable trigger.
+    const prev = returnFocus?.current ?? document.activeElement as HTMLElement | null;
     const root = ref.current;
     if (root && !root.contains(document.activeElement)) {
       root.focus();
@@ -62,5 +63,5 @@ export function useModalFocus(open: boolean, ref: RefObject<HTMLElement | null>)
       window.removeEventListener("keydown", onKey, true);
       if (prev && prev.isConnected) prev.focus();
     };
-  }, [open, ref]);
+  }, [open, ref, returnFocus]);
 }

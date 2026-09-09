@@ -4,10 +4,11 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { IconAlert } from "./Icons";
-import type { TranscriptHistoryEntry } from "../lib/transcript-history";
+import { removeEntry, type TranscriptHistoryEntry } from "../lib/transcript-history";
+import { hidePaths } from "../lib/library-hidden";
 import { useModalFocus } from "../hooks/use-modal-focus";
 
-export type RowMenuTarget = { entry: TranscriptHistoryEntry; title: string; x: number; y: number };
+export type RowMenuTarget = { entry: TranscriptHistoryEntry; entries?: TranscriptHistoryEntry[]; title: string; x: number; y: number };
 
 type Props = {
   target: RowMenuTarget;
@@ -27,7 +28,8 @@ type Props = {
  * TranscriptReader stays a lean layout shell.
  */
 export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onRename, onMove }: Props) {
-  const [mode, setMode] = useState<"menu" | "rename" | "move">("menu");
+  const [mode, setMode] = useState<"menu" | "rename" | "move" | "trash">("menu");
+  const [remaining, setRemaining] = useState(target.entries ?? [target.entry]);
   const [nameInput, setNameInput] = useState(target.title);
   const [newFolder, setNewFolder] = useState("");
   const [busy, setBusy] = useState(false);
@@ -59,10 +61,25 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
 
   // Outside-click / Escape closes the whole thing.
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape" && !busy) onClose(); }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, busy]);
+
+  async function doTrash() {
+    setBusy(true); setErr(null);
+    const failed: TranscriptHistoryEntry[] = [];
+    const errors: string[] = [];
+    for (const entry of remaining) {
+      try {
+        await invoke("trash_transcript", { path: entry.srtPath });
+        removeEntry(entry.id);
+      } catch (error) { failed.push(entry); errors.push(`${entry.srtPath.split("/").pop()}: ${formatError(error)}`); }
+    }
+    setRemaining(failed); setBusy(false);
+    if (failed.length) setErr(errors.join(" · "));
+    else onClose();
+  }
 
   /** Same verb the library's card menu offers. It was absent here, so the one
    *  place you manage transcripts could not show you where they live. */
@@ -105,8 +122,8 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
   // to establish a containing block rather than to the viewport, so the cursor
   // coordinates it is positioned from could put it somewhere else entirely.
   if (mode === "menu") {
-    const left = Math.min(target.x, window.innerWidth - 200);
-    const top = Math.min(target.y, window.innerHeight - 110);
+    const left = Math.max(8, Math.min(target.x, window.innerWidth - 220));
+    const top = Math.max(8, Math.min(target.y, window.innerHeight - 240));
     return createPortal(
       <>
         <div className="cp-rowmenu-scrim" onMouseDown={onClose} />
@@ -114,6 +131,9 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
           <button role="menuitem" onClick={() => { setNameInput(target.title); setErr(null); setMode("rename"); }}>Rename…</button>
           <button role="menuitem" onClick={() => { setErr(null); setMode("move"); }}>Move to folder…</button>
           <button role="menuitem" onClick={() => { void revealInFinder(); }}>Reveal in Finder</button>
+          <button role="menuitem" onClick={() => { hidePaths(remaining.map(entry => entry.srtPath)); onClose(); }}>Remove from library</button>
+          <button role="menuitem" onClick={() => { setErr(null); setMode("trash"); }}>Move to Trash…</button>
+          {err && <p className="cp-rowmenu-err" role="alert">{err}</p>}
         </div>
       </>,
       document.body,
@@ -122,9 +142,20 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
 
   const ext = target.entry.srtPath.split(".").pop() || "srt";
   return createPortal(
-    <div className="cp-rowmenu-scrim modal" onMouseDown={onClose}>
+    <div className="cp-rowmenu-scrim modal" onMouseDown={() => { if (!busy) onClose(); }}>
       <div ref={dialogRef} tabIndex={-1} className="cp-rowmenu-dialog" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        {mode === "rename" ? (
+        {mode === "trash" ? (
+          <>
+            <h4 id={titleId} className="cp-rowmenu-title">Move {remaining.length === 1 ? "transcript" : `${remaining.length} transcripts`} to Trash?</h4>
+            <p className="cp-rowmenu-warn"><IconAlert size={13} />Are you sure? Only the selected transcript files move to macOS Trash. Source videos, speaker labels, and analysis files are kept. You can restore the transcripts using Finder.</p>
+            <ul>{remaining.map(entry => <li key={entry.srtPath}>{entry.srtPath.split("/").pop()}</li>)}</ul>
+            {err && <p className="cp-rowmenu-err" role="alert">{err}</p>}
+            <div className="cp-rowmenu-actions">
+              <button className="btn btn-ghost cp-tx-iconbtn" onClick={onClose} disabled={busy} autoFocus>Cancel</button>
+              <button className="btn btn-danger cp-tx-iconbtn" onClick={() => { void doTrash(); }} disabled={busy}>{busy ? "Moving…" : "Move to Trash"}</button>
+            </div>
+          </>
+        ) : mode === "rename" ? (
           <>
             <h4 id={titleId} className="cp-rowmenu-title">Rename transcript</h4>
             <input

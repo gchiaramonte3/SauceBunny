@@ -127,6 +127,65 @@ pub async fn set_finder_tags(
 mod tests {
     use super::*;
 
+    /// Only test-owned temporary files, never existing media or Finder tags.
+    struct TagFixture(std::path::PathBuf);
+    impl TagFixture {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("saucebunny-tag-test-{}.mov", uuid::Uuid::new_v4()));
+            std::fs::write(&path, b"tag fixture").unwrap();
+            Self(path)
+        }
+        fn path(&self) -> String { self.0.to_string_lossy().into_owned() }
+    }
+    impl Drop for TagFixture {
+        fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+    }
+
+    #[tokio::test]
+    async fn native_commands_share_finders_xattr_and_preserve_file_contents() {
+        let file = TagFixture::new();
+        // Simulate Finder's external write, including its named-color index 1.
+        let external = vec![FinderTag { name: "Purple".into(), color: 1 }, FinderTag { name: "Archive".into(), color: 0 }];
+        xattr::set(&file.0, TAG_ATTR, &encode(&external).unwrap()).unwrap();
+        let read = read_finder_tags(vec![file.path()]).await.unwrap();
+        assert_eq!(read[0].tags[0].name, "Purple");
+        assert_eq!(read[0].tags[0].color, 1);
+        for (index, name) in [(1, "Grey"), (2, "Green"), (3, "Purple"), (4, "Blue"), (5, "Yellow"), (6, "Red"), (7, "Orange")] {
+            set_finder_tags(file.path(), vec![FinderTag { name: name.into(), color: index }, external[1].clone()]).await.unwrap();
+            let raw = xattr::get(&file.0, TAG_ATTR).unwrap().unwrap();
+            assert!(raw.starts_with(b"bplist00"));
+            let values: Vec<String> = plist::from_bytes(&raw).unwrap();
+            assert_eq!(values, vec![format!("{name}\n{index}"), "Archive\n0".into()]);
+        }
+        set_finder_tags(file.path(), vec![]).await.unwrap();
+        assert!(xattr::get(&file.0, TAG_ATTR).unwrap().is_none());
+        assert_eq!(std::fs::read(&file.0).unwrap(), b"tag fixture");
+    }
+
+    #[tokio::test]
+    async fn a_failed_write_is_reported_and_bulk_read_survives_a_missing_file() {
+        let file = TagFixture::new();
+        let missing = format!("{}.missing", file.path());
+        assert!(set_finder_tags(missing.clone(), vec![FinderTag { name: "Blue".into(), color: 4 }]).await.is_err());
+        let read = read_finder_tags(vec![file.path(), missing]).await.unwrap();
+        assert_eq!(read.len(), 2);
+        assert!(read.iter().all(|row| row.tags.is_empty()));
+    }
+
+    #[tokio::test]
+    async fn tags_follow_the_media_file_after_rename() {
+        let mut file = TagFixture::new();
+        set_finder_tags(file.path(), vec![FinderTag { name: "Blue".into(), color: 4 }]).await.unwrap();
+        let old_path = file.path();
+        let renamed = file.0.with_extension("renamed.mov");
+        std::fs::rename(&file.0, &renamed).unwrap();
+        file.0 = renamed;
+        let read = read_finder_tags(vec![old_path, file.path()]).await.unwrap();
+        assert!(read[0].tags.is_empty());
+        assert_eq!(read[1].tags[0].name, "Blue");
+        assert_eq!(read[1].tags[0].color, 4);
+    }
+
     #[test]
     fn round_trips_a_coloured_tag() {
         let tags = vec![FinderTag { name: "Red".into(), color: 6 }];

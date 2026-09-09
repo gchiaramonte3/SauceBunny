@@ -66,6 +66,6 @@ describe("a review link in the lobby", () => {
     // The canary. Every assertion above is about a banner appearing; if it
     // appeared unconditionally they would all pass while measuring nothing.
     draw(null);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(/Your review link is ready/)).toBeNull();
   });
 });

@@ -240,11 +240,23 @@ for key in CFBundleIdentifier CFBundleShortVersionString LSMinimumSystemVersion 
   if [ -n "${v}" ]; then pass "Info.plist ${key} = ${v}"; else fail "Info.plist missing ${key}"; fi
 done
 # TCC prompts show these strings; a missing one means the OS denies silently.
-for key in NSCameraUsageDescription NSMicrophoneUsageDescription; do
+for key in NSCameraUsageDescription NSMicrophoneUsageDescription NSLocalNetworkUsageDescription; do
   if [ -n "$(plist_get "${key}")" ]; then pass "Info.plist ${key} present"; else fail "Info.plist missing ${key} — the OS will deny access with no prompt"; fi
 done
+if [ "$(plist_get 'NSBonjourServices:0')" = "_ndi._tcp" ]; then
+  pass "Info.plist declares NDI Bonjour discovery"
+else
+  fail "Info.plist NSBonjourServices does not declare _ndi._tcp — packaged discovery can be denied"
+fi
 
 # ── 8. Signature ────────────────────────────────────────────────────
+if [ "$ALLOW_STUBS" -eq 1 ]; then
+  warn "NDI runtime check skipped for stub-sidecar CI build; not a distributable artifact"
+elif node "$ROOT_DIR/scripts/verify-ndi-package.mjs" "$APP"; then
+  pass "approved NDI runtime and component notices bundled"
+else
+  fail "NDI package verification failed"
+fi
 # NOT piped into grep: `grep -q` exits on first match, codesign gets SIGPIPE,
 # and under pipefail the pipeline reports failure ~half the time. Capture, then
 # match. (Measured: 20 false negatives in 40 runs of the piped form.)

@@ -1,0 +1,23 @@
+import { execFileSync } from "node:child_process";
+import { copyFileSync, readFileSync, statSync } from "node:fs";
+import { resolve } from "node:path";
+import assert from "node:assert/strict";
+
+const root = resolve(import.meta.dirname, "..");
+const archive = resolve(root, "ccx/com.saucebunny.premiere-companion_premierepro.ccx");
+const manifest = JSON.parse(execFileSync("/usr/bin/unzip", ["-p", archive, "manifest.json"], { encoding: "utf8" }));
+assert.equal(manifest.id, "com.saucebunny.premiere-companion");
+assert.equal(manifest.host.app, "premierepro");
+assert.equal(manifest.host.minVersion, "26.3.2");
+assert.deepEqual(manifest.requiredPermissions, { network: { domains: ["ws://localhost"] } });
+assert.deepEqual(manifest.featureFlags.CSSNextSupport, ["boxShadow"]);
+assert.equal(manifest.addon, undefined);
+assert.equal(manifest.main, "index.html");
+const files = execFileSync("/usr/bin/unzip", ["-Z1", archive], { encoding: "utf8" }).trim().split("\n");
+assert(files.includes("BOLT-UXP-LICENSE.txt") && files.includes("THIRD-PARTY-NOTICES.txt"));
+assert(!files.some(file => /\.(?:dylib|uxpaddon|node|map|ccx)$/.test(file) || file.includes("design-system") || file.includes("node_modules")));
+assert(readFileSync(resolve(root, "dist/index.html"), "utf8").includes("assets/"));
+const installArtifact = resolve(root, "dist/SauceBunnyPremiere.ccx");
+copyFileSync(archive, installArtifact);
+console.log(`Verified internal-test CCX: ${installArtifact} (${statSync(installArtifact).size} bytes)`);
+console.log("Packaged Premiere installation, localhost permissions and real marker/media timing remain manual acceptance gates.");

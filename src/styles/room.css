@@ -2,23 +2,35 @@
    ============================================================
    When a session is live and the Review view is active, App puts `cp-room`
    on .cp-body (plus `cp-room-theater` for the widened-stage sub-mode). The
-   room REUSES the Clip view's stage subtree: CSS below makes the [hidden]
-   Clip view visible and strips every piece of editing furniture, so the
-   player never remounts (the one hard constraint). What remains is the
+   room REUSES the single mounted playback stage. App owns which workspace
+   presents that stage; CSS only supplies the room's visual treatment. This
+   keeps [hidden] semantically honest for focus and accessibility. What remains is the
    room's own design system: nav rail (always visible), People panel left,
    stage center, review drawer right, room header above the stage.
    Successor of the retired cp-screening mode (see git history). */
 
-/* The stage lives in the Clip view; the room shows it while the Review
-   view is the active one. The lobby (cp-view-coreview) yields entirely. */
-.cp-room .cp-view-clip[hidden] {
-  display: flex;
-}
-.cp-room .cp-view-coreview {
-  display: none;
-}
-
 /* OUT, unconditionally: Clip's editing furniture. */
+.cp-review-program-overlay { display: contents; }
+.cp-review-program-overlay[hidden] { display: none; }
+.cp-review-notes-shell { display: contents; }
+.cp-review-notes-shell[hidden], .cp-review-tools[hidden], .cp-view-coreview[hidden] { display: none; }
+.cp-review-tools {
+  flex: 0 0 340px;
+  min-width: 0;
+  min-height: 0;
+  margin: var(--s-2) 4px;
+  overflow: auto;
+  background: var(--bg-1);
+  border-radius: var(--r-lg);
+}
+.cp-room .cp-review-tools { flex-basis: 440px; }
+/* Setup uses the familiar preview stage, without claiming room semantics. */
+.cp-preview-setup :is(.cp-toolbar, .cp-sidebar, .cp-view-bar, .cp-logs) { display: none; }
+.cp-preview-setup .cp-main { background: var(--bg-0); }
+.cp-preview-setup .cp-transport-side.right :is(.cp-icon-group, .cp-icon-divider) { display: none; }
+.cp-preview-setup .cp-preview-head { margin: var(--s-3) var(--s-3) var(--s-3); padding: var(--s-3); }
+.cp-review-tools .cp-view-coreview { height: 100%; min-height: 0; outline: none; }
+.cp-connect-premiere { white-space: nowrap; min-width: 0; }
 .cp-room .cp-view-clip .cp-toolbar { display: none; }
 .cp-room .cp-sidebar { display: none; }
 .cp-room .cp-view-bar { display: none; }
@@ -34,6 +46,25 @@
 /* Minimal transport: play/pause + scrub only. Editing clusters go. */
 .cp-room .cp-transport-side.right .cp-icon-group { display: none; }
 .cp-room .cp-transport-side.right .cp-icon-divider { display: none; }
+/* Keep every existing room/audio control reachable when the note rail takes
+   width. Only the control cluster wraps; the room's panel widths do not move. */
+.cp-room .cp-monitor-wrap { container-type: inline-size; }
+@container (max-width: 1050px) {
+  .cp-room .cp-transport { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); row-gap: var(--s-2); }
+  .cp-room .cp-transport-side.right { display: contents; }
+  .cp-room .cp-transport-media { grid-column: 3; grid-row: 1; justify-self: end; }
+  .cp-room .cp-room-bar { grid-column: 1 / -1; grid-row: 2; justify-self: end; margin-left: 0; padding-left: 0; border-left: 0; }
+  .cp-room .cp-transport-media .cp-tc.duration { display: none; }
+}
+
+/* Live status uses the vacated play-control space; room controls may keep
+   their existing second row. Timing and playback ownership stay together. */
+.cp-preview-setup .cp-transport-live, .cp-room .cp-transport-live { grid-template-columns: minmax(0, 1fr) auto; }
+.cp-transport-live > .cp-transport-center { display: none; }
+.cp-preview-setup .cp-transport-live > .cp-transport-side.right, .cp-room .cp-transport-live > .cp-transport-side.right { display: contents; }
+.cp-transport-live .cp-transport-media { grid-column: 2; grid-row: 1; justify-self: end; }
+.cp-transport-live .cp-room-bar { grid-column: 1 / -1; grid-row: 2; justify-self: end; margin-left: 0; padding-left: 0; border-left: 0; }
+.cp-transport-live .cp-transport-side.left { flex-wrap: wrap; min-width: 0; }
 
 /* The room reads as its own place: the canvas deepens behind the stage. */
 .cp-room .cp-main { background: var(--bg-0); }
@@ -207,11 +238,6 @@
   margin-top: var(--s-2);
 }
 
-/* The review drawer is the room's right panel: no tab strip, no queue
-   chrome — the Review face only (QueueDrawer roomFace). */
-.cp-room .cp-queue-drawer.room .cp-queue-head { display: none; }
-.cp-room .cp-queue-drawer.room .cp-queue-foot { display: none; }
-
 
 /* ── Theater sub-mode: widen the stage; the rail STAYS (it is the app's
    primary navigation — the room is not an exception). ── */
@@ -265,22 +291,49 @@
   padding: 2px var(--s-2) var(--s-2);
 }
 
-/* One member: a 16:9 camera tile, or the avatar card in the same slot. */
+/* Only the picture clips. Participant state and device controls have their
+   own space, including when the picture becomes a 48px avatar. */
 .cp-person {
   position: relative;
-  aspect-ratio: 16 / 9;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   border-radius: var(--r-lg);
-  overflow: hidden;
   background: var(--bg-0);
   flex-shrink: 0;
 }
+.cp-person-trigger {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: none;
+  color: var(--fg-1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cp-person-trigger:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.cp-person-trigger:hover { background: var(--bg-2); }
+.cp-person-picture {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+}
 .cp-person video {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 .cp-person video.mirror { transform: scaleX(-1); }
-.cp-person.speaking {
+.cp-person.speaking .cp-person-picture {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 82%, transparent);
 }
 .cp-person-avatar {
@@ -310,87 +363,77 @@
 .cp-person-conn {
   font-family: var(--font-ui);
   font-size: var(--text-sm);
-  color: var(--fg-4);
-}
-/* TEXT OVER LIVE VIDEO HAS NO MEASURABLE CONTRAST RATIO.
-   `.cp-person-meta` sits over the peer's camera feed, so whatever the app
-   chooses for the name and the Presenting badge is composited against frames
-   nobody controls. A text-shadow (which the name has) helps and is not
-   something WCAG credits; a background is. The app had already answered this
-   three times over video - `.cp-person-share`, `.cp-reaction-name` and
-   `.cp-caption-cue` all paint a dark plate behind their text - and this row
-   was the one that had not.
-
-   A gradient on the tile rather than a solid bar on the row: it is what video
-   players do for exactly this, it bounds BOTH children at once, and it does
-   not draw a hard edge across every tile. Pointer-transparent, and behind the
-   meta row's own z-index. */
-.cp-person::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 38%;
-  pointer-events: none;
-  background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.62));
+  color: var(--warning);
 }
 
 .cp-person-meta {
-  position: absolute;
-  z-index: 1;
-  left: 6px;
-  right: 6px;
-  bottom: 5px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px;
   min-width: 0;
 }
+.cp-person-identity { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1 1 90px; }
 .cp-person-name {
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
   font-family: var(--font-ui);
   font-size: var(--text-base);
   font-weight: var(--weight-bold);
   color: var(--fg-0);
-  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
 }
 .cp-person-crown { color: var(--gold); display: flex; flex-shrink: 0; }
 /* The roster badge states exactly what .cp-person-ctl.off states, so it is
    drawn in the same red rather than in body grey. */
-.cp-person-muted { color: var(--danger-text); display: flex; flex-shrink: 0; margin-left: auto; }
-
-/* YOUR OWN TILE: the controls you click sit bottom-right, under the picture's
-   quiet corner, and the "Presenting" badge takes the top-right. They used to
-   be the other way round, which put the two device buttons over the face and
-   left the badge sharing the name row with a mute glyph that contradicted it.
-   Raised above .cp-person-meta so the name row cannot overlap the buttons. */
-.cp-person-controls.self {
-  top: auto;
-  bottom: 5px;
-  right: 6px;
-  z-index: 3;
+.cp-person-muted { color: var(--danger-text); }
+.cp-person-local-muted { color: var(--fg-3); }
+.cp-person-signals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  padding: 0 6px 6px;
+  color: var(--fg-2);
 }
-/* The name row yields the space rather than running under the buttons. */
-.cp-person.self .cp-person-meta { right: 62px; }
-.cp-person-presenting {
+.cp-person-signals:empty { display: none; }
+.cp-person-signal {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 16px;
+  max-width: 100%;
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+}
+.cp-person-signal > svg { flex-shrink: 0; }
+.cp-person-signal-label { overflow-wrap: anywhere; }
+.cp-person-presenter-pin {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 2;
+  display: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  right: -3px;
+  bottom: -3px;
+  border-radius: 50%;
+  border: 1px solid var(--line-3);
+  background: var(--bg-3);
+  color: var(--fg-0);
+  box-shadow: var(--shadow-soft);
 }
 
-/* Per-person actions, on right-click. Everything you can do TO someone else
-   lives here now: hide or mute them for yourself, hand them the floor, remove
-   them. As hover buttons over their face, two of the three read as controls
-   over that person when they only ever affected this screen. */
+/* Participant details open by click, keyboard or context menu. Actions keep
+   the distinction between local viewing changes and host permissions. */
 .cp-person-menu {
   position: fixed;
   z-index: var(--z-menu);
-  min-width: 190px;
+  box-sizing: border-box;
+  width: 264px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -399,10 +442,14 @@
   border-radius: var(--r-card);
   box-shadow: var(--shadow-card);
 }
+.cp-person-menu-head { display: grid; gap: 4px; padding: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--line-1); overflow-wrap: anywhere; }
+.cp-person-menu-head strong { color: var(--fg-1); font-size: var(--text-md); }
+.cp-person-menu-head span { color: var(--fg-3); font-size: var(--text-base); line-height: var(--leading-normal); }
 .cp-person-menu button {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  min-height: 30px;
   padding: 6px 9px;
   border: 0;
   border-radius: var(--r-sm);
@@ -413,45 +460,45 @@
   text-align: left;
   cursor: pointer;
 }
+.cp-person-menu button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; background: var(--bg-4); }
 .cp-person-menu button:hover { background: var(--bg-4); color: var(--fg-1); }
 .cp-person-menu button.danger:hover { color: var(--danger-text); }
 /* "for me" - the difference between a local view change and a social act. */
 .cp-person-menu-note { margin-left: auto; color: var(--fg-4); font-size: var(--text-sm); }
 
-/* Spine mode: 72px avatar column; tiles pop over on hover/focus. */
+/* Spine mode: 72px rail, 48px picture, no clipped badge or device target. */
 .cp-people.spine { width: 72px; }
 .cp-people.spine .cp-people-title,
 .cp-people.spine .cp-people-count { display: none; }
 .cp-people.spine .cp-person {
-  aspect-ratio: 1;
-  border-radius: 50%;
-  width: 48px;
+  width: 56px;
   align-self: center;
+  background: transparent;
 }
-.cp-people.spine .cp-person video { border-radius: 50%; }
+.cp-people.spine .cp-person-trigger { width: 48px; height: 48px; align-self: center; border-radius: 50%; }
+.cp-people.spine .cp-person-picture { width: 48px; height: 48px; aspect-ratio: 1; border-radius: 50%; }
 .cp-people.spine .cp-person-meta { display: none; }
-.cp-people.spine .cp-person:hover,
-.cp-people.spine .cp-person:focus-within {
-  overflow: visible;
-}
-.cp-people.spine .cp-person:hover video,
-.cp-people.spine .cp-person:focus-within video {
-  position: absolute;
-  left: 56px;
-  top: 0;
-  width: 220px;
-  height: 124px;
-  border-radius: var(--r-lg);
-  z-index: 20;
-  box-shadow: 0 8px 28px rgba(0,0,0,0.5);
-}
+.cp-people.spine .cp-person-presenter-pin { display: grid; }
+.cp-people.spine .cp-person-signals { justify-content: center; padding: 10px 0 0; }
+.cp-people.spine .cp-person-signal-label { display: none; }
+.cp-people.spine .cp-person-signal { width: 16px; justify-content: center; }
+.cp-people.spine .cp-person-controls { display: none; }
+.cp-people.spine .cp-person-muted, .cp-people.spine .cp-person-camera { display: none; }
 /* Narrow windows collapse to the spine automatically. */
 @media (max-width: 1100px) {
-  .cp-room .cp-people { width: 72px; }
-  .cp-room .cp-people .cp-people-title,
-  .cp-room .cp-people .cp-people-count { display: none; }
-  .cp-room .cp-people .cp-person { aspect-ratio: 1; border-radius: 50%; width: 48px; align-self: center; }
-  .cp-room .cp-people .cp-person-meta { display: none; }
+  .cp-room .cp-people:not(.strip) { width: 72px; }
+  .cp-room .cp-people:not(.strip) .cp-people-title,
+  .cp-room .cp-people:not(.strip) .cp-people-count { display: none; }
+  .cp-room .cp-people:not(.strip) .cp-person { width: 56px; align-self: center; background: transparent; }
+  .cp-room .cp-people:not(.strip) .cp-person-trigger { width: 48px; height: 48px; align-self: center; border-radius: 50%; }
+  .cp-room .cp-people:not(.strip) .cp-person-picture { width: 48px; height: 48px; aspect-ratio: 1; border-radius: 50%; }
+  .cp-room .cp-people:not(.strip) .cp-person-meta { display: none; }
+  .cp-room .cp-people:not(.strip) .cp-person-presenter-pin { display: grid; }
+  .cp-room .cp-people:not(.strip) .cp-person-signals { justify-content: center; padding: 10px 0 0; }
+  .cp-room .cp-people:not(.strip) .cp-person-signal-label { display: none; }
+  .cp-room .cp-people:not(.strip) .cp-person-signal { width: 16px; justify-content: center; }
+  .cp-room .cp-people:not(.strip) .cp-person-controls { display: none; }
+  .cp-room .cp-people:not(.strip) .cp-person-muted, .cp-room .cp-people:not(.strip) .cp-person-camera { display: none; }
 }
 
 /* ── Room control cluster: lives INSIDE the transport's right side (user
@@ -532,18 +579,7 @@
 
 /* Share badge on a tile. */
 .cp-person-share {
-  position: absolute;
-  top: 5px;
-  left: 6px;
-  padding: 1px 6px;
-  border-radius: var(--r-pill);
-  background: rgba(0,0,0,0.72); /* see .cp-person-presenting: 0.55 is 3.73:1 over white video */
-  color: var(--fg-1);
-  font-family: var(--font-ui);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--track-wide);
-  text-transform: uppercase;
+  color: var(--fg-2);
 }
 
 
@@ -602,22 +638,14 @@
 }
 .cp-people.strip .cp-person {
   width: 168px;
-  aspect-ratio: 16 / 9;
 }
 
 /* Tile badges: persistent raised hand + the ~5s reaction flash. */
 .cp-person-hand {
-  position: absolute;
-  top: 5px;
-  right: 6px;
-  font-size: var(--text-xl);
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));
+  color: var(--fg-1);
 }
 .cp-person-flash {
-  position: absolute;
-  bottom: 26px;
-  right: 6px;
-  font-size: var(--text-3xl);
+  font-size: var(--text-xl);
   animation: cp-flash-pop 300ms var(--ease-out);
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));
 }
@@ -993,19 +1021,7 @@
   padding: 1px 6px;
   border-radius: var(--r-pill);
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  /* The same plate `.cp-person-share` uses two rules above. This badge is the
-     ONLY indicator of who controls playback, and it was the one element in the
-     tile with neither a background nor a text-shadow - accent green composited
-     straight onto arbitrary video.
-
-     0.72, and the number is measured rather than picked. The worst case for
-     a dark plate is WHITE video showing through it. At 0.55 the composite is
-     rgb(115,115,115), on which accent green #6CFF8D reads 3.69:1 - under AA
-     for text this size. At 0.72 it is 7.22:1 and holds against any frame.
-
-     Its two siblings were raised to 0.72 with it: at 0.55 their near-white
-     --fg-1 measures 3.73:1 on that same worst case, so they were not "getting
-     away with it" either - I checked, having first assumed they were. */
+  /* This caption is outside the picture mask, on a stable dark surface. */
   background: rgba(0,0,0,0.72);
   color: var(--accent);
   font-size: var(--text-xs);
@@ -1013,40 +1029,28 @@
   letter-spacing: var(--track-wide);
   text-transform: uppercase;
 }
-/* Hover-revealed, like the rest of the tile affordances. */
-@media (prefers-reduced-motion: reduce) {
-  }
-
-/* Device controls on your OWN people tile. Hover/focus reveal, like the rest
-   of the tile affordances; always visible while a device is off so "why can't
-   they see me" is answerable at a glance. */
+/* Device controls on your OWN tile remain visible, outside the picture mask. */
 .cp-person-controls {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 2;
   display: flex;
+  justify-content: flex-end;
   gap: 4px;
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-out);
+  padding: 0 6px 6px;
 }
-.cp-person:hover .cp-person-controls,
-.cp-person-controls:focus-within,
-.cp-person-controls:has(.off) { opacity: 1; }
 .cp-person-ctl {
   display: grid;
   place-items: center;
   width: 24px;
   height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  flex-shrink: 0;
   border-radius: var(--r-sm);
   border: 1px solid var(--line-2);
   background: color-mix(in srgb, var(--bg-0) 72%, transparent);
   color: var(--fg-1);
   cursor: pointer;
 }
-/* Remote-tile controls are LOCAL-ONLY (hide video / mute for me): visually
-   lighter than the self tile's real device switches so the two can't be
-   mistaken for each other. */
+/* These are self device switches; local-only peer actions live in details. */
 .cp-person-ctl:hover { background: var(--bg-0); }
 .cp-person-ctl:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 /* Off is a state, not an error: red so it reads as "you turned this off", and
@@ -1055,18 +1059,15 @@
    it in .cp-person-meta drew --fg-2 grey, and the same mute in the room bar
    drew --warning amber. One fact, one colour.
 
-   The glyph is --danger-text, not the solid --danger, because it sits on a
-   translucent plate over live video. Measured over a bright frame the plate
-   composites to about #4F4F50, where solid --danger is 1.85:1 and fails 1.4.11
-   outright; --danger-text is 3.61:1 there and 8.05:1 on the dark bar. The
+   The glyph is --danger-text, not the solid --danger. When these controls
+   lived over video, a bright frame made the plate about #4F4F50, where solid
+   --danger measured 1.85:1 and failed 1.4.11; --danger-text was 3.61:1 there
+   and is 8.05:1 on the dark bar. The
    BORDER stays a --danger tint, which is decoration and carries no meaning on
    its own. Guarded by src/lib/device-state-contract.test.ts. */
 .cp-person-ctl.off {
   color: var(--danger-text);
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
-}
-@media (prefers-reduced-motion: reduce) {
-  .cp-person-controls { transition: none; }
 }
 
 /* Reduced motion. Transitions here are stopped by DURATION, never by
@@ -1133,6 +1134,67 @@
   justify-content: center;
   background: var(--bg-0);
 }
+
+.cp-peerstage-audio {
+  position: absolute;
+  z-index: 2;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: var(--r-sm);
+  background: rgba(12, 14, 18, .9);
+  pointer-events: auto;
+}
+
+.cp-live-note-context {
+  min-width: 0;
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  margin: 8px 12px;
+  padding: 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+.cp-live-note-context legend {
+  max-width: 100%;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.cp-preview-composer-gate { border:0; padding:0; margin:0; min-width:0; }
+.cp-preview-composer-gate:disabled { opacity:0.65; }
+.cp-ndi-decoder-shell { position:absolute; inset:0; display:flex; flex-direction:column; pointer-events:none; }
+.cp-ndi-monitor { pointer-events:auto; }
+.cp-ndi-picture { flex:1; min-height:0; position:relative; }
+.cp-ndi-audio-bar { flex:none; display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:6px 10px; background:var(--bg-2); color:var(--fg-2); font-size:var(--text-sm); pointer-events:auto; }
+.cp-ndi-audio-bar button { font:inherit; color:inherit; background:transparent; border:0; cursor:pointer; }
+.cp-ndi-audio-bar input[type="range"] { width:72px; vertical-align:middle; }
+.cp-ndi-details { position:relative; }
+.cp-ndi-details[open] { flex-basis:100%; }
+.cp-ndi-details p { margin:6px 0; }
+.cp-premiere-links p,.cp-ndi-attribution p { color:var(--fg-3); font-size:var(--text-base); }
+.cp-premiere-links .cp-ndi-actions { display:flex; align-items:center; flex-wrap:wrap; gap:var(--s-2); margin:var(--s-2) 0; }
+.cp-ndi-terms { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; color:var(--fg-3); }
+.cp-ndi-attribution { margin-top:var(--s-4); padding-top:var(--s-3); border-top:1px solid var(--line-1); }
+.cp-ndi-meters { margin-top:16px; display:grid; gap:4px; }
+.cp-ndi-meters label { display:flex; gap:8px; align-items:center; font-size:var(--text-sm); }
+.cp-ndi-meters meter { width:100%; height:10px; }
+.cp-live-note-context label { display: grid; gap: 4px; margin-bottom: 8px; }
+.cp-live-note-context input { width: 100%; min-width: 0; padding: 7px 8px; background: var(--bg-1); color: var(--fg-1); border: 1px solid var(--line-2); border-radius: var(--r-sm); font: inherit; }
+.cp-live-note-context p { margin: 0; font-size: var(--text-base); opacity: 0.75; }
+.cp-program-diagnostics {
+  position: absolute; right: 12px; bottom: 56px;
+  padding: 12px; background: rgba(0, 0, 0, 0.85); color: white;
+  border-radius: var(--r-sm); font-size: var(--text-base);
+  pointer-events: auto;
+}
+.cp-peerstage-audio button { color: inherit; background: transparent; border: 0; cursor: pointer; }
+.cp-peerstage-audio input { width: 85px; }
 .cp-peerstage-video {
   width: 100%;
   height: 100%;
@@ -1144,6 +1206,7 @@
    is part of the picture rather than a tooltip. */
 .cp-peerstage-badge {
   position: absolute;
+  z-index: 2;
   top: var(--s-3);
   left: var(--s-3);
   padding: 2px 8px;
@@ -1169,26 +1232,18 @@
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
 }
 
-/* The RECORDING badge on a tile: that person is recording their own camera.
-   Sits under .cp-person-share (top-left) because the two can be true at once
-   and top-right is the raised hand. Same opaque plate as the share badge -
-   0.72 rather than 0.55, because these sit over live video and 0.55 measured
-   3.73:1 over a white frame. The tint is --danger at low alpha over that
-   plate, never --danger as the text colour: tokens.css records that #E82626
-   fails as a glyph against dark greys. Tints go through color-mix on the
-   token - danger-text-contract rejects a retyped literal red. */
+/* Recording is independent of sharing and presentation; its own signal slot
+   remains visible when those states coincide. */
 .cp-person-rec {
-  position: absolute;
-  top: 26px;
-  left: 6px;
-  padding: 1px 6px;
-  border-radius: var(--r-pill);
-  background: rgba(0, 0, 0, 0.72);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 55%, transparent);
   color: var(--danger-text);
-  font-family: var(--font-ui);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--track-wide);
-  text-transform: uppercase;
+}
+.cp-panel-source-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  color: var(--fg-2);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line-1);
+  font-size: var(--text-base);
 }

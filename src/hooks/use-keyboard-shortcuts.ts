@@ -13,6 +13,7 @@ import { loadActiveTab } from "../lib/tab-state";
 
 /** Everything the dispatch reads. Enumerated by tsc, not by hand. */
 export type KeyboardShortcutsDeps = {
+  programInputActive?: boolean;
   comboToAction: Map<string, KeyActionId>;
   status: string;
   fps: number;
@@ -82,6 +83,7 @@ export type KeyboardShortcutsDeps = {
  */
 export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
   const {
+    programInputActive = false,
     comboToAction, status, fps, readerFps, durationFrames, settingsOpen, exportOpts,
     activeViewRef, homeViewRef, libraryViewRef, clipViewRef, coreviewViewRef,
     readerViewRef, readerPlayerRef, tcEntryRef, kHeldRef,
@@ -116,6 +118,7 @@ export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
       // available to whatever view IS in front, which is what lets the
       // Library run arrow-key navigation and type-ahead on the same letters.
       if (isPlaybackScoped(id) && !VIEWS_WITH_A_PLAYER.has(activeViewRef.current)) return;
+      if (programInputActive && activeViewRef.current !== "reader" && isPlaybackScoped(id)) { e.preventDefault(); return; }
       e.preventDefault();
       switch (id) {
         // A keyboard-opened modal has to dismiss the transient popovers it
@@ -179,7 +182,13 @@ export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
             v === "library" ? libraryViewRef :
             v === "coreview" ? coreviewViewRef :
             v === "reader" ? readerViewRef : clipViewRef;
-          requestAnimationFrame(() => viewRef.current?.focus());
+          requestAnimationFrame(() => {
+            // Review's preview monitor shares the mounted stage, while its
+            // session-setup root is hidden. Focus the visible root only.
+            const target=v === "coreview" && coreviewViewRef.current?.hidden
+              ? clipViewRef.current : viewRef.current;
+            target?.focus();
+          });
           break;
         }
         case "view.logs":    setLogsOpen((p) => !p); break;
@@ -355,7 +364,7 @@ export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
     // optimisation, and ⌘E starts insisting on a folder the user has already
     // chosen. Listing it directly costs nothing (the effect already re-runs on
     // that change) and removes a coupling nothing states.
-    exportOpts.folder,
+    exportOpts.folder, programInputActive,
     kHeldRef, pushNotification, readerSeekRel, setQueueOpenChoice,
     // Added when this moved out of App.tsx. Inside the component the linter
     // could see these were refs and setState functions and left them alone;

@@ -3,16 +3,17 @@ import {
 } from "react";
 import {
   Input, ALL_FORMATS,
-  CanvasSink, AudioBufferSink, EncodedPacketSink,
+  CanvasSink, AudioBufferSink,
   type InputVideoTrack, type InputAudioTrack, type WrappedCanvas,
 } from "mediabunny";
 import { mediabunnySource } from "../lib/mediabunny-source";
 import { canvasLooksBlank } from "../lib/mediabunny-helpers";
+import { supportedVideoDecoderOptions } from "../lib/video-decoder-options";
 import { audioAnchorWaitMs, audioVitals, shouldRetakeAnchor } from "../lib/av-clock";
 import { createScrubPump, type ScrubPump } from "../lib/scrub-pump";
 import { GRAIN_MAX_VOICES, grainEnvelope, idleScrubState, planGrain, type ScrubGrainState } from "../lib/audio-scrub";
 import { BunnyMark } from "./BunnyMark";
-import type { PlayerHandle } from "./player-handle";
+import type { PlayerHandle, SeekResult } from "./player-handle";
 
 /** How long to wait for a decode loop to pin the clock before pinning it to
  *  the requested time anyway. Only reachable on sources with no video track,
@@ -26,20 +27,6 @@ const ANCHOR_FALLBACK_MS = 1000;
  * first play.
  */
 const AUDIO_SUMMARY_MS = 3500;
-
-/** How long seeks must stop arriving before a scrub-while-playing gesture is
- *  considered over and the decode pipelines are rebuilt. Matches
- *  LocalMediaPlayer's settle so the two local engines feel the same. */
-const SCRUB_SETTLE_MS = 200;
-/** Fast-drag detector: seeks landing closer together in time than this and
- *  farther apart in media than FAST_SCRUB_MIN_JUMP_S get KEYFRAME previews
- *  (one decode each) instead of exact frames (keyframe + forward-walk, up to
- *  a whole GOP of hidden decodes per painted frame). */
-const FAST_SCRUB_GAP_MS = 160;
-const FAST_SCRUB_MIN_JUMP_S = 0.35;
-/** After the last seek of a fast drag, decode the EXACT frame under the
- *  cursor once the hand rests (the NLE settle). */
-const FAST_SCRUB_EXACT_MS = 170;
 
 /** Audio-scrub blip length (s). Long enough to hear a syllable at a slow
  *  drag; a fast drag supersedes it long before it ends, which is what makes
@@ -193,18 +180,10 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
    * a decode was in flight. Created lazily below.
    */
   const scrubPumpRef = useRef<ScrubPump | null>(null);
-  /**
-   * Scrub-gesture latch for seeking WHILE PLAYING. Without it every seek of a
-   * drag restarted both decode pipelines — a fresh video decoder, a fresh audio
-   * decoder and a demuxer keyframe seek, up to 60 times a second, none of them
-   * living long enough to produce anything. The other two engines already
-   * pause-and-settle (LocalMediaPlayer 200ms, MSEStreamPlayer 300ms); this
-   * brings the default local player in line so scrub feel stops depending on
-   * which engine happened to mount.
-   */
-  const scrubLatchRef = useRef(false);
+  /** The timeline, not a quiet-period timer, owns the scrub gesture. */
+  const scrubbingRef = useRef(false);
   const scrubResumeRef = useRef(false);
-  const scrubSettleRef = useRef(0);
+  const scrubTargetRef = useRef(0);
   /** Audio-scrub pref (Settings → Local playback), mirrored to a ref so the
    *  []-deps imperative handle and the pump drain read the live value. */
   const scrubAudioPrefRef = useRef(scrubAudio !== false);
@@ -217,13 +196,6 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
   const grainStateRef = useRef<ScrubGrainState>(idleScrubState());
   /** Latest-wins decoder for scrub BLIPS (audio twin of scrubPumpRef). */
   const scrubAudioPumpRef = useRef<ScrubPump | null>(null);
-  /** Keyframe index over the video track (fast-scrub previews). */
-  const keyPacketSinkRef = useRef<EncodedPacketSink | null>(null);
-  /** Fast-drag state: last request (for velocity), current mode, and the
-   *  trailing exact-decode timer. */
-  const scrubLastReqRef = useRef<{ t: number; at: number } | null>(null);
-  const scrubFastRef = useRef(false);
-  const scrubExactTimerRef = useRef(0);
 
   // Driving a setState for the visible play/pause UI on audio-only mode.
   const [isPlaying, setIsPlaying] = useState(false);
@@ -341,19 +313,8 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       const gen = genRef.current;
       const sink = videoSinkRef.current;
       if (!sink) return;
-      let decodeAt = target;
-      if (scrubFastRef.current && keyPacketSinkRef.current) {
-        // Fast drag: paint the keyframe at-or-before the cursor. Decoding a
-        // keyframe timestamp needs no forward walk, so preview rate stops
-        // depending on the source's GOP length. The trailing settle pass
-        // (seekTo) repaints the exact frame once the hand rests.
-        try {
-          const pkt = await keyPacketSinkRef.current.getKeyPacket(target, { verifyKeyPackets: false });
-          if (pkt) decodeAt = pkt.timestamp;
-        } catch { /* fall back to the exact decode */ }
-      }
       let wrapped: WrappedCanvas | null = null;
-      try { wrapped = await sink.getCanvas(decodeAt); }
+      try { wrapped = await sink.getCanvas(target); }
       catch { return; }
       if (gen === genRef.current && wrapped) drawCanvas(wrapped.canvas);
     });
@@ -468,11 +429,6 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     scrubPumpRef.current?.cancel();
     scrubAudioPumpRef.current?.cancel();
     stopScrubBlip();
-    if (scrubExactTimerRef.current) {
-      window.clearTimeout(scrubExactTimerRef.current);
-      scrubExactTimerRef.current = 0;
-    }
-    scrubFastRef.current = false;
     for (const node of scheduledRef.current) {
       try { node.stop(); } catch { /* already stopped */ }
       try { node.disconnect(); } catch { /* ignore */ }
@@ -480,13 +436,10 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     scheduledRef.current = [];
   };
 
-  /** Abandon any in-progress scrub gesture WITHOUT resuming playback. Called
-   *  from every path that decides the transport state itself (pause, play,
-   *  shuttle, teardown), so a pending settle can't resurrect playback after. */
+  /** Abandon any in-progress scrub gesture without resuming playback. */
   const clearScrubLatch = () => {
-    scrubLatchRef.current = false;
+    scrubbingRef.current = false;
     scrubResumeRef.current = false;
-    if (scrubSettleRef.current) { window.clearTimeout(scrubSettleRef.current); scrubSettleRef.current = 0; }
   };
 
   const stopPlayback = () => {
@@ -804,6 +757,81 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     };
   }, []);
 
+  const clampTarget = (seconds: number) =>
+    Math.max(0, durationRef.current > 0 ? Math.min(durationRef.current, seconds) : seconds);
+
+  const beginScrub = () => {
+    if (scrubbingRef.current) return;
+    scrubbingRef.current = true;
+    scrubResumeRef.current = playingRef.current;
+    const at = playingRef.current ? currentMediaTime() : startMediaTimeRef.current;
+    startMediaTimeRef.current = at;
+    scrubTargetRef.current = at;
+    // Interrupt the A/V loops once for the whole gesture. Keep the public
+    // playing state unchanged so the transport does not flicker while the
+    // gesture is temporarily holding playback.
+    if (playingRef.current) cancelInFlight();
+  };
+
+  const scrubTo = (seconds: number) => {
+    if (!scrubbingRef.current) beginScrub();
+    const target = clampTarget(seconds);
+    scrubTargetRef.current = target;
+    startMediaTimeRef.current = target;
+    onTimeUpdateRef.current?.(target);
+    // Exact decoded frames from the low-resolution review copy, coalesced by
+    // the single-flight pump. Intermediate requests never form a backlog.
+    void scrubPumpRef.current?.request(target);
+    void scrubAudioPumpRef.current?.request(target);
+  };
+
+  const endScrub = async (seconds: number): Promise<SeekResult> => {
+    const target = clampTarget(seconds);
+    scrubTargetRef.current = target;
+    startMediaTimeRef.current = target;
+    onTimeUpdateRef.current?.(target);
+    const painted = await (scrubPumpRef.current?.request(target) ?? Promise.resolve(true));
+    if (!painted || !scrubbingRef.current) {
+      return { requestedSeconds: target, presentedSeconds: startMediaTimeRef.current, status: "superseded" };
+    }
+    scrubbingRef.current = false;
+    stopScrubBlip();
+    const resume = scrubResumeRef.current;
+    scrubResumeRef.current = false;
+    if (resume && playingRef.current) {
+      const ctx = audioCtxRef.current;
+      if (ctx) {
+        const gen = ++genRef.current;
+        void startLoops(ctx, target, gen);
+      }
+    } else {
+      playingRef.current = false;
+      setIsPlaying(false);
+      onPlayStateChange?.(false);
+    }
+    return { requestedSeconds: target, presentedSeconds: target, status: "presented" };
+  };
+
+  const seekExact = async (seconds: number): Promise<SeekResult> => {
+    const target = clampTarget(seconds);
+    const resume = playingRef.current;
+    if (scrubbingRef.current) clearScrubLatch();
+    if (resume) startMediaTimeRef.current = currentMediaTime();
+    cancelInFlight();
+    startMediaTimeRef.current = target;
+    onTimeUpdateRef.current?.(target);
+    const painted = await (scrubPumpRef.current?.request(target) ?? Promise.resolve(true));
+    if (!painted) return { requestedSeconds: target, presentedSeconds: startMediaTimeRef.current, status: "superseded" };
+    if (resume && playingRef.current) {
+      const ctx = audioCtxRef.current;
+      if (ctx) {
+        const gen = ++genRef.current;
+        void startLoops(ctx, target, gen);
+      }
+    }
+    return { requestedSeconds: target, presentedSeconds: target, status: "presented" };
+  };
+
   // ─── Public handle ──────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
     // The element a live session captures to show a peer what the
@@ -813,7 +841,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       if (!readyRef.current) return;
       const ctx = audioCtxRef.current;
       if (!ctx) return;
-      clearScrubLatch(); // an explicit play supersedes any pending scrub settle
+      clearScrubLatch(); // an explicit play supersedes an active scrub
       cancelInFlight();
       const gen = ++genRef.current;
       // No anchor here: the clock is pinned by the first sample the loops
@@ -826,84 +854,10 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       void startLoops(ctx, startMediaTimeRef.current, gen);
     },
     pause: () => stopPlayback(),
-    seekTo: (s: number) => {
-      const clamped = Math.max(0, Math.min(durationRef.current, s));
-      const wasPlaying = playingRef.current;
-      // Fast-drag detection: closely-spaced seeks covering real media
-      // distance switch the preview pump to keyframe mode (one decode per
-      // painted frame). The trailing timer decodes the EXACT resting frame
-      // once seeks stop, so precision returns the moment the hand does.
-      {
-        const now = performance.now();
-        const last = scrubLastReqRef.current;
-        scrubLastReqRef.current = { t: clamped, at: now };
-        scrubFastRef.current = !!last
-          && now - last.at < FAST_SCRUB_GAP_MS
-          && Math.abs(clamped - last.t) > FAST_SCRUB_MIN_JUMP_S;
-        if (scrubExactTimerRef.current) window.clearTimeout(scrubExactTimerRef.current);
-        if (scrubFastRef.current) {
-          scrubExactTimerRef.current = window.setTimeout(() => {
-            scrubExactTimerRef.current = 0;
-            scrubFastRef.current = false;
-            const rest = scrubLastReqRef.current;
-            if (rest) scrubPumpRef.current?.request(rest.t);
-          }, FAST_SCRUB_EXACT_MS);
-        }
-      }
-      startMediaTimeRef.current = clamped;
-      // Via the ref, like the 100ms tick and the shuttle loop: this handle is
-      // built with [] deps, so calling the prop directly would publish through
-      // the callback captured at MOUNT (a stale fps), desyncing the transcript
-      // from the player on every cue click.
-      onTimeUpdateRef.current?.(clamped);
-      if (wasPlaying || scrubLatchRef.current) {
-        // Seeking while playing. Treat a burst of seeks as ONE gesture: stop
-        // the pipelines on the first, preview through the scrub pump for the
-        // duration, and rebuild them ONCE when the seeks stop. Restarting per
-        // seek meant building and abandoning a video decoder, an audio decoder
-        // and a demuxer seek every vsync, so a drag produced silence and a
-        // stalled picture rather than a preview.
-        if (!scrubLatchRef.current) {
-          scrubLatchRef.current = true;
-          scrubResumeRef.current = wasPlaying;
-          cancelInFlight(); // playback really is being interrupted here
-        }
-        scrubPumpRef.current?.request(clamped);
-        scrubAudioPumpRef.current?.request(clamped);
-        if (scrubSettleRef.current) window.clearTimeout(scrubSettleRef.current);
-        scrubSettleRef.current = window.setTimeout(() => {
-          scrubSettleRef.current = 0;
-          scrubLatchRef.current = false;
-          if (!scrubResumeRef.current) return;
-          scrubResumeRef.current = false;
-          const ctx = audioCtxRef.current;
-          if (!ctx || !playingRef.current) return;
-          // A blip still sounding would double the first ~50ms of the
-          // resumed audio at the same position — cut it before the rebuild.
-          stopScrubBlip();
-          const gen = ++genRef.current;
-          // Anchored from the first delivered sample, not from here — this is
-          // the path a transcript-cue click takes, and anchoring at the request
-          // charged the whole seek latency to the audio and lost it.
-          void startLoops(ctx, startMediaTimeRef.current, gen);
-        }, SCRUB_SETTLE_MS);
-      } else {
-        // Paused seek / scrub. Coalesce into the single-flight pump: it keeps
-        // only the newest target, so a fast drag chases the cursor instead of
-        // queueing a decode per seek.
-        //
-        // Deliberately NOT cancelInFlight() here. That bumped the playback
-        // generation on every seek, which invalidated the scrub decode it had
-        // just started: the timeline fires one seek per vsync, so while the
-        // cursor kept moving nothing ever survived to paint. The picture sat
-        // frozen until the drag stopped, having burned a full keyframe-to-target
-        // decode per display frame producing images nobody saw. The drain's own
-        // generation check still prevents a scrub frame landing after playback
-        // resumes, which is the case that gate exists for.
-        scrubPumpRef.current?.request(clamped);
-        scrubAudioPumpRef.current?.request(clamped);
-      }
-    },
+    seekTo: seekExact,
+    beginScrub,
+    scrubTo,
+    endScrub,
     getCurrentTime: () => currentMediaTime(),
     getDuration: () => durationRef.current,
     isReady: () => readyRef.current,
@@ -1096,17 +1050,13 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
           // allowedOutputFormats, so it never emits a sample WKWebView cannot
           // wrap. The empirical paint check below is the backstop, and it now
           // guards EVERY codec instead of banning one.
-          // Packet-level keyframe lookup: lets a fast drag snap its preview
-          // to the keyframe at-or-before the cursor, ONE decode per painted
-          // frame instead of a keyframe-to-target walk.
-          keyPacketSinkRef.current = new EncodedPacketSink(vt);
+          const decoderOptions = await supportedVideoDecoderOptions(await vt.getDecoderConfig());
+          if (cancelled) return;
           videoSinkRef.current = new CanvasSink(vt, {
             poolSize: 4,
-            // Scrub latency: `optimizeForLatency` tells WebCodecs to emit each
-            // decoded frame ASAP instead of buffering several first, so a
-            // getCanvas() lands sooner; `prefer-hardware` keeps decode on the
-            // GPU. Both fall back gracefully if unavailable.
-            decoderOptions: { hardwareAcceleration: "prefer-hardware", optimizeForLatency: true },
+            // Check the exact preferences, not just the track's default
+            // canDecode() config; hardware hints do not always fall back.
+            decoderOptions,
           });
           // Paint the first frame so the canvas isn't black before play. If a
           // sample decodes but can't be wrapped for the canvas, getCanvas throws

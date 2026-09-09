@@ -39,7 +39,7 @@ function base(over: Partial<Props> = {}): Props {
       title: "A film", duration: 120, thumbnail: null, uploader: null,
       upload_date: null, view_count: null, webpage_url: "https://example.com/w",
       width: 1920, height: 1080, fps: 25, vcodec: "h264", acodec: "aac",
-      ext: "mp4", has_subs: false,
+      ext: "mp4", has_subs: false, is_live: false,
     },
     metadataLoading: false,
     exportOpts: { folder: "/Users/x/Movies", filename: "cut", format: "video", inTc: "", outTc: "", reencode: false },

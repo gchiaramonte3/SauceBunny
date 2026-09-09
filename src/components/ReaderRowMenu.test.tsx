@@ -2,9 +2,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ReaderRowMenu } from "./ReaderRowMenu";
+import { invoke } from "@tauri-apps/api/core";
+import { __resetHiddenCache, isHidden } from "../lib/library-hidden";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => "/lib/New") }));
-afterEach(cleanup);
+afterEach(() => { cleanup(); localStorage.clear(); __resetHiddenCache(); vi.clearAllMocks(); });
 
 const entry = { srtPath: "/lib/Talk.srt" } as never;
 
@@ -23,6 +25,36 @@ function open(onRename = vi.fn(async () => {})) {
 }
 
 describe("the transcript reader's row menu", () => {
+  it("removes from the library immediately without a native file operation", () => {
+    open();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove from library" }));
+    expect(isHidden("/lib/Talk.srt")).toBe(true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("requires confirmation for Trash and retries only failed members of a selection", async () => {
+    const close = vi.fn();
+    const first = { id: "first", srtPath: "/lib/First.srt" } as never;
+    const second = { id: "second", srtPath: "/lib/Second.vtt" } as never;
+    render(<ReaderRowMenu target={{ entry: first, entries: [first, second], title: "First", x: 10, y: 10 }}
+      onClose={close} folderOptions={[]} libraryPath="/lib" onRename={vi.fn()} onMove={vi.fn()} />);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to Trash…" }));
+    expect(screen.getByRole("dialog", { name: "Move 2 transcripts to Trash?" })).toBeTruthy();
+    expect(invoke).not.toHaveBeenCalled();
+    vi.mocked(invoke).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("Permission denied"));
+    fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Permission denied"));
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.queryByText("First.srt")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(vi.mocked(invoke).mock.calls).toEqual([
+      ["trash_transcript", { path: "/lib/First.srt" }],
+      ["trash_transcript", { path: "/lib/Second.vtt" }],
+      ["trash_transcript", { path: "/lib/Second.vtt" }],
+    ]);
+  });
   it("offers Rename, and opens its dialog", () => {
     open();
     fireEvent.click(screen.getByRole("menuitem", { name: /Rename/ }));

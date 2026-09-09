@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * Self-contained emoji picker for the review composer. Renders a monochrome
@@ -166,7 +167,7 @@ export function EmojiPicker({ onPick, title = "Add emoji" }: { onPick: (emoji: s
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [recents, setRecents] = useState<string[]>(loadRecents);
-  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
@@ -175,7 +176,11 @@ export function EmojiPicker({ onPick, title = "Add emoji" }: { onPick: (emoji: s
     const r = triggerRef.current?.getBoundingClientRect();
     if (!r) return;
     const left = Math.max(8, Math.min(r.left, window.innerWidth - POP_WIDTH - 8));
-    setPos({ left, bottom: window.innerHeight - r.top + 8 });
+    const above = r.top - 16;
+    const below = window.innerHeight - r.bottom - 16;
+    const useAbove = above >= Math.min(360, below);
+    const maxHeight = Math.max(80, Math.min(360, useAbove ? above : below));
+    setPos({ left, top: Math.max(8, useAbove ? r.top - maxHeight - 8 : r.bottom + 8), maxHeight });
   };
 
   useLayoutEffect(() => {
@@ -183,7 +188,8 @@ export function EmojiPicker({ onPick, title = "Add emoji" }: { onPick: (emoji: s
     place();
     const onResize = () => place();
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    window.addEventListener("scroll", onResize, true);
+    return () => { window.removeEventListener("resize", onResize); window.removeEventListener("scroll", onResize, true); };
   }, [open]);
 
   useEffect(() => {
@@ -193,7 +199,7 @@ export function EmojiPicker({ onPick, title = "Add emoji" }: { onPick: (emoji: s
       if (popRef.current?.contains(t) || triggerRef.current?.contains(t)) return;
       setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setOpen(false); setQuery(""); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setOpen(false); setQuery(""); triggerRef.current?.focus(); } };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
@@ -227,13 +233,13 @@ export function EmojiPicker({ onPick, title = "Add emoji" }: { onPick: (emoji: s
         <SmileyGlyph />
       </button>
 
-      {open && pos && (
+      {open && pos && createPortal(
         <div
           ref={popRef}
           className="cp-emoji-pop"
           role="dialog"
           aria-label="Emoji picker"
-          style={{ left: pos.left, bottom: pos.bottom }}
+          style={pos}
         >
           <div className="cp-emoji-head">
             <SearchGlyph />
@@ -284,7 +290,7 @@ export function EmojiPicker({ onPick, title = "Add emoji" }: { onPick: (emoji: s
               </>
             )}
           </div>
-        </div>
+        </div>, document.body
       )}
     </>
   );

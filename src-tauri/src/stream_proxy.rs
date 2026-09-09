@@ -45,6 +45,7 @@
 //! and reopening with a fresh Range (each reopen is just a new request).
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 /// Base URL of the running proxy, e.g. `http://127.0.0.1:52431`. Set once
@@ -60,6 +61,34 @@ static BASE: OnceLock<String> = OnceLock::new();
 /// the frontend receives, so all existing URL construction (`buildProxyUrl` +
 /// the `/fmp4/` string-replace) carries it transparently — no frontend change.
 static TOKEN: OnceLock<String> = OnceLock::new();
+
+/// Exact HLS URLs authorized by a yt-dlp presentation resolve, plus child
+/// playlist/media/key URLs discovered while rewriting those manifests. An
+/// encoded URL alone is never authority to make the proxy fetch it.
+static HLS_ALLOWED: OnceLock<std::sync::Mutex<HashSet<String>>> = OnceLock::new();
+
+fn hls_allowed() -> &'static std::sync::Mutex<HashSet<String>> {
+    HLS_ALLOWED.get_or_init(|| std::sync::Mutex::new(HashSet::new()))
+}
+
+pub(crate) fn register_hls_url(url: &str) -> bool {
+    if !is_safe_upstream(url) {
+        return false;
+    }
+    let Ok(mut allowed) = hls_allowed().lock() else { return false };
+    // A malicious or pathological playlist must not turn this into an
+    // unbounded process-lifetime URL store. Current playback URLs are simply
+    // re-registered after the reset as manifests are requested.
+    if allowed.len() >= 4096 {
+        allowed.clear();
+    }
+    allowed.insert(url.to_string());
+    true
+}
+
+fn is_registered_hls_url(url: &str) -> bool {
+    hls_allowed().lock().map(|set| set.contains(url)).unwrap_or(false)
+}
 
 /// The capability gate as a pure function, so it can be tested without a
 /// server. Returns the path AFTER `/t/<token>`, or None to answer 403.
@@ -376,7 +405,50 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
         }
     };
 
+    if request.method() == &tiny_http::Method::Options {
+        let cors = cors_origin_for(&request);
+        let mut response = tiny_http::Response::from_string("").with_status_code(204);
+        for (name, value) in [
+            ("Access-Control-Allow-Origin", cors.as_str()),
+            ("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS"),
+            ("Access-Control-Allow-Headers", "Range"),
+            ("Access-Control-Max-Age", "600"),
+        ] {
+            if let Ok(header) = tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()) {
+                response.add_header(header);
+            }
+        }
+        return request.respond(response);
+    }
+
     // ── fMP4 remux route (r63) ──────────────────────────────────────
+    if let Some(id) = raw_path.strip_prefix("/program-remote/v1/") {
+        if request.method() != &tiny_http::Method::Get || !crate::commands::ndi::valid_program_id(id) {
+            return request.respond(tiny_http::Response::from_string("Invalid program request").with_status_code(400));
+        }
+        let cors=cors_origin_for(&request);
+        let handle=match crate::commands::peer_stream::request_media_stream(format!("ndi:{id}"),0.0,None) {
+            Ok(handle)=>handle,
+            Err(e)=>return request.respond(tiny_http::Response::from_string(e.to_string()).with_status_code(503)),
+        };
+        let headers=[("Content-Type","application/octet-stream"),("Cache-Control","no-store"),
+            ("Access-Control-Allow-Origin",cors.as_str())].into_iter().filter_map(|(k,v)|tiny_http::Header::from_bytes(k,v).ok()).collect();
+        return request.respond(tiny_http::Response::new(tiny_http::StatusCode(200),headers,
+            crate::commands::peer_stream::ChannelReader::new(handle.rx),None,None));
+    }
+    if let Some(id) = raw_path.strip_prefix("/program/v1/") {
+        if request.method() != &tiny_http::Method::Get {
+            return request.respond(tiny_http::Response::from_string("GET only").with_status_code(405));
+        }
+        let Some(program) = crate::commands::ndi::find_program(id) else {
+            return request.respond(tiny_http::Response::from_string("Program source is unavailable").with_status_code(404));
+        };
+        let cors = cors_origin_for(&request);
+        let headers = [("Content-Type","application/octet-stream"), ("Cache-Control","no-store"),
+            ("Access-Control-Allow-Origin",cors.as_str())].into_iter().filter_map(|(k,v)|tiny_http::Header::from_bytes(k,v).ok()).collect();
+        return request.respond(tiny_http::Response::new(tiny_http::StatusCode(200),headers,
+            crate::commands::ndi::ProgramReader::new(program),None,None));
+    }
     // `/fmp4/v1/<b64-upstream>?start=<secs>` → spawn the ffmpeg sidecar to
     // transmux the upstream stream to fragmented MP4 (`-c copy`, both
     // tracks) and pipe it straight to the response. The frontend fetch()es
@@ -390,6 +462,45 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
     if raw_path.trim_start_matches('/').starts_with("share/v1") {
         return serve_share(request, parse_share_source(&raw_path));
     }
+    if raw_path.trim_start_matches('/').starts_with("hls/v1/") {
+        return match decode_after("hls/v1/", &raw_path) {
+            Some(u) if is_registered_hls_url(&u) && is_safe_upstream(&u) => {
+                serve_hls_manifest(request, u)
+            }
+            Some(_) => request.respond(
+                tiny_http::Response::from_string("unregistered hls url").with_status_code(403),
+            ),
+            None => request.respond(
+                tiny_http::Response::from_string("bad hls path").with_status_code(400),
+            ),
+        };
+    }
+    // Media, init and key objects discovered in an authorized playlist use a
+    // separate raw route. Keeping them out of the generic `/v1/` path means
+    // the exact URL registration performed during rewriting is enforced on
+    // every HLS fetch, not just on nested playlist fetches.
+    let hls_media_upstream = if raw_path
+        .trim_start_matches('/')
+        .starts_with("hls/media/v1/")
+    {
+        match decode_after("hls/media/v1/", &raw_path) {
+            Some(u) if is_registered_hls_url(&u) && is_safe_upstream(&u) => Some(u),
+            Some(_) => {
+                return request.respond(
+                    tiny_http::Response::from_string("unregistered hls media url")
+                        .with_status_code(403),
+                );
+            }
+            None => {
+                return request.respond(
+                    tiny_http::Response::from_string("bad hls media path")
+                        .with_status_code(400),
+                );
+            }
+        }
+    } else {
+        None
+    };
     if raw_path.trim_start_matches('/').starts_with("fmp4/v1/") {
         match decode_after("fmp4/v1/", &raw_path) {
             Some(u) => return serve_fmp4(request, u, parse_start_query(&raw_path), parse_audio_query(&raw_path), false),
@@ -443,7 +554,7 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
         };
     }
 
-    let upstream = match decode_upstream(&raw_path) {
+    let upstream = match hls_media_upstream.or_else(|| decode_upstream(&raw_path)) {
         Some(u) => u,
         None => {
             eprintln!("[media-proxy] REQ path={raw_path} -> 400 (bad path)");
@@ -546,6 +657,132 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
     // length (always true for our 206 ranged responses). This was the
     // difference between the 2-byte probe working and the real chunk failing.
     .with_chunked_threshold(usize::MAX);
+    request.respond(response)
+}
+
+fn hls_proxy_url(proxy_base: &str, upstream: &str, playlist: bool) -> String {
+    let route = if playlist { "hls/v1" } else { "hls/media/v1" };
+    format!("{proxy_base}/{route}/{}", URL_SAFE_NO_PAD.encode(upstream.as_bytes()))
+}
+
+fn resolve_hls_uri(manifest_url: &str, uri: &str) -> Option<String> {
+    let base = reqwest::Url::parse(manifest_url).ok()?;
+    let value = base.join(uri).ok()?.to_string();
+    register_hls_url(&value).then_some(value)
+}
+
+fn uri_looks_like_playlist(uri: &str) -> bool {
+    uri.split(['?', '#'])
+        .next()
+        .unwrap_or(uri)
+        .to_ascii_lowercase()
+        .ends_with(".m3u8")
+}
+
+/// Rewrites variant playlists, audio renditions, media segments, init maps
+/// and encryption keys through the same capability-gated loopback origin.
+/// Relative URI resolution uses `Url::join`, preserving signed query strings.
+fn rewrite_hls_playlist(body: &str, manifest_url: &str, proxy_base: &str) -> Result<String, String> {
+    let mut out = String::with_capacity(body.len() + 512);
+    let mut next_plain_is_playlist = false;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        let mut rewritten = line.to_string();
+        if trimmed.starts_with("#EXT-X-STREAM-INF:") {
+            next_plain_is_playlist = true;
+        } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
+            let playlist = next_plain_is_playlist || uri_looks_like_playlist(trimmed);
+            let absolute = resolve_hls_uri(manifest_url, trimmed)
+                .ok_or_else(|| format!("unsafe or invalid HLS URI: {trimmed}"))?;
+            rewritten = hls_proxy_url(proxy_base, &absolute, playlist);
+            next_plain_is_playlist = false;
+        } else if let Some(start) = line.find("URI=\"") {
+            let value_start = start + 5;
+            let rest = &line[value_start..];
+            let value_end = rest.find('"')
+                .ok_or_else(|| "unterminated HLS URI attribute".to_string())?;
+            let uri = &rest[..value_end];
+            let playlist = trimmed.starts_with("#EXT-X-MEDIA:")
+                || trimmed.starts_with("#EXT-X-I-FRAME-STREAM-INF:")
+                || trimmed.starts_with("#EXT-X-RENDITION-REPORT:")
+                || uri_looks_like_playlist(uri);
+            let absolute = resolve_hls_uri(manifest_url, uri)
+                .ok_or_else(|| format!("unsafe or invalid HLS URI: {uri}"))?;
+            let proxied = hls_proxy_url(proxy_base, &absolute, playlist);
+            rewritten = format!("{}{}{}", &line[..value_start], proxied, &rest[value_end..]);
+        }
+        out.push_str(&rewritten);
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+fn serve_hls_manifest(request: tiny_http::Request, upstream: String) -> std::io::Result<()> {
+    // HLS authorization is exact and redirects are intentionally disabled. A
+    // public CDN redirecting to an unregistered destination must be resolved
+    // again by yt-dlp; following it here would bypass the URL allowlist.
+    if !is_registered_hls_url(&upstream) || !is_safe_upstream(&upstream) {
+        return request.respond(
+            tiny_http::Response::from_string("unregistered hls url").with_status_code(403),
+        );
+    }
+    let client = match reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => return request.respond(
+            tiny_http::Response::from_string(format!("HLS client failed: {error}"))
+                .with_status_code(500),
+        ),
+    };
+    let response = match client
+        .get(&upstream)
+        .header(reqwest::header::USER_AGENT, SAFARI_UA)
+        .header(reqwest::header::ACCEPT, "application/vnd.apple.mpegurl, application/x-mpegURL, */*")
+        .send()
+    {
+        Ok(response) => response,
+        Err(error) => return request.respond(
+            tiny_http::Response::from_string(format!("HLS manifest fetch failed: {error}"))
+                .with_status_code(502),
+        ),
+    };
+    let status = response.status().as_u16();
+    if !response.status().is_success() {
+        return request.respond(
+            tiny_http::Response::from_string(format!("HLS upstream returned {status}"))
+                .with_status_code(status),
+        );
+    }
+    let body = match response.text() {
+        Ok(body) => body,
+        Err(error) => return request.respond(
+            tiny_http::Response::from_string(format!("HLS manifest read failed: {error}"))
+                .with_status_code(502),
+        ),
+    };
+    let proxy_base = BASE.get().map(String::as_str).unwrap_or("");
+    let rewritten = match rewrite_hls_playlist(&body, &upstream, proxy_base) {
+        Ok(body) => body,
+        Err(error) => return request.respond(
+            tiny_http::Response::from_string(error).with_status_code(400),
+        ),
+    };
+    let cors = cors_origin_for(&request);
+    let mut response = tiny_http::Response::from_string(rewritten).with_status_code(status);
+    for (name, value) in [
+        ("Content-Type", "application/vnd.apple.mpegurl"),
+        ("Cache-Control", "no-cache"),
+        ("Access-Control-Allow-Origin", cors.as_str()),
+        ("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS"),
+        ("Access-Control-Allow-Headers", "Range"),
+    ] {
+        if let Ok(header) = tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()) {
+            response.add_header(header);
+        }
+    }
     request.respond(response)
 }
 
@@ -1420,6 +1657,38 @@ mod tests {
 
     fn b64(url: &str) -> String {
         URL_SAFE_NO_PAD.encode(url.as_bytes())
+    }
+
+    #[test]
+    fn hls_rewrite_routes_playlists_segments_audio_and_keys() {
+        let manifest = "https://video.example.com/path/master.m3u8?root=1";
+        assert!(register_hls_url(manifest));
+        let body = "#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,URI=\"audio/list.m3u8?sig=a%2Fb\"\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://keys.example.com/k?id=7&sig=x%2By\"\n#EXT-X-STREAM-INF:BANDWIDTH=800000\nvideo/720.m3u8?token=abc\n#EXTINF:4,\nseg-1.ts?sig=keep%2Fme\n";
+        let proxy = "http://127.0.0.1:4000/t/test-token";
+        let rewritten = rewrite_hls_playlist(body, manifest, proxy).unwrap();
+        assert!(rewritten.contains("URI=\"http://127.0.0.1:4000/t/test-token/hls/v1/"));
+        assert!(rewritten.contains("URI=\"http://127.0.0.1:4000/t/test-token/hls/media/v1/"));
+
+        let lines: Vec<&str> = rewritten.lines().collect();
+        let variant = lines.iter().find(|line| line.starts_with(&format!("{proxy}/hls/v1/"))).unwrap();
+        assert_eq!(
+            decode_after("hls/v1/", variant.strip_prefix(proxy).unwrap()).as_deref(),
+            Some("https://video.example.com/path/video/720.m3u8?token=abc"),
+        );
+        let segment = lines.iter().find(|line| line.starts_with(&format!("{proxy}/hls/media/v1/"))).unwrap();
+        assert_eq!(
+            decode_after("hls/media/v1/", segment.strip_prefix(proxy).unwrap()).as_deref(),
+            Some("https://video.example.com/path/seg-1.ts?sig=keep%2Fme"),
+        );
+    }
+
+    #[test]
+    fn hls_rewrite_rejects_private_child_targets() {
+        let manifest = "https://video.example.com/master.m3u8";
+        assert!(register_hls_url(manifest));
+        let body = "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"http://127.0.0.1:8080/key\"\nsegment.ts\n";
+        assert!(rewrite_hls_playlist(body, manifest, "http://127.0.0.1:4000/t/token").is_err());
+        assert!(!is_registered_hls_url("http://127.0.0.1:8080/key"));
     }
 
     // ── parse_share_source — share route query ──────────────────────────

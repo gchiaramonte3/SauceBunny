@@ -111,4 +111,18 @@ test.describe("the review toolbar at the narrowest panel", () => {
     expect(overlaps, overlaps.join("\n")).toEqual([]);
   });
 
+  for (const enlarged of [false, true]) test(`Post remains reachable in a narrow composer at ${enlarged ? 125 : 100}% text`, async ({ page }) => {
+    await openReviewTab(page);
+    if (enlarged) await page.addStyleTag({ content: ":root { --text-base: 13.75px; --text-md: 15px; }" });
+    // Geometric stress at the real drawer floor; all tools remain present.
+    const composer = page.locator(".cp-review-composer");
+    const post = composer.getByRole("button", { name: "Post", exact: true });
+    const outer = (await composer.boundingBox())!;
+    const button = (await post.boundingBox())!;
+    expect(button.width).toBeGreaterThan(40);
+    expect(button.x).toBeGreaterThanOrEqual(outer.x);
+    expect(button.x + button.width).toBeLessThanOrEqual(outer.x + outer.width);
+    expect(button.y + button.height).toBeLessThanOrEqual(outer.y + outer.height);
+  });
+
 });

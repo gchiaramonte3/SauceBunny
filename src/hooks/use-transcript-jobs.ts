@@ -67,7 +67,7 @@ export type TranscriptJobsProps = {
   setSettingsOpen: Dispatch<SetStateAction<boolean>>;
   /** The union is App's own; written out rather than guessed - the first
    *  attempt invented two tabs that do not exist and missed one that does. */
-  setSettingsInitialTab: Dispatch<SetStateAction<"general" | "transcription" | "ai-summary" | "commands" | "about">>;
+  setSettingsInitialTab: Dispatch<SetStateAction<"general" | "transcription" | "ai-summary" | "commands" | "about" | "integrations">>;
 };
 
 

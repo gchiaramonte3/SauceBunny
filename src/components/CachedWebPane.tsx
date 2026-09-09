@@ -12,6 +12,7 @@ import { LibraryCard } from "./LibraryCard";
 import { useGridSelection } from "../hooks/use-grid-selection";
 import { useMarquee } from "../hooks/use-marquee";
 import { useCardDrag } from "../hooks/use-card-drag";
+import { useFinderTags } from "../hooks/use-finder-tags";
 import { WebListRows } from "./WebListRows";
 import { WebCollectionMenu } from "./WebCollectionMenu";
 import {
@@ -136,6 +137,7 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
   // flat table regardless, because Site is a column there and per-shelf
   // tables would repeat the header four times down the page.
   const filtered = filterCachedWeb(all, needle);
+  const finderTags = useFinderTags(filtered.flatMap((it) => it.path ? [it.path] : []));
   const sortedFlat = sortCachedWeb(filtered, prefs.sort, prefs.dir);
   // A collected item leaves its site shelf - it has been FILED, and showing
   // it twice would make the fold read as a search result rather than an
@@ -198,6 +200,7 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
         onSelect={(e) => grid.onItemClick(it.url, e)}
         key={it.url}
         title={it.title ?? it.url}
+        tags={it.path ? finderTags.tags.get(it.path) : undefined}
         detail={`${it.uploader ?? siteName(it.url)}${size ? ` · ${size}` : ""}`}
         art={{ kind: "remote", url: it.thumbnail }}
         badge="web"
@@ -426,6 +429,7 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
           )}
           {prefs.view === "list" ? (
             <WebListRows
+              tagsByPath={finderTags.tags}
               selected={grid.selected}
               onSelect={grid.onItemClick}
               items={g.items}

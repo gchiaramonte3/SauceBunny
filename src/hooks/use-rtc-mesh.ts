@@ -39,6 +39,8 @@ export type { TurnConfig } from "../lib/ice-servers";
 
 export function useRtcMesh(args: {
   active: boolean;
+  /** Room identity: member ids may be reused in a different room. */
+  sessionKey: string | null;
   selfId: string | null;
   role: string; // "off" | "host" | "peer"
   memberIds: { id: string; epoch: number }[];
@@ -48,9 +50,10 @@ export function useRtcMesh(args: {
   stunUrl: string;
   onLog: (tag: "info" | "warn" | "err", msg: string) => void;
 }) {
-  const { active, selfId, role, memberIds, turn, stunUrl, onLog } = args;
+  const { active, sessionKey, selfId, role, memberIds, turn, stunUrl, onLog } = args;
   const { url: turnUrl, username: turnUser, password: turnPass } = turn;
   const [remoteStreams, setRemoteStreams] = useState<ReadonlyMap<string, MediaStream>>(new Map());
+  const [remoteProgramStreams, setRemoteProgramStreams] = useState<ReadonlyMap<string, MediaStream>>(new Map());
   const [peerStates, setPeerStates] = useState<ReadonlyMap<string, MeshPeerState>>(new Map());
   // Per-peer LOCAL mute (People tile "Mute for me"): flips the hidden voice
   // element's muted flag on THIS machine only. A social-safe control - the
@@ -69,6 +72,10 @@ export function useRtcMesh(args: {
   // construction effect must never see a roster one render stale.
   const memberIdsRef = useRef(memberIds);
   memberIdsRef.current = memberIds;
+  // Network settings are latched at session entry. Editing a password must
+  // not tear down every camera, microphone, and program feed per keystroke.
+  const networkRef = useRef({ stunUrl, turnUrl, turnUser, turnPass });
+  networkRef.current = { stunUrl, turnUrl, turnUser, turnPass };
 
   // Speaker choice changed in settings: re-route every live voice element.
   useEffect(() => {
@@ -98,11 +105,9 @@ export function useRtcMesh(args: {
   // full teardown (every PC closed, every voice stopped) when it ends.
   useEffect(() => {
     if (!active || !selfId) return;
-    // Rebuilt from the FIELDS, not from `turn` itself. App composes that
-    // object inline on every render, so depending on its identity would tear
-    // the whole mesh down and rebuild it on any unrelated re-render - every
-    // participant's video dropping several times a second. The deps below
-    // are primitives for the same reason.
+    // Network settings are read once for this room. App composes `turn`
+    // inline, so its object identity must never drive mesh lifetime.
+    const { stunUrl, turnUrl, turnUser, turnPass } = networkRef.current;
     const iceServers = buildIceServers(stunUrl, { url: turnUrl, username: turnUser, password: turnPass });
     const mesh = new RtcMesh({
       selfId,
@@ -140,6 +145,13 @@ export function useRtcMesh(args: {
           stopAudio(id);
         }
       },
+      onRemoteProgram: (id, stream) => {
+        setRemoteProgramStreams((prev) => {
+          const next = new Map(prev);
+          if (stream) next.set(id, stream); else next.delete(id);
+          return next;
+        });
+      },
       onState: (id, state) => {
         // "Tile stuck on Connecting" is the single most-reported session
         // symptom and it has several unrelated causes; the transition log is
@@ -152,12 +164,8 @@ export function useRtcMesh(args: {
     });
     meshRef.current = mesh;
     const els = audioRef.current;
-    // Seed the roster HERE, not only from the effect below. This effect also
-    // reruns when the TURN fields change (Settings, per keystroke), and the
-    // roster effect is keyed on `memberIds` - which does NOT change when a
-    // mesh is rebuilt. So editing TURN mid-session closed every connection and
-    // left the replacement with an empty roster: all tiles stuck "Connecting"
-    // with no recovery short of rejoining. setMembers is idempotent.
+    // A different room can reuse the same roster, so seed every new mesh
+    // here even if the separate membership effect has no changed input.
     onLogRef.current("info",
       `mesh up: self=${selfId} role=${roleRef.current} `
       // Both, not just TURN: STUN is switchable now, and "nobody can see
@@ -175,21 +183,23 @@ export function useRtcMesh(args: {
       // audioRef.current at teardown time, which may already point elsewhere.
       for (const id of [...els.keys()]) stopAudio(id);
       setRemoteStreams(new Map());
+      setRemoteProgramStreams(new Map());
       setPeerStates(new Map());
+      setPeerMutedForMe(new Set());
     };
-  }, [active, selfId, stunUrl, turnUrl, turnUser, turnPass]);
+  }, [active, sessionKey, selfId]);
 
   // Roster reconciliation on every membership change.
   useEffect(() => {
     meshRef.current?.setMembers(memberIds);
   }, [memberIds]);
 
-  /** Screen share: route the share track to every peer (null = camera). */
+  /** Program video only. Null retracts the share without touching the camera. */
   const setVideoOverride = useCallback((track: MediaStreamTrack | null) => {
     void meshRef.current?.setVideoOverride(track);
   }, []);
 
-  /** Share audio: the share+mic mix to every peer (null = mic only). */
+  /** Program audio only. The conversation microphone remains independent. */
   const setAudioOverride = useCallback((track: MediaStreamTrack | null) => {
     void meshRef.current?.setAudioOverride(track);
   }, []);
@@ -212,5 +222,10 @@ export function useRtcMesh(args: {
     if (el) el.muted = muted;
   }, []);
 
-  return { remoteStreams, peerStates, peerMutedForMe, toggleMuteForMe, handleSignal, setVideoOverride, setAudioOverride };
+  const readProgramDiagnostics = useCallback(async (id: string) => {
+    try { return await meshRef.current?.readProgramDiagnostics(id) ?? null; }
+    catch { return null; }
+  }, []);
+
+  return { remoteStreams, remoteProgramStreams, peerStates, peerMutedForMe, toggleMuteForMe, handleSignal, setVideoOverride, setAudioOverride, readProgramDiagnostics };
 }

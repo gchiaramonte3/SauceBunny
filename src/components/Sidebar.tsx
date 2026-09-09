@@ -6,6 +6,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { invoke } from "@tauri-apps/api/core";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { GenerateButton } from "./GenerateButton";
+import { ExpectedSpeakersMenu } from "./ExpectedSpeakersMenu";
 import { StatefulButton } from "./StatefulButton";
 import {
   IconChevronRight,
@@ -551,19 +552,11 @@ export function Sidebar(props: Props) {
                       <span className="lbl" style={{ color: "var(--fg-3)" }}>
                         Expected speakers
                       </span>
-                      <select
-                        className="cp-select xs cp-mini-select"
+                      <ExpectedSpeakersMenu
                         value={expectedSpeakers}
-                        onChange={(e) => setExpectedSpeakers(parseInt(e.target.value, 10) || 0)}
+                        onChange={setExpectedSpeakers}
                         disabled={transcriptState === "running"}
-                      >
-                        <option value={0}>Auto</option>
-                        <option value={2}>2</option>
-                        <option value={3}>3</option>
-                        <option value={4}>4</option>
-                        <option value={5}>5</option>
-                        <option value={6}>6+</option>
-                      </select>
+                      />
                     </label>
                   )}
                   <GenerateButton

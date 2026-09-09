@@ -1,0 +1,14 @@
+{
+  "version": "6.3.2.0",
+  "sdkVersionText": "NDI 2026-04-13 git-5396c5f1 v6.3.2.0",
+  "runtimeSha256": "af53789fcb8fc1737e6827a54d7ccea09736dc759e00ef02d53f4ed64d9abbd5",
+  "noticesSha256": "9f18e17e95324b1907c4de45f676ce2fedbc0a5c4ff6ed451b31c3fcb1229b8d",
+  "sdkLicenseSha256": "11ae13ae038d5af06d2fd5f9e55cbbdb97e75d2526656a0dbaa4dafcb7bf48e6",
+  "vendorTeamId": "W8U66ET244",
+  "uuids": {
+    "arm64": "1A13FFDD-7D8D-37F9-A1A1-180F2E371171",
+    "x86_64": "4D0D25F2-59D1-322E-BF4B-4F9D08CB1202"
+  },
+  "licensingUrl": "https://docs.ndi.video/all/developing-with-ndi/sdk/licensing",
+  "source": "Standard NDI SDK for Apple 6.3.2, lib/macOS/libndi.dylib. SDK installer verified with Apple trust services on 2026-09-07."
+}

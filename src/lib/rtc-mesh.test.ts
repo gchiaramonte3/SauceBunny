@@ -11,7 +11,7 @@ class FakeSender {
   replaced: unknown[] = [];
   params: { encodings: Array<Record<string, unknown>> } = { encodings: [] };
   constructor(track: { kind: string }) { this.track = track; }
-  replaceTrack(t: unknown) { this.replaced.push(t); return Promise.resolve(); }
+  replaceTrack(t: unknown) { this.track = t as { kind: string } | null; this.replaced.push(t); return Promise.resolve(); }
   getParameters() { return this.params; }
   setParameters(p: typeof this.params) { this.params = p; return Promise.resolve(); }
 }
@@ -37,15 +37,16 @@ class FakePc {
     return s as unknown as RTCRtpSender;
   }
   getSenders() { return this.senders as unknown as RTCRtpSender[]; }
-  transceivers: { kind: string; direction: string; streams: unknown[] }[] = [];
+  transceivers: { kind: string; direction: string; streams: unknown[]; receiver: object }[] = [];
   addTransceiver(kind: string, init?: { direction?: string; streams?: unknown[] }) {
+    const receiver = {};
     this.transceivers.push({
-      kind, direction: init?.direction ?? "sendrecv", streams: init?.streams ?? [],
+      receiver, kind, direction: init?.direction ?? "sendrecv", streams: init?.streams ?? [],
     });
     const s = new FakeSender({ kind });
     s.track = null; // a placeholder sender carries no track yet
     this.senders.push(s);
-    return { sender: s as unknown as RTCRtpSender };
+    return { sender: s as unknown as RTCRtpSender, receiver };
   }
   createOffer() { this.offers++; return Promise.resolve({ type: "offer", sdp: "sdp-offer" }); }
   createAnswer() { this.answers++; return Promise.resolve({ type: "answer", sdp: "sdp-answer" }); }
@@ -141,7 +142,8 @@ describe("rtc mesh", () => {
     const next = fakeStream(["video", "audio"]);
     await mesh.replaceLocalStream(next);
     for (const pc of FakePc.instances) {
-      for (const s of pc.senders) expect(s.replaced.length).toBe(1);
+      for (const s of pc.senders.slice(0, 2)) expect(s.replaced.length).toBe(2);
+      for (const s of pc.senders.slice(2)) expect(s.replaced.length).toBe(0);
     }
   });
 
@@ -150,6 +152,35 @@ describe("rtc mesh", () => {
     await flush();
     const videoSender = FakePc.instances[0].senders.find((s) => s.track?.kind === "video");
     expect(videoSender?.params.encodings[0]?.scaleResolutionDownBy).toBe(2); // 720/360
+  });
+
+  it("a stalled sender cannot hold up another peer and obsolete track changes coalesce", async () => {
+    const { mesh } = makeMesh("m0");
+    mesh.setMembers([{ id: "m1", epoch: 1 }, { id: "m2", epoch: 1 }]);
+    await flush();
+    const [slow, fast] = FakePc.instances.map((pc) => pc.senders[2]);
+    let release!: () => void;
+    const replace = slow.replaceTrack.bind(slow);
+    vi.spyOn(slow, "replaceTrack").mockImplementationOnce((track) => {
+      void replace(track);
+      return new Promise<void>((resolve) => { release = resolve; });
+    });
+    const first = fakeTrack("video") as unknown as MediaStreamTrack;
+    const obsolete = fakeTrack("video") as unknown as MediaStreamTrack;
+    const latest = fakeTrack("video") as unknown as MediaStreamTrack;
+    const p1 = mesh.setVideoOverride(first);
+    await flush();
+    expect(fast.track).toBe(first);
+    const p2 = mesh.setVideoOverride(obsolete);
+    const p3 = mesh.setVideoOverride(latest);
+    await flush();
+    expect(fast.track).toBe(latest);
+    expect(slow.track).toBe(first);
+    release();
+    await Promise.all([p1, p2, p3]);
+    expect(slow.track).toBe(latest);
+    expect(slow.replaced).not.toContain(obsolete);
+    mesh.close();
   });
 
   it("teardown closes every peer connection and retracts streams", async () => {
@@ -188,7 +219,7 @@ describe("rtc mesh", () => {
   });
 
 
-  it("share override owns video senders through a device switch, camera returns on null", async () => {
+  it("program sharing leaves the camera and microphone intact through device switches", async () => {
     const local = fakeStream(["video", "audio"]);
     const { mesh } = makeMesh("m0", { getLocalStream: () => local });
     mesh.setMembers([{ id: "m1", epoch: 1 }]);
@@ -196,14 +227,17 @@ describe("rtc mesh", () => {
     const share = { kind: "video", getSettings: () => ({ height: 900 }) } as unknown as MediaStreamTrack;
     await mesh.setVideoOverride(share);
     const pc = FakePc.instances[0];
-    const vs = pc.senders.find((s) => s.track?.kind === "video");
+    const vs = pc.senders[2];
+    const camera = pc.senders[0];
+    expect(camera.track).toBe(local.getVideoTracks()[0]);
     expect(vs?.replaced.at(-1)).toBe(share);
     // Device switch mid-share: the share KEEPS the video slot.
     await mesh.replaceLocalStream(fakeStream(["video", "audio"]));
     expect(vs?.replaced.at(-1)).toBe(share);
     // Share ends: the camera track returns.
     await mesh.setVideoOverride(null);
-    expect((vs?.replaced.at(-1) as { kind?: string })?.kind).toBe("video");
+    expect(vs?.replaced.at(-1)).toBeNull();
+    expect(camera.track?.kind).toBe("video");
     expect(vs?.replaced.at(-1)).not.toBe(share);
   });
 });
@@ -251,32 +285,34 @@ describe("a member who reconnects (r124)", () => {
   });
 });
 
-describe("screen share resolution (r128)", () => {
-  it("sends a share at full size instead of inheriting the camera tile cap", async () => {
-    // scaleResolutionDownBy is a SENDER property, so it survived
-    // replaceTrack: a share went out at roughly half resolution, which is
-    // unreadable for the text and timelines people actually share.
+describe("program and camera encoding budgets", () => {
+  it("keeps program resolution separate from the camera tile cap", async () => {
     const { mesh } = makeMesh("m0");
     mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    await flush();
     const pc = FakePc.instances[0];
-    const videoSender = pc.senders.find((s) => s.track?.kind === "video")!;
-    // The camera tile cap is in place first.
-    expect(videoSender.params.encodings[0].scaleResolutionDownBy).toBeGreaterThan(1);
-
     await mesh.setVideoOverride(fakeTrack("video") as unknown as MediaStreamTrack);
-    expect(videoSender.params.encodings[0].scaleResolutionDownBy,
-      "a share must not be downscaled to tile size").toBe(1);
+    await flush();
+    expect(pc.senders[0].params.encodings[0].scaleResolutionDownBy).toBe(2);
+    expect(pc.senders[2].params.encodings[0].scaleResolutionDownBy).toBe(1);
+    expect(pc.senders[2].params.encodings[0].maxBitrate).toBe(8_000_000);
+    await mesh.setVideoOverride(null);
+    expect(pc.senders[2].track).toBeNull();
+    expect(pc.senders[0].track?.kind).toBe("video");
   });
 
-  it("restores the tile cap when the share ends", async () => {
+  it("does not mix program audio into the microphone sender", async () => {
     const { mesh } = makeMesh("m0");
     mesh.setMembers([{ id: "m1", epoch: 1 }]);
     const pc = FakePc.instances[0];
-    const videoSender = pc.senders.find((s) => s.track?.kind === "video")!;
-    await mesh.setVideoOverride(fakeTrack("video") as unknown as MediaStreamTrack);
-    await mesh.setVideoOverride(null);
-    expect(videoSender.params.encodings[0].scaleResolutionDownBy,
-      "the camera goes back to tile size").toBeGreaterThan(1);
+    const mic = pc.senders[1].track;
+    const program = fakeTrack("audio") as unknown as MediaStreamTrack;
+    await mesh.setAudioOverride(program);
+    expect(pc.senders[1].track).toBe(mic);
+    expect(pc.senders[3].track).toBe(program);
+    await mesh.setAudioOverride(null);
+    expect(pc.senders[1].track).toBe(mic);
+    expect(pc.senders[3].track).toBeNull();
   });
 });
 
@@ -300,7 +336,7 @@ describe("a peer who joins mid-share (r131)", () => {
     mesh.setMembers([{ id: "m1", epoch: 1 }]); // ...then they join
 
     const pc = FakePc.instances[0];
-    const placeholder = pc.senders.find((s) => s.track === null || s.track?.kind === "video")!;
+    const placeholder = pc.senders[2];
     expect(placeholder.replaced,
       "a peer joining mid-share must receive the share track").toContain(share);
   });
@@ -311,7 +347,8 @@ describe("a peer who joins mid-share (r131)", () => {
     mesh.setMembers([{ id: "m1", epoch: 1 }]);
 
     const pc = FakePc.instances[0];
-    const sender = pc.senders.find((s) => s.track === null || s.track?.kind === "video")!;
+    await flush();
+    const sender = pc.senders[2];
     expect(sender.params.encodings[0]?.scaleResolutionDownBy,
       "a late joiner must get the same readable picture as everyone else").toBe(1);
   });
@@ -332,7 +369,8 @@ describe("a peer who joins mid-share (r131)", () => {
   it("still caps a plain camera to tile size (the share path must not leak)", async () => {
     const { mesh } = makeMesh("m0"); // camera on, no share
     mesh.setMembers([{ id: "m1", epoch: 1 }]);
-    const sender = FakePc.instances[0].senders.find((s) => s.track?.kind === "video")!;
+    await flush();
+    const sender = FakePc.instances[0].senders[0];
     expect(sender.params.encodings[0].scaleResolutionDownBy,
       "a full mesh of camera tiles must stay lean").toBeGreaterThan(1);
   });
@@ -343,12 +381,14 @@ describe("a peer who joins mid-share (r131)", () => {
     const { mesh } = makeMesh("m0", { getLocalStream: () => null });
     mesh.setMembers([{ id: "m1", epoch: 1 }]);
     const tx = FakePc.instances[0].transceivers;
-    expect(tx.length, "both kinds get reserved").toBe(2);
+    expect(tx.length, "camera/mic and program video/audio get separate slots").toBe(4);
     for (const t of tx) {
       expect(t.streams.length, `${t.kind} placeholder needs an msid`).toBe(1);
     }
     // ...and all of them share ONE stream, so they arrive as one peer.
     expect(tx[0].streams[0]).toBe(tx[1].streams[0]);
+    expect(tx[2].streams[0]).toBe(tx[3].streams[0]);
+    expect(tx[0].streams[0]).not.toBe(tx[2].streams[0]);
   });
 });
 
@@ -521,5 +561,24 @@ describe("the watchdog", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("program receive routing", () => {
+  it("keeps program video/audio out of the camera and voice stream", () => {
+    const cameras: MediaStream[] = [];
+    const programs: MediaStream[] = [];
+    const { mesh } = makeMesh("m0", {
+      onRemoteStream: (_, stream) => { if (stream) cameras.push(stream); },
+      onRemoteProgram: (_, stream) => { if (stream) programs.push(stream); },
+    });
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    const pc = FakePc.instances[0];
+    pc.ontrack?.({ track: { kind: "video", id: "camera" }, transceiver: pc.transceivers[0] });
+    pc.ontrack?.({ track: { kind: "audio", id: "mic" }, transceiver: pc.transceivers[1] });
+    pc.ontrack?.({ track: { kind: "video", id: "program" }, transceiver: pc.transceivers[2] });
+    pc.ontrack?.({ track: { kind: "audio", id: "soundtrack" }, transceiver: pc.transceivers[3] });
+    expect(cameras.at(-1)?.getTracks().map((t) => t.id)).toEqual(["camera", "mic"]);
+    expect(programs.at(-1)?.getTracks().map((t) => t.id)).toEqual(["program", "soundtrack"]);
   });
 });

@@ -18,6 +18,31 @@ ships inside a released `.dmg`.
 
 ---
 
+## NDI runtime (proprietary, optional feature)
+
+NDI-enabled macOS builds include the standard NDI 6.3.2 runtime as
+`Contents/Frameworks/libndi.dylib`, loaded dynamically only when Premiere/NDI
+setup or receiving is requested. It is not an MIT-licensed component.
+Sauce Bunny's own source remains MIT licensed.
+
+Copyright (C) 2023-2026 Vizrt NDI AB. All rights reserved.
+NDI® is a registered trademark of Vizrt NDI AB. Sauce Bunny is not endorsed
+by NDI. Information: <https://ndi.video/>.
+
+The bundle includes the vendor's complete `libndi_licenses.txt`, the scoped
+`NDI-RUNTIME-TERMS.txt`, and version/checksum provenance under
+`Contents/Resources/licenses/`. The build validates the standard SDK runtime
+and its vendor signature before staging it; NDI Tools, the SDK, and the Adobe
+Premiere output plugin are not distributed with Sauce Bunny.
+
+The editor installs the official Premiere plugin through
+<https://ndi.video/tools/>. Remote reviewers do not install NDI Tools or the SDK.
+Redistribution must comply with the current NDI SDK license and
+<https://docs.ndi.video/all/developing-with-ndi/sdk/licensing>, including the
+required end-user terms, attribution, and applicable codec licensing.
+
+---
+
 ## Rust crates and npm packages
 
 Beyond the bundled binaries above, the app links ~750 Rust crates and ships a

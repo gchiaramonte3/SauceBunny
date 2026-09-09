@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useTransport, type TransportDeps } from "./use-transport";
 import type { PlayerHandle } from "../components/player-handle";
+import { createPlaybackSessionController } from "../lib/playback-session-controller";
 import {
   getLastUserSeekAt,
   getPlayheadFrames,
@@ -26,7 +27,8 @@ const DURATION = 3000; // 100s
 
 function fakePlayer(over: Partial<PlayerHandle> = {}) {
   return {
-    play: vi.fn(), pause: vi.fn(), seekTo: vi.fn(),
+    play: vi.fn(), pause: vi.fn(), seekTo: vi.fn(async (seconds: number) => ({ requestedSeconds: seconds, presentedSeconds: seconds, status: "presented" as const })),
+    beginScrub: vi.fn(), scrubTo: vi.fn(), endScrub: vi.fn(async (seconds: number) => ({ requestedSeconds: seconds, presentedSeconds: seconds, status: "presented" as const })),
     getCurrentTime: vi.fn(() => 0), getDuration: vi.fn(() => DURATION / FPS),
     isReady: vi.fn(() => true), isPlaying: vi.fn(() => false),
     setVolume: vi.fn(), getVolume: vi.fn(() => 1),
@@ -48,6 +50,7 @@ function setup(over: Partial<TransportDeps> = {}, player = fakePlayer()) {
   };
   const deps: TransportDeps = {
     playerRef: { current: player },
+    playbackController: createPlaybackSessionController(() => player),
     status: "loaded",
     isPlaying: false,
     setIsPlaying: state.setIsPlaying,

@@ -208,6 +208,53 @@
   border-radius: var(--r-sm);
 }
 
+/* A labeled toolbar disclosure, not an editing transport or job action.
+   Its compact sentence-case recipe is deliberately separate from the legacy
+   22px uppercase .btn-compact; no existing button family changes with it. */
+.cp-toolbar-disclosure {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: 6px;
+  min-height: 26px;
+  max-width: 100%;
+  padding: 3px var(--s-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  box-shadow: var(--bevel-raised);
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--track-wide);
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+.cp-toolbar-disclosure:hover:not(:disabled),
+.cp-toolbar-disclosure[aria-expanded="true"]:not(:disabled) {
+  background: var(--bg-4);
+  border-color: var(--line-3);
+  color: var(--fg-1);
+}
+.cp-toolbar-disclosure:active:not(:disabled) { box-shadow: var(--bevel-pressed); }
+.cp-toolbar-disclosure:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.cp-toolbar-disclosure:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-toolbar-disclosure { transition: none; }
+}
+
 
 /* ──────────────────────────────────────────────────────────────────
    Generate CTA (.cp-gen-btn) — transcription's primary action.

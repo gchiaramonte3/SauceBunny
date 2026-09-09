@@ -31,8 +31,11 @@ describe("the outbox is wired", () => {
     // reached nobody and nobody was told.
     expect(HOOK, "no failable send exists").toContain("trySendSessionMsg");
     const post = HOOK.slice(HOOK.indexOf("const postSessionOp"), HOOK.indexOf("const postSessionOp") + 1400);
-    expect(post, "postSessionOp still uses the swallowing send").toContain("trySendSessionMsg");
-    expect(post, "a failed send does not queue the note").toContain("enqueueOp(");
+    expect(post).toContain("sendEnvelope(envelope)");
+    expect(post, "save the source-scoped op before optimistic display or send").toContain("enqueueEnvelope(envelope)");
+    expect(post.indexOf("enqueueEnvelope(envelope)")).toBeLessThan(post.indexOf("setSessionDoc(applyReviewOp"));
+    expect(post.indexOf("enqueueEnvelope(envelope)")).toBeLessThan(post.indexOf("sendEnvelope(envelope)"));
+    expect(post).not.toContain("acknowledgeEnvelope");
   });
 
   it("the queue survives, on disk", () => {

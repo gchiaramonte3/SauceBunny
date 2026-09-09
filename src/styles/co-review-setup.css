@@ -1,0 +1,45 @@
+/* Setup is surrounding chrome, not a replacement video viewport. These
+   overrides stay scoped away from the established room and shared controls. */
+.cp-coreview-lobby.cp-setup-rail {
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: var(--s-5);
+  background: var(--bg-1);
+}
+.cp-coreview-lobby.cp-setup-rail::before { content: none; }
+.cp-setup-rail .cp-colobby-inner { max-width: none; padding: 0; gap: var(--s-5); }
+.cp-setup-rail .cp-colobby-head { align-items: flex-start; text-align: left; margin: 0; gap: var(--s-1); }
+.cp-setup-rail .cp-colobby-title { font-size: var(--text-3xl); }
+.cp-setup-rail .cp-colobby-sub { font-size: var(--text-md); }
+.cp-setup-tabs { display: flex; gap: var(--s-1); padding: var(--s-1); background: var(--bg-0); border-radius: var(--r-md); }
+.cp-setup-tab { flex: 1; min-height: 32px; padding: var(--s-1) var(--s-2); border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: var(--fg-3); font-family: var(--font-ui); font-size: var(--text-md); font-weight: var(--weight-bold); cursor: pointer; }
+.cp-setup-tab:hover { background: var(--bg-2); color: var(--fg-1); }
+.cp-setup-tab[aria-selected="true"] { background: var(--bg-3); color: var(--fg-1); border-color: var(--line-2); }
+.cp-setup-rail .cp-colobby-card { border: 0; padding: 0; background: transparent; border-radius: 0; }
+.cp-setup-rail .cp-setup-form[hidden] { display: none; }
+.cp-setup-rail .cp-colobby-field-label { text-transform: none; letter-spacing: normal; font-size: var(--text-md); }
+.cp-setup-rail .cp-colobby-cta { width: 100%; align-self: stretch; }
+.cp-setup-rail .cp-colobby-hint { margin: 0; text-align: left; }
+.cp-setup-rail .cp-colobby-taken { align-items: flex-start; text-align: left; }
+.cp-setup-rail .cp-colobby-linkbanner { margin: 0; text-align: left; }
+.cp-setup-premiere { display: flex; flex-direction: column; align-items: stretch; gap: var(--s-2); }
+.cp-setup-help { color: var(--fg-3); font-size: var(--text-base); line-height: var(--leading-normal); }
+.cp-setup-identity { border-top: 1px solid var(--line-1); padding-top: var(--s-4); }
+.cp-setup-summary { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.cp-setup-summary > div { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
+.cp-setup-summary strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-1); font-size: var(--text-md); font-weight: var(--weight-bold); }
+.cp-setup-summary span { color: var(--fg-3); font-size: var(--text-base); line-height: var(--leading-normal); }
+.cp-setup-summary > button { flex-shrink: 0; }
+.cp-setup-editor { display: flex; flex-direction: column; gap: var(--s-3); padding-top: var(--s-3); }
+.cp-setup-editor-tabs { display: flex; gap: var(--s-2); }
+.cp-setup-editor .cp-gr-preview { max-height: 150px; }
+.cp-setup-editor .cp-gr-preview-state { padding: var(--s-2); }
+.cp-setup-editor .cp-gr-preview-state > svg { display: none; }
+.cp-setup-editor .cp-gr-state-sub { font-size: var(--text-base); }
+.cp-setup-access { border-top: 1px solid var(--line-1); padding-top: var(--s-3); }
+.cp-setup-access > summary { min-height: 28px; color: var(--fg-3); font-size: var(--text-md); cursor: pointer; }
+.cp-setup-access > summary:hover { color: var(--fg-1); }
+.cp-setup-access .cp-grants { margin-top: var(--s-2); padding-top: 0; border-top: 0; }
+.cp-setup-access .cp-grants-new { align-items: stretch; flex-direction: column; }
+.cp-setup-history { display: inline-flex; align-items: center; justify-content: space-between; gap: var(--s-2); min-height: 28px; padding: 0; border: 0; background: none; color: var(--fg-3); font-family: var(--font-ui); font-size: var(--text-md); text-align: left; cursor: pointer; }
+.cp-setup-history:hover { color: var(--fg-1); }

@@ -40,7 +40,7 @@ export type ScreeningSegment = {
   id: string;
   /** Portable content identity, straight off the wire. This is what would let
    *  a DIFFERENT machine recognise the same source. */
-  kind: "web" | "file";
+  kind: "web" | "file" | "ndi";
   url: string | null;
   fingerprint: string | null;
   /** THIS machine's review-doc key, so `loadReview(localSourceKey)` opens the

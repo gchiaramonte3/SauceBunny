@@ -40,6 +40,7 @@ import type { RecentSource } from "../lib/recent-sources";
 import { webPosterFor } from "../lib/web-poster-store";
 import type { CachedWebItem } from "../bindings/CachedWebItem";
 import type { LibraryItem } from "../types";
+import { useFinderTags } from "../hooks/use-finder-tags";
 
 type Props = {
   recentSources: RecentSource[];
@@ -181,6 +182,7 @@ export function LibraryView({
    * shelf would have stayed grey.
    */
   const [webPosters, setWebPosters] = useState<Map<string, string>>(new Map());
+  const [webPaths, setWebPaths] = useState<Map<string, string>>(new Map());
   useEffect(() => {
     let alive = true;
     void invoke<CachedWebItem[]>("list_cached_web")
@@ -189,6 +191,7 @@ export function LibraryView({
         const m = new Map<string, string>();
         for (const it of list) if (it.url && it.thumbnail) m.set(it.url, it.thumbnail);
         setWebPosters(m);
+        setWebPaths(new Map(list.filter((it) => it.path).map((it) => [it.url, it.path!])));
       })
       // No cache, or a stale binary: the cards fall back the way they always
       // did rather than the shelf failing to render.
@@ -234,6 +237,14 @@ export function LibraryView({
     for (const t of trees) for (const it of shelfCards.get(t.path) ?? []) out.push(it.path);
     return out;
   }, [trees, shelfCards, needle, results]);
+  // Only represented media files: transcript artwork is not tag identity.
+  const finderTags = useFinderTags([
+    ...shownPaths,
+    ...continueRow.flatMap((r) => {
+      const path = r.kind === "url" ? webPaths.get(r.value) : r.value;
+      return path ? [path] : [];
+    }),
+  ]);
   shownPathsRef.current = shownPaths;
   useEffect(() => { setSel((cur) => pruneSelection(cur, shownPaths)); }, [shownPaths]);
 
@@ -250,6 +261,7 @@ export function LibraryView({
       detail={[formatBytes(it.size_bytes), formatModifiedDate(it.modified_ms)]
         .filter(Boolean).join(" · ")}
       art={{ kind: "local", path: it.path, media: it.kind }}
+      tags={finderTags.tags.get(it.path)}
       onOpen={() => onOpenLocalPath(it.path)}
       // A MODIFIED click is a selection gesture; a plain click still opens,
       // because Home is a launcher first and single-click-to-open is what
@@ -277,6 +289,7 @@ export function LibraryView({
     <LibraryCard
       key={`${r.value}#${posterVersions[r.value] ?? 0}`}
       title={r.title}
+      tags={finderTags.tags.get(r.kind === "url" ? webPaths.get(r.value) ?? "" : r.value)}
       detail={[r.kind === "url" ? hostnameOf(r.value) : "Local file",
         formatTimeAgo(r.lastOpenedAt)].join(" · ")}
       art={r.kind === "url"

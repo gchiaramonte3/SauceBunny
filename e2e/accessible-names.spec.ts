@@ -129,18 +129,16 @@ for (const [key, label, root] of VIEWS) {
     await boot(page);
     await page.keyboard.press(key);
 
-    // Prove the switch happened before believing the result. All five view
-    // roots stay in the DOM with `hidden` toggling, so a shortcut that stops
-    // working leaves every one of these tests measuring the Clip view and
-    // reporting five passes for one screen. Counting buttons does not show it
-    // either: the raw count is identical from every view because it includes
-    // the hidden ones.
-    // Polled, not sleep-then-snapshot: `expect(await ...)` reads one moment,
-    // so the fixed wait it replaced was load-bearing and flaky under load.
-    await expect
-      .poll(() => page.evaluate(() => document.querySelector(".cp-view:not([hidden])")?.className ?? ""),
-        { message: `${key} did not switch to ${label}` })
-      .toContain(root);
+    // Review shares the mounted Clip stage; its setup rail is no longer a
+    // standalone .cp-view. Assert the active navigation and visible surface
+    // instead of mistaking a shared stage class for the selected workspace.
+    await expect(page.locator(".cp-nav-item.active"), `${key} did not switch to ${label}`).toContainText(label);
+    await expect(page.locator("." + root)).toBeVisible();
+    if (label === "Review") {
+      await expect(page.getByRole("main", { name: "Review", exact: true })).toBeVisible();
+      await expect(page.locator(".cp-view-clip .cp-monitor")).toBeVisible();
+      await expect(page.getByRole("region", { name: "Session setup" })).toBeVisible();
+    }
 
     const bad = await unnamed(page);
     expect(

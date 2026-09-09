@@ -575,6 +575,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Clips keep metadata beside the filename, outside the artwork. Folder
+   captions retain their existing padding and tinted glyph treatment. */
+.cp-lib-card-caption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 9px 0;
+}
+.cp-lib-card-caption > .cp-lib-card-title {
+  min-width: 0;
+  padding: 0;
+}
 /* Size/date (or host/recency) line — revealed on hover/focus. Fixed height
    so the reveal never reflows the shelf. */
 .cp-lib-card-detail {
@@ -1360,6 +1373,7 @@
   color: var(--fg-4);
 }
 .cp-lib-lrow {
+  position: relative;
   /* EXACT, not content-derived. Measured at 27.13px from padding plus the
      34px 16:9 thumbnail, and a striped filler whose period is 27 while the
      rows are 27.13 drifts a whole row out of phase every 200 rows. Pinning it
@@ -1788,17 +1802,23 @@
 .cp-tagrow-clear:hover:not(:disabled) { color: var(--fg-1); }
 .cp-tagrow-clear:disabled { opacity: 0.3; cursor: default; }
 
-/* The tag dot, inline before the name — like Finder's list view. Not its own
-   grid column: the row grid is five tracks shared with the header, and a sixth
-   child shifted every cell one track over. */
-.cp-lib-lrow-dot {
-  display: inline-block;
+/* Finder colors are external metadata, not selection or health. Both recipes
+   use the same primarySwatch; full tag names belong to the containing clip.
+   No pointer target, extra grid track, tint over footage or row-wide fill. */
+.cp-clip-tag { pointer-events: none; }
+.cp-clip-tag-dot {
+  display: block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  margin-right: 6px;
-  flex-shrink: 0;
-  vertical-align: baseline;
+  flex: 0 0 8px;
+}
+.cp-clip-tag-stripe {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
 }
 /* The header's leading spacer exists only to keep NAME aligned over the names.
    It inherits the thumbnail chrome from .cp-lib-lrow-art, which drew an empty
@@ -2199,6 +2219,43 @@
 
 /* The card. No poster: a session is people and notes, not a picture, so the
    card leads with its name instead of reserving 16:9 for a black rectangle. */
+.cp-session-browser:not([hidden]) { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.cp-session-copy-notice { margin: var(--s-2) var(--s-5); color: var(--fg-3); }
+.cp-sessions-view .cp-lib-bar { flex-wrap: wrap; height: auto; min-height: 48px; }
+.cp-sessions-view .cp-lib-bar-search { width: 24em; font-size: var(--text-md); flex-shrink: 0; }
+.cp-sessions-view .cp-lib-bar-search > svg { flex-shrink: 0; }
+.cp-session-source-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px;
+  border-radius: var(--r-xs);
+  background: var(--bg-3);
+  color: var(--fg-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+}
+.cp-session-reader { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.cp-session-reader-head {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-3);
+  padding: var(--s-4); border-bottom: 1px solid var(--line-1);
+}
+.cp-session-reader h2 { margin: 0; font-size: var(--text-xl); overflow-wrap: anywhere; }
+.cp-session-reader h3 { font-size: var(--text-lg); margin: 0 0 var(--s-3); overflow-wrap: anywhere; }
+.cp-session-reader-head > span { color: var(--fg-3); overflow-wrap: anywhere; }
+.cp-session-source-picker { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-3) var(--s-4); }
+.cp-session-source-picker select { min-width: 0; max-width: 100%; flex: 1; }
+.cp-session-reader-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 1fr); flex: 1; min-height: 0; }
+.cp-session-source, .cp-session-notes { padding: var(--s-5); overflow: auto; overflow-wrap: anywhere; }
+.cp-session-source { color: var(--fg-3); }
+.cp-session-source h3 { margin-top: var(--s-3); color: var(--fg-1); }
+.cp-session-notes { border-left: 1px solid var(--line-1); }
+.cp-session-note { padding: var(--s-4) 0; border-bottom: 1px solid var(--line-1); }
+.cp-session-note header { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--s-2); }
+.cp-session-note header > span, .cp-session-note-time { color: var(--fg-3); font-size: var(--text-base); }
+.cp-session-note-text { white-space: pre-wrap; }
+.cp-session-note summary { cursor: pointer; min-height: 24px; color: var(--fg-3); }
+.cp-session-reply { margin: var(--s-3) 0 0 var(--s-3); padding-left: var(--s-3); border-left: 1px solid var(--line-2); }
 .cp-sess-card {
   display: flex;
   flex-direction: column;

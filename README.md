@@ -130,8 +130,9 @@ engineering rules live in [CLAUDE.md](CLAUDE.md).
 
 ## Documentation
 
-The repo carries its reasoning, not just its code. Fourteen documents live in
-[`docs/`](docs/); these are the ones worth knowing about.
+The repo carries its reasoning, not just its code. Start with
+[AGENTS.md](AGENTS.md) for the developer/agent reading order; these are the
+main references in the repository and [`docs/`](docs/).
 
 | document | what it answers |
 |---|---|
@@ -140,9 +141,18 @@ The repo carries its reasoning, not just its code. Fourteen documents live in
 | [DECISIONS.md](docs/DECISIONS.md) | What was tried, what was rejected, and why |
 | [DATA-MODEL.md](docs/DATA-MODEL.md) | Every store, its durability class, and its writers |
 | [DESIGN.md](docs/DESIGN.md) | The design system: type scale, colour roles, motion, targets |
+| [DESIGN-SYSTEM-AUDIT.md](docs/DESIGN-SYSTEM-AUDIT.md) | Source-backed UI findings, existing shared patterns and intentional exceptions |
+| [DESIGN-CATALOG.md](docs/DESIGN-CATALOG.md) | Isolated current/proposed examples and verification; not authorization to migrate the app |
+| [PREMIERE-MARKER-PROOF.md](docs/PREMIERE-MARKER-PROOF.md) | Experimental local companion, durable marker queue, timing probe, and remaining room/real-media gates |
 | [DISTRIBUTION.md](docs/DISTRIBUTION.md) | Why this ships as a notarized `.dmg` and not through the App Store |
 | [SECURITY.md](SECURITY.md) | Threat model, including the loopback media proxy |
 | [HAND-TEST.md](docs/HAND-TEST.md) | What no automated gate can check, so a human must |
+
+For UI work, read the design rules and audit before opening the examples with
+`npm run design:catalog`. Run `npm run check:design-catalog` to verify the
+catalog. It uses local fixtures, not your saved data or live media. See
+[Contributing: UI changes](CONTRIBUTING.md#ui-changes) for the adoption boundary
+and production checks.
 
 ## Built on
 

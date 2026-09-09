@@ -17,8 +17,9 @@
  * testable without a real decoder.
  */
 export type ScrubPump = {
-  /** Record the newest target and ensure the drain loop is running. */
-  request: (target: number) => void;
+  /** Record the newest target and ensure the drain loop is running. Resolves
+   * true only when this request is still newest after its frame is painted. */
+  request: (target: number) => Promise<boolean>;
   /**
    * Drop any pending (not-yet-started) target. A drain already in flight
    * still runs to completion — the caller is expected to gate its own paint
@@ -33,8 +34,12 @@ export type ScrubPump = {
 export function createScrubPump(
   drain: (target: number) => Promise<void>,
 ): ScrubPump {
-  let pending: number | null = null;
+  type Request = { target: number; id: number; resolve: (painted: boolean) => void };
+  let pending: Request | null = null;
+  let inFlight: Request | null = null;
   let busy = false;
+  let nextId = 0;
+  let latestId = 0;
 
   const run = async (): Promise<void> => {
     if (busy) return;
@@ -44,9 +49,19 @@ export function createScrubPump(
       // mid-drain overwrites `pending`, so intermediate targets are silently
       // skipped and only the freshest survives to the next iteration.
       while (pending !== null) {
-        const target = pending;
+        const request = pending;
         pending = null;
-        await drain(target);
+        inFlight = request;
+        try {
+          await drain(request.target);
+          request.resolve(request.id === latestId);
+        } catch {
+          // A single decoder miss must settle its waiter and allow the newest
+          // pending target to run. The owning player reports diagnostics and
+          // keeps its last successfully painted frame visible.
+          request.resolve(false);
+        }
+        inFlight = null;
       }
     } finally {
       busy = false;
@@ -54,12 +69,21 @@ export function createScrubPump(
   };
 
   return {
-    request(target: number): void {
-      pending = target;
+    request(target: number): Promise<boolean> {
+      if (pending) pending.resolve(false);
+      const id = ++nextId;
+      latestId = id;
+      const result = new Promise<boolean>((resolve) => { pending = { target, id, resolve }; });
       void run();
+      return result;
     },
     cancel(): void {
+      latestId = ++nextId;
+      if (pending) pending.resolve(false);
       pending = null;
+      // The decoder itself may not be cancellable, but its waiter can be
+      // released immediately and the caller's generation gate prevents paint.
+      if (inFlight) inFlight.resolve(false);
     },
     isBusy: () => busy,
   };

@@ -34,8 +34,9 @@
       "kind": "source",
       "source": "swift-sidecar/ in this repo",
       "publisher_checksums": "n/a",
-      "sha256": "6f0b4c7d3eafe305c7adbca9c7d9cb7133ba06243c0e8dc42524c20478506d1e",
-      "bytes": 10421328
+      "sha256": "d961beb0c621ce02c7141f33612960b96dad826ffdf682d4e0ab5d263b3a9a96",
+      "bytes": 10427904,
+      "note": "Rebuilt from unchanged swift-sidecar sources with scripts/build-diarizer.sh on 2026-09-07; release build, dylib self-containment and version smoke passed."
     },
     "saucebunny-dictate": {
       "kind": "source",

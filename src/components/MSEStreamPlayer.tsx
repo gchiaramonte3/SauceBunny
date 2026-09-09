@@ -1,9 +1,9 @@
 import {
-  forwardRef, memo, useEffect, useImperativeHandle, useRef, useState,
+  forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
 import { Input, UrlSource, CanvasSink, EncodedPacketSink, ALL_FORMATS } from "mediabunny";
 import { BunnyMark } from "./BunnyMark";
-import type { PlayerHandle } from "./player-handle";
+import type { PlayerHandle, SeekResult } from "./player-handle";
 import { base64UrlEncode } from "../lib/stream-proxy";
 import { encodedStreamMime, peerStreamMime } from "../lib/codec-strings";
 import { rebuildLogLine } from "../lib/seek-log";
@@ -206,9 +206,19 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const teardownRef = useRef<(() => void) | null>(null);
   const rebuildTimerRef = useRef<number | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
-  // Scrubbing = pause playback so it can't fight the playhead; resume on
-  // settle (no seek for ~300ms). Fires after the last seek of a gesture.
-  const seekSettleRef = useRef<number | null>(null);
+  // Scrubbing is an explicit timeline-owned gesture. Active updates never
+  // reach the FFmpeg rebuild path; only endScrub performs a landing.
+  const scrubbingRef = useRef(false);
+  const scrubResumeRef = useRef(false);
+  const resumeOverrideRef = useRef<boolean | null>(null);
+  const seekCommandRef = useRef(0);
+  const seekCompletionRef = useRef<{
+    id: number;
+    target: number;
+    timer: number;
+    resolve: (result: SeekResult) => void;
+  } | null>(null);
+  const playerHandleRef = useRef<PlayerHandle | null>(null);
   // Shuttle (J-K-L): forward uses native playbackRate (capped 4× — beyond that
   // playback outruns the proxy's fMP4 remux); reverse runs a wall-clock rAF
   // scan walking currentTime backward (no native reverse in WebKit), clamped
@@ -226,12 +236,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // canvas — instant + every frame, vs the <video>'s laggy native seek.
   // Hidden again once the real video shows a frame at the new position.
   const previewSinkRef = useRef<CanvasSink | null>(null);
-  /** Keyframe index over the preview input (fast-drag snap). */
+  /** Packet sink remains available for diagnostics/probing, but active scrub
+   * requests always ask CanvasSink for the exact proxy frame. */
   const previewKeySinkRef = useRef<EncodedPacketSink | null>(null);
-  /** Fast-drag mode for the preview + its velocity/settle bookkeeping. */
-  const previewFastRef = useRef(false);
-  const previewLastReqRef = useRef<{ t: number; at: number } | null>(null);
-  const previewExactTimerRef = useRef(0);
   const previewInputRef = useRef<Input | null>(null);
   const previewTargetRef = useRef<number | null>(null);
   const previewBusyRef = useRef(false);
@@ -294,8 +301,65 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // surface a spurious error toast after the fallback already took over.
   const failedRef = useRef(false);
 
+  const clampTarget = useCallback((seconds: number) => {
+    const total = Math.max(totalDurationRef.current || 0, knownDurationRef.current || 0);
+    return Math.max(0, total > 0 ? Math.min(total, seconds) : seconds);
+  }, []);
+
+  const finishSeek = useCallback((status: SeekResult["status"], presentedSeconds?: number) => {
+    const pending = seekCompletionRef.current;
+    if (!pending) return;
+    seekCompletionRef.current = null;
+    window.clearTimeout(pending.timer);
+    pending.resolve({
+      requestedSeconds: pending.target,
+      presentedSeconds: presentedSeconds ?? pending.target,
+      status,
+    });
+  }, []);
+
+  const armSeek = useCallback((target: number): Promise<SeekResult> => {
+    finishSeek("superseded");
+    const id = ++seekCommandRef.current;
+    return new Promise<SeekResult>((resolve) => {
+      const timer = window.setTimeout(() => {
+        if (seekCompletionRef.current?.id !== id) return;
+        finishSeek("unavailable", livePosRef.current);
+      }, 20_000);
+      seekCompletionRef.current = { id, target, timer, resolve };
+    });
+  }, [finishSeek]);
+
+  const beginScrub = useCallback(() => {
+    if (scrubbingRef.current) return;
+    const v = videoRef.current;
+    scrubbingRef.current = true;
+    scrubResumeRef.current = !!v && !v.paused;
+    gestureFromRef.current = livePosRef.current;
+    gestureSeeksRef.current = 0;
+    seekingRef.current = true;
+    try { v?.pause(); } catch { /* ignore */ }
+  }, []);
+
+  const scrubTo = useCallback((seconds: number) => {
+    if (!scrubbingRef.current) beginScrub();
+    const target = clampTarget(seconds);
+    if (gestureSeeksRef.current === 0) gestureFromRef.current = target;
+    pendingSeekRef.current = target;
+    gestureSeeksRef.current += 1;
+    onTimeUpdateRef.current?.(target);
+    if (!disableScrubPreviewRef.current) {
+      if (previewPaintedRef.current) setScrubPreview(true);
+      requestPreviewRef.current?.(target);
+    }
+    // Intentionally no currentTime assignment outside the existing buffer and
+    // no rebuild scheduling. The downloaded-proxy player owns drag preview;
+    // this compatibility player receives a single landing on release.
+  }, [beginScrub, clampTarget]);
+
   // ─── Imperative handle ──────────────────────────────────────────────
-  useImperativeHandle(ref, () => ({
+  useImperativeHandle(ref, () => {
+    const handle: PlayerHandle = {
     // The element a live session captures to show a peer what the
     // presenter is watching. See lib/viewer-capture.ts.
     getCaptureElement: () => videoRef.current,
@@ -316,6 +380,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       });
     },
     pause: () => {
+      scrubbingRef.current = false;
+      scrubResumeRef.current = false;
+      seekCommandRef.current++;
+      finishSeek("superseded");
       videoRef.current?.pause();
     },
     seekTo: (s) => {
@@ -326,18 +394,15 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       // exactly what made far seeks land backward ("19:40 → 15:12"); never let
       // it clamp a valid forward seek.
       const total = Math.max(totalDurationRef.current || 0, knownDurationRef.current || 0);
-      const target = Math.max(0, total > 0 ? Math.min(total, s) : s);
+      const target = clampTarget(s);
+      const completion = armSeek(target);
       const co = clockOriginRef.current;
       const rel = target - baseTimeRef.current;
       // ── Gesture bookkeeping ──────────────────────────────────────────
-      // A scrub fires seekTo() many times. On the FIRST of a gesture,
-      // remember whether we were playing, then PAUSE — playback advancing
-      // mid-scrub is exactly what fights the playhead and causes jitter.
-      // `seekingRef` stays true for the whole gesture so the video's own
-      // timeupdate is suppressed (only the explicit target moves the
-      // playhead). A settle timer (no seek for 300ms) ends the gesture and
-      // resumes playback if we were playing.
-      const newGesture = seekSettleRef.current == null && !seekingRef.current;
+      // Explicit beginScrub/endScrub owns drag lifetime. Direct seekTo calls
+      // are a one-shot gesture; a scrub release arrives with resumeOverride
+      // set by endScrub. No inactivity timer is allowed to infer either case.
+      const newGesture = gestureSeeksRef.current === 0;
       // Diagnostic (Pipeline log, channel "seek"): if a forward seek lands
       // earlier than requested, this shows WHERE — a `total` smaller than `s`
       // clamps `target` backward; otherwise the branch/rel/clockOrigin reveal it.
@@ -350,8 +415,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         onDiagRef.current?.("info",
           `seek req ${s.toFixed(1)} → target ${target.toFixed(1)} (base ${baseTimeRef.current.toFixed(1)}, total ${total.toFixed(1)}, rel ${rel.toFixed(1)}, clockOrigin ${co.toFixed(2)})`);
       }
-      gestureSeeksRef.current += 1;
-      if (newGesture) wantPlayRef.current = !!v && !v.paused;
+      const landingFromScrub = resumeOverrideRef.current !== null;
+      if (!landingFromScrub) gestureSeeksRef.current += 1;
+      const resume = resumeOverrideRef.current ?? (!!v && !v.paused);
+      resumeOverrideRef.current = null;
+      wantPlayRef.current = resume;
       seekingRef.current = true;
       try { v?.pause(); } catch { /* ignore */ }
       onTimeUpdateRef.current?.(target);
@@ -361,22 +429,6 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       // listeners hide it once the real video catches up post-gesture.
       // Peer streams skip it: no random access on the raw route.
       if (!disableScrubPreviewRef.current) {
-        // Fast-drag detection (mirrors MediaBunnyPlayer): closely-spaced
-        // seeks covering real distance preview KEYFRAMES; a trailing pass
-        // decodes the exact resting frame.
-        const nowMs = performance.now();
-        const last = previewLastReqRef.current;
-        previewLastReqRef.current = { t: target, at: nowMs };
-        previewFastRef.current = !!last && nowMs - last.at < 160 && Math.abs(target - last.t) > 0.35;
-        if (previewExactTimerRef.current) window.clearTimeout(previewExactTimerRef.current);
-        if (previewFastRef.current) {
-          previewExactTimerRef.current = window.setTimeout(() => {
-            previewExactTimerRef.current = 0;
-            previewFastRef.current = false;
-            const rest = previewLastReqRef.current;
-            if (rest) requestPreviewRef.current?.(rest.t);
-          }, 170);
-        }
         // Only reveal the overlay when it is holding a real frame. Before the
         // first paint the video underneath is a far better thing to look at
         // than an opaque black rectangle, and after it a slightly stale frame
@@ -384,17 +436,6 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         if (previewPaintedRef.current) setScrubPreview(true);
         requestPreviewRef.current?.(target);
       }
-      if (seekSettleRef.current != null) window.clearTimeout(seekSettleRef.current);
-      seekSettleRef.current = window.setTimeout(() => {
-        seekSettleRef.current = null;
-        // A rebuild (out-of-buffer) owns its own resume via onReady — only
-        // resume here for the in-buffer case (current pipeline still live).
-        if (rebuildTimerRef.current != null) return; // rebuild imminent
-        if (!sbRef.current) return;                   // rebuild in flight
-        seekingRef.current = false;
-        if (wantPlayRef.current) { wantPlayRef.current = false; videoRef.current?.play().catch(() => { /* ignore */ }); }
-      }, 300);
-
       // ── In-buffer → instant native seek ─────────────────────────────
       // Buffered ranges + el.currentTime live in the pipeline's LOCAL timeline,
       // which starts at clockOrigin (the fMP4 start-PTS). The absolute target
@@ -414,7 +455,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             if (newGesture) {
               onDiagRef.current?.("ok", `seek in-buffer → currentTime ${localTarget.toFixed(1)}`);
             }
-            return;
+            return completion;
           }
         }
       }
@@ -489,7 +530,27 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         }
         teardownRef.current?.();
         rebuildRef.current?.(t);
-      }, 280);
+      }, 0);
+      return completion;
+    },
+    beginScrub,
+    scrubTo,
+    endScrub: (seconds: number) => {
+      const target = clampTarget(seconds);
+      const resume = scrubResumeRef.current;
+      scrubbingRef.current = false;
+      scrubResumeRef.current = false;
+      pendingSeekRef.current = null;
+      resumeOverrideRef.current = resume;
+      // seekTo's implementation is the single landing path. Accessing the
+      // freshly-built handle through a tiny local object would recurse; repeat
+      // the public call on the next microtask after the handle is installed.
+      const handle = playerHandleRef.current;
+      return handle ? handle.seekTo(target) : Promise.resolve({
+        requestedSeconds: target,
+        presentedSeconds: livePosRef.current,
+        status: "unavailable" as const,
+      });
     },
     // While a seek is resolving, report the TARGET (not the old/paused
     // video's time) so nothing reading this can snap the playhead back.
@@ -613,7 +674,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       };
       shuttleRafRef.current = requestAnimationFrame(tick);
     },
-  }), [onError]);
+    };
+    playerHandleRef.current = handle;
+    return handle;
+  }, [onError, armSeek, beginScrub, clampTarget, finishSeek, scrubTo]);
 
   // ─── Pipeline lifecycle ─────────────────────────────────────────────
   useEffect(() => {
@@ -627,11 +691,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     pendingLandRef.current = null;
     mimeRef.current = null;
     seekingRef.current = false;
-    // A scrub gesture dies with its source. If the path changes mid-gesture
-    // (scrub, then load another URL within the 300ms settle), the cleanup
-    // cancels the settle timer, so a leaked wantPlay would be consumed by
-    // the NEXT source's pipeline-open and auto-play a source the app
-    // mounted paused (the scrub-then-switch resume race).
+    // A scrub gesture dies with its source. Clear its resume intent so the
+    // next source cannot consume it and autoplay unexpectedly.
     wantPlayRef.current = false;
     failedRef.current = false;
     setScrubPreview(false);
@@ -748,12 +809,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         while (previewTargetRef.current != null && !disposed) {
           const t = previewTargetRef.current;
           previewTargetRef.current = null;
-          let decodeAt = Math.max(0, t);
-          const keySink = previewKeySinkRef.current;
-          if (previewFastRef.current && keySink) {
-            const pkt = await keySink.getKeyPacket(decodeAt, { verifyKeyPackets: false }).catch(() => null);
-            if (pkt) decodeAt = pkt.timestamp;
-          }
+          const decodeAt = Math.max(0, t);
           let decodeErr: unknown = null;
           const got = await withDeadline(
             sink.getCanvas(decodeAt).catch((e) => { decodeErr = e; return null; }),
@@ -1222,8 +1278,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       disposed = true;
       window.clearInterval(ticker);
       if (rebuildTimerRef.current != null) { window.clearTimeout(rebuildTimerRef.current); rebuildTimerRef.current = null; }
-      if (seekSettleRef.current != null) { window.clearTimeout(seekSettleRef.current); seekSettleRef.current = null; }
       pendingSeekRef.current = null;
+      scrubbingRef.current = false;
+      finishSeek("unavailable", livePosRef.current);
       teardownPipeline();
       // Tear down the scrub-preview decoder.
       requestPreviewRef.current = null;
@@ -1231,12 +1288,6 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       previewBusyRef.current = false;
       previewSinkRef.current = null;
       previewKeySinkRef.current = null;
-      previewFastRef.current = false;
-      previewLastReqRef.current = null;
-      if (previewExactTimerRef.current) {
-        window.clearTimeout(previewExactTimerRef.current);
-        previewExactTimerRef.current = 0;
-      }
       const previewInput = previewInputRef.current;
       previewInputRef.current = null;
       if (previewInput) queueMicrotask(() => { void previewInput.dispose(); });
@@ -1269,7 +1320,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     let rafId = 0;
     let rvfcId = 0;
     type RVFCVideo = HTMLVideoElement & {
-      requestVideoFrameCallback: (cb: () => void) => number;
+      requestVideoFrameCallback: (cb: (now: number, metadata: { mediaTime?: number }) => void) => number;
       cancelVideoFrameCallback: (id: number) => void;
     };
     const rvfc = el as RVFCVideo;
@@ -1361,7 +1412,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       pausedAtRef.current = Date.now();
       reportedIdleRef.current = false;
       aheadAtPauseRef.current = aheadNow();
-      playingRef.current = false; setIsPlaying(false); onPlayStateChange?.(false);
+      playingRef.current = false; setIsPlaying(false);
+      // beginScrub temporarily pauses the presentation engine. That is not a
+      // transport pause and must not erase the controller's resume intent.
+      if (!scrubbingRef.current) onPlayStateChange?.(false);
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
       if (rvfcId) { try { rvfc.cancelVideoFrameCallback(rvfcId); } catch { /* ignore */ } rvfcId = 0; }
     };
@@ -1378,19 +1432,35 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       };
       onError?.(`Video error: ${map[me?.code ?? 0] ?? "unknown"}${me?.message ? ` (${me.message})` : ""}`);
     };
-    // Hide the scrub-preview overlay once the real <video> has a frame at
-    // the new position AND the gesture has ended (no pending settle). During
-    // an active drag the settle timer is armed, so per-tick 'seeked's don't
-    // prematurely reveal the laggy video.
+    // Hide the scrub-preview overlay only after the native presentation engine
+    // confirms a decoded frame for the landing. During an active drag the
+    // proxy frame stays visible regardless of native seek events.
     // The overlay must OUTLIVE A REBUILD - see mayHideScrubOverlay. The
     // rebuild attaches a fresh, empty MediaSource, whose `loadeddata` used to
     // reach this handler and hide the one thing holding a picture.
     const onSettled = () => {
       if (mayHideScrubOverlay({
-        settleArmed: seekSettleRef.current != null,
+        settleArmed: scrubbingRef.current,
         rebuildPending: rebuildTimerRef.current != null,
         hasSourceBuffer: !!sbRef.current,
-      })) setScrubPreview(false);
+      })) {
+        const confirm = (raw = el.currentTime) => {
+          const at = corrected(raw);
+          seekingRef.current = false;
+          livePosRef.current = at;
+          onTimeUpdateRef.current?.(at);
+          setScrubPreview(false);
+          finishSeek("presented", at);
+          if (wantPlayRef.current) {
+            wantPlayRef.current = false;
+            el.play().catch(() => { /* gesture/autoplay — ignore */ });
+          }
+        };
+        if (hasRVFC) {
+          rvfc.requestVideoFrameCallback((_now: number, meta: { mediaTime?: number }) =>
+            confirm(meta.mediaTime ?? el.currentTime));
+        } else confirm();
+      }
     };
     // Also hide the overlay the instant real playback resumes. The
     // out-of-buffer REBUILD path can fire 'loadeddata' while the settle
@@ -1399,7 +1469,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     // over a playing video (audio but no picture). 'playing' can't fire
     // mid-scrub (we pause on every seek tick), so clearing here is always
     // correct: if the video is genuinely playing, show it, not a stale frame.
-    const onResume = () => setScrubPreview(false);
+    const onResume = () => onSettled();
     // The starvation signal. Nothing in this app listened for `waiting`
     // anywhere before the ladder — there was no way to know a guest was
     // running dry, which is why a stalled peer stream simply stayed stalled.

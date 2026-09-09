@@ -31,6 +31,34 @@ async function bootReader(page: Page): Promise<void> {
 const pickerWidth = async (page: Page) =>
   (await page.locator(".cp-reader-picker").boundingBox())!.width;
 
+test("right-click Remove hides transcripts without a warning or disk mutation", async ({ page }) => {
+  await bootReader(page);
+  await page.locator(".cp-reader-group-label button").first().click();
+  const row = page.locator('.cp-reader-row[title="first-interview"]');
+  await expect(row).toBeVisible();
+  await row.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Remove from library", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(row).toHaveCount(0);
+  await page.reload();
+  await page.keyboard.press("Meta+5");
+  await expect(row).toHaveCount(0);
+  await expect(page.locator('.cp-reader-row[title="second-interview"]')).toBeVisible();
+});
+
+test("right-click Trash opens a bounded warning and Cancel returns focus", async ({ page }) => {
+  await bootReader(page);
+  await page.locator(".cp-reader-group-label button").first().click();
+  const row = page.locator('.cp-reader-row[title="first-interview"]');
+  await row.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Move to Trash…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Move transcript to Trash?" });
+  await expect(dialog).toContainText("Source videos, speaker labels, and analysis files are kept");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(row).toBeVisible();
+  await expect(row).toBeFocused();
+});
+
 test("dragging the edge makes the picker wider, and it stays", async ({ page }) => {
   await bootReader(page);
   const before = await pickerWidth(page);

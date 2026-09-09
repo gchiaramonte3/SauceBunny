@@ -13,6 +13,15 @@ import { useMenubarEvents } from "./hooks/use-menubar-events";
 import { useKeyboardShortcuts } from "./hooks/use-keyboard-shortcuts";
 import { useClipExport } from "./hooks/use-clip-export";
 import { useClipQueue } from "./hooks/use-clip-queue";
+import { createPlaybackSessionController } from "./lib/playback-session-controller";
+import { createReviewSession } from "./lib/review-session";
+import { useNdiInput } from "./hooks/use-ndi-input";
+import { NDI_INPUT_PANEL_ID, NdiInputPanel } from "./components/NdiInputPanel";
+import { NdiPreviewHeader } from "./components/NdiPreviewHeader";
+import type { NdiPlaybackRecovery } from "./components/NdiProgramMonitor";
+import { observePremiereLink, setPremiereVisibleInput } from "./lib/premiere-link";
+import { IconSettings } from "./components/Icons";
+import { ReviewProgramSurfaces, type ReviewProgramSurfacesHandle } from "./components/ReviewProgramSurfaces";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
 import {
   durationToTc, framesToTc, tcToFrames, isCompleteTc,
@@ -119,13 +128,11 @@ export default function App() {
       // it ever causes regressions the user can toggle back to the
       // ffmpeg-prep + <video> path via Settings → Local playback.
       useWebCodecsDecoder: stored.useWebCodecsDecoder ?? true,
-      // r72: HYBRID is the default — stream instantly to watch + mark in/out,
-      // then download ONLY the marked clip on export (no full-video wait on
-      // long videos). `streamPreview: true` = stream-first. Turning it OFF
-      // (Settings → Web playback) gives the download-first path for max
-      // reliability on flaky connections.
-      streamPreview: stored.streamPreview ?? true,
-      hybridMigrated: stored.hybridMigrated ?? false,
+      // Download-first is authoritative for ordinary web VOD review. Old
+      // installs are intentionally migrated to it regardless of the removed
+      // streamPreview/hybridMigrated flags; instant streaming remains an
+      // explicit opt-in under Settings → Web playback.
+      webLoadMode: stored.webLoadMode ?? "downloaded-proxy",
       // Default off — user must pick a browser explicitly because pulling
       // cookies prompts the OS keychain on Chrome/Brave/Edge.
       ytCookiesBrowser: stored.ytCookiesBrowser ?? "none",
@@ -314,15 +321,6 @@ export default function App() {
         if (p) setExportOpts((prev) => (prev.folder ? prev : { ...prev, folder: p }));
       } catch { /* user can still pick one from Settings or Browse */ }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // r72: one-shot — flip existing installs onto the hybrid (stream-first)
-  // default, even if they saved the old download-first value. Latches so the
-  // user's own Web-playback toggle is respected afterward.
-  useEffect(() => {
-    if (defaults.hybridMigrated) return;
-    setDefaults((prev) => prev.hybridMigrated ? prev : { ...prev, streamPreview: true, hybridMigrated: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -632,7 +630,46 @@ export default function App() {
   // annotation fade); App logic reads getPlayheadFrames() at action time.
   // This is what keeps playback from re-rendering the whole App tree.
   const playerRef = useRef<PlayerHandle>(null);
+  const playbackController = useMemo(
+    () => createPlaybackSessionController(() => playerRef.current),
+    [],
+  );
+  const reviewSession = useMemo(
+    () => createReviewSession(playbackController),
+    [playbackController],
+  );
   const [isPlaying, setIsPlaying] = useState(false);
+  const ndiInput = useNdiInput();
+  const ndiProgram = ndiInput.program;
+  const ndiRoomSource = ndiInput.roomSource;
+  const [ndiPanelOpen,setNdiPanelOpen] = useState(false);
+  const [ndiRecovery,setNdiRecovery] = useState<NdiPlaybackRecovery|null>(null);
+  const [ndiRefreshRequest,setNdiRefreshRequest] = useState(0);
+  const [previewSelected,setPreviewSelected] = useState(false);
+  const [reviewLobbyOpen,setReviewLobbyOpen] = useState(false);
+  const openPremiere = useCallback(() => {
+    setReviewLobbyOpen(false);
+    setPreviewSelected(true); setNdiPanelOpen(true);
+    setNdiRefreshRequest(n => n + 1);
+  }, []);
+  const [sessionsRequestTick,setSessionsRequestTick] = useState(0);
+  const previewStatus = ndiInput.previewState.phase === "error" ? "Premiere needs attention · Not shared"
+    : ndiInput.snapshot.candidate?.decodedReady && ndiInput.snapshot.candidate.encodedReady ? "Premiere ready · Not shared" : "Premiere connecting · Not shared";
+  const ndiMonitorRef = useRef<ReviewProgramSurfacesHandle>(null);
+  const connectPremiereRef = useRef<HTMLButtonElement>(null);
+  const sourceShareButtonRef = useRef<HTMLButtonElement>(null);
+  // The file timeline is 40px normally and taller with thumbnails/waveforms.
+  // Keep its actual last visible footprint when Premiere owns the monitor.
+  const timelineHeightRef = useRef(40);
+  const rememberTimelineHeight = useCallback((height: number) => { timelineHeightRef.current = height; }, []);
+  const [programMuted,setProgramMuted] = useState(true);
+  const [programVolume,setProgramVolume] = useState(1);
+  const [previewMuted,setPreviewMuted] = useState(true);
+  const [previewVolume,setPreviewVolume] = useState(1);
+  // Guests hear the received program. A local publication retains the
+  // editor's explicit preview-audio choice in onShared, rather than muting
+  // that same video again merely because it became the room source.
+  useEffect(() => { if (ndiProgram?.local === false) setProgramMuted(false); }, [ndiProgram?.local, ndiProgram?.ownerId]);
 
   // ====== In/out + export form ======
   // null = mark not set. With both null the export is the full clip
@@ -669,6 +706,7 @@ export default function App() {
    * that they pointed at words instead of scrubbing.
    */
   const markRangeFromSeconds = useCallback((startSec: number, endSec: number) => {
+    if (ndiProgram || ndiRoomSource || reviewSession.getProgramSource() || reviewSession.getInspectionBlock()) return null;
     const r = markRange(startSec, endSec, fps, durationFrames);
     if (!r) return null;
     pushMarksUndo("Mark from transcript", inFrames, outFrames, r.inFrames, r.outFrames);
@@ -680,7 +718,7 @@ export default function App() {
     // React re-renders. So it queued the last range instead of the selection.
     // Handing the range back is what lets that call site be correct.
     return r;
-  }, [fps, durationFrames, inFrames, outFrames, pushMarksUndo]);
+  }, [fps, durationFrames, inFrames, outFrames, pushMarksUndo, ndiProgram, ndiRoomSource, reviewSession]);
 
   const [exportOpts, setExportOpts] = useState<ExportOpts>(() => ({
     inTc: "",
@@ -833,6 +871,7 @@ export default function App() {
   // not loaded yet.
   // The panel window (?window=panel) never mounts App, so it's untouched.
   const [activeView, setActiveViewState] = useState<AppView>("home");
+  const privateInspectionVisible = activeView === "coreview" && previewSelected && !!ndiInput.previewProgram;
   const setActiveView = useCallback((v: AppView) => {
     setActiveViewState(v);
     // Arriving at Clip always presents the full workbench: both side panels
@@ -1083,9 +1122,9 @@ export default function App() {
     const next = sanitizePlaybackRate(r);
     if (next === playbackRate) return;
     setPlaybackRate(next);
-    try { playerRef.current?.setPlaybackRate(next); } catch { /* ignore */ }
+    try { playbackController.setPlaybackRate(next); } catch { /* ignore */ }
     flashRateHud(next);
-  }, [rateSupported, playbackRate, flashRateHud]);
+  }, [rateSupported, playbackRate, flashRateHud, playbackController]);
   const handlePlaybackRateStep = useCallback(
     (dir: 1 | -1) => handlePlaybackRateChange(stepPlaybackRate(playbackRate, dir)),
     [handlePlaybackRateChange, playbackRate]);
@@ -1115,7 +1154,7 @@ export default function App() {
     if (!import.meta.env.DEV) return false;
     try { return localStorage.getItem("saucebunny.devPeerStream") === "1"; } catch { return false; }
   });
-  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "commands" | "about">("general");
+  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "commands" | "about" | "integrations">("general");
 
   // ====== Media info modal ======
   // Deep inspector over the ORIGINAL local source file (never the ffmpeg
@@ -1412,6 +1451,7 @@ export default function App() {
   const {
     loadWeb: loadWebPlayback,
     loadCached: loadCachedWebPlayback,
+    promoteLive: promoteLiveWebPlayback,
     reset: resetWebPlayback,
     stop: stopWebPlayback,
     onPlayerReady: webOnPlayerReady,
@@ -1421,6 +1461,21 @@ export default function App() {
   // True while actively MSE-streaming a web source (not yet downloaded to
   // cache). Gates the audio pre-cache, caption auto-fetch, caption-sync offset.
   const webStreaming = webPlayback.state.kind === "streaming";
+
+  // Keep one source-scoped playback session alive above the Clip/Review
+  // workspaces. Navigation never changes this identity; only loading a new
+  // source does. The controller therefore preserves an in-flight landing as
+  // the surrounding workspace changes.
+  useEffect(() => {
+    const sourceId = sourceKind === "file"
+      ? localFilePath
+      : (metadata?.webpage_url ?? (webPlayback.state.kind === "inactive" ? null : webPlayback.state.url));
+    playbackController.setSource(
+      sourceId,
+      metadata?.duration ?? 0,
+      webPlayback.cachePath ? "proxy" : "presentation",
+    );
+  }, [localFilePath, metadata?.duration, metadata?.webpage_url, playbackController, sourceKind, webPlayback.cachePath, webPlayback.state]);
 
   // Pick the player for the download-fallback cached copy (r122). Reset to
   // the mediabunny default on every new cache path, then let a background
@@ -1693,16 +1748,32 @@ export default function App() {
   // ====== Player callbacks ======
   // Sync our playhead from the YouTube player's current time while it's playing.
   const onPlayerTimeUpdate = useCallback((seconds: number) => {
-    // ONE conversion formula, owned by the store — publishing through any
-    // other math is how the 24-vs-30 fps split (0.8x post-seek slide) shipped.
+    // Some compatibility engines announce the requested position while
+    // seeking. Only their seek result can confirm a landing; those optimistic
+    // callbacks must not masquerade as the media clock in a live room.
+    const { phase } = playbackController.getSnapshot();
+    if (phase === "landing" || phase === "scrubbing") return;
+    playbackController.reportPresented(seconds);
+  }, [playbackController]);
+
+  useEffect(() => playbackController.subscribe(() => {
+    const snapshot = playbackController.getSnapshot();
+    const seconds = snapshot.phase === "landing" || snapshot.phase === "scrubbing"
+      ? snapshot.requestedSeconds : snapshot.presentedSeconds;
     publishPlayheadFrames(playheadSecondsToFrames(seconds, fps));
-  }, [fps]);
+  }), [fps, playbackController]);
 
   const onPlayerStateChange = useCallback((playing: boolean) => {
+    playbackController.reportPlaying(playing);
     setIsPlaying(playing);
-  }, []);
+  }, [playbackController]);
+
+  const onRepresentationChange = useCallback((representation: "proxy" | "presentation") => {
+    playbackController.reportRepresentation(representation);
+  }, [playbackController]);
 
   const onPlayerReady = useCallback((dur: number) => {
+    playbackController.setDuration(dur);
     // Player opened — tell the web machine (disarms its stall watchdog so we
     // don't trigger an unnecessary download fallback). No-op for local files.
     webOnPlayerReady();
@@ -1732,7 +1803,7 @@ export default function App() {
       // setPlaybackRate, so it must land even if setVolume/setMuted throws —
       // otherwise a shuttle exit would snap back to 1× while the badge
       // still shows the persisted rate.
-      try { p.setPlaybackRate(playbackRate); } catch { /* ignore */ }
+      try { playbackController.setPlaybackRate(playbackRate); } catch { /* ignore */ }
       try {
         p.setVolume(volume);
         p.setMuted(muted);
@@ -1749,7 +1820,7 @@ export default function App() {
         return { ...prev, duration: dur };
       });
     }
-  }, [volume, muted, playbackRate, webOnPlayerReady, webConsumeResume]);
+  }, [volume, muted, playbackRate, playbackController, webOnPlayerReady, webConsumeResume]);
 
   // ====== Actions ======
   /**
@@ -2030,6 +2101,7 @@ export default function App() {
     decodeMetaTitle,
     loadWebPlayback,
     loadCachedWebPlayback,
+    promoteLiveWebPlayback,
     appendLog,
     pushNotification,
     maybePromptYtAuth,
@@ -2208,7 +2280,7 @@ export default function App() {
   /** Latest active view for the keyboard bindings (they capture once). */
   const activeViewRef = useRef<string>("clip");
   const openSourceView = useCallback(() => {
-    setActiveView(sessionRoomRef.current ? "coreview" : "clip");
+    setActiveView(sessionRoomRef.current || activeViewRef.current === "coreview" ? "coreview" : "clip");
   }, [setActiveView]);
 
   const { loadLocalPath } = useLocalSource({
@@ -2235,8 +2307,7 @@ export default function App() {
   });
 
 
-  const handleImportFile = useCallback(async () => {
-    const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
+  const pickLocalFile = useCallback(() => import("@tauri-apps/plugin-dialog").then((m) =>
       m.open({
         multiple: false,
         directory: false,
@@ -2246,9 +2317,11 @@ export default function App() {
           { name: "All", extensions: ["*"] },
         ],
       })
-    );
+    ), []);
+  const handleImportFile = useCallback(async () => {
+    const picked = await pickLocalFile();
     if (typeof picked === "string") await loadLocalPath(picked);
-  }, [loadLocalPath]);
+  }, [loadLocalPath,pickLocalFile]);
 
   // Re-open a clip from the review history popover — local path via the import
   // core, a web source via the URL fetch. Its notes load automatically (the
@@ -3259,9 +3332,9 @@ export default function App() {
   const {
     shuttleRate, kHeldRef, onPlayToggle, onStep,
     seekBySeconds, shuttleStep, onMarkIn, onMarkOut, onClearMarks,
-    onGotoIn, onGotoOut, onSeek, onChaseSeek,
+    onGotoIn, onGotoOut, onSeek, onScrubStart, onScrub, onScrubEnd, onChaseSeekConfirmed,
   } = useTransport({
-    playerRef, status, isPlaying, setIsPlaying, fps, durationFrames,
+    playerRef, playbackController, status, isPlaying, setIsPlaying, fps, durationFrames,
     inFrames, outFrames, setInFrames, setOutFrames, pushMarksUndo,
     sourceKind, localFilePath,
     webCachePath: webPlayback.cachePath,
@@ -3297,13 +3370,9 @@ export default function App() {
   const undoSnap = useSyncExternalStore(appUndo.subscribe, appUndo.getSnapshot);
 
   // ====== Keyboard ======
-  // Review comment-range hotkeys (⇧I/⇧O) — ReviewPanel registers its handlers
-  // here (the range state lives in the panel; App only forwards intent). The
-  // gate values ride a companion latest-value ref because reviewSourceKey is
-  // derived later in this file than the keyboard effect below.
-  const reviewRangeKeysRef = useRef<{ markIn: () => void; markOut: () => void } | null>(null);
-  const registerReviewRangeKeys = useCallback(
-    (h: { markIn: () => void; markOut: () => void } | null) => { reviewRangeKeysRef.current = h; }, []);
+  // Review comment-range hotkeys (⇧I/⇧O) are commands on the shared Review
+  // session. The panel owns its local draft state, but no longer registers a
+  // callback directly into this component.
   const reviewRangeGateRef = useRef({ panelDetached: false, queueOpen: false, roomActive: false, reviewSourceKey: null as string | null, hasSource: false, clipVisible: false });
 
   // Data-driven: the live event is serialized to a combo and matched against the
@@ -3316,10 +3385,11 @@ export default function App() {
   // Nothing in the body changed, so the diff is a move; tsc enumerated the
   // dependency surface below rather than me guessing at it.
   useKeyboardShortcuts({
+    programInputActive: privateInspectionVisible || (activeView === "coreview" && (!!ndiProgram || !!ndiRoomSource)),
     comboToAction, status, fps, readerFps, durationFrames, settingsOpen, exportOpts,
     activeViewRef, homeViewRef, libraryViewRef, clipViewRef, coreviewViewRef,
     readerViewRef, readerPlayerRef, tcEntryRef, kHeldRef,
-    reviewRangeGateRef, reviewRangeKeysRef,
+    reviewRangeGateRef, reviewRangeKeysRef: reviewSession.rangeCommandsRef,
     onPlayToggle, shuttleStep, onMarkIn, onMarkOut, onClearMarks,
     onGotoIn, onGotoOut, onStep, onSeek, readerSeekRel,
     handlePlaybackRateStep, handlePlaybackRateChange,
@@ -3382,7 +3452,7 @@ export default function App() {
   // its current state + handlers. The dependency array below is unchanged from
   // when the array was inline, so memoization behaves identically.
   const commands: Command[] = useMemo(() => buildCommands({
-    url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
+    url, hasSource: hasSource && !privateInspectionVisible && !(activeView === "coreview" && (ndiProgram || ndiRoomSource)), isPlaying, inFrames, outFrames, durationFrames, fps,
     captionsOn, playbackRate, activeView, onNavigateView: navigateView,
     logsOpen, clipQueueLength: clipQueue.length, queueRunning,
     activeTranscriptPath: activeTranscript?.path ?? null,
@@ -3415,6 +3485,10 @@ export default function App() {
     // Overlay the live (user-editable) hotkey onto each rebindable command so the
     // palette + Settings list always show the real binding, never a stale literal.
   }).map((c) => {
+    if ((privateInspectionVisible || (activeView === "coreview" && (ndiProgram || ndiRoomSource)))
+      && (c.group === "Playback" || c.group === "Marks" || c.id === "export.snapshot")) {
+      c = { ...c, disabled: true };
+    }
     if (c.id in KEY_ACTION_BY_ID) {
       const combos = bindingsFor(c.id as KeyActionId, keybindings);
       return { ...c, hotkey: combos[0] ? formatCombo(combos[0]) : undefined };
@@ -3431,7 +3505,7 @@ export default function App() {
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleGenerateTranscript, handleDownloadCaptions, handleImportTranscript,
     handleStop, keybindings, undoSnap, performUndo, performRedo,
-    pushNotification, setQueueOpenChoice,
+    pushNotification, setQueueOpenChoice, privateInspectionVisible, ndiProgram, ndiRoomSource,
   ]);
 
   // ====== First-run checklist derivation ======
@@ -3503,6 +3577,7 @@ export default function App() {
   // the empty state. A file travels as its fingerprint (content identity), not
   // as a host-local path the peer could never open.
   const sessionSource = useMemo<SessionSource>(() => {
+    if (ndiRoomSource) return { kind:"ndi",url:ndiRoomSource.id,fingerprint:null,title:ndiRoomSource.name,duration:null,reviewKey:ndiRoomSource.reviewKey };
     if (!metadata) {
       return { kind: "none", url: null, fingerprint: null, title: null, duration: null, reviewKey: "" };
     }
@@ -3521,7 +3596,7 @@ export default function App() {
       title: metadata.title ?? null, duration: metadata.duration ?? null,
       reviewKey: metadata.webpage_url ?? "",
     };
-  }, [sourceKind, metadata, localFilePath, localFileSize, activeSourceUrl]);
+  }, [sourceKind, metadata, localFilePath, localFileSize, activeSourceUrl, ndiRoomSource]);
   // Also a localStorage read (resolveByFingerprint), also previously bare in
   // the render body. Depends only on the identity of the loaded source, which
   // changes far less often than App renders. `fpIndexBump` re-runs it when
@@ -3529,8 +3604,8 @@ export default function App() {
   // older cut's version stack rewrites where this key should resolve.
   const [fpIndexBump, setFpIndexBump] = useState(0);
   const [txSearchOpen, setTxSearchOpen] = useState(false);
-  const reviewSourceKey = useMemo(
-    () => ((sourceKind === "file" && localFilePath && metadata)
+  const mediaReviewSourceKey = useMemo(
+    () => (sourceKind === "file" && localFilePath && metadata)
       /* receivedReviewKey FIRST. A file that arrived through a session belongs
          to that session's review, and that is a stronger statement than the
          fingerprint's "this looks like that file" - the received copy's name
@@ -3539,17 +3614,21 @@ export default function App() {
       ? (receivedReviewKey(localFilePath)
           ?? resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize))
           ?? localFilePath)
-      : (metadata?.webpage_url ?? null)),
+      : (metadata?.webpage_url ?? null),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fpIndexBump tracks the localStorage index the linter can't see
     [sourceKind, localFilePath, metadata, localFileSize, fpIndexBump],
   );
+  const reviewSourceKey = ndiRoomSource?.reviewKey ?? mediaReviewSourceKey;
 
   // Marks, remembered per source. The restore/save handshake lives in
   // use-source-marks - lifted out of this file because its second shipped bug
   // (re-opening a source erased its stored marks) was only provable by a test,
   // and nothing in a 6,000-line component can be tested. The hook's header
   // carries the full three-state story.
-  useSourceMarks({ reviewSourceKey, durationFrames, inFrames, outFrames, setInFrames, setOutFrames });
+  // Live reviews own notes, not the hidden file's frame marks. Changing the
+  // publication must neither copy those marks into an NDI pass nor restore
+  // old live-pass values over the still-mounted file's marks.
+  useSourceMarks({ reviewSourceKey: mediaReviewSourceKey, durationFrames, inFrames, outFrames, setInFrames, setOutFrames });
 
   /**
    * Version stacks: absorb the OPEN file into `oldKey`'s review doc as its
@@ -3741,7 +3820,7 @@ export default function App() {
       vcodec: offer.vcodec,
       acodec: offer.acodec,
       ext: null,
-      has_subs: false, chapters: [], description: null,
+      has_subs: false, is_live: false, chapters: [], description: null,
     });
     setSourceKind("youtube");
     setStatus("loaded");
@@ -3758,7 +3837,7 @@ export default function App() {
     coSession, coSessionActive, sessionDoc, postSessionOp,
     raisedHands, handRaised, sendReaction, toggleHand,
     theater, setTheater, theaterParticipants,
-    meshStreams, meshStates, meshMutedForMe, toggleMuteForMe,
+    meshStreams, meshProgramStreams, meshStates, meshMutedForMe, toggleMuteForMe, readProgramDiagnostics,
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
     offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, keepOfferedCopy, canKeepCopy, placeReceivedRef, cancelFetch,
@@ -3771,9 +3850,9 @@ export default function App() {
     liveDraw, postDrawOp, clearLiveDraw, pruneLiveDraw,
   } = useCoReview({
     isPlaying, fps, playbackRate,
-    sessionSource, activeSourceUrlRef, reviewSourceKey,
-    playerRef, metadataRef,
-    onChaseSeek, setUrl, handleFetch, loadLocalPath, loadPeerStream, clearStageForPeerSource,
+    sessionSource, activeSourceUrlRef, reviewSourceKey, privatePreview: ndiInput.reviewBlocked || privateInspectionVisible,
+    playerRef, playbackController, metadataRef,
+    onChaseSeek: onChaseSeekConfirmed, setUrl, handleFetch, loadLocalPath, loadPeerStream, clearStageForPeerSource,
     pushNotification, setQueueOpen,
     setReviewMarkers, setReviewAnnotations,
     turn: { url: defaults.turnUrl, username: defaults.turnUsername, password: defaults.turnPassword },
@@ -3838,6 +3917,25 @@ export default function App() {
   sessionRoomRef.current = coSessionActive;
   activeViewRef.current = activeView;
   const roomActive = coSessionActive && activeView === "coreview";
+  const reviewStageActive = activeView === "coreview";
+  const reviewSetupMode = reviewStageActive && !coSessionActive;
+  const ndiPictureVisible = privateInspectionVisible || (roomActive && (!!ndiProgram || !!ndiRoomSource));
+  const canManageNdiSource = coSession.role === "off" || (coSession.role === "host" && isPresenter);
+  const premiereToolsVisible = reviewStageActive && (previewSelected || ndiPanelOpen || ndiPictureVisible);
+  const privateReviewProgram = privateInspectionVisible && !coSessionActive ? ndiInput.previewProgram : null;
+  const visibleNdiState = privateInspectionVisible ? ndiInput.previewState : ndiInput.state;
+  const visibleNdiName = privateInspectionVisible ? ndiInput.previewProgram?.name : ndiProgram?.name ?? ndiRoomSource?.name;
+  const closePremiere = () => {
+    setNdiPanelOpen(false);
+    const target = connectPremiereRef.current;
+    if (target?.getClientRects().length) target.focus();
+    else sourceShareButtonRef.current?.focus();
+  };
+  useEffect(() => {
+    reviewSession.setInspectionBlock(privateInspectionVisible && coSessionActive
+      ? "Private Premiere preview. Return to the room picture or share Premiere before adding notes. Your draft is kept." : null);
+  }, [privateInspectionVisible, coSessionActive, reviewSession]);
+  useEffect(() => { if (activeView !== "coreview") setNdiPanelOpen(false); }, [activeView]);
   // Display name of whoever is driving, for the waiting affordance.
   const presenterName = coSession.peers.find((p) => p.id === coSession.presenter)?.name
     ?? (coSession.presenter === "m0" ? "The host" : "The presenter");
@@ -3987,6 +4085,7 @@ export default function App() {
   const [reviewLabelMode, setReviewLabelMode] = useState(false);
   const [reviewDraft, setReviewDraft] = useState<AnnotationStrokes | null>(null);
   const [annotationDisplay, setAnnotationDisplay] = useState<AnnotationStrokes | null>(null);
+  const [hiddenDrawing, setHiddenDrawing] = useState<{ source: string | null; time: number | null } | null>(null);
   const [annotationDisplayColor, setAnnotationDisplayColor] = useState<string | null>(null);
 
   /**
@@ -4043,7 +4142,8 @@ export default function App() {
   const sendingPct = transfer && transfer.total > 0
     ? Math.floor((transfer.received / transfer.total) * 100)
     : 0;
-  const shareButtonLabel = offerError ? "Share failed"
+  const shareButtonLabel = ndiRoomSource ? ndiRoomSource.state === "stopped" ? "Sharing stopped" : "Premiere live"
+    : offerError ? "Share failed"
     : transfer?.phase === "hashing" ? "Preparing…"
     : transfer?.phase === "sending" ? `Sending ${sendingPct}%`
     : viewerShareState === "live" ? "Showing live"
@@ -4057,8 +4157,21 @@ export default function App() {
     : blockedMembers.length > 0
       ? `${blockedMembers.join(", ")} cannot open this. Show them live, or send them a copy.`
       : "Show them what you are watching, or send them a copy.";
+  const publishPremiere = ndiInput.share;
+  const stopPremiereSharing = ndiInput.stopSharing;
   const shareOptions = useMemo(() => {
     const out: ShareOption[] = [];
+    if(coSession.role === "host") {
+      out.push({key:"ndi",label:"Premiere via NDI…",detail:ndiInput.previewProgram ? previewStatus : "Beta · private preview first",onSelect:openPremiere});
+      if(ndiInput.canShare) out.push({key:"ndi-publish",label:"Share Premiere with room",detail:"Publish the prepared picture",onSelect:()=>{
+        void publishPremiere().then(()=>{setProgramMuted(previewMuted);setProgramVolume(previewVolume);setPreviewSelected(false);setNdiPanelOpen(false);stopShare();stopViewerShare();}).catch(error=>pushNotification("error","Couldn't share Premiere",formatError(error)));
+      }});
+      if(ndiProgram && !ndiProgram.stopped) {
+        out.push({key:"ndi-retry",label:"Reconnect Premiere picture",detail:"Keep the last picture while reconnecting",onSelect:()=>ndiMonitorRef.current?.retryVisible()});
+        out.push({key:"ndi-stop",label:"Stop sharing Premiere",detail:"Keep the last picture",onSelect:()=>{void stopPremiereSharing().catch(error=>pushNotification("error","Couldn't stop Premiere",formatError(error)));}});
+      }
+    }
+    if(ndiProgram || ndiRoomSource) return out;
     if (viewerShareState === "live") {
       out.push({ key: "stop-live", label: "Stop the live view", detail: "Back to your camera",
         onSelect: () => stopViewerShare() });
@@ -4079,7 +4192,7 @@ export default function App() {
         onSelect: () => { void offerCurrentFile(localFilePath, metadata?.title ?? undefined, metadata?.vcodec ?? null, metadata?.acodec ?? null); } });
     }
     return out;
-  }, [viewerShareState, localFilePath, offeredFile, playbackPath, metadata, offerCurrentFile, startViewerShare, stopViewerShare]);
+  }, [viewerShareState, localFilePath, offeredFile, playbackPath, metadata, offerCurrentFile, startViewerShare, stopViewerShare, stopShare, coSession.role, ndiProgram, ndiRoomSource, ndiInput.previewProgram, ndiInput.canShare, publishPremiere, stopPremiereSharing, previewStatus, pushNotification, openPremiere, previewMuted, previewVolume]);
 
   /* A PEER'S LIVE VIEW, ON THE STAGE.
      The first cut of this pushed the presenter's captured monitor onto the
@@ -4092,15 +4205,39 @@ export default function App() {
      feedback loop with a compression generation in it. */
   const peerLiveStream = useMemo(() => {
     for (const id of sharingMembers) {
-      if (id === coSession.selfId) continue;
-      const stream = meshStreams.get(id);
+      if (id === coSession.selfId || id !== coSession.presenter) continue;
+      const stream = meshProgramStreams.get(id);
       if (stream && stream.getVideoTracks().length > 0) {
         const who = coSession.peers.find((p) => p.id === id)?.name ?? "them";
-        return { stream, who };
+        return { stream, who, ownerId: id };
       }
     }
     return null;
-  }, [sharingMembers, meshStreams, coSession.selfId, coSession.peers]);
+  }, [sharingMembers, meshProgramStreams, coSession.selfId, coSession.presenter, coSession.peers]);
+
+  const programOwner = peerLiveStream?.ownerId;
+  const programName = peerLiveStream?.who;
+  useEffect(observePremiereLink, []);
+  useEffect(() => {
+    const visiblePremiere = privateInspectionVisible ? ndiInput.previewProgram : ndiProgram;
+    setPremiereVisibleInput(visiblePremiere ? { sourceId: visiblePremiere.reviewKey,
+      streamId: visiblePremiere.id, name: visiblePremiere.name } : null);
+    reviewSession.setProgramSource(privateReviewProgram ? {
+      id:privateReviewProgram.reviewKey,ownerId:privateReviewProgram.ownerId,kind:"ndi",label:privateReviewProgram.name,
+    } : ndiProgram ? {
+      id:ndiProgram.reviewKey,ownerId:ndiProgram.ownerId,kind:"ndi",label:ndiProgram.name,
+      notesBlocked:activeView!=="coreview"?"Open Review to add Premiere notes.":ndiInput.reviewBlocked?"Waiting for the room picture. Notes continue syncing; you can post when the new picture appears.":undefined,
+    } : ndiRoomSource ? {
+      id:ndiRoomSource.reviewKey,ownerId:"m0",kind:"ndi",label:ndiRoomSource.name,
+    } : programOwner ? {
+      id: `screen:${programOwner}`, ownerId: programOwner,
+      kind: "screen", label: `${programName}'s shared picture`,
+    } : null);
+    // A private candidate must not pause the file/web clock feeding the room.
+    playbackController.setExternalProgram(!!ndiRoomSource);
+    if (programOwner && !ndiProgram) playbackController.pause({ origin: "remote" });
+  }, [programOwner, programName, reviewSession, playbackController, ndiProgram, ndiRoomSource, ndiInput.reviewBlocked, activeView,
+    privateInspectionVisible, ndiInput.previewProgram, privateReviewProgram]);
 
   const autoWatchedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -4161,6 +4298,28 @@ export default function App() {
     draftPastRef.current = [];
     draftFutureRef.current = [];
   }, []);
+  const showReviewAnnotation = useCallback((
+    annotation: AnnotationStrokes | null,
+    color?: string,
+    time?: number,
+  ) => {
+    stashDraft();
+    setReviewDrawActive(false);
+    setReviewLabelMode(false);
+    setReviewDraft(null);
+    setAnnotationDisplay(annotation);
+    setHiddenDrawing(null);
+    setAnnotationDisplayColor(color ?? null);
+    setAnnotationDisplayTime(time ?? null);
+  }, [stashDraft]);
+
+  useEffect(() => {
+    reviewSession.setSourceIdentity(reviewSourceKey);
+    return reviewSession.configure({
+      setCommentRange: setReviewRangeDraft,
+      showAnnotation: showReviewAnnotation,
+    });
+  }, [reviewSession, reviewSourceKey, showReviewAnnotation]);
   /** Puts a stashed draft back. Returns whether there was one. */
   const restoreDraft = useCallback(() => {
     const stash = draftStashRef.current;
@@ -4344,21 +4503,23 @@ export default function App() {
     setPanelDetached,
     setQueueOpen,
     snapshot: {
+      sourceIdentity: reviewSourceKey,
+      programInputActive: privateInspectionVisible || !!ndiProgram || !!ndiRoomSource,
       queue: clipQueue,
       fps,
       running: queueRunning,
       hasFolder: !!exportOpts.folder,
       transcriptPath: activeTranscript?.path ?? null,
       transcriptOrigin: activeTranscript?.origin ?? "unknown",
-      transcriptPlayhead,
+      transcriptPlayhead: privateInspectionVisible || ndiProgram || ndiRoomSource ? null : transcriptPlayhead,
       transcriptArrivedTick,
       regenerateBusy: transcriptState === "running",
-      canRegenerate: hasSource && !!selectedModel?.downloaded,
-      hasSource,
+      canRegenerate: hasSource && !!selectedModel?.downloaded && !ndiProgram && !ndiRoomSource,
+      hasSource: hasSource && !ndiProgram && !ndiRoomSource,
       aiModelId: defaults.llmSummarizationModel,
       aiStyle: { format: defaults.summaryFormat, length: defaults.summaryLength },
-      chapterSourceKey: reviewSourceKey,
-      durationSec: sourceDurationSec,
+      chapterSourceKey: ndiProgram || ndiRoomSource ? null : reviewSourceKey,
+      durationSec: ndiProgram || ndiRoomSource ? null : sourceDurationSec,
     },
     handlers: {
       onRemove: handleQueueRemove,
@@ -4372,10 +4533,7 @@ export default function App() {
       onExportAll: () => { void handleExportQueue(); },
       onStop: () => { void handleStop(); },
       onSeek: (seconds: number) => {
-        // onSeek owns the duration clamp (playhead-clock) — no inline math
-        // here, or an unknown duration snaps the cue click to frame 0.
-        const r = Math.max(1, Math.round(fps));
-        onSeek(Math.max(0, Math.floor(seconds * r)));
+        void reviewSession.jumpToComment(seconds);
       },
       onClearTranscript: handleClearTranscript,
       onLoadFromHistory: handleLoadFromHistory,
@@ -4462,7 +4620,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className={"cp-body" + (roomActive ? " cp-room" : "") + (roomActive && theater ? " cp-room-theater" : "")}>
+      <div className={"cp-body" + (roomActive ? " cp-room" : "") + (reviewSetupMode ? " cp-preview-setup" : "") + (roomActive && theater ? " cp-room-theater" : "")}>
         {/* display:contents wrapper (rail is a plain flex child). The rail is
             ALWAYS visible — the session room is not an exception (the old
             theater edge-reveal overlay is retired; see room.css). */}
@@ -4512,6 +4670,7 @@ export default function App() {
               roots. Keep-alive like the others; shares lib's scan results. */}
           <div ref={libraryViewRef} tabIndex={-1} className="cp-view cp-view-library" hidden={activeView !== "library"}>
             <LibraryBrowser
+              sessionsRequestTick={sessionsRequestTick}
               onReviewLocalPath={handleReviewLocalPath}
               onOpenWebUrl={(u: string) => { setUrl(u); void handleFetch(u); }}
               roots={lib.roots}
@@ -4627,7 +4786,15 @@ export default function App() {
               co-review sessions, and every listener beneath survive
               browsing the library. Audio deliberately keeps playing on
               Home (streaming-platform behavior — no pause-on-leave). */}
-          <div ref={clipViewRef} tabIndex={-1} className="cp-view cp-view-clip" hidden={activeView !== "clip"}>
+          <div
+            ref={clipViewRef}
+            tabIndex={-1}
+            className="cp-view cp-view-clip"
+            /* The shared playback stage is mounted once. Clip owns it during
+               editing; an active Review room owns it explicitly here rather
+               than room.css overriding the semantics of [hidden]. */
+            hidden={activeView !== "clip" && !reviewStageActive}
+          >
             <Toolbar
               url={url}
               onChange={setUrl}
@@ -4725,15 +4892,32 @@ export default function App() {
                 metadataLoading={metadataLoading}
               />
 
-              <main className="cp-main" aria-label="Clip">
+              <main className="cp-main" aria-label={reviewStageActive ? "Review" : "Clip"}>
+                {reviewSetupMode && <div className="cp-room-head cp-preview-head">
+                  <div className="cp-room-title"><span className="cp-room-name">Preview</span></div>
+                  <RoomSourceBar hasSource={hasSource}
+                    onLoadUrl={u => { setPreviewSelected(false); setUrl(u); void handleFetch(u); }}
+                    onImportFile={() => { void (async () => {
+                      const picked = await pickLocalFile();
+                      if (typeof picked !== "string") return;
+                      setPreviewSelected(false);
+                      if (!(hasSource && sourceKind === "file" && localFilePath === picked)) await loadLocalPath(picked);
+                    })().catch(e => pushNotification("error", "Couldn't open file", formatError(e))); }}
+                    onClear={() => { setPreviewSelected(false); handleClear(); }} />
+                  {premiereToolsVisible && <button type="button" className="cp-toolbar-disclosure"
+                    onClick={() => setReviewLobbyOpen(value => !value)}>
+                    {reviewLobbyOpen ? "Review notes" : "Session setup…"}
+                  </button>}
+                </div>}
                 {roomActive && (
                   <div className="cp-room-head">
                     <div className="cp-room-title">
                       <span className="cp-room-live" aria-hidden />
-                      <span className="cp-room-name" title={coSession.title || metadata?.title || undefined}>
-                        {coSession.title || metadata?.title || "Review session"}
+                      <span className="cp-room-name" title={coSession.title || ndiProgram?.name || metadata?.title || undefined}>
+                        {coSession.title || ndiProgram?.name || metadata?.title || "Review session"}
                       </span>
-                      {metadata?.title && coSession.title && metadata.title !== coSession.title && (
+                      {ndiProgram && <span className="cp-room-source" title={ndiProgram.name}>Premiere · {ndiProgram.stopped ? "Sharing stopped" : ndiInput.state.phase === "error" ? "Disconnected" : ndiInput.state.phase === "stale" ? "Picture parked" : "Live"}</span>}
+                      {!ndiProgram && metadata?.title && coSession.title && metadata.title !== coSession.title && (
                         <span className="cp-room-source" title={metadata.title}>{metadata.title}</span>
                       )}
                       {reviewStatus && reviewStatus.state !== "pending" && (
@@ -4756,6 +4940,7 @@ export default function App() {
                           button's label rather than three more chips. */}
                       {isPresenter && (
                         <button
+                          ref={sourceShareButtonRef}
                           type="button"
                           className={"btn btn-compact " + (blockedMembers.length > 0 ? "btn-primary" : "btn-ghost")}
                           aria-haspopup="menu"
@@ -4782,10 +4967,21 @@ export default function App() {
                         switch sources was to end the session. Presenter only. */}
                     {isPresenter && (
                       <RoomSourceBar
-                        hasSource={hasSource}
-                        onLoadUrl={(u) => { setUrl(u); void handleFetch(u); }}
-                        onImportFile={() => { void handleImportFile(); }}
-                        onClear={handleClear}
+                        hasSource={hasSource || !!ndiProgram}
+                        onLoadUrl={(u) => { void ndiInput.stop().then(()=>{setUrl(u);void handleFetch(u);}).catch(e=>pushNotification("error","Couldn't switch program source",formatError(e))); }}
+                        onImportFile={() => { void (async()=>{
+                          const picked=await pickLocalFile();
+                          if(typeof picked!=="string")return;
+                          const returnToOpenFile=!!ndiRoomSource && hasSource && sourceKind==="file" && picked===localFilePath;
+                          const sourceTurn=sourceSeqRef.current;
+                          await ndiInput.stop();
+                          if(sourceSeqRef.current!==sourceTurn)return;
+                          // This file never unmounted beneath the live picture.
+                          // Re-importing it resets its marks, captions and clock;
+                          // an explicit return only changes the room's source.
+                          if(!returnToOpenFile)await loadLocalPath(picked);
+                        })().catch(e=>pushNotification("error","Couldn't switch program source",formatError(e))); }}
+                        onClear={()=>{void ndiInput.stop().then(()=>handleClear()).catch(e=>pushNotification("error","Couldn't clear program source",formatError(e)));}}
                       />
                     )}
                     <div className="cp-room-head-actions">
@@ -4905,8 +5101,20 @@ export default function App() {
                       onShowMediaInfo={sourceKind === "file" && localFilePath ? () => setMediaInfoOpen(true) : undefined}
                     />
                   </div>
+                  {ndiPictureVisible && <NdiPreviewHeader sharing={privateInspectionVisible ? "private" : ndiProgram?.stopped || !ndiProgram ? "stopped" : "shared"}>
+                    {privateInspectionVisible && roomActive && ndiInput.snapshot.room?.presenting && <button type="button"
+                      className="btn cp-toolbar-disclosure cp-ndi-share-action" disabled={!ndiInput.canShare}
+                      aria-busy={ndiInput.snapshot.busy === "publishing"}
+                      onClick={() => shareOptions.find(option => option.key === "ndi-publish")?.onSelect()}>Share with room</button>}
+                    {privateInspectionVisible && roomActive && <button type="button" className="btn btn-ghost btn-compact" onClick={() => { setPreviewSelected(false); setNdiPanelOpen(false); }}>Return to room</button>}
+                    {privateInspectionVisible && !roomActive && hasSource && <button type="button" className="btn btn-ghost btn-compact" onClick={() => setPreviewSelected(false)}>Return to file</button>}
+                  </NdiPreviewHeader>}
                   <Monitor
                     ref={playerRef}
+                    pictureCovered={ndiPictureVisible || !!peerLiveStream}
+                    displayAspect={ndiPictureVisible && visibleNdiState.inputWidth >= 16 && visibleNdiState.inputHeight >= 16
+                      ? visibleNdiState.inputWidth / visibleNdiState.inputHeight : undefined}
+                    emptyActions={reviewStageActive && (coSession.role === "off" || (coSession.role === "host" && isPresenter)) ? <button type="button" className="btn btn-ghost" onClick={openPremiere}>Connect Premiere</button> : undefined}
                     status={status}
                     metadata={metadata}
                     errorDetail={errorDetail}
@@ -4926,7 +5134,7 @@ export default function App() {
                     resumeTitle={recentSources.length > 0 ? recentSources[0].title : null}
                     onResume={recentSources.length > 0 ? () => handleOpenRecentSource(recentSources[0]) : undefined}
                     /* First-run checklist card — null once done/dismissed. */
-                    onboarding={onboardingSteps ? {
+                    onboarding={!reviewStageActive && onboardingSteps ? {
                       steps: onboardingSteps,
                       onStep: handleOnboardingStep,
                       onDismiss: () => { saveOnboardingDismissed(); setOnboardingDismissed(true); },
@@ -4945,6 +5153,7 @@ export default function App() {
                     /* r122: cached copies play mediabunny-first (large files hang
                        native <video> over asset:// — same lesson as r107 locals). */
                     webCachedUseMediabunny={webCachedPlayer === "mediabunny"}
+                    presentationSource={webPlayback.presentationSource}
                     streamStartAt={webPlayback.streamStartAt}
                     disableScrubPreview={activeSourceUrl?.startsWith("peer://") ?? false}
                     /* "This stage is being recorded" - by me, or by whoever
@@ -4982,7 +5191,7 @@ export default function App() {
                     audioStreamUrl={webPlayback.audioUrl}
                     streamVideoCodec={webPlayback.videoCodec}
                     streamAudioCodec={webPlayback.audioCodec}
-                    initialVolume={muted ? 0 : volume}
+                    initialVolume={muted || privateInspectionVisible ? 0 : volume}
                     /* Prep banner is shared with local-file ffmpeg prep — OR the two
                        sources so the web download lights it up too. */
                     playbackPrepBusy={playbackPrepBusy || webPlayback.downloading}
@@ -5116,6 +5325,7 @@ export default function App() {
                     onToastDismiss={() => setToast(null)}
                     onPlayerTimeUpdate={onPlayerTimeUpdate}
                     onPlayerStateChange={onPlayerStateChange}
+                    onRepresentationChange={onRepresentationChange}
                     onPlayerReady={onPlayerReady}
                     onSurfaceClick={onPlayToggle}
                     /* On-video captions (the transport CC toggle). Driven by the
@@ -5123,7 +5333,7 @@ export default function App() {
                     transcriptPath={clipTxPath}
                     transcriptReloadToken={transcriptArrivedTick}
                     fps={fps}
-                    captionsOn={captionsOn}
+                    captionsOn={captionsOn && !peerLiveStream && !ndiPictureVisible}
                     /* User-tunable caption look (Settings → Captions). r82: no sync
                        offset — the audio-master clock keeps captions on the heard
                        audio across every path. */
@@ -5138,12 +5348,14 @@ export default function App() {
                     /* Review drawing annotations — draft while drawing, else the
                        saved one being viewed; with neither, Monitor's proximity
                        fade picks from the saved list as the playhead passes. */
-                    annotation={annStrokes}
-                    annotationDrawing={annDrawing}
-                    proximityAnnotations={!annDrawing && !annotationDisplay ? reviewAnnotations : undefined}
+                    annotation={ndiPictureVisible?null:annStrokes}
+                    annotationDrawing={annDrawing&&!ndiPictureVisible}
+                    proximityAnnotations={!peerLiveStream && !ndiPictureVisible && !annDrawing && !annotationDisplay
+                      ? reviewAnnotations.filter(item => hiddenDrawing?.source !== reviewSourceKey || item.time !== hiddenDrawing.time) : undefined}
                     onAnnotationChange={onReviewDraftChange}
                     annotationTime={annPinned ? annotationDisplayTime : null}
-                    onAnnotationDismiss={annPinned ? () => { setAnnotationDisplay(null); setAnnotationDisplayTime(null); } : undefined}
+                    onAnnotationDismiss={annPinned ? () => { setHiddenDrawing({ source: reviewSourceKey, time: annotationDisplayTime }); setAnnotationDisplay(null); setAnnotationDisplayTime(null); } : undefined}
+                    onAnnotationRelease={() => { setAnnotationDisplay(null); setAnnotationDisplayTime(null); }}
                     annotationLabelMode={annDrawing && reviewLabelMode}
                     annotationLabelColor={annLabelColor}
                     /* Reactions belong ON the picture. This used to be a
@@ -5152,25 +5364,33 @@ export default function App() {
                        resolved against an ancestor spanning the whole column
                        and a clap surfaced over the timecode field instead of
                        over the video. */
-                    stageOverlay={roomActive ? (
-                      <>
+                    stageOverlay={roomActive || !!ndiProgram || !!ndiRoomSource || !!ndiInput.previewProgram ? (
+                      <div className="cp-review-program-overlay" hidden={!reviewStageActive}>
                         {/* Under the reactions: an emoji thrown at a live view
                             should land on it, not behind it. */}
-                        {peerLiveStream && (
-                          <PeerStageVideo stream={peerLiveStream.stream} who={peerLiveStream.who} />
+                        <ReviewProgramSurfaces ref={ndiMonitorRef} program={ndiProgram} state={ndiInput.state}
+                          previewProgram={ndiInput.previewProgram} previewState={ndiInput.previewState}
+                          previewVisible={privateInspectionVisible} active={reviewStageActive}
+                          onRecoveryChange={setNdiRecovery}
+                          roomAudio={{muted:programMuted,volume:programVolume}} previewAudio={{muted:previewMuted,volume:previewVolume}}
+                          onFrameDecoded={ndiInput.frameDecoded} onPictureFailed={ndiInput.pictureFailed}
+                          onPreviewFrameDecoded={ndiInput.previewFrameDecoded} onPreviewPictureFailed={ndiInput.previewPictureFailed} />
+                        {!privateInspectionVisible && !ndiProgram && !ndiRoomSource && peerLiveStream && (
+                          <PeerStageVideo stream={peerLiveStream.stream} who={peerLiveStream.who}
+                            ownerId={peerLiveStream.ownerId} readDiagnostics={readProgramDiagnostics} />
                         )}
                         {/* The room's live marks, fading. Always mounted in a
                             session so a peer's stroke appears whether or not
                             I am holding the pen. */}
-                        <LiveDrawLayer
+                        {roomActive && !ndiInput.reviewBlocked && !privateInspectionVisible && <LiveDrawLayer
                           state={liveDraw}
                           fadeSec={defaults.liveDrawFadeSec}
                           onExpire={pruneLiveDraw}
-                        />
+                        />}
                         {/* My pen. `annotation={null}` is what makes this
                             ephemeral: there is no draft to accumulate into, so
                             each finished stroke is relayed and dropped. */}
-                        {liveDrawOn && (
+                        {roomActive && liveDrawOn && !ndiInput.reviewBlocked && !privateInspectionVisible && (
                           <AnnotationOverlay
                             annotation={null}
                             drawing
@@ -5181,11 +5401,14 @@ export default function App() {
                             })}
                           />
                         )}
-                        <ReactionLayer />
-                      </>
+                        {roomActive && !privateInspectionVisible && <ReactionLayer />}
+                      </div>
                     ) : null}
                   />
                   <Transport
+                    liveController={ndiPictureVisible?"premiere":"presenter"}
+                    liveInput={(ndiPictureVisible ? visibleNdiName : undefined) ?? (peerLiveStream ? `${peerLiveStream.who}'s shared picture` : undefined)}
+                    sourceControls={reviewStageActive && (canManageNdiSource || ndiPictureVisible) ? <button ref={connectPremiereRef} type="button" className="cp-icon-btn cp-connect-premiere" title="NDI settings" aria-label="NDI settings" aria-haspopup="dialog" aria-expanded={ndiPanelOpen} aria-controls={NDI_INPUT_PANEL_ID} onKeyDown={event => { if (event.key === " ") event.stopPropagation(); }} onClick={() => { if (ndiPictureVisible) { setNdiPanelOpen(true); setNdiRefreshRequest(n => n + 1); } else openPremiere(); }}><IconSettings size={16} /></button> : undefined}
                     status={status}
                     isPlaying={isPlaying}
                     fps={fps}
@@ -5195,8 +5418,8 @@ export default function App() {
                     captionsOn={captionsActive}
                     snapshotBusy={snapshotBusy}
                     canSnapshot={status === "loaded" || status === "exporting" || status === "success"}
-                    volume={volume}
-                    muted={muted}
+                    volume={privateInspectionVisible ? previewVolume : ndiPictureVisible ? programVolume : volume}
+                    muted={privateInspectionVisible ? previewMuted : ndiPictureVisible ? programMuted : muted}
                     playbackRate={playbackRate}
                     playbackRateSupported={rateSupported}
                     onPlayToggle={onPlayToggle}
@@ -5206,8 +5429,8 @@ export default function App() {
                     onClearMarks={onClearMarks}
                     onToggleCaptions={onToggleCaptions}
                     onSnapshot={handleSnapshot}
-                    onVolumeChange={handleVolumeChange}
-                    onMutedChange={handleMutedChange}
+                    onVolumeChange={privateInspectionVisible ? setPreviewVolume : ndiPictureVisible ? setProgramVolume : handleVolumeChange}
+                    onMutedChange={privateInspectionVisible ? setPreviewMuted : ndiPictureVisible ? setProgramMuted : handleMutedChange}
                     onPlaybackRateChange={handlePlaybackRateChange}
                     roomControls={roomActive ? (
                       <RoomControlBar
@@ -5239,7 +5462,9 @@ export default function App() {
                       />
                     ) : undefined}
                   />
-                  <Timeline
+                  {ndiPictureVisible ? <div className="cp-timeline cp-timeline-live" role="region" aria-label="Live timeline" aria-disabled="true" style={{height:timelineHeightRef.current}}>
+                  </div> : !peerLiveStream && <Timeline
+                    onHeightChange={rememberTimelineHeight}
                     status={status}
                     durationFrames={durationFrames}
                     inFrames={inFrames}
@@ -5283,7 +5508,10 @@ export default function App() {
                     waveformOn={waveformVisible}
                     speakerLanes={speakerLaneData}
                     onSeek={onSeek}
-                  />
+                    onScrubStart={onScrubStart}
+                    onScrub={onScrub}
+                    onScrubEnd={onScrubEnd}
+                  />}
                   {/* Status line under the timeline (9a): the no-marks helper
                       shows ONLY with no marks and an empty queue; a completed
                       selection (or a queued no-marks state) renders NOTHING -
@@ -5295,6 +5523,13 @@ export default function App() {
                       active
                       strip
                       participants={theaterParticipants}
+                      presenter={coSession.presenter}
+                      canGrantPresenter={coSession.role === "host"}
+                      onMakePresenter={makePresenter}
+                      selfCamOff={capture.choice.cameraOff}
+                      selfMicMuted={capture.choice.micMuted}
+                      onToggleCam={() => capture.setEnabled("video", capture.choice.cameraOff)}
+                      onToggleMic={() => capture.setEnabled("audio", capture.choice.micMuted)}
                       remoteStreams={meshStreams}
                       peerStates={meshStates}
                       mutedForMe={meshMutedForMe}
@@ -5306,7 +5541,7 @@ export default function App() {
                       raisedHands={raisedHands}
                     />
                   )}
-                  {!roomActive && (() => {
+                  {!roomActive && !ndiPictureVisible && (() => {
                     const content =
                       (status === "loaded" || status === "success")
                         ? (inFrames == null && outFrames == null
@@ -5373,20 +5608,27 @@ export default function App() {
                   fires `panel:closed` → setPanelDetached(false)). */}
               {/* The room's review rail overrides detachment - a session
                   with no review panel is a session you can't comment in. */}
-              {(roomActive || !panelDetached) && <QueueDrawer
+              <NdiInputPanel input={ndiInput} open={reviewStageActive && ndiPanelOpen} onClose={closePremiere} refreshRequest={ndiRefreshRequest}
+                returnFocus={connectPremiereRef}
+                recovery={ndiRecovery} canManageSource={canManageNdiSource} previewVisible={privateInspectionVisible}
+                onPreviewRequested={() => { setPreviewSelected(true); setPreviewMuted(false); if (previewVolume === 0) setPreviewVolume(1); }}
+                onCompanionSetup={() => { closePremiere(); setSettingsInitialTab("integrations"); setSettingsOpen(true); }}
+                onReconnectPicture={() => ndiMonitorRef.current?.retryVisible()}
+                onShared={() => { setProgramMuted(previewMuted); setProgramVolume(previewVolume); setPreviewSelected(false); stopShare(); stopViewerShare(); }} />
+              <div className="cp-review-notes-shell" hidden={reviewSetupMode && (!premiereToolsVisible || reviewLobbyOpen)}>
+              {(reviewStageActive || !panelDetached) && <QueueDrawer
             outboxDepth={outboxDepth}
                 onUndo={performUndo}
                 onRedo={performRedo}
                 onGrabFace={grabFaceFromFrame}
-                open={roomActive ? true : queueOpen}
+                open={roomActive || premiereToolsVisible ? true : queueOpen}
                 /* Clip is keep-alive, so this subtree stays mounted on Home /
-                   Library. `|| roomActive` is load-bearing: room.css un-hides
-                   the Clip view during a session while activeView is
-                   "coreview", and the review rail there is genuinely visible. */
-                viewActive={activeView === "clip" || roomActive}
-                roomFace={roomActive}
+                   Library. The shared stage is explicitly visible in a room,
+                   and its review rail is genuinely active there. */
+                viewActive={activeView === "clip" || roomActive || (premiereToolsVisible && !reviewLobbyOpen)}
+                roomFace={roomActive || premiereToolsVisible}
                 focusItem={queueFocusItem}
-                onClose={() => setQueueOpenChoice(false)}
+                onClose={() => { if (premiereToolsVisible && !roomActive) setReviewLobbyOpen(true); else setQueueOpenChoice(false); }}
                 onPopOut={handlePopOutPanel}
                 queue={clipQueue}
                 fps={fps}
@@ -5404,9 +5646,9 @@ export default function App() {
                 onRenameClip={handleQueueRename}
                 onReorderQueue={handleQueueReorder}
                 onRenameAll={handleQueueRenameAll}
-                transcriptPath={clipTxPath}
+                transcriptPath={ndiPictureVisible ? null : clipTxPath}
                 transcriptOrigin={activeTranscript?.origin ?? "unknown"}
-                playheadAvailable={hasSource}
+                playheadAvailable={hasSource && !ndiPictureVisible}
                 transcriptFps={fps}
                 sourceStartTimecode={clipStartTc}
                 onSetSourceTimecode={clipSourceKey ? (tc) => {
@@ -5425,13 +5667,13 @@ export default function App() {
                 onLoadFromHistory={handleLoadFromHistory}
                 onRegenerateTranscript={handleGenerateTranscript}
                 regenerateBusy={transcriptState === "running"}
-                canRegenerate={hasSource && (defaults.transcriptionEngine === "parakeet" || !!selectedModel?.downloaded)}
+                canRegenerate={!ndiPictureVisible && hasSource && (defaults.transcriptionEngine === "parakeet" || !!selectedModel?.downloaded)}
                 onRedetectSpeakers={() => { void handleRediarize(); }}
-                canRedetect={hasSource && !!activeTranscript}
+                canRedetect={!ndiPictureVisible && hasSource && !!activeTranscript}
                 onImportTranscript={handleImportTranscript}
                 sourceKind={sourceKind}
                 onFixCaptionTiming={handleFixCaptionTiming}
-                transcriptHasSource={hasSource}
+                transcriptHasSource={hasSource && !ndiPictureVisible}
                 /* Inline cue editing rewrote the SRT in place — the arrived tick is
                    the existing "same path, new contents" signal (see the speaker-
                    lanes effect), so every reader of the file re-reads: the caption
@@ -5440,11 +5682,12 @@ export default function App() {
                 aiModelId={defaults.llmSummarizationModel}
                 aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
                 onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
-                chapterSourceKey={reviewSourceKey}
-                sourceDescription={metadata?.description ?? null}
-                chapterDurationSec={sourceDurationSec}
-                reviewSourceKey={reviewSourceKey}
-                reviewSourceTitle={metadata?.title ?? null}
+                chapterSourceKey={ndiPictureVisible ? null : reviewSourceKey}
+                sourceDescription={ndiPictureVisible ? null : metadata?.description ?? null}
+                chapterDurationSec={ndiPictureVisible ? null : sourceDurationSec}
+                reviewSourceKey={privateReviewProgram?.reviewKey ?? reviewSourceKey}
+                reviewSourceTitle={privateReviewProgram?.name ?? ndiProgram?.name ?? metadata?.title ?? null}
+                reviewSession={reviewSession}
                 reviewDrawActive={reviewDrawActive}
                 reviewDraft={reviewDraft}
                 onToggleReviewDraw={() => {
@@ -5491,13 +5734,10 @@ export default function App() {
                 /* Set the draft ASIDE rather than dropping it - see stashDraft.
                    Looking at what someone else drew is not a decision to throw
                    away what you were drawing. */
-                onShowAnnotation={(a, color, time) => { stashDraft(); setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); setAnnotationDisplayTime(time ?? null); }}
                 onOpenReviewSource={handleOpenReviewSource}
-                onReviewLinkAsVersion={sourceKind === "file" ? linkAsReviewVersion : undefined}
-                onReviewUnlinkVersion={sourceKind === "file" ? unlinkReviewVersion : undefined}
-                reviewSourcePath={sourceKind === "file" ? localFilePath : null}
-                onReviewRangeDraft={setReviewRangeDraft}
-                onRegisterRangeHotkeys={registerReviewRangeKeys}
+                onReviewLinkAsVersion={!ndiPictureVisible && sourceKind === "file" ? linkAsReviewVersion : undefined}
+                onReviewUnlinkVersion={!ndiPictureVisible && sourceKind === "file" ? unlinkReviewVersion : undefined}
+                reviewSourcePath={!ndiPictureVisible && sourceKind === "file" ? localFilePath : null}
                 reviewSessionActive={coSessionActive}
                 // "The room cleared the source" and "the snapshot has not
                 // arrived yet" are both "in a session with no doc". Only one
@@ -5506,32 +5746,26 @@ export default function App() {
                 reviewSessionDoc={sessionDoc}
                 onReviewSessionOp={postSessionOp}
               />}
+              </div>
+              <aside className="cp-review-tools" hidden={!reviewStageActive || roomActive || (premiereToolsVisible && !reviewLobbyOpen)}>
+                <div ref={coreviewViewRef} tabIndex={-1} className="cp-view-coreview" hidden={roomActive}>
+                  <CoReviewLobby session={coSession} localSource={coLocalSourceLoaded} participants={theaterParticipants}
+                    onStart={title => { void startCoReview(title); }} onJoin={joinCoReview} onLeave={leaveCoReview}
+                    initialCode={pendingJoinCode} onInitialCodeUsed={clearPendingJoinCode} defaultTitle={sessionDefaultTitle}
+                    premierePreviewName={ndiInput.previewProgram?.name ?? null} premierePreviewStatus={previewStatus}
+                    onConnectPremiere={openPremiere}
+                    onOpenSessionHistory={() => { setSessionsRequestTick(n => n + 1); navigateView("library"); }} />
+                </div>
+              </aside>
             </div>
-          </div>
-          {/* Co-Review — a first-class lobby over the SAME useCoReview state
-              the toolbar popover reads (both surfaces stay in sync by
-              construction). Kept-alive like the others: [hidden] when inactive
-              so the session/listeners beneath are never torn down. "Enter
-              theater" lands on Clip with theater on (the theater overlays the
-              Clip player). */}
-          <div ref={coreviewViewRef} tabIndex={-1} className="cp-view cp-view-coreview" hidden={activeView !== "coreview"}>
-            <CoReviewLobby
-              session={coSession}
-              localSource={coLocalSourceLoaded}
-              participants={theaterParticipants}
-              onStart={(title) => { void startCoReview(title); }}
-              onJoin={joinCoReview}
-              onLeave={leaveCoReview}
-              initialCode={pendingJoinCode}
-              onInitialCodeUsed={clearPendingJoinCode}
-              defaultTitle={sessionDefaultTitle}
-            />
           </div>
         </div>
       </div>
 
+
       <SettingsModal
         open={settingsOpen}
+        ndiTelemetry={privateInspectionVisible ? ndiInput.previewState : ndiInput.state}
         onClose={() => { setSettingsOpen(false); setSettingsInitialTab("general"); refreshWhisperModels(); }}
         /* Cache files the CURRENT session plays from — Clear cache must not
            delete the video/audio that's on screen right now. Their jobs have

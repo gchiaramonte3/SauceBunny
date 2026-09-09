@@ -37,6 +37,8 @@ import { formatError } from "../lib/error-format";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { YouTubeSettings } from "./YouTubeSettings";
 import { AiApiSettings } from "./AiApiSettings";
+import { NdiAttribution, PremiereSetup } from "./PremiereSetup";
+import type { NdiTelemetry } from "../bindings/NdiTelemetry";
 import { useModalFocus } from "../hooks/use-modal-focus";
 import { formatBytes } from "../lib/library";
 import logoUrl from "../assets/saucebunny.svg";
@@ -50,7 +52,7 @@ import { newJobId } from "../lib/job-id";
 import { DEFAULT_STUN_URL } from "../lib/ice-servers";
 import { clearHidden as clearHiddenLibrary, hiddenCount as hiddenLibraryCount } from "../lib/library-hidden";
 
-type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "ai-apis" | "commands" | "about" | "credits";
+type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "ai-apis" | "integrations" | "commands" | "about" | "credits";
 
 export type Defaults = {
   folder: string | null;
@@ -103,21 +105,11 @@ export type Defaults = {
    */
   useWebCodecsDecoder: boolean;
   /**
-   * When true, web sources (YouTube/etc.) try the INSTANT MSE stream
-   * preview (loopback proxy + ffmpeg fMP4 remux) for fastest time-to-play.
-   * Default OFF (r70): the reliable default downloads the file to cache
-   * first, then plays it natively (full audio, instant native scrub, no
-   * MSE fragility). Opt in only if you want fastest playback and accept
-   * that live web streaming is less reliable than download-first.
+   * How ordinary web VODs become reviewable. The default downloads a small,
+   * seekable copy before enabling transport; instant-stream retains the old
+   * FFmpeg/MSE path as an explicitly experimental fast-start option.
    */
-  streamPreview: boolean;
-  /**
-   * One-shot flag: true once the r72 "hybrid is the default" migration has
-   * forced `streamPreview` on for an existing install (which may have saved
-   * the old download-first default). After it latches, the user's own
-   * toggle is honoured. New installs start migrated.
-   */
-  hybridMigrated: boolean;
+  webLoadMode: "downloaded-proxy" | "instant-stream";
   /**
    * Browser to pull YouTube cookies from for yt-dlp's --cookies-from-
    * browser flag. Required for any video YouTube has gated behind "Sign
@@ -234,6 +226,7 @@ type Props = {
   onApplyToCurrent?: (patch: Partial<ExportOpts>) => void;
   /** Optional initial tab to open on. */
   initialTab?: TabId;
+  ndiTelemetry?: NdiTelemetry;
   /**
    * Full registry of palette commands, threaded down from App so the
    * Commands tab can render the same list users see in ⌘K. The tab
@@ -258,6 +251,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "transcription", label: "Transcription" },
   { id: "ai-summary",    label: "AI Summary" },
   { id: "ai-apis",       label: "AI APIs" },
+  { id: "integrations",  label: "Integrations" },
   { id: "commands",      label: "Shortcuts" },
   { id: "about",         label: "About" },
   { id: "credits",       label: "Open source" },
@@ -1115,7 +1109,7 @@ export function SettingsModal(props: Props) {
                   <div className="cp-pane-row">
                     <div className="k">
                       TURN relay
-                      <span className="desc">Optional. Webcams connect direct or via STUN; a TURN server helps strict networks. Empty uses STUN only. The password is stored in the macOS Keychain and never included in settings exports.</span>
+                      <span className="desc">Optional. Webcams connect direct or via STUN; a TURN server helps strict networks. Empty uses STUN only. Network changes apply when you next join a session. The password is stored in the macOS Keychain and never included in settings exports.</span>
                     </div>
                     <div className="v" style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 320 }}>
                       <input className="cp-input" aria-label="TURN relay URL" placeholder="turn:host:3478" value={defaults.turnUrl}
@@ -1170,16 +1164,16 @@ export function SettingsModal(props: Props) {
                 <CollapsibleSection id="gen-web-playback" label="Web playback" open={sectionOpen("gen-web-playback")} onToggle={() => toggleSection("gen-web-playback")}>
                   <div className="cp-pane-row">
                     <div className="k">
-                      Stream while you watch
-                      <span className="desc">On (default): stream instantly and mark in/out without waiting; export downloads only the marked clip, and a failed stream falls back to downloading. Off: download the full video before playing (slower, most reliable on flaky connections).</span>
+                      Instant web streaming (experimental)
+                      <span className="desc">Off (recommended): download a 480p review copy first for dependable, frame-accurate scrubbing. High-resolution presentation and exports are resolved independently. On: begin streaming immediately through the compatibility player; seeking may rebuild the stream.</span>
                     </div>
                     <div className="v">
                       <button
-                        className={"cp-toggle-switch" + (defaults.streamPreview ? " on" : "")}
+                        className={"cp-toggle-switch" + (defaults.webLoadMode === "instant-stream" ? " on" : "")}
                 role="switch"
-                aria-checked={defaults.streamPreview}
-                aria-label="Stream while you watch"
-                        onClick={() => setDefaults({ ...defaults, streamPreview: !defaults.streamPreview })}
+                aria-checked={defaults.webLoadMode === "instant-stream"}
+                aria-label="Instant web streaming"
+                        onClick={() => setDefaults({ ...defaults, webLoadMode: defaults.webLoadMode === "instant-stream" ? "downloaded-proxy" : "instant-stream" })}
                       />
                     </div>
                   </div>
@@ -1995,6 +1989,7 @@ export function SettingsModal(props: Props) {
             )}
 
             {tab === "ai-apis" && <AiApiSettings />}
+            {tab === "integrations" && <PremiereSetup telemetry={props.ndiTelemetry} />}
 
             {tab === "commands" && (
               <section>
@@ -2149,9 +2144,12 @@ export function SettingsModal(props: Props) {
                   mediabunny. All of it runs locally. No telemetry, ever. The app
                   reaches the network only when you ask it to: the web source you fetch, the thumbnail URL
                   when you save or copy a poster, HuggingFace when you download a Whisper model, GitHub when
-                  you check for an update, a live co-review session with a peer, and a cloud model only if
+                  you check for an update, local NDI discovery and input when you enable Premiere,
+                  a live co-review session with a peer, and a cloud model only if
                   you have added your own API key under AI APIs.
                 </p>
+
+                <NdiAttribution />
 
                 {/* A pointer, not a second copy of the list. The credits get
                     their own tab because twelve projects with sponsor links
@@ -2418,5 +2416,3 @@ function CacheControls({ excludePaths, capGb, clearOnQuit, onRetentionChange }: 
     </div>
   );
 }
-
-

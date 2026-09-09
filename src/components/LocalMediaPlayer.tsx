@@ -1,9 +1,9 @@
 import {
-  forwardRef, memo, useEffect, useImperativeHandle, useRef, useState,
+  forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
 import { assetUrl } from "../lib/asset-url";
 import { BunnyMark } from "./BunnyMark";
-import type { PlayerHandle } from "./player-handle";
+import type { PlayerHandle, SeekResult } from "./player-handle";
 
 type Props = {
   path: string;
@@ -73,16 +73,11 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   // User's persistent playback speed (Transport speed picker). The shuttle
   // temporarily owns `playbackRate`; every shuttle exit restores THIS value.
   const userRateRef = useRef(1);
-  // Scrub hardening: while the playhead is being dragged we pause the element
-  // so continuous playback can't fight the seek, then resume once seeks settle.
-  // (The streaming player has had this since r66; the local <video> never did,
-  // which is why local scrubbing stuttered/stalled on WKWebView.)
+  // Scrub hardening: the timeline explicitly opens/closes this gesture. The
+  // player never guesses from a quiet period between seek calls.
   const scrubbingRef = useRef(false);
   const wasPlayingRef = useRef(false);
-  const settleTimerRef = useRef(0);
-  /** Exact target of the newest seek; the settle re-seeks to it precisely
-   *  after fastSeek keyframe previews. */
-  const lastSeekTargetRef = useRef(0);
+  const seekGenerationRef = useRef(0);
   const retriedLoadRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -101,6 +96,92 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   onErrorRef.current = onError;
   const onPlayStateChangeRef = useRef(onPlayStateChange);
   onPlayStateChangeRef.current = onPlayStateChange;
+
+  const clampTarget = useCallback((seconds: number) => {
+    const el = mediaRef.current;
+    const duration = el?.duration;
+    return Math.max(0, duration && isFinite(duration) ? Math.min(duration, seconds) : seconds);
+  }, []);
+
+  /** Resolve from a decoded-frame callback where available. `seeked` is the
+   * compatibility fallback; the bounded timeout reports unavailable rather
+   * than allowing a co-review command to remain pending forever. */
+  const seekExact = useCallback((seconds: number): Promise<SeekResult> => {
+    const el = mediaRef.current;
+    const target = clampTarget(seconds);
+    const generation = ++seekGenerationRef.current;
+    if (!el) return Promise.resolve({ requestedSeconds: target, presentedSeconds: target, status: "unavailable" });
+    onTimeUpdateRef.current?.(target);
+    try { el.currentTime = target; }
+    catch { return Promise.resolve({ requestedSeconds: target, presentedSeconds: el.currentTime || 0, status: "unavailable" }); }
+
+    return new Promise<SeekResult>((resolve) => {
+      let finished = false;
+      let frameId = 0;
+      const video = el instanceof HTMLVideoElement ? el as HTMLVideoElement & {
+        requestVideoFrameCallback?: (cb: (_now: number, meta: { mediaTime: number }) => void) => number;
+        cancelVideoFrameCallback?: (id: number) => void;
+      } : null;
+      const finish = (status: SeekResult["status"], presented = el.currentTime || target) => {
+        if (finished) return;
+        finished = true;
+        window.clearTimeout(timeout);
+        el.removeEventListener("seeked", onSeeked);
+        if (frameId && video?.cancelVideoFrameCallback) video.cancelVideoFrameCallback(frameId);
+        resolve({ requestedSeconds: target, presentedSeconds: presented, status });
+      };
+      const onSeeked = () => {
+        if (generation !== seekGenerationRef.current) { finish("superseded"); return; }
+        if (video?.requestVideoFrameCallback) {
+          frameId = video.requestVideoFrameCallback((_now, meta) => finish("presented", meta.mediaTime));
+        } else finish("presented");
+      };
+      const timeout = window.setTimeout(() => finish(
+        generation === seekGenerationRef.current ? "unavailable" : "superseded",
+      ), 2500);
+      el.addEventListener("seeked", onSeeked, { once: true });
+      // jsdom and a few already-landed WebKit paths do not emit seeked for a
+      // zero-distance request. A decoded current frame is already confirmed.
+      if (!el.seeking && Math.abs(el.currentTime - target) < 0.001 && el.readyState >= 2) {
+        queueMicrotask(onSeeked);
+      }
+    });
+  }, [clampTarget]);
+
+  const beginScrub = useCallback(() => {
+    if (scrubbingRef.current) return;
+    const el = mediaRef.current;
+    scrubbingRef.current = true;
+    wasPlayingRef.current = !!el && !el.paused;
+    if (el && !el.paused) { try { el.pause(); } catch { /* ignore */ } }
+  }, []);
+
+  const scrubTo = useCallback((seconds: number) => {
+    const el = mediaRef.current;
+    if (!el) return;
+    if (!scrubbingRef.current) beginScrub();
+    const target = clampTarget(seconds);
+    onTimeUpdateRef.current?.(target);
+    const fast = (el as HTMLMediaElement & { fastSeek?: (t: number) => void }).fastSeek;
+    try { fast ? fast.call(el, target) : (el.currentTime = target); }
+    catch { try { el.currentTime = target; } catch { /* ignore */ } }
+  }, [beginScrub, clampTarget]);
+
+  const endScrub = useCallback(async (seconds: number): Promise<SeekResult> => {
+    const resume = wasPlayingRef.current;
+    wasPlayingRef.current = false;
+    const result = await seekExact(seconds);
+    scrubbingRef.current = false;
+    if (resume && result.status !== "superseded") {
+      mediaRef.current?.play().catch(() => { /* gesture may have been cancelled */ });
+    } else if (!resume) {
+      playingRef.current = false;
+      setIsPlaying(false);
+      onPlayStateChangeRef.current?.(false);
+    }
+    return result;
+  }, [seekExact]);
+
   useImperativeHandle(ref, () => ({
     // The element a live session captures to show a peer what the
     // presenter is watching. See lib/viewer-capture.ts.
@@ -108,9 +189,9 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     play: () => {
       const el = mediaRef.current;
       if (!el) return;
-      // Explicit play cancels any pending scrub-resume so it can't double-fire.
+      // Explicit play supersedes any active scrub landing.
       scrubbingRef.current = false;
-      if (settleTimerRef.current) { window.clearTimeout(settleTimerRef.current); settleTimerRef.current = 0; }
+      wasPlayingRef.current = false;
       el.play().catch((err) => {
         // AbortError → benign: a pause()/src change interrupted the pending
         // play() per spec (scrub gestures do this constantly). Reporting it
@@ -125,7 +206,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       // Explicit pause cancels the scrub-resume so we don't restart playback.
       scrubbingRef.current = false;
       wasPlayingRef.current = false;
-      if (settleTimerRef.current) { window.clearTimeout(settleTimerRef.current); settleTimerRef.current = 0; }
+      seekGenerationRef.current++;
       const el = mediaRef.current;
       const alreadyPaused = !el || el.paused;
       el?.pause();
@@ -138,54 +219,10 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
         onPlayStateChangeRef.current?.(false);
       }
     },
-    seekTo: (s) => {
-      const el = mediaRef.current;
-      if (!el) return;
-      const target = Math.max(0, s);
-      // First seek of a drag opens a scrub window: pause so playback can't
-      // race the playhead. Each subsequent seek just resets the settle timer;
-      // we resume (only if we were playing) once seeks stop arriving. The
-      // paused <video> still repaints the frame at each currentTime, so the
-      // drag previews frame-by-frame instead of fighting the decoder.
-      const gestureStart = !scrubbingRef.current;
-      if (gestureStart) {
-        scrubbingRef.current = true;
-        wasPlayingRef.current = !el.paused;
-        if (!el.paused) { try { el.pause(); } catch { /* ignore */ } }
-      }
-      // Mid-drag seeks use fastSeek when the engine has it: WebKit lands on
-      // the nearest keyframe without the exact-frame walk, so long-GOP files
-      // preview at drag speed. The settle below re-seeks EXACTLY (plain
-      // currentTime) once the hand rests, so precision is unchanged.
-      const canFastSeek = typeof (el as HTMLMediaElement & { fastSeek?: (t: number) => void }).fastSeek === "function";
-      if (!gestureStart && canFastSeek) {
-        try { (el as HTMLMediaElement & { fastSeek: (t: number) => void }).fastSeek(target); }
-        catch { el.currentTime = target; }
-      } else {
-        el.currentTime = target;
-      }
-      // One line per GESTURE, not per seek. A drag fires this once per vsync and
-      // every log line is App state, so this was a full App re-render per drag
-      // frame — the one thing on the scrub path that still re-rendered the tree.
-      // A click-to-seek is a gesture of one, so it still logs exactly as before.
-      if (gestureStart) {
-        onDiagRef.current?.("info",
-          `seek → ${target.toFixed(1)}s (file duration ${(el.duration || 0).toFixed(1)}s, landed ${el.currentTime.toFixed(1)}s)`);
-      }
-      lastSeekTargetRef.current = target;
-      if (settleTimerRef.current) window.clearTimeout(settleTimerRef.current);
-      settleTimerRef.current = window.setTimeout(() => {
-        settleTimerRef.current = 0;
-        scrubbingRef.current = false;
-        const m = mediaRef.current;
-        // fastSeek previews land on keyframes; the gesture's RESTING frame
-        // must be exact, so re-seek precisely before resuming.
-        if (m && Math.abs(m.currentTime - lastSeekTargetRef.current) > 0.001) {
-          try { m.currentTime = lastSeekTargetRef.current; } catch { /* ignore */ }
-        }
-        if (wasPlayingRef.current) mediaRef.current?.play().catch(() => { /* ignore */ });
-      }, 200);
-    },
+    seekTo: seekExact,
+    beginScrub,
+    scrubTo,
+    endScrub,
     getCurrentTime: () => mediaRef.current?.currentTime ?? 0,
     getDuration: () => mediaRef.current?.duration ?? 0,
     isReady: () => readyRef.current,
@@ -263,7 +300,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       };
       shuttleRafRef.current = requestAnimationFrame(tick);
     },
-  }), []);
+  }), [beginScrub, endScrub, scrubTo, seekExact]);
 
   useEffect(() => {
     const el = mediaRef.current;
@@ -362,7 +399,6 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
       if (shuttleRafRef.current) { cancelAnimationFrame(shuttleRafRef.current); shuttleRafRef.current = 0; }
-      if (settleTimerRef.current) { window.clearTimeout(settleTimerRef.current); settleTimerRef.current = 0; }
       shuttleRateRef.current = 0;
       // Mid-shuttle source swap: give the element back its pre-shuttle audio.
       if (preShuttleMutedRef.current != null) { el.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }

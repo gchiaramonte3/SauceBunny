@@ -534,7 +534,16 @@ pub fn create_transcript_folder(library_path: String, name: String) -> Result<St
 /// entries are skipped: `.DS_Store` is a file, but a stray dot-directory is
 /// not something anybody made here.
 #[tauri::command]
-pub fn list_transcript_folders(library_path: String) -> Result<Vec<String>, crate::AppError> {
+pub async fn list_transcript_folders(library_path: String) -> Result<Vec<String>, crate::AppError> {
+    // This runs during application startup. A cloud-backed or unavailable
+    // volume can block read_dir indefinitely; never pin the macOS UI thread
+    // (or an async executor worker) while waiting for that filesystem.
+    tokio::task::spawn_blocking(move || list_transcript_folders_sync(&library_path))
+        .await
+        .map_err(|e| crate::AppError::internal(format!("Transcript folder scan task failed: {e}")))?
+}
+
+fn list_transcript_folders_sync(library_path: &str) -> Result<Vec<String>, crate::AppError> {
     let root = PathBuf::from(&library_path);
     let Ok(entries) = std::fs::read_dir(&root) else {
         // A library that does not exist yet is not an error — it is a fresh
@@ -1207,8 +1216,8 @@ mod tests {
 
     // ---- project folders -------------------------------------------------
 
-    #[test]
-    fn lists_folders_that_hold_no_transcripts() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn lists_folders_that_hold_no_transcripts() {
         // The bug this command exists for: the panel derived its folder list
         // from the transcript SCAN, so a project only existed once something
         // was filed in it - and New Project, which creates an empty one, did
@@ -1217,32 +1226,32 @@ mod tests {
         std::fs::create_dir(t.path().join("Empty Project")).unwrap();
         std::fs::create_dir(t.path().join("Has Work")).unwrap();
         std::fs::write(t.path().join("Has Work/a.srt"), "x").unwrap();
-        let got = list_transcript_folders(t.path().to_string_lossy().into()).unwrap();
+        let got = list_transcript_folders(t.path().to_string_lossy().into()).await.unwrap();
         assert_eq!(got, vec!["Empty Project", "Has Work"]);
     }
 
-    #[test]
-    fn lists_no_files_and_no_dotfolders() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn lists_no_files_and_no_dotfolders() {
         let t = TempTree::new("list-filter");
         std::fs::create_dir(t.path().join("Show")).unwrap();
         std::fs::create_dir(t.path().join(".hidden")).unwrap();
         std::fs::write(t.path().join("loose.srt"), "x").unwrap();
         std::fs::write(t.path().join(".DS_Store"), "x").unwrap();
         assert_eq!(
-            list_transcript_folders(t.path().to_string_lossy().into()).unwrap(),
+            list_transcript_folders(t.path().to_string_lossy().into()).await.unwrap(),
             vec!["Show"],
         );
     }
 
-    #[test]
-    fn a_library_that_does_not_exist_yet_is_not_an_error() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_library_that_does_not_exist_yet_is_not_an_error() {
         // First run: the folder is created lazily. Returning Err here would
         // surface a scary message on an empty install, and the honest answer
         // is that there are no folders.
         let t = TempTree::new("list-missing");
         let missing = t.path().join("not-created-yet");
         assert_eq!(
-            list_transcript_folders(missing.to_string_lossy().into()).unwrap(),
+            list_transcript_folders(missing.to_string_lossy().into()).await.unwrap(),
             Vec::<String>::new(),
         );
     }

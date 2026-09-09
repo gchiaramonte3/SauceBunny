@@ -18,6 +18,7 @@
 
 import { loadJson, saveJson } from "./storage";
 import { getReviewDoc, putReviewDoc } from "./review-store";
+import { PREMIERE_ROOM_MARKERS_ENABLED } from "./premiere-permissions";
 import { secondsToHms } from "./timecode";
 import { pathKey } from "./repath";
 
@@ -140,6 +141,13 @@ export type ReviewComment = {
    */
   sessionId?: string;
   segmentId?: string;
+  /** Explicit undo of a deletion; ordinary replayed adds never clear tombstones. */
+  restoredAt?: number;
+  revision?: number;
+  /** Absent on existing, verified file notes. Live timestamps are never source seconds. */
+  timing?: { kind: "general" | "manual"; sourceId: string; pass: string; timecode?: string };
+  /** Explicit marker intent. Optional/additive; never inferred from a live clock. */
+  premiere?: import("../bindings/PremiereAnchor").PremiereAnchor;
 };
 
 export type ReviewVersion = {
@@ -185,6 +193,14 @@ export type ReviewDoc = {
    * than the only copy.
    */
   fingerprints?: string[];
+  /** Deletions survive snapshots, saves, and delayed adds from older peers. */
+  deletedComments?: Record<string, number>;
+  /** Host-committed operations, retained for durable retry deduplication. */
+  sync?: {
+    revision: number; clock: number; operations: Record<string, number>; sessionId?: string;
+    /** Host replay journal, omitted from wire snapshots. */
+    commits?: Record<string, { op: ReviewOp; revision: number; clock: number; versionId: string }>;
+  };
 };
 
 export type CommentSort = "time" | "newest" | "oldest";
@@ -225,8 +241,16 @@ export function isHostLocalKey(s: string): boolean {
 export function sanitizeDocForWire(doc: ReviewDoc, wireKey: string | null): ReviewDoc {
   return {
     ...doc,
+    ...(doc.sync ? { sync: { ...doc.sync, commits: undefined } } : {}),
     sourceKey: isHostLocalKey(doc.sourceKey) ? (wireKey || "shared-local") : doc.sourceKey,
     versions: doc.versions.map((v) => (isHostLocalKey(v.path) ? { ...v, path: "" } : v)),
+    // Keep the local anchor, but do not leak newly introduced sequence details
+    // through an ordinary review snapshot while room sharing is unapproved.
+    comments: PREMIERE_ROOM_MARKERS_ENABLED ? doc.comments : doc.comments.map(comment => {
+      if (!comment?.premiere) return comment;
+      const { premiere: _localAnchor, ...wireComment } = comment;
+      return wireComment;
+    }),
   };
 }
 
@@ -501,6 +525,9 @@ export function buildComment(c: NewComment, now = Date.now()): ReviewComment {
  *  replaying/echoing an op can't duplicate it — the co-review convergence
  *  guarantee for add-ops). */
 export function insertComment(doc: ReviewDoc, comment: ReviewComment): ReviewDoc {
+  const deletedAt = Math.max(doc.deletedComments?.[comment.id] ?? 0,
+    comment.parentId ? doc.deletedComments?.[comment.parentId] ?? 0 : 0);
+  if (deletedAt && (comment.restoredAt ?? 0) <= deletedAt) return doc;
   if (doc.comments.some((c) => c.id === comment.id)) return doc;
   return { ...doc, comments: [...doc.comments, comment] };
 }
@@ -514,10 +541,16 @@ export function editComment(doc: ReviewDoc, id: string, body: string, now = Date
 }
 
 /** Delete a comment and (if it's a root) all of its replies. */
-export function deleteComment(doc: ReviewDoc, id: string): ReviewDoc {
+export function deleteComment(doc: ReviewDoc, id: string, at = Date.now()): ReviewDoc {
+  const deletedComments = { ...doc.deletedComments };
+  for (const key of [id, ...doc.comments.filter((c) => c.parentId === id).map((c) => c.id)]) {
+    deletedComments[key] = Math.max(deletedComments[key] ?? 0, at);
+  }
   return {
     ...doc,
-    comments: doc.comments.filter((c) => c.id !== id && c.parentId !== id),
+    deletedComments,
+    comments: doc.comments.filter((c) => (c.id !== id && c.parentId !== id)
+      || (c.restoredAt ?? 0) > Math.max(deletedComments[c.id] ?? 0, deletedComments[c.parentId ?? ""] ?? 0)),
   };
 }
 
@@ -536,15 +569,18 @@ export function editReply(
   };
 }
 
-/** Delete a single reply (parity with deleteComment for roots). Addressed by
- *  full path like editReply; unknown ids are a no-op. */
+/** Delete a single reply, retaining its tombstone even when the add is late.
+ *  A known reply addressed through the wrong path cannot be deleted. */
 export function removeReply(
-  doc: ReviewDoc, versionId: string, commentId: string, replyId: string,
+  doc: ReviewDoc, versionId: string, commentId: string, replyId: string, at = Date.now(),
 ): ReviewDoc {
   const match = (c: ReviewComment) =>
     c.id === replyId && c.parentId === commentId && c.versionId === versionId;
-  if (!doc.comments.some(match)) return doc;
-  return { ...doc, comments: doc.comments.filter((c) => !match(c)) };
+  // A delete can arrive before its add. Keep the tombstone, but reject a
+  // path that tries to delete an already-known reply belonging elsewhere.
+  if (doc.comments.some((c) => c.id === replyId) && !doc.comments.some(match)) return doc;
+  if (!doc.versions.some((v) => v.id === versionId)) return doc;
+  return deleteComment(doc, replyId, at);
 }
 
 
@@ -632,13 +668,13 @@ export function setLike(
 export type ReviewOp =
   | { t: "add"; comment: ReviewComment }
   | { t: "edit"; id: string; body: string; at: number }
-  | { t: "del"; id: string }
+  | { t: "del"; id: string; at?: number }
   | { t: "resolve"; id: string; resolved: boolean; at: number }
   /** `at` is optional only for peers on a build that predates it; without
    *  one the receiver stamps arrival time, which is the best it can do. */
   | { t: "like"; id: string; name: string; liked: boolean; emoji?: string; at?: number }
   | { t: "editReply"; versionId: string; commentId: string; replyId: string; body: string; at: number }
-  | { t: "delReply"; versionId: string; commentId: string; replyId: string }
+  | { t: "delReply"; versionId: string; commentId: string; replyId: string; at?: number }
   /** Source-level verdict (per active version). LWW like edits; relayed in
    *  co-review with zero Rust changes (the star is payload-agnostic). */
   | { t: "status"; versionId: string; state: ReviewStatusState; reviewer: string; at: number };
@@ -676,7 +712,7 @@ export function applyReviewOp(doc: ReviewDoc, op: ReviewOp): ReviewDoc {
       return editComment(doc, op.id, op.body, op.at);
     }
     case "del":
-      return deleteComment(doc, op.id);
+      return deleteComment(doc, op.id, op.at);
     case "resolve": {
       const cur = doc.comments.find((c) => c.id === op.id);
       // On a true timestamp tie, resolved=true wins deterministically.
@@ -691,7 +727,7 @@ export function applyReviewOp(doc: ReviewDoc, op: ReviewOp): ReviewDoc {
       return editReply(doc, op.versionId, op.commentId, op.replyId, op.body, op.at);
     }
     case "delReply":
-      return removeReply(doc, op.versionId, op.commentId, op.replyId);
+      return removeReply(doc, op.versionId, op.commentId, op.replyId, op.at);
     default:
       return doc;
   }
@@ -727,12 +763,12 @@ export function inverseReviewOps(before: ReviewDoc, op: ReviewOp, at = Date.now(
       // deleteComment removes the root AND its replies — resurrect all of
       // them (peers' replies included, authorship intact).
       const removed = before.comments.filter((c) => c.id === op.id || c.parentId === op.id);
-      return removed.map((c) => ({ t: "add", comment: c }));
+      return removed.map((c) => ({ t: "add", comment: { ...c, restoredAt: at + 1 } }));
     }
     case "delReply": {
       const r = before.comments.find(
         (c) => c.id === op.replyId && c.parentId === op.commentId && c.versionId === op.versionId);
-      return r ? [{ t: "add", comment: r }] : [];
+      return r ? [{ t: "add", comment: { ...r, restoredAt: at + 1 } }] : [];
     }
     case "edit": {
       const cur = before.comments.find((c) => c.id === op.id);
@@ -764,9 +800,13 @@ export function inverseReviewOps(before: ReviewDoc, op: ReviewOp, at = Date.now(
  *  and no-op. Ops without `at` are returned unchanged. */
 export function restampReviewOp(op: ReviewOp, at: number): ReviewOp {
   switch (op.t) {
+    case "add":
+      return { ...op, comment: { ...op.comment, restoredAt: at + 1 } };
     case "edit":
     case "resolve":
     case "editReply":
+    case "del":
+    case "delReply":
       return { ...op, at };
     default:
       return op;
@@ -867,11 +907,18 @@ export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc
   // Different key means these are two different conversations: take the
   // incoming one whole and leave `local` alone on disk.
   if (local.sourceKey !== incoming.sourceKey) return incoming;
+  const deletedComments = { ...local.deletedComments };
+  for (const [id, at] of Object.entries(incoming.deletedComments ?? {})) {
+    deletedComments[id] = Math.max(deletedComments[id] ?? 0, at);
+  }
   const byId = new Map<string, ReviewComment>(incoming.comments.map((c) => [c.id, { ...c }]));
   for (const lc of local.comments) {
     const ic = byId.get(lc.id);
     if (!ic) { byId.set(lc.id, lc); continue; } // local-only → keep it
-    const base = lc.updatedAt > ic.updatedAt ? { ...lc } : { ...ic };
+    const base = (lc.revision ?? 0) > (ic.revision ?? 0)
+      || ((lc.revision ?? 0) === (ic.revision ?? 0) && ((lc.restoredAt ?? 0) > (ic.restoredAt ?? 0)
+      || ((lc.restoredAt ?? 0) === (ic.restoredAt ?? 0) && lc.updatedAt > ic.updatedAt)))
+      ? { ...lc } : { ...ic };
     const { reactions, reactedAt } = mergeReactions(ic, lc);
     // `likes` is the pre-emoji thumbs-up field, and reactionsOf folds it back
     // in as 👍 - so unioning it blindly puts a removal straight back through
@@ -893,7 +940,23 @@ export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc
     const other = status[vid];
     if (!other || st.updatedAt > other.updatedAt) status[vid] = st;
   }
-  return { ...incoming, comments: Array.from(byId.values()), status };
+  const comments = Array.from(byId.values()).filter((c) => {
+    const deletedAt = Math.max(deletedComments[c.id] ?? 0,
+      c.parentId ? deletedComments[c.parentId] ?? 0 : 0);
+    return !deletedAt || (c.restoredAt ?? 0) > deletedAt;
+  });
+  const sync = local.sync || incoming.sync ? {
+    ...incoming.sync,
+    revision: Math.max(local.sync?.revision ?? 0, incoming.sync?.revision ?? 0),
+    clock: Math.max(local.sync?.clock ?? 0, incoming.sync?.clock ?? 0),
+    operations: { ...local.sync?.operations, ...incoming.sync?.operations },
+    ...(local.sync?.commits || incoming.sync?.commits
+      ? { commits: { ...local.sync?.commits, ...incoming.sync?.commits } } : {}),
+  } : undefined;
+  return { ...incoming, comments, status,
+    ...(Object.keys(deletedComments).length ? { deletedComments } : {}),
+    ...(sync ? { sync } : {}),
+  };
 }
 
 // ── approval status ──────────────────────────────────────────────────────────
@@ -938,7 +1001,7 @@ export function commentMarkers(
   doc: ReviewDoc, versionId: string | null,
 ): { id: string; time: number; timeEnd: number | null; resolved: boolean; author: string }[] {
   return doc.comments
-    .filter((c) => c.versionId === versionId && c.parentId === null)
+    .filter((c) => c.versionId === versionId && c.parentId === null && !c.timing)
     .map((c) => ({ id: c.id, time: c.timeStart, timeEnd: c.timeEnd, resolved: c.resolved, author: c.author }));
 }
 
@@ -1167,7 +1230,7 @@ export function annotationsOf(
   doc: ReviewDoc, versionId: string | null,
 ): { id: string; time: number; author: string; strokes: AnnotationStrokes }[] {
   return doc.comments
-    .filter((c) => c.versionId === versionId && c.parentId === null && annotationHasContent(c.annotation))
+    .filter((c) => c.versionId === versionId && c.parentId === null && !c.timing && annotationHasContent(c.annotation))
     .map((c) => ({ id: c.id, time: c.timeStart, author: c.author, strokes: c.annotation as AnnotationStrokes }));
 }
 
@@ -1211,7 +1274,10 @@ export function reviewToMarkdown(doc: ReviewDoc, title = "Review"): string {
     "",
   ];
   for (const c of roots) {
-    out.push(`- **[${secondsToHms(c.timeStart)}]** ${mdInline(c.body)}${labelSuffix(c, mdInline)} — ${mdInline(c.author)}${c.resolved ? "  _(resolved)_" : ""}`);
+    const location = c.timing
+      ? `${c.timing.pass} · ${c.timing.kind === "manual" ? `Manual ${c.timing.timecode}` : "General note"}`
+      : secondsToHms(c.timeStart);
+    out.push(`- **[${mdInline(location)}]** ${mdInline(c.body)}${labelSuffix(c, mdInline)} — ${mdInline(c.author)}${c.resolved ? "  _(resolved)_" : ""}`);
     for (const r of repliesOf(doc, c.id)) out.push(`  - ↳ ${mdInline(r.body)} — ${mdInline(r.author)}`);
   }
   return out.filter((l) => l !== "").join("\n") + "\n";

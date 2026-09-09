@@ -644,6 +644,10 @@ pub struct Metadata {
     pub acodec: Option<String>,
     pub ext: Option<String>,
     pub has_subs: bool,
+    /// Active live streams keep the FFmpeg/MSE path: a download-first review
+    /// copy cannot become playable until a live broadcast ends.
+    #[serde(default)]
+    pub is_live: bool,
     /// The creator's OWN chapters, when the site publishes them.
     ///
     /// This app used to infer chapters from the transcript with a local LLM -
@@ -888,6 +892,8 @@ pub async fn fetch_metadata(
         acodec: v["acodec"].as_str().map(String::from),
         ext: v["ext"].as_str().map(String::from),
         has_subs,
+        is_live: v["is_live"].as_bool().unwrap_or(false)
+            || v["live_status"].as_str() == Some("is_live"),
     };
     // Warm-boot cache (r112): remember the parsed metadata so re-opening this
     // source hydrates the UI instantly instead of re-paying the ~1-3s probe.
@@ -1368,6 +1374,166 @@ pub struct DirectStreamResult {
     pub acodec: Option<String>,
 }
 
+/// The high-resolution representation is intentionally separate from the
+/// completed review copy. The review copy is stable, local and optimized for
+/// random frame access; this source may expire and is used only for parked or
+/// playing presentation.
+#[derive(Clone, Debug, PartialEq, Serialize, ts_rs::TS)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub enum ResolvedPresentationSource {
+    Hls {
+        manifest_url: String,
+        #[ts(type = "number")]
+        expires_at: u64,
+        width: Option<u32>,
+        height: Option<u32>,
+        video_codec: Option<String>,
+        audio_codec: Option<String>,
+    },
+    Progressive {
+        video_url: String,
+        #[ts(type = "number")]
+        expires_at: u64,
+        width: Option<u32>,
+        height: Option<u32>,
+        video_codec: Option<String>,
+        audio_codec: Option<String>,
+    },
+    Split {
+        video_url: String,
+        audio_url: String,
+        #[ts(type = "number")]
+        expires_at: u64,
+        width: Option<u32>,
+        height: Option<u32>,
+        video_codec: Option<String>,
+        audio_codec: Option<String>,
+    },
+}
+
+const PRESENTATION_PRINT_TEMPLATE: &str =
+    "%(requested_formats.0.url)s\t%(requested_formats.1.url)s\t%(url)s\t%(width)s\t%(height)s\t%(vcodec)s\t%(acodec)s\t%(requested_formats.1.acodec)s\t%(protocol)s\t%(requested_formats.0.protocol)s\t%(requested_formats.1.protocol)s";
+
+fn presentation_selector() -> String {
+    [
+        // Native HLS carries synchronized A/V and adapts without an ffmpeg
+        // remux. This only wins when yt-dlp reports an actual HLS manifest.
+        "b[vcodec!=none][acodec!=none][protocol*=m3u8]",
+        // Otherwise prefer a high-quality muxed progressive file.
+        "b[vcodec!=none][acodec!=none][protocol^=http][protocol!*=m3u8]",
+        // YouTube commonly exposes high resolutions as split H.264 + AAC.
+        "bv*[vcodec^=avc1][protocol^=http][protocol!*=m3u8]+ba[acodec^=mp4a][protocol^=http][protocol!*=m3u8]",
+        "bv*[protocol^=http][protocol!*=m3u8]+ba[protocol^=http][protocol!*=m3u8]",
+    ]
+    .join("/")
+}
+
+fn parse_presentation_line(line: &str, resolved_at: u64) -> Result<ResolvedPresentationSource, crate::AppError> {
+    let f: Vec<&str> = line.split('\t').collect();
+    let get = |i: usize| f.get(i).map(|s| s.trim()).filter(|s| !s.is_empty() && *s != "NA");
+    let width = get(3).and_then(|s| s.parse().ok());
+    let height = get(4).and_then(|s| s.parse().ok());
+    let video_codec = get(5).map(str::to_string);
+
+    if let (Some(video), Some(audio)) = (get(0), get(1)) {
+        if !crate::stream_proxy::is_safe_upstream(video) || !crate::stream_proxy::is_safe_upstream(audio) {
+            return Err(crate::AppError::internal("yt-dlp returned an unsafe presentation URL"));
+        }
+        let audio_codec = get(7).map(str::to_string);
+        return Ok(ResolvedPresentationSource::Split {
+            video_url: video.to_string(),
+            audio_url: audio.to_string(),
+            expires_at: stream_expires_at(video, Some(audio), resolved_at),
+            width,
+            height,
+            video_codec,
+            audio_codec,
+        });
+    }
+
+    let url = get(2).ok_or_else(|| crate::AppError::internal(
+        "yt-dlp resolved no high-resolution presentation URL for this source",
+    ))?;
+    if !crate::stream_proxy::is_safe_upstream(url) {
+        return Err(crate::AppError::internal("yt-dlp returned an unsafe presentation URL"));
+    }
+    let audio_codec = get(6).map(str::to_string);
+    let protocol = get(8).unwrap_or("");
+    let expires_at = stream_expires_at(url, None, resolved_at);
+    if protocol.contains("m3u8") {
+        Ok(ResolvedPresentationSource::Hls {
+            manifest_url: url.to_string(),
+            expires_at,
+            width,
+            height,
+            video_codec,
+            audio_codec,
+        })
+    } else {
+        Ok(ResolvedPresentationSource::Progressive {
+            video_url: url.to_string(),
+            expires_at,
+            width,
+            height,
+            video_codec,
+            audio_codec,
+        })
+    }
+}
+
+async fn resolve_presentation_tiers(
+    app: &AppHandle,
+    url: &str,
+    cookies_browser: Option<&str>,
+) -> Result<ResolvedPresentationSource, crate::AppError> {
+    let yt = ytdlp(app)?;
+    let mut args: Vec<String> = vec![
+        "--no-playlist".into(),
+        "--no-warnings".into(),
+        "--socket-timeout".into(), "20".into(),
+        "-f".into(), presentation_selector(),
+        "-S".into(), "res,vbr,ext".into(),
+        YT_EXTRACTOR_ARGS[0].into(), YT_EXTRACTOR_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[0].into(), YT_JS_RUNTIME_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[2].into(), YT_JS_RUNTIME_ARGS[3].into(),
+        YT_JS_RUNTIME_ARGS[4].into(), YT_JS_RUNTIME_ARGS[5].into(),
+        "--print".into(), PRESENTATION_PRINT_TEMPLATE.into(),
+    ];
+    args.extend(cookies_args(cookies_browser));
+    args.push(url.to_string());
+    let out = output_timed(yt.args(args), RESOLVE_TIMEOUT_SECS).await?;
+    if !out.status.success() {
+        return Err(humanize_ytdlp_error(&String::from_utf8_lossy(&out.stderr)).into());
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let line = stdout.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+    parse_presentation_line(line, unix_now())
+}
+
+#[tauri::command]
+pub async fn resolve_presentation_source(
+    app: AppHandle,
+    url: String,
+    cookies_browser: Option<String>,
+) -> Result<ResolvedPresentationSource, crate::AppError> {
+    validate_source_url(&url)?;
+    let source = match resolve_presentation_tiers(&app, &url, cookies_browser.as_deref()).await {
+        Ok(source) => Ok(source),
+        Err(_error) if cookies_active(cookies_browser.as_deref()) => {
+            eprintln!("[presentation] resolve with cookies failed; retrying without cookies");
+            resolve_presentation_tiers(&app, &url, None).await
+        }
+        Err(error) => Err(error),
+    }?;
+    if let ResolvedPresentationSource::Hls { manifest_url, .. } = &source {
+        if !crate::stream_proxy::register_hls_url(manifest_url) {
+            return Err(crate::AppError::internal("yt-dlp returned an unsafe HLS manifest URL"));
+        }
+    }
+    Ok(source)
+}
+
 #[tauri::command]
 pub async fn get_direct_stream_url(
     app: AppHandle,
@@ -1450,10 +1616,12 @@ pub(crate) fn stream_selector(max_height: Option<u32>) -> String {
 /// merely lose, it lost after a full extraction, and tier 2 then paid for a
 /// second one. Measured on the same video with the bundled yt-dlp:
 ///
-///     tier 1  11.03s  exit 1, "Requested format is not available"
-///     tier 2  12.05s  exit 0, usable video+audio pair
-///     ------  ------
-///     total   23.10s  for one resolve
+/// ```text
+/// tier 1  11.03s  exit 1, "Requested format is not available"
+/// tier 2  12.05s  exit 0, usable video+audio pair
+/// ------  ------
+/// total   23.10s  for one resolve
+/// ```
 ///
 /// yt-dlp's own format grammar already expresses "try this, else that": the
 /// alternatives below are the three tiers' selectors concatenated with `/`,
@@ -2949,5 +3117,53 @@ mod stream_selector_tests {
         // Tab-separated, and the parse indexes these positions.
         assert_eq!(STREAM_PRINT_TEMPLATE.matches('\t').count(), 7);
         assert!(!STREAM_PRINT_TEMPLATE.contains(' '), "a space would break the field split");
+    }
+}
+
+#[cfg(test)]
+mod presentation_source_tests {
+    use super::{
+        parse_presentation_line, presentation_selector, ResolvedPresentationSource,
+        PRESENTATION_PRINT_TEMPLATE,
+    };
+
+    #[test]
+    fn hls_is_selected_only_from_an_hls_protocol() {
+        let line = "NA\tNA\thttps://cdn.example.com/master.m3u8?expire=1900000000\t1920\t1080\tavc1.640028\tmp4a.40.2\tNA\tm3u8_native\tNA\tNA";
+        let source = parse_presentation_line(line, 1_800_000_000).unwrap();
+        assert!(matches!(source, ResolvedPresentationSource::Hls { height: Some(1080), .. }));
+    }
+
+    #[test]
+    fn ordinary_muxed_http_is_progressive() {
+        let line = "NA\tNA\thttps://cdn.example.com/video.mp4?expire=1900000000\t3840\t2160\tavc1.640033\t.mp4a.40.2\tNA\thttps\tNA\tNA";
+        let source = parse_presentation_line(line, 1_800_000_000).unwrap();
+        assert!(matches!(source, ResolvedPresentationSource::Progressive { height: Some(2160), .. }));
+    }
+
+    #[test]
+    fn split_video_and_audio_keep_the_earliest_expiry() {
+        let line = "https://v.example.com/v?expire=1900000000\thttps://a.example.com/a?expire=1850000000\tNA\t1920\t1080\tavc1.640028\tNA\tmp4a.40.2\tNA\thttps\thttps";
+        let source = parse_presentation_line(line, 1_800_000_000).unwrap();
+        assert!(matches!(source, ResolvedPresentationSource::Split { expires_at: 1_850_000_000, .. }));
+    }
+
+    #[test]
+    fn selector_and_wire_shape_preserve_the_representation_boundary() {
+        let selector = presentation_selector();
+        assert!(selector.starts_with("b[vcodec!=none][acodec!=none][protocol*=m3u8]"));
+        assert!(selector.contains("bv*[vcodec^=avc1]"));
+        assert_eq!(PRESENTATION_PRINT_TEMPLATE.matches('\t').count(), 10);
+
+        let source = ResolvedPresentationSource::Progressive {
+            video_url: "https://cdn.example.com/v.mp4".into(),
+            expires_at: 1_900_000_000,
+            width: Some(1920), height: Some(1080),
+            video_codec: Some("avc1".into()), audio_codec: Some("mp4a".into()),
+        };
+        let json = serde_json::to_value(source).unwrap();
+        assert_eq!(json["kind"], "progressive");
+        assert_eq!(json["videoUrl"], "https://cdn.example.com/v.mp4");
+        assert_eq!(json["expiresAt"], 1_900_000_000u64);
     }
 }

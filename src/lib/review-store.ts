@@ -76,6 +76,23 @@ const MIGRATED_FLAG_KEY = "saucebunny.reviews.migrated";
 const docs = new Map<string, ReviewDoc>();
 const index = new Map<string, ReviewIndexEntry>();
 const dirty = new Set<string>();
+const persisted = new Map<string, ReviewDoc>();
+const persistedListeners = new Set<(doc: ReviewDoc) => void>();
+/** Observers cannot change whether a review save succeeds. External delivery
+ * failures belong to their own durable queue, never the review acknowledgement. */
+export function subscribePersistedReviews(listener: (doc: ReviewDoc) => void): () => void {
+  persistedListeners.add(listener);
+  return () => { persistedListeners.delete(listener); };
+}
+export function persistedReviews(): Iterable<ReviewDoc> { return persisted.values(); }
+function didPersist(doc: ReviewDoc) {
+  persisted.set(doc.sourceKey, doc);
+  for (const listener of persistedListeners) {
+    try { listener(doc); } catch { /* subscriber cannot invalidate a completed save */ }
+  }
+}
+const docListeners = new Map<string, Set<() => void>>();
+let flushInFlight: Promise<void> | null = null;
 let reviewsDir: string | null = null;
 let dirEnsured = false;
 let hydrated = false;
@@ -130,6 +147,9 @@ export function resetReviewStoreForTests(): void {
   docs.clear();
   index.clear();
   dirty.clear();
+  persisted.clear();
+  docListeners.clear();
+  flushInFlight = null;
   reviewsDir = null;
   dirEnsured = false;
   hydrated = false;
@@ -225,7 +245,8 @@ export function looksLikeReviewDoc(v: unknown): v is ReviewDoc {
  *  gets written for every source ever opened) aren't worth a file — they
  *  rebuild on next open. */
 export function reviewDocHasContent(d: ReviewDoc): boolean {
-  return d.comments.length > 0 || Object.keys(d.status).length > 0;
+  return d.comments.length > 0 || Object.keys(d.status).length > 0
+    || Object.keys(d.deletedComments ?? {}).length > 0 || !!d.sync;
 }
 
 // ── store API (review.ts delegates here) ─────────────────────────────────────
@@ -251,9 +272,28 @@ export function getReviewDoc(sourceKey: string): ReviewDoc | undefined {
 /** Write-through: update the Map now (sync — readers see it immediately) and
  *  schedule the debounced file write. */
 export function putReviewDoc(doc: ReviewDoc): void {
+  if (docs.get(doc.sourceKey) === doc) return;
   docs.set(doc.sourceKey, doc);
   dirty.add(doc.sourceKey);
   scheduleFlush();
+  docListeners.get(doc.sourceKey)?.forEach((listener) => listener());
+}
+
+export function subscribeReviewDoc(key: string, listener: () => void): () => void {
+  const listeners = docListeners.get(key) ?? new Set();
+  listeners.add(listener);
+  docListeners.set(key, listeners);
+  return () => { listeners.delete(listener); if (!listeners.size) docListeners.delete(key); };
+}
+
+/** A successful IPC send is not a save. Acknowledge only a completed document
+ * and index write. Failure leaves the source dirty and the sender's outbox intact. */
+export async function persistReviewDoc(doc: ReviewDoc): Promise<void> {
+  putReviewDoc(doc);
+  await flushDirtyDocs();
+  if (persisted.get(doc.sourceKey) !== docs.get(doc.sourceKey) || dirty.has(doc.sourceKey)) {
+    throw new Error("Review is saved in memory but has not reached disk. Sync will retry.");
+  }
 }
 
 /**
@@ -298,6 +338,12 @@ function scheduleFlush(): void {
 }
 
 async function flushDirtyDocs(): Promise<void> {
+  const task = (flushInFlight ?? Promise.resolve()).then(writeDirtyDocs);
+  flushInFlight = task;
+  try { await task; } finally { if (flushInFlight === task) flushInFlight = null; }
+}
+
+async function writeDirtyDocs(): Promise<void> {
   // No dir (hydration failed / e2e mock / plain-browser dev) → memory-only
   // session; keep the dirty set so a later flush can still land.
   if (!reviewsDir || dirty.size === 0) return;
@@ -326,6 +372,7 @@ async function flushDirtyDocs(): Promise<void> {
     return;
   }
   let indexDirty = false;
+  const written = new Map<string, ReviewDoc>();
   for (const key of keys) {
     const doc = docs.get(key);
     if (!doc) continue;
@@ -396,6 +443,7 @@ async function flushDirtyDocs(): Promise<void> {
       ).length;
       index.set(key, { file, updatedAt: Date.now(), count, bytes: bytes.length });
       indexDirty = true;
+      written.set(key, doc);
       clearWriteBackoff();
     } catch (err) {
       reportProblem(
@@ -414,7 +462,11 @@ async function flushDirtyDocs(): Promise<void> {
       text: serializeReviewIndex(index),
       atomic: true,
     });
+    for (const doc of written.values()) didPersist(doc);
   } catch (err) {
+    for (const key of written.keys()) dirty.add(key);
+    backOffAfterFailure();
+    scheduleFlush();
     // The documents landed; only the index did not. Recoverable on the next
     // write, but say so: a stale index is how notes go missing from lists.
     reportProblem(
@@ -501,6 +553,7 @@ export async function hydrateReviewStore(opts?: { migrate?: boolean }): Promise<
           // state; unedited keys still hydrate normally.
           if (!dirty.has(key)) {
             docs.set(key, parsed);
+            didPersist(parsed);
           }
           loadedDocs++;
           loadedBytes += text.length;

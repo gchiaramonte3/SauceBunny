@@ -37,7 +37,9 @@ jobs:
       # disable naming the ref that makes it safe, so a new warning is a new
       # dependency array nobody has read — not one of the old ones resurfacing.
       - run: npm run lint
-      - run: npx vitest run
+      # Include native-runtime packaging and profiling regressions as well
+      # as the frontend/stream-continuity suite; no SDK or runtime is needed.
+      - run: npm test
       # CLAUDE.md's dependency rule allows permissive and weak copyleft and
       # rules out GPL/AGPL, because strong copyleft would reach the app's own
       # MIT source. That rule was written down and nothing checked it: a

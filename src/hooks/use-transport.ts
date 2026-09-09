@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlayerHandle } from "../components/player-handle";
+import type { PlaybackSessionController } from "../lib/playback-session-controller";
 import type { SourceKind } from "../types";
 import { clampSeekFrames, maxSeekSeconds } from "../lib/playhead-clock";
 import { nextShuttleRate } from "../lib/shuttle";
@@ -36,6 +37,7 @@ import {
  */
 export type TransportDeps = {
   playerRef: React.RefObject<PlayerHandle | null>;
+  playbackController: PlaybackSessionController;
   status: string;
   isPlaying: boolean;
   setIsPlaying: React.Dispatch<React.SetStateAction<boolean>>;
@@ -58,7 +60,7 @@ export type TransportDeps = {
 };
 
 export function useTransport({
-  playerRef, status, isPlaying, setIsPlaying, fps, durationFrames,
+  playerRef, playbackController, status, isPlaying, setIsPlaying, fps, durationFrames,
   inFrames, outFrames, setInFrames, setOutFrames, pushMarksUndo,
   sourceKind, localFilePath, webCachePath, webStreamUrl,
 }: TransportDeps) {
@@ -94,12 +96,12 @@ const onPlayToggle = useCallback(() => {
   if (status !== "loaded" && status !== "exporting" && status !== "success") return;
   const p = playerRef.current;
   if (p && p.isReady()) {
-    if (isPlaying) p.pause();
-    else p.play();
+    if (isPlaying) playbackController.pause();
+    else void playbackController.play();
   } else {
     setIsPlaying((x) => !x);
   }
-}, [status, isPlaying, applyShuttle, playerRef, setIsPlaying]);
+}, [status, isPlaying, applyShuttle, playbackController, playerRef, setIsPlaying]);
 
 const onStep = useCallback((delta: number) => {
   exitShuttle();
@@ -111,11 +113,10 @@ const onStep = useCallback((delta: number) => {
   const next = clampSeekFrames(getPlayheadFrames() + delta, durationFrames);
   markUserSeek(next); // review fix: frame-steps must arm the co-review latch too
   if (p && p.isReady()) {
-    p.pause();
-    p.seekTo(next / r);
+    void playbackController.seekTo(next / r, { phase: "frame-step" });
   }
   publishPlayheadFrames(next);
-}, [durationFrames, fps, exitShuttle, playerRef]);
+}, [durationFrames, fps, exitShuttle, playbackController, playerRef]);
 
 const seekBySeconds = useCallback((deltaSec: number) => {
   exitShuttle();
@@ -127,8 +128,8 @@ const seekBySeconds = useCallback((deltaSec: number) => {
   const targetSec = Math.max(0, Math.min(maxSeekSeconds(durationFrames, fps), currentSec + deltaSec));
   markUserSeek(playheadSecondsToFrames(targetSec, fps)); // arms the co-review latch
   publishPlayheadFrames(playheadSecondsToFrames(targetSec, fps));
-  if (p?.isReady()) p.seekTo(targetSec);
-}, [fps, durationFrames, exitShuttle, playerRef]);
+  if (p?.isReady()) void playbackController.seekTo(targetSec);
+}, [fps, durationFrames, exitShuttle, playbackController, playerRef]);
 
 // Max |shuttle rate| for the ACTIVE player. The MSE web stream caps at 4× —
 // reverse scans only the buffered window and forward playbackRate beyond
@@ -159,12 +160,12 @@ const shuttleStep = useCallback((direction: 1 | -1, isRepeat = false) => {
   if (next === 1) {
     // +1 = normal play, not a 1× shuttle — same start path onPlayToggle uses.
     applyShuttle(0);
-    if (p?.isReady()) p.play();
+    if (p?.isReady()) void playbackController.play();
     else setIsPlaying(true);
     return;
   }
   applyShuttle(next);
-}, [isPlaying, onStep, applyShuttle, playerShuttleCap, playerRef, setIsPlaying]);
+}, [isPlaying, onStep, applyShuttle, playbackController, playerShuttleCap, playerRef, setIsPlaying]);
 
 // The players self-terminate a shuttle at the media bounds (reverse hits 0 /
 // forward hits the end) without a callback; watch the playhead STORE while a
@@ -220,8 +221,8 @@ const onGotoIn = useCallback(() => {
   const r = Math.max(1, Math.round(fps));
   markUserSeek(inFrames);
   publishPlayheadFrames(inFrames);
-  playerRef.current?.seekTo?.(inFrames / r);
-}, [inFrames, fps, exitShuttle, playerRef]);
+  void playbackController.seekTo(inFrames / r);
+}, [inFrames, fps, exitShuttle, playbackController]);
 
 const onGotoOut = useCallback(() => {
   if (outFrames == null) return;
@@ -229,8 +230,8 @@ const onGotoOut = useCallback(() => {
   const r = Math.max(1, Math.round(fps));
   markUserSeek(outFrames);
   publishPlayheadFrames(outFrames);
-  playerRef.current?.seekTo?.(outFrames / r);
-}, [outFrames, fps, exitShuttle, playerRef]);
+  void playbackController.seekTo(outFrames / r);
+}, [outFrames, fps, exitShuttle, playbackController]);
 
 const onSeek = useCallback((f: number) => {
   exitShuttle();
@@ -241,8 +242,29 @@ const onSeek = useCallback((f: number) => {
   const clamped = clampSeekFrames(f, durationFrames);
   markUserSeek(clamped); // arms the store's dev backward-motion canary
   publishPlayheadFrames(clamped);
-  playerRef.current?.seekTo?.(clamped / r);
-}, [durationFrames, fps, exitShuttle, playerRef]);
+  void playbackController.seekTo(clamped / r);
+}, [durationFrames, fps, exitShuttle, playbackController]);
+
+const onScrubStart = useCallback(() => {
+  exitShuttle();
+  playbackController.beginScrub();
+}, [exitShuttle, playbackController]);
+
+const onScrub = useCallback((f: number) => {
+  const r = Math.max(1, Math.round(fps));
+  const clamped = clampSeekFrames(f, durationFrames);
+  // Requested time owns the visible timeline/captions during the gesture.
+  publishPlayheadFrames(clamped);
+  playbackController.scrubTo(clamped / r);
+}, [durationFrames, fps, playbackController]);
+
+const onScrubEnd = useCallback((f: number) => {
+  const r = Math.max(1, Math.round(fps));
+  const clamped = clampSeekFrames(f, durationFrames);
+  markUserSeek(clamped);
+  publishPlayheadFrames(clamped);
+  void playbackController.endScrub(clamped / r);
+}, [durationFrames, fps, playbackController]);
 
 // Co-review chase corrections: onSeek minus markUserSeek — the chase must
 // never arm the latch it yields to (review fix).
@@ -251,8 +273,16 @@ const onChaseSeek = useCallback((f: number) => {
   const r = Math.max(1, Math.round(fps));
   const clamped = clampSeekFrames(f, durationFrames);
   publishPlayheadFrames(clamped);
-  playerRef.current?.seekTo?.(clamped / r);
-}, [durationFrames, fps, exitShuttle, playerRef]);
+  void playbackController.seekTo(clamped / r);
+}, [durationFrames, fps, exitShuttle, playbackController]);
+
+const onChaseSeekConfirmed = useCallback((f: number) => {
+  exitShuttle();
+  const r = Math.max(1, Math.round(fps));
+  const clamped = clampSeekFrames(f, durationFrames);
+  publishPlayheadFrames(clamped);
+  return playbackController.seekTo(clamped / r, { origin: "remote" });
+}, [durationFrames, fps, exitShuttle, playbackController]);
 
   // applyShuttle and exitShuttle are deliberately NOT returned. Extracting
   // this subsystem is what revealed they were never used outside it: every
@@ -281,6 +311,10 @@ const onChaseSeek = useCallback((f: number) => {
     onGotoIn,
     onGotoOut,
     onSeek,
+    onScrubStart,
+    onScrub,
+    onScrubEnd,
     onChaseSeek,
+    onChaseSeekConfirmed,
   };
 }

@@ -31,6 +31,7 @@ vi.mock("../lib/waveform", () => ({
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   setPlayheadFrames(0);
 });
 
@@ -52,6 +53,30 @@ function mount(over: Partial<Parameters<typeof Timeline>[0]> = {}) {
   );
   return { onSeek, playhead: screen.getByRole("slider", { name: "Playhead" }) };
 }
+
+it("reports the rendered timeline footprint and ignores hidden zero-size observations", () => {
+  let measure!: () => void;
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback: ResizeObserverCallback) {
+      measure = () => callback([{ contentRect: { width: 640 } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+    }
+    observe() {}
+    disconnect() {}
+  });
+  const onHeightChange = vi.fn();
+  mount({ onHeightChange });
+  const timeline = screen.getByRole("region", { name: "Timeline" });
+  const rect = vi.spyOn(timeline, "getBoundingClientRect");
+  rect.mockReturnValue({ height: 40 } as DOMRect);
+  act(measure);
+  expect(onHeightChange).toHaveBeenLastCalledWith(40);
+  rect.mockReturnValue({ height: 62 } as DOMRect);
+  act(measure);
+  expect(onHeightChange).toHaveBeenLastCalledWith(62);
+  rect.mockReturnValue({ height: 0 } as DOMRect);
+  act(measure);
+  expect(onHeightChange).toHaveBeenCalledTimes(2);
+});
 
 describe("Timeline review markers — live vs carried", () => {
   /** One point note and one RANGE note, each in both flavours. */

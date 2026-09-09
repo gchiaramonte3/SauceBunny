@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { useMenuKeys } from "../hooks/use-menu-keys";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil, IconTrash, IconFolderSolid, IconCircleX, IconTranscript } from "./Icons";
+import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil, IconTrash, IconFolderSolid, IconCircleX, IconTranscript, IconClipboard } from "./Icons";
 import { TagColorRow } from "./TagColorRow";
 import type { TagColorIndex } from "../lib/finder-tags";
 import type { FinderTag } from "../bindings/FinderTag";
@@ -24,6 +24,8 @@ type Props = {
   /** Transcribe. Present on the Library's own rows; absent elsewhere. Acts on
    *  the whole selection when the clicked row is part of one. */
   onTranscribe?: () => void;
+  /** Session history opens its record in-app, not its JSON in Finder. */
+  sessionActions?: { onOpen: () => void; onCopyName: () => void };
   transcribeLabel?: string;
   /** Viewport coords to anchor at (cursor, or the ⋯ button's corner). */
   anchor: { x: number; y: number };
@@ -96,12 +98,14 @@ export function LibraryCardMenu({
   anchor, align = "left", canPickThumbnail, hasChosenThumbnail, revealPath,
   onChooseThumbnail, onResetThumbnail, onOpen, onReview, onClose,
   tags, onToggleTagColor, onClearTagColors, onRename, onDelete, onRemove, deleteLabel, onMove, customEdits, onEditCustom,
-  onTranscribe, transcribeLabel,
+  onTranscribe, transcribeLabel, sessionActions,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: anchor.x, top: anchor.y });
 
   const items: Item[] = [];
+  if (sessionActions) items.push({ icon: <IconReview size={14} />, label: "Open session", onSelect: sessionActions.onOpen });
+  if (sessionActions) items.push({ icon: <IconClipboard size={14} />, label: "Copy session name", onSelect: sessionActions.onCopyName });
   if (canPickThumbnail) {
     items.push({ icon: <IconCamera size={14} />, label: "Choose thumbnail…", onSelect: onChooseThumbnail });
     items.push({ icon: <IconRefresh size={14} />, label: "Reset thumbnail", disabled: !hasChosenThumbnail, onSelect: onResetThumbnail });

@@ -12,9 +12,9 @@
 // focused hook, justified the same way as `use-panel-bus.ts`: extracting a
 // cohesive state machine out of the God-component for readability.
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { buildProxyUrl } from "../lib/stream-proxy";
+import { buildHlsProxyUrl, buildProxyUrl } from "../lib/stream-proxy";
 import { formatError } from "../lib/error-format";
 import { asLogTag, type LogTag } from "../types";
 import type { ProgressEvent } from "../bindings/ProgressEvent";
@@ -34,6 +34,7 @@ import {
 // the struct's doc comments, so the DASH split and the acodec rule are legible
 // at the call site instead of only in download.rs.
 import type { DirectStreamResult } from "../bindings/DirectStreamResult";
+import type { ResolvedPresentationSource } from "../bindings/ResolvedPresentationSource";
 
 // Imported, not restated. Four other call sites import it from CanvasToast;
 // this was the lone copy, and a copy of a union is a copy that drifts.
@@ -47,7 +48,8 @@ type Helpers = {
   maybePromptYtAuth: (message: string, seq: number) => void;
   /** Browser to borrow cookies from, or undefined for none. */
   cookiesBrowser: () => string | undefined;
-  /** Preview height cap (governs both the streamed res and the download). */
+  /** Height of the downloaded random-access review copy. It never caps the
+   * independently-resolved presentation source. */
   previewMaxHeight: number;
   /** Playhead at dispatch time — carried on MEDIA_ERROR/WATCHDOG so the
    *  download fallback can resume where the stream died (RC4). */
@@ -70,6 +72,9 @@ export type WebPlayback = {
   downloading: boolean;
   downloadProgress: number;
   downloadJobId: string | null;
+  /** Expiring high-resolution source used only after the local proxy frame is
+   * parked. Resolution runs in parallel with the review-copy download. */
+  presentationSource: ResolvedPresentationSource | null;
   // ── Actions (stable identities) ──
   /** `warmStream` (r112): a still-valid cached resolve from get_warm_start.
    *  Stream-first loads skip yt-dlp and hand it straight to the proxy/MSE
@@ -80,6 +85,10 @@ export type WebPlayback = {
   /** Warm boot from a COMPLETE downloaded copy: skip resolve/proxy entirely
    *  and play the file (LocalMediaPlayer) immediately. */
   loadCached: (url: string, cachePath: string, seq: number) => void;
+  /** A metadata probe identified an active live source after download-first
+   * had already started. Cancel that impossible-to-complete copy and retain
+   * the existing FFmpeg/MSE live path. */
+  promoteLive: (url: string, seq: number) => void;
   onPlayerReady: () => void;
   /** One-shot the RC4 resume after the ready-seek applied it. */
   consumeResume: () => void;
@@ -114,8 +123,26 @@ export function shouldRetryWithoutCookies(message: string, hadCookies: boolean):
   return true;
 }
 
+export function proxyPresentationSource(
+  source: ResolvedPresentationSource,
+  proxyBase: string | null,
+): ResolvedPresentationSource {
+  if (source.kind === "hls") {
+    return { ...source, manifestUrl: buildHlsProxyUrl(proxyBase, source.manifestUrl) };
+  }
+  return { ...source, videoUrl: buildProxyUrl(proxyBase, source.videoUrl) };
+}
+
+export function presentationRefreshDelayMs(expiresAtSeconds: number, nowMs: number): number {
+  // Refresh one minute before expiry, but never spin synchronously when a CDN
+  // returns an already-short-lived token. setTimeout's signed 32-bit ceiling
+  // is about 24.8 days.
+  return Math.min(2_147_000_000, Math.max(1_000, expiresAtSeconds * 1_000 - nowMs - 60_000));
+}
+
 export function useWebPlayback(helpers: Helpers): WebPlayback {
   const [state, dispatch] = useReducer(webPlaybackReducer, INITIAL_WEB_PLAYBACK);
+  const [presentationSource, setPresentationSource] = useState<ResolvedPresentationSource | null>(null);
 
   /**
    * SAY SO WHEN IT FAILS.
@@ -158,6 +185,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   // re-resolve), so it RESETS the machine instead of falling into a yt-dlp
   // download of a peer:// marker.
   const peerStreamRef = useRef<{ seq: number; url: string; videoCodec: string | null; audioCodec: string | null } | null>(null);
+  const presentationSeqRef = useRef(-1);
 
   // Effect keys: only kind / seq / streaming-readiness re-trigger work — NOT
   // download progress (which keeps kind+seq stable, so the download isn't
@@ -335,7 +363,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
             });
           })().catch(reject);
         });
-      h.appendLog("info", "web-preview", "CDN rejected cross-origin fetch. Downloading via yt-dlp…");
+      h.appendLog("info", "web-preview", "Preparing the local review copy via yt-dlp…");
       try {
         const cookies = h.cookiesBrowser();
         let cachePath: string;
@@ -381,19 +409,80 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     if (id) void invoke("cancel_job", { jobId: id }).catch(() => { /* best-effort */ });
   }, []);
 
+  const resolvePresentation = useCallback((url: string, seqArg: number) => {
+    presentationSeqRef.current = seqArg;
+    setPresentationSource(null);
+    void (async () => {
+      const h = helpersRef.current;
+      try {
+        const source = await invoke<ResolvedPresentationSource>("resolve_presentation_source", {
+          url,
+          cookiesBrowser: h.cookiesBrowser(),
+        });
+        if (!source || presentationSeqRef.current !== seqArg) return;
+        if (!proxyBaseFetchedRef.current) {
+          proxyBaseRef.current = await invoke<string | null>("get_stream_proxy_base").catch(() => null);
+          proxyBaseFetchedRef.current = true;
+        }
+        if (presentationSeqRef.current !== seqArg) return;
+        setPresentationSource(proxyPresentationSource(source, proxyBaseRef.current));
+        h.appendLog(
+          "ok",
+          "yt-dlp",
+          `Presentation ready · ${source.height ?? "?"}p · ${source.kind}`,
+        );
+      } catch (error) {
+        if (presentationSeqRef.current !== seqArg) return;
+        // The completed proxy remains a fully playable source. Presentation
+        // resolution is an enhancement and must never fail the review copy.
+        h.appendLog("warn", "yt-dlp", `High-resolution presentation unavailable: ${formatError(error)}`);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!presentationSource) return;
+    const current = stateRef.current;
+    if (current.kind === "inactive") return;
+    const timer = window.setTimeout(() => {
+      const latest = stateRef.current;
+      if (latest.kind !== "inactive" && latest.seq === presentationSeqRef.current) {
+        helpersRef.current.appendLog("info", "yt-dlp", "Refreshing the expiring presentation source…");
+        resolvePresentation(latest.url, latest.seq);
+      }
+    }, presentationRefreshDelayMs(presentationSource.expiresAt, Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [presentationSource, resolvePresentation]);
+
   const loadWeb = useCallback((url: string, mode: "stream-first" | "download-first", seqArg: number, warmStream?: CachedStream | null) => {
     peerStreamRef.current = null;
     warmStreamRef.current = mode === "stream-first" && warmStream
       ? { seq: seqArg, stream: warmStream }
       : null;
+    if (mode === "download-first") resolvePresentation(url, seqArg);
+    else { presentationSeqRef.current = seqArg; setPresentationSource(null); }
     dispatch({ t: "LOAD", seq: seqArg, url, mode });
-  }, []);
+  }, [resolvePresentation]);
 
   const loadCached = useCallback((url: string, cachePath: string, seqArg: number) => {
     warmStreamRef.current = null;
     peerStreamRef.current = null;
+    resolvePresentation(url, seqArg);
     dispatch({ t: "LOAD_CACHED", seq: seqArg, url, cachePath });
-  }, []);
+  }, [resolvePresentation]);
+
+  const promoteLive = useCallback((url: string, seqArg: number) => {
+    const current = stateRef.current;
+    if (current.kind === "inactive" || current.seq !== seqArg || current.url !== url) return;
+    // A completed copy is useful even if the source happened to be live when
+    // probed. Only interrupt an in-progress download/failure path.
+    if (current.kind === "cached" || current.kind === "streaming" || current.kind === "resolving") return;
+    cancelActiveJob();
+    warmStreamRef.current = null;
+    presentationSeqRef.current = -1;
+    setPresentationSource(null);
+    dispatch({ t: "LOAD", seq: seqArg, url, mode: "stream-first" });
+  }, [cancelActiveJob]);
 
   /** Tier B: stream the host's offered file over the session. `markerUrl` is
    *  a peer:// display marker (never fetched); `stream.url` is the full
@@ -401,6 +490,8 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   const loadPeerStream = useCallback((markerUrl: string, stream: { url: string; videoCodec: string | null; audioCodec: string | null }, seqArg: number) => {
     warmStreamRef.current = null;
     peerStreamRef.current = { seq: seqArg, ...stream };
+    presentationSeqRef.current = seqArg;
+    setPresentationSource(null);
     dispatch({ t: "LOAD", seq: seqArg, url: markerUrl, mode: "stream-first" });
   }, []);
 
@@ -436,6 +527,8 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   const reset = useCallback(() => {
     cancelActiveJob();
     warmStreamRef.current = null;
+    presentationSeqRef.current = -1;
+    setPresentationSource(null);
     dispatch({ t: "RESET" });
   }, [cancelActiveJob]);
 
@@ -469,8 +562,10 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     downloading: state.kind === "downloading",
     downloadProgress: state.kind === "downloading" ? state.progress : 0,
     downloadJobId: state.kind === "downloading" ? state.jobId : null,
+    presentationSource,
     loadWeb,
     loadCached,
+    promoteLive,
     loadPeerStream,
     onPlayerReady,
     consumeResume,

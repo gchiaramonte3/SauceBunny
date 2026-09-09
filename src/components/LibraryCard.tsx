@@ -13,6 +13,8 @@ import { chosenPosterFor } from "../lib/library";
 import { useHoverFrames } from "../hooks/use-hover-frames";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
 import { requestHeroStill } from "../hooks/use-library-scan";
+import { tagSummary } from "../lib/finder-tags";
+import { ClipTagIndicator } from "./ClipTagIndicator";
 
 /** Where a card's poster art comes from. */
 export type LibraryCardArt =
@@ -121,6 +123,7 @@ export function LibraryCard({
   title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, onDelete, onRemove, deleteLabel, onMove, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   onSelect, onContextSelect, onRename, selected, selectionPath, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
+  const tagDescription = tagSummary(tags ?? []);
   const btnRef = useRef<HTMLButtonElement>(null);
   /** The ⋯ trigger. Separate from btnRef, which is the whole CARD: anchoring
    *  the menu to the card put it at the card's bottom-left corner, nowhere
@@ -212,7 +215,8 @@ export function LibraryCard({
         onClick={onSelect ? (e) => onSelect(e) : onOpen}
         onDoubleClick={onSelect ? onOpen : undefined}
         aria-current={onSelect ? (selected ? "true" : undefined) : undefined}
-        title={title}
+        title={tagDescription ? `${title}\nFinder tags: ${tagDescription}` : title}
+        aria-description={tagDescription ? `Finder tags: ${tagDescription}` : undefined}
         onContextMenu={(e) => {
           e.preventDefault();
           // Select FIRST, so the menu acts on what is under the cursor. Finder's
@@ -286,7 +290,10 @@ export function LibraryCard({
             <IconPlay size={15} />
           </span>
         </span>
-        <span className="cp-lib-card-title">{title}</span>
+        <span className="cp-lib-card-caption">
+          <ClipTagIndicator tags={tags} variant="dot" />
+          <span className="cp-lib-card-title">{title}</span>
+        </span>
         <span className="cp-lib-card-detail">{detail}</span>
       </button>
       {cellControls}

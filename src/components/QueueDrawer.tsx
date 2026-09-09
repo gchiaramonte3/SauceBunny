@@ -13,6 +13,7 @@ import { TranscriptViewer } from "./TranscriptViewer";
 import { AiSummary, type SummaryStyle } from "./AiSummary";
 import { ReviewPanel } from "./ReviewPanel";
 import type { AnnotationStrokes } from "../lib/review";
+import type { ReviewSession } from "../lib/review-session";
 import type { TranscriptHistoryEntry } from "../lib/transcript-history";
 import {
   type TabId, loadActiveTab, saveActiveTab, loadTabOrder, saveTabOrder,
@@ -59,8 +60,8 @@ type Props = {
   /** Put a failed row back in the queue, marks and all. */
   onRetry: (id: string) => void;
   /** Turn a transcript selection into in/out marks, or a queued clip. */
-  onMarkRange: (startSeconds: number, endSeconds: number) => void;
-  onQueueRange: (startSeconds: number, endSeconds: number) => void;
+  onMarkRange?: (startSeconds: number, endSeconds: number) => void;
+  onQueueRange?: (startSeconds: number, endSeconds: number) => void;
   onClearAll: () => void;
   /** Drop only the finished rows (and their timeline bands). */
   onClearDone?: () => void;
@@ -193,6 +194,9 @@ type Props = {
   /** ReviewPanel registers its ⇧I/⇧O range-mark handlers with App through
    *  this (null on unmount) — see App's review-range keyboard dispatch. */
   onRegisterRangeHotkeys?: (h: { markIn: () => void; markOut: () => void } | null) => void;
+  /** App-level Review domain service. When present, comment seeks, range
+   * drafts, annotations and range commands do not callback-thread to App. */
+  reviewSession?: ReviewSession;
   /** Rename one queued clip (double-click its name). Docked drawer only for
    *  now — the floating panel's action bus doesn't carry these yet. */
   onRenameClip?: (id: string, name: string) => void;
@@ -222,8 +226,8 @@ type Props = {
    * PanelApp.
    */
   embedded?: boolean;
-  /** Session-room dressing: tab strip and queue chrome hidden, the
-   *  Review tab forced (same mounted panel, just the room's face). */
+  /** Review/Preview dressing, with a separate transient tab choice. The same
+   *  four tabs and mounted bodies remain available as in Clip. */
   roomFace?: boolean;
   /** Timeline range click: switch to the Queue tab and flash the item. */
   focusItem?: { id: string; tick: number } | null;
@@ -274,7 +278,7 @@ export function QueueDrawer({
   chapterSourceKey, chapterDurationSec, onChaptersChanged, sourceDescription,
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
-  onOpenReviewSource, onReviewLinkAsVersion, onReviewUnlinkVersion, reviewSourcePath, onReviewRangeDraft, onRegisterRangeHotkeys, onUndo, onRedo,
+  onOpenReviewSource, onReviewLinkAsVersion, onReviewUnlinkVersion, reviewSourcePath, onReviewRangeDraft, onRegisterRangeHotkeys, reviewSession, onUndo, onRedo,
   reviewSessionActive, reviewRoomHasSource, reviewSessionDoc, onReviewSessionOp,
   onRenameClip, onRenameAll, onReorderQueue,
   onPopOut, embedded = false, roomFace = false, focusItem = null,
@@ -353,12 +357,13 @@ export function QueueDrawer({
     }, 60);
     return () => window.clearTimeout(t);
   }, [focusItem]);
-  // The room forces the Review face without touching the persisted tab
-  // choice - leaving the room lands back on whatever was active before.
+  // Room/Preview has the same four tools, with its own transient tab choice.
+  // Leaving it restores the persisted Clip tab instead of overwriting it.
   // A tab persisted from the main window (or from before Review was hidden
   // here) must not strand the panel on a face it cannot render.
   const availableTab: TabId = embedded && activeTab === "review" ? "transcript" : activeTab;
-  const shownTab: TabId = roomFace ? "review" : availableTab;
+  const [reviewTab, setReviewTab] = useState<TabId>("review");
+  const shownTab: TabId = roomFace ? reviewTab : availableTab;
   useEffect(() => { saveActiveTab(activeTab); }, [activeTab]);
   // Review-tab comfort width. Below ~520px the review toolbar wraps onto two
   // rows (filters row + icons row), which reads as clutter. When the user
@@ -411,8 +416,8 @@ export function QueueDrawer({
   useEffect(() => {
     if (reviewRequestTick === lastReviewTickRef.current) return;
     lastReviewTickRef.current = reviewRequestTick;
-    setActiveTab("review");
-  }, [reviewRequestTick]);
+    if (roomFace) setReviewTab("review"); else setActiveTab("review");
+  }, [reviewRequestTick, roomFace]);
 
   const lastArrivedTickRef = useRef(transcriptArrivedTick);
   useEffect(() => {
@@ -721,7 +726,9 @@ export function QueueDrawer({
                  still where pointerup landed, so we treat any same-tab
                  release as a click and any cross-tab release as a reorder
                  (handled in pointerup). */
-              onClick={() => { if (!t.disabled && (!drag || drag.srcIdx === drag.dropIdx)) setActiveTab(t.id); }}
+              onClick={() => { if (!t.disabled && (!drag || drag.srcIdx === drag.dropIdx)) {
+                if (roomFace) setReviewTab(t.id); else setActiveTab(t.id);
+              } }}
               title={t.disabled ? `${t.label} (coming soon)` : `${t.label} · drag to reorder`}
               /* The visible label is hidden when the panel is narrow (see
                  queue-drawer.css), so the name has to live somewhere that does
@@ -748,7 +755,7 @@ export function QueueDrawer({
         {/* Pop-out — opens the side panel in its own native OS window
             (r44.B). Hidden when this drawer IS the floating window
             (would just stack windows endlessly). */}
-        {!embedded && onPopOut && (
+        {!embedded && !roomFace && onPopOut && (
           <button
             type="button"
             className="cp-tab-close cp-tab-popout"
@@ -767,7 +774,7 @@ export function QueueDrawer({
             </svg>
           </button>
         )}
-        <button
+        {!roomFace && <button
           type="button"
           className="cp-tab-close"
           onClick={onClose}
@@ -775,7 +782,7 @@ export function QueueDrawer({
           aria-label={embedded ? "Close panel window" : "Hide panel"}
         >
           ×
-        </button>
+        </button>}
       </div>
 
       {/* Active-tab bodies — keep-alive wrappers: `visited` gates the mount,
@@ -1059,7 +1066,7 @@ export function QueueDrawer({
              seeded from localStorage and this <aside> renders whether or not
              the drawer is open, so mounting alone would load a multi-GB model
              at boot for a user who did nothing. */
-          warmable={open && shownTab === "ai"}
+          warmable={open && viewActive && shownTab === "ai"}
           selectedModelId={aiModelId}
           style={aiStyle}
           onOpenSettings={onOpenAiSettings}
@@ -1074,6 +1081,7 @@ export function QueueDrawer({
       {visited.has("review") && (
         <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-review" aria-labelledby="cp-tab-review" hidden={shownTab !== "review"}>
         <ReviewPanel
+          reviewSession={reviewSession}
           outboxDepth={outboxDepth}
           sourceKey={reviewSourceKey ?? null}
           sourceTitle={reviewSourceTitle}
@@ -1081,20 +1089,20 @@ export function QueueDrawer({
           playheadActive={playheadAvailable && viewActive && shownTab === "review"}
           fps={fps}
           durationSec={chapterDurationSec ?? null}
-          onSeek={onTranscriptSeek}
+          onSeek={reviewSession ? (seconds) => { void reviewSession.jumpToComment(seconds); } : onTranscriptSeek}
           drawActive={!!reviewDrawActive}
           draft={reviewDraft ?? null}
           onToggleDraw={onToggleReviewDraw}
           labelActive={!!reviewLabelActive}
           onToggleLabel={onToggleReviewLabel}
           onDraftConsumed={onReviewDraftConsumed}
-          onShowAnnotation={onShowAnnotation}
+          onShowAnnotation={reviewSession?.showAnnotation ?? onShowAnnotation}
           onOpenReview={onOpenReviewSource}
           onLinkAsVersion={onReviewLinkAsVersion}
           onUnlinkVersion={onReviewUnlinkVersion}
           sourcePath={reviewSourcePath ?? null}
-          onRangeDraft={onReviewRangeDraft}
-          onRegisterRangeHotkeys={onRegisterRangeHotkeys}
+          onRangeDraft={reviewSession?.setCommentRange ?? onReviewRangeDraft}
+          onRegisterRangeHotkeys={reviewSession?.registerRangeCommands ?? onRegisterRangeHotkeys}
           sessionActive={!!reviewSessionActive}
           roomHasSource={reviewRoomHasSource ?? true}
           sessionDoc={reviewSessionDoc ?? null}

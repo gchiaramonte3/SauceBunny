@@ -329,6 +329,29 @@ topology: star — host + up to MAX_PEERS(3) guests, host relays everything
 - **Web-source only** for now (a local file can't reach guests); a relay-URL
   override + LAN-only mode is deferred (Phase 3 note in session.rs).
 
+## Saved review-session navigation
+
+The Library session shelf opens `SavedReviewSession` in place. Its browser
+stays mounted/hidden so Back preserves search, selection, scroll and row focus.
+`SavedSessionNotes` reads the existing hydrated Reviews store and subscribes to
+the selected document; it never creates or saves a second copy. The pure
+`lib/saved-session.ts` resolver matches local keys, fingerprints, source URLs
+or recorded comment IDs, never a similar title. Locally recorded root IDs
+include guest notes whose originating session IDs differ; replies follow the
+selected roots. Multi-source sessions have an explicit source chooser.
+
+NDI archive keys are not paths. They cannot reach file/web loaders. The reader
+does not join sessions, connect Premiere, restart an NDI receiver or alter
+playback. A file/web source has a separate explicit Open source in Clip action;
+ambiguous version stacks do not silently open the current/first version.
+Missing media does not gate note access; a missing review document is reported
+instead of pretending the archive had no notes.
+
+Screening index `sourceKinds` and `premiere` fields are additive, preserved by
+the whitelist parser, and populated on ordinary future saves. Legacy index
+rows get read-only badge enrichment from their full records with at most three
+reads in flight. No migration rewrites archived sessions on opening the shelf.
+
 ## State management
 
 `App.tsx` owns most application state via `useState`. Preferences and history persist to `localStorage` under the `saucebunny.*` namespace:

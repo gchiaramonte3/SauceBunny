@@ -9,6 +9,9 @@ import { IconDownload, IconLink } from "./Icons";
 import { ListColumnHeaders, ListColumnRules } from "./ListColumnHeaders";
 import { LibraryCardMenu } from "./LibraryCardMenu";
 import type { ColSpec } from "./ListColumnHeaders";
+import type { FinderTag } from "../bindings/FinderTag";
+import { tagSummary } from "../lib/finder-tags";
+import { ClipTagIndicator } from "./ClipTagIndicator";
 
 /**
  * The web cache as a table — the Library list view's sibling for items that
@@ -59,7 +62,8 @@ function fetchedLabel(unixSeconds: number): string {
   });
 }
 
-export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, selected, onSelect }: {
+export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, selected, onSelect, tagsByPath }: {
+  tagsByPath?: ReadonlyMap<string, readonly FinderTag[]>;
   items: readonly CachedWebItem[];
   sort: LibrarySortKey;
   dir: LibrarySortDir;
@@ -93,6 +97,8 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
         <ListColumnHeaders specs={WEB_COL_SPECS} model={colModel} sort={sort} dir={dir} onSort={onSort} />
       </div>
       {items.map((it) => {
+        const tags = it.path ? tagsByPath?.get(it.path) : undefined;
+        const tagDescription = tagSummary(tags ?? []);
         return (
           <div key={it.url} role="listitem" className="cp-web-lrow-wrap">
             <button
@@ -100,7 +106,8 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
               data-path={it.url}
               aria-current={selected?.has(it.url) ? "true" : undefined}
               className={"cp-lib-lrow" + (selected?.has(it.url) ? " selected" : "")}
-              title={it.url}
+              title={tagDescription ? `${it.url}\nFinder tags: ${tagDescription}` : it.url}
+              aria-description={tagDescription ? `Finder tags: ${tagDescription}` : undefined}
               // Selection owns the single click when a selection is
               // running, and opening moves to the double click - the same
               // split LibraryListRow uses. Without a selection above, the
@@ -122,6 +129,7 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
               }}
               onDoubleClick={() => onOpenUrl(it.url)}
             >
+              <ClipTagIndicator tags={tags} variant="stripe" />
               <span className="cp-lib-lrow-art">
                 {it.thumbnail
                   ? <img src={it.thumbnail} alt="" loading="lazy" />

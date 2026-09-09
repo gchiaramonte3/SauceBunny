@@ -4,7 +4,8 @@ import { listen, emit } from "@tauri-apps/api/event";
 import { QueueDrawer } from "./components/QueueDrawer";
 import { setPlayheadFrames } from "./lib/playhead-store";
 import {
-  PANEL_SNAPSHOT_KEY, PANEL_PLAYHEAD_EVENT, INITIAL_SNAPSHOT, coercePanelSnapshot,
+  PANEL_SNAPSHOT_KEY, PANEL_PLAYHEAD_EVENT, PANEL_ACTION_REJECTED_EVENT, INITIAL_SNAPSHOT, coercePanelSnapshot,
+  panelCanTargetSource,
   type PanelSnapshot,
 } from "./hooks/use-panel-bus";
 import type { TranscriptHistoryEntry } from "./lib/transcript-history";
@@ -84,6 +85,17 @@ const RECONCILE_MS = 5000;
 export default function PanelApp() {
   const [boot] = useState(readSnapshotSync);
   const [state, setState] = useState<PanelState>(boot.state);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  useEffect(() => {
+    let cancelled = false;
+    let off: (() => void) | undefined;
+    void listen<{ message: string }>(PANEL_ACTION_REJECTED_EVENT, (e) => {
+      if (!cancelled) setActionNotice(e.payload.message);
+    }).then((unlisten) => { if (cancelled) unlisten(); else off = unlisten; });
+    return () => { cancelled = true; off?.(); };
+  }, []);
 
   // PRIMARY channel: `panel:state` Tauri events, pushed by main on every
   // actual state change (debounced ~50ms). The listener is registered before
@@ -96,7 +108,7 @@ export default function PanelApp() {
       const off = await listen<PanelState>("panel:state", (e) => {
         if (cancelled) return;
         lastEventAtRef.current = Date.now();
-        setState(e.payload);
+        setState(coercePanelSnapshot(e.payload));
       });
       if (cancelled) { off(); return; }
       unlisten = off;
@@ -126,8 +138,8 @@ export default function PanelApp() {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     (async () => {
-      const off = await listen<{ seconds: number }>(PANEL_PLAYHEAD_EVENT, (e) => {
-        if (cancelled) return;
+      const off = await listen<{ seconds: number; sourceIdentity?: string | null }>(PANEL_PLAYHEAD_EVENT, (e) => {
+        if (cancelled || !panelCanTargetSource(stateRef.current, e.payload)) return;
         const r = Math.max(1, Math.round(fpsRef.current));
         setPlayheadFrames(Math.round(e.payload.seconds * r));
       });
@@ -164,6 +176,10 @@ export default function PanelApp() {
 
   return (
     <div className="cp-panel-window-root">
+      {(state.programInputActive || actionNotice) && <div className="cp-panel-source-notice" role="status">
+        <span>{state.programInputActive ? "Premiere is visible in the monitor. File seeks and ranges are unavailable." : actionNotice}</span>
+        {actionNotice && <button type="button" className="cp-btn" onClick={() => setActionNotice(null)}>Dismiss</button>}
+      </div>}
       <QueueDrawer
         // Always open in the floating window — there's no "close panel"
         // affordance inside the panel itself (only "close window").
@@ -176,8 +192,8 @@ export default function PanelApp() {
         hasFolder={state.hasFolder}
         onRemove={(id) => sendAction("remove", { id })}
         onRetry={(id) => sendAction("retry", { id })}
-        onMarkRange={(a, b) => sendAction("markRange", { a, b })}
-        onQueueRange={(a, b) => sendAction("queueRange", { a, b })}
+        onMarkRange={state.programInputActive ? undefined : (a, b) => sendAction("markRange", { a, b, sourceIdentity: state.sourceIdentity })}
+        onQueueRange={state.programInputActive ? undefined : (a, b) => sendAction("queueRange", { a, b, sourceIdentity: state.sourceIdentity })}
         onClearAll={() => sendAction("clearAll")}
         onClearDone={() => sendAction("clearDone")}
         onExportAll={() => sendAction("exportAll")}
@@ -186,7 +202,7 @@ export default function PanelApp() {
         transcriptOrigin={state.transcriptOrigin}
         playheadAvailable={state.transcriptPlayhead != null}
         transcriptFps={state.fps}
-        onTranscriptSeek={(seconds) => sendAction("seek", { seconds })}
+        onTranscriptSeek={(seconds) => sendAction("seek", { seconds, sourceIdentity: state.sourceIdentity })}
         transcriptArrivedTick={state.transcriptArrivedTick}
         onClearTranscript={() => sendAction("clearTranscript")}
         onLoadFromHistory={(entry: TranscriptHistoryEntry) => sendAction("loadFromHistory", { entry })}

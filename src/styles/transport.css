@@ -15,8 +15,10 @@
   align-items: center;
   gap: 10px;
 }
+.cp-timeline-live { display:flex; align-items:center; justify-content:center; color:var(--fg-3); font-size:var(--text-sm); background:var(--bg-1); border-radius:var(--r-sm); }
 .cp-transport-side.left { justify-content: flex-start; }
 .cp-transport-side.right { justify-content: flex-end; }
+.cp-transport-media { display: flex; align-items: center; gap: 10px; }
 
 .cp-transport-center {
   display: flex;
@@ -45,6 +47,23 @@
   color: var(--fg-3);
   background: transparent;
   border-color: transparent;
+}
+
+/* Source kind, not connection health. Live has no timecode-field outline or
+   button affordance; the picture/panel already reports parking and input loss. */
+.cp-source-status {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  white-space: nowrap;
 }
 
 .cp-transport-btn {
@@ -764,3 +783,6 @@
   .cp-filmstrip-cell img,
   .cp-track-wave { animation: none; }
 }
+.cp-source-timing { color: var(--fg-3); font-size: var(--text-sm); line-height: var(--leading-tight); }
+.cp-source-timing { display: flex; align-items: baseline; gap: var(--s-2); }
+.cp-source-timing > span { white-space: nowrap; }

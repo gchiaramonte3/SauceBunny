@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MAX_PER_REVIEW, __clearAllOutboxes, clearDelivered, discardOutbox,
-  enqueueOp, pendingCount, pendingOps,
+  enqueueOp, enqueueEnvelope, acknowledgeEnvelope, pendingCount, pendingOps,
 } from "./review-outbox";
+import { createReviewEnvelope } from "./review-delivery";
+import { emptyDoc } from "./review";
+import { withFailingStorage } from "../test-setup";
 import type { ReviewOp } from "./review";
 
 const op = (id: string): ReviewOp => ({ t: "del", id });
 
 beforeEach(() => { localStorage.clear(); __clearAllOutboxes(); });
-afterEach(() => { localStorage.clear(); });
+afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
 
 describe("the review outbox", () => {
   it("keeps a note nobody received", () => {
@@ -51,14 +54,14 @@ describe("the review outbox", () => {
     expect(JSON.parse(localStorage.getItem("saucebunny.review.outbox")!)).toEqual({});
   });
 
-  it("is bounded, and keeps the RECENT notes", () => {
+  it("never evicts unacknowledged notes at the warning threshold", () => {
     // Nothing guarantees a host ever returns, and an unbounded store is a
     // quota failure waiting to happen. If someone has written past the cap
     // into the void, the recent notes are the ones they still care about.
     for (let i = 0; i < MAX_PER_REVIEW + 5; i++) enqueueOp("film-a", op(String(i)));
     const q = pendingOps("film-a");
-    expect(q).toHaveLength(MAX_PER_REVIEW);
-    expect(q[0], "it trimmed the newest instead of the oldest").toEqual(op("5"));
+    expect(q).toHaveLength(MAX_PER_REVIEW + 5);
+    expect(q[0], "it silently discarded user work").toEqual(op("0"));
     expect(q.at(-1)).toEqual(op(String(MAX_PER_REVIEW + 4)));
   });
 
@@ -76,6 +79,27 @@ describe("the review outbox", () => {
   it("survives a mangled stored value", () => {
     localStorage.setItem("saucebunny.review.outbox", "{not json");
     expect(pendingOps("film-a")).toEqual([]);
-    expect(() => enqueueOp("film-a", op("1"))).not.toThrow();
+    expect(() => enqueueOp("film-a", op("1"))).toThrow("preserved");
+    expect(localStorage.getItem("saucebunny.review.outbox")).toBe("{not json");
+  });
+
+  it("keeps new envelopes until a matching source and operation acknowledgement", () => {
+    const doc = { ...emptyDoc("film-a"), activeVersionId: "v" };
+    const envelope = createReviewEnvelope(doc, op("note"), "film-a", "session");
+    enqueueEnvelope(envelope);
+    enqueueEnvelope(envelope);
+    clearDelivered("film-a", [envelope.op]);
+    acknowledgeEnvelope("film-b", envelope.opId);
+    expect(pendingCount()).toBe(1);
+    acknowledgeEnvelope("film-a", envelope.opId);
+    expect(pendingCount()).toBe(0);
+  });
+
+  it("refuses a failed local write without discarding previous queued notes", () => {
+    enqueueOp("film-a", op("first"));
+    withFailingStorage("setItem", () => {
+      expect(() => enqueueOp("film-a", op("second"))).toThrow("preserved");
+    });
+    expect(pendingOps("film-a")).toEqual([op("first")]);
   });
 });

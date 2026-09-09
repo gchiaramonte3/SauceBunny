@@ -14,10 +14,23 @@
  * for all web sources now). The type was relocated + renamed at the
  * same time.
  */
+export type SeekResult = {
+  requestedSeconds: number;
+  presentedSeconds: number;
+  status: "presented" | "superseded" | "unavailable";
+};
+
 export type PlayerHandle = {
   play: () => void;
   pause: () => void;
-  seekTo: (seconds: number) => void;
+  /** One complete, programmatic seek (comment/cue/frame-step/chase). */
+  seekTo: (seconds: number) => Promise<SeekResult>;
+  /** Explicit timeline gesture lifecycle. No player may infer this from timeouts. */
+  beginScrub: () => void;
+  /** Latest-wins preview update. It must not rebuild a streaming pipeline. */
+  scrubTo: (seconds: number) => void;
+  /** Exact landing. Streaming engines may rebuild at most once here. */
+  endScrub: (seconds: number) => Promise<SeekResult>;
   getCurrentTime: () => number;
   getDuration: () => number;
   isReady: () => boolean;

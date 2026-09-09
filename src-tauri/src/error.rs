@@ -24,6 +24,7 @@
 //! ## Pattern: handlers
 //!
 //! ```rust,no_run
+//! use sauce_bunny_lib::AppError;
 //! #[tauri::command]
 //! pub fn read_config(path: &str) -> Result<String, AppError> {
 //!     std::fs::read_to_string(path)?;         // io::Error → AppError via From

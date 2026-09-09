@@ -24,12 +24,9 @@ export type TagColor = {
 };
 
 /**
- * In Finder's own menu order.
- *
- * The greens are worth a note: macOS green (#63DA57) sits near this app's
- * accent (#6CFF8D), which everywhere else means "selected". It is darker and
- * less saturated, so the two read apart on a row, but a tag swatch must never
- * be drawn at accent brightness or a green-tagged file will look chosen.
+ * Existing Finder menu order and palette. These are file metadata colors,
+ * not application status or selection: never substitute --success or
+ * --sel-fill for a tag's color, or tint the row/artwork with it.
  */
 export const TAG_COLORS: readonly TagColor[] = [
   { index: 1, label: "Grey", hex: "#A2A2A6" },

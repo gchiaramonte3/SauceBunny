@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { PeoplePanel, type Participant } from "./PeoplePanel";
 
 // The panel subscribes to the green-room capture on mount. That path reaches
@@ -35,6 +35,8 @@ const base = {
   sharingMembers: new Set<string>(), shareStream: null,
   raisedHands: new Set<string>(), reactionFlashes: new Map(),
 } as const;
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("PeoplePanel roster announcements", () => {
   beforeEach(() => { document.body.innerHTML = ""; });
@@ -167,6 +169,31 @@ describe("the self tile's mic state", () => {
     expect(screen.getByLabelText("Mute")).toBeTruthy();
     expect(document.querySelectorAll(".cp-person.self .cp-person-muted")).toHaveLength(0);
   });
+
+  it("preserves native Space activation without also reaching global playback shortcuts", () => {
+    const onToggleCam = vi.fn();
+    const onToggleMic = vi.fn();
+    render(<PeoplePanel {...base} active participants={[p("m0", "Gasper", { isSelf: true })]}
+      selfCamOff selfMicMuted onToggleCam={onToggleCam} onToggleMic={onToggleMic} />);
+    const globalKey = vi.fn();
+    document.addEventListener("keydown", globalKey);
+    try {
+      for (const control of [screen.getByRole("button", { name: /Gasper,.*Participant details/ }),
+        screen.getByRole("button", { name: "Turn camera on" }), screen.getByRole("button", { name: "Unmute" })]) {
+        const event = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+        fireEvent(control, event);
+        expect(event.defaultPrevented).toBe(false);
+      }
+      expect(globalKey).not.toHaveBeenCalled();
+      expect(onToggleCam).not.toHaveBeenCalled();
+      expect(onToggleMic).not.toHaveBeenCalled();
+      // Actual native Space clicks are covered by the real App browser test.
+      fireEvent.click(screen.getByRole("button", { name: "Turn camera on" }));
+      fireEvent.click(screen.getByRole("button", { name: "Unmute" }));
+      expect(onToggleCam).toHaveBeenCalledTimes(1);
+      expect(onToggleMic).toHaveBeenCalledTimes(1);
+    } finally { document.removeEventListener("keydown", globalKey); }
+  });
 });
 
 describe("a peer's tile", () => {
@@ -185,7 +212,7 @@ describe("a peer's tile", () => {
     expect(screen.queryByText("Let them present"), "the grant button is back on the tile").toBeNull();
   });
 
-  it("puts every per-person action behind right-click", async () => {
+  it("retains the real presenter action behind right-click", () => {
     const onMakePresenter = vi.fn();
     render(
       <PeoplePanel {...base} active participants={[p("m0", "Gasper", { isSelf: true, isHost: true }), p("m1", "Jamien")]}
@@ -197,21 +224,156 @@ describe("a peer's tile", () => {
     const peer = [...tiles].find((t) => !t.classList.contains("self"))!;
     expect(document.querySelector(".cp-person-menu")).toBeNull();
 
-    const { fireEvent } = await import("@testing-library/react");
     fireEvent.contextMenu(peer);
     expect(document.querySelector(".cp-person-menu"), "right-click opened no menu").toBeTruthy();
     fireEvent.click(screen.getByText("Let them present"));
     expect(onMakePresenter).toHaveBeenCalledWith("m1");
   });
 
-  it("offers nothing on your OWN tile", async () => {
+  it("opens self details without offering peer moderation actions", () => {
+    const onToggleCam = vi.fn();
+    const onToggleMic = vi.fn();
     render(
       <PeoplePanel {...base} active participants={[p("m0", "Gasper", { isSelf: true, isHost: true })]}
-        canGrantPresenter onMakePresenter={() => {}} onToggleMuteForMe={() => {}}
-        selfCamOff={false} selfMicMuted={false} onToggleCam={() => {}} onToggleMic={() => {}} />,
+        canGrantPresenter onMakePresenter={() => {}} onToggleMuteForMe={() => {}} onRemovePerson={() => {}}
+        selfCamOff selfMicMuted onToggleCam={onToggleCam} onToggleMic={onToggleMic} />,
     );
-    const { fireEvent } = await import("@testing-library/react");
     fireEvent.contextMenu(document.querySelector(".cp-person.self")!);
-    expect(document.querySelector(".cp-person-menu"), "you can act on yourself").toBeNull();
+    const menu = screen.getByRole("menu", { name: "Gasper participant details" });
+    expect(within(menu).queryByRole("menuitem", { name: "Let them present" })).toBeNull();
+    expect(within(menu).queryByRole("menuitem", { name: "Remove from session" })).toBeNull();
+    expect(within(menu).queryByRole("menuitem", { name: /for me/ })).toBeNull();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Turn camera on" }));
+    expect(onToggleCam).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /Gasper,.*Participant details/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unmute" }));
+    expect(onToggleMic).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes simultaneous states without placing indicators or controls inside the picture mask", () => {
+    render(<PeoplePanel {...base} active participants={[p("m1", "Alexandra Long Name")]}
+      presenter="m1" sharingMembers={new Set(["m1"])} recordingMembers={new Set(["m1"])}
+      raisedHands={new Set(["m1"])} mutedForMe={new Set(["m1"])}
+      peerStates={new Map([["m1", "failed"]])} />);
+    const tile = document.querySelector('[data-member-id="m1"]')!;
+    const picture = tile.querySelector(".cp-person-picture")!;
+    const trigger = within(tile as HTMLElement).getByRole("button", { name: /Alexandra Long Name,.*Participant details/ });
+    const accessibleName = trigger.getAttribute("aria-label")!;
+    for (const state of ["Presenting", "Mic muted", "No camera picture", "Sharing screen", "Recording camera and mic", "Hand raised", "Muted for me", "No connection"]) {
+      expect(accessibleName).toContain(state);
+    }
+    expect(picture.querySelector(".cp-person-signals, .cp-person-controls, .cp-person-presenting, .cp-person-presenter-pin")).toBeNull();
+    for (const signal of ["cp-person-muted", "cp-person-local-muted", "cp-person-camera", "cp-person-share", "cp-person-rec", "cp-person-hand", "cp-person-conn"]) {
+      expect(tile.querySelector(`.cp-person-signals .${signal}`)).toBeTruthy();
+    }
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu", { name: "Alexandra Long Name participant details" });
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu.textContent).toContain("Recording camera and mic");
+  });
+
+  it("opens by the keyboard context-menu shortcut, supports menu navigation, and returns focus", () => {
+    render(<PeoplePanel {...base} active participants={[p("m1", "Jamien")]}
+      canGrantPresenter onMakePresenter={() => {}} onToggleMuteForMe={() => {}} onRemovePerson={() => {}} />);
+    const trigger = screen.getByRole("button", { name: /Jamien,.*Participant details/ });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "F10", shiftKey: true });
+    const menu = screen.getByRole("menu");
+    const items = within(menu).getAllByRole("menuitem");
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(menu, { key: "End" });
+    expect(document.activeElement).toBe(items.at(-1));
+    fireEvent.keyDown(menu, { key: "Home" });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("keeps local hide/mute, handoff, and removal bound to the selected member", () => {
+    const onToggleMuteForMe = vi.fn();
+    const onMakePresenter = vi.fn();
+    const onRemovePerson = vi.fn();
+    render(<PeoplePanel {...base} active participants={[p("m1", "Jamien")]}
+      canGrantPresenter onMakePresenter={onMakePresenter} onToggleMuteForMe={onToggleMuteForMe}
+      onRemovePerson={onRemovePerson} />);
+    const trigger = screen.getByRole("button", { name: /Jamien,.*Participant details/ });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Hide their video for me" }));
+    expect(trigger.getAttribute("aria-label")).toContain("Video hidden for me");
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menuitem", { name: "Show their video for me" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Mute them for me" }));
+    expect(onToggleMuteForMe).toHaveBeenCalledExactlyOnceWith("m1", true);
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Let them present" }));
+    expect(onMakePresenter).toHaveBeenCalledExactlyOnceWith("m1");
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove from session" }));
+    expect(onRemovePerson).toHaveBeenCalledExactlyOnceWith("m1", "Jamien");
+  });
+
+  it("does not invent host permissions or offer a handoff to the current presenter", () => {
+    const { rerender } = render(<PeoplePanel {...base} active participants={[p("m1", "Jamien")]}
+      onMakePresenter={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Jamien,.*Participant details/ }));
+    expect(screen.queryByRole("menuitem", { name: "Let them present" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Remove from session" })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close details" }));
+    rerender(<PeoplePanel {...base} active participants={[p("m1", "Jamien")]}
+      canGrantPresenter presenter="m1" onMakePresenter={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Jamien,.*Participant details/ }));
+    expect(screen.queryByRole("menuitem", { name: "Let them present" })).toBeNull();
+  });
+
+  it("keeps the same video element through compact and theater presentation changes", () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    const stream = { getVideoTracks: () => [{ enabled: true, muted: false }], getAudioTracks: () => [] } as unknown as MediaStream;
+    const props = { ...base, active: true, participants: [p("m1", "Jamien")], remoteStreams: new Map([["m1", stream]]) };
+    const { rerender } = render(<PeoplePanel {...props} />);
+    const video = document.querySelector("video")!;
+    expect(video.srcObject).toBe(stream);
+    expect(play).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse the people panel to avatars" }));
+    expect(document.querySelector("video")).toBe(video);
+    rerender(<PeoplePanel {...props} strip />);
+    expect(document.querySelector("video")).toBe(video);
+    expect(document.querySelector(".cp-people.strip")).toBeTruthy();
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it("clamps the portal to the viewport and dismisses on resize", () => {
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("cp-person-menu")
+        ? { x: 0, y: 0, left: 0, top: 0, width: 264, height: 300, right: 264, bottom: 300, toJSON() {} }
+        : original.call(this);
+    });
+    render(<PeoplePanel {...base} active participants={[p("m1", "Jamien")]} />);
+    const trigger = screen.getByRole("button", { name: /Jamien,.*Participant details/ });
+    fireEvent.contextMenu(trigger, { clientX: window.innerWidth - 1, clientY: window.innerHeight - 1 });
+    const menu = screen.getByRole("menu");
+    expect(menu.style.left).toBe(`${window.innerWidth - 264 - 12}px`);
+    expect(menu.style.top).toBe(`${window.innerHeight - 300 - 12}px`);
+    fireEvent.resize(window);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes on a second trigger click or outside click without immediately reopening", async () => {
+    render(<PeoplePanel {...base} active participants={[p("m1", "Jamien")]} />);
+    const trigger = screen.getByRole("button", { name: /Jamien,.*Participant details/ });
+    fireEvent.click(trigger);
+    await new Promise(resolve => setTimeout(resolve, 1));
+    fireEvent.mouseDown(trigger);
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(trigger);
+    await new Promise(resolve => setTimeout(resolve, 1));
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });

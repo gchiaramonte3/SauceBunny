@@ -76,6 +76,8 @@ const GREEN = /var\(--(ella-green|success|stroke-green|color-accent-green)\b/;
  * would let a second, unrelated green slip into the same rule.
  */
 const ALLOWED: Record<string, string[]> = {
+  // Explicit user-approved Share action; not an assertion of connection health.
+  "ndi-input.css": ["cp-ndi-input-share", "@keyframes cp-share-ready"],
   // ── positive outcome ───────────────────────────────────────────────
   "buttons.css": ["cp-sbtn-result", "cp-gen-result", "cp-gen-btn", "cp-gen-svg"],
   // The completion toast and the notification row the bell dot points to:
@@ -86,7 +88,9 @@ const ALLOWED: Record<string, string[]> = {
   // cp-tx-jump and cp-md-ts below; it was the one blue among three.
   // cp-review-enhance: the AI tidy-up sweep. WORK ACTUALLY RUNNING, the same
   // category as the Generate button's sweep - not decoration.
-  "review.css": ["cp-review-export-msg", "cp-status-chip", "cp-review-tc", "cp-review-enhance"],
+  // User-approved exception (2026-09-07): Post is green when actionable.
+  // This does not change neutral primary buttons or white keyboard focus.
+  "review.css": ["cp-review-export-msg", "cp-status-chip", "cp-review-tc", "cp-review-enhance", "cp-review-post"],
   "settings.css": ["cp-spike-row", "cp-aiapi-set", "cp-settings-ready", "cp-aiapi-msg"],
   "shell.css": ["cp-drop-card"],
   "transport.css": ["cp-track-queued"],

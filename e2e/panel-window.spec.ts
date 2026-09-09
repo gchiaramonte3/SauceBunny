@@ -130,6 +130,21 @@ test("a seeded snapshot reaches the UI without waiting for an event", async ({ p
   expect(noise, `console noise:\n${noise.join("\n")}`).toEqual([]);
 });
 
+test("an NDI preview keeps detached file actions visibly unavailable without clipping its tabs", async ({ page }) => {
+  const noise: string[] = [];
+  await page.setViewportSize({ width: 480, height: 700 });
+  await openPanel(page, noise, { queue: [], fps: 24, sourceIdentity: "hidden-file", programInputActive: true,
+    transcriptPlayhead: null, transcriptPath: null, hasSource: false });
+  await expect(page.getByRole("status")).toContainText("File seeks and ranges are unavailable");
+  await expect(page.getByRole("tab", { name: "Transcript" })).toBeVisible();
+  const drawer = await page.locator(".cp-queue-drawer").boundingBox();
+  const notice = await page.locator(".cp-panel-source-notice").boundingBox();
+  expect(drawer!.y).toBeGreaterThanOrEqual(notice!.y + notice!.height - 1);
+  expect(drawer!.x + drawer!.width).toBeLessThanOrEqual(480);
+  expect(drawer!.y + drawer!.height).toBeLessThanOrEqual(700);
+  expect(noise).toEqual([]);
+});
+
 /**
  * The panel does not hydrate the review store, and this is why it is allowed
  * not to.

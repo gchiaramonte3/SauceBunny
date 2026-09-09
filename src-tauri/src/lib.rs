@@ -5,6 +5,7 @@ mod error;
 #[cfg(test)]
 mod nightly;
 mod stream_proxy;
+mod premiere_bridge;
 pub use error::AppError;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -185,6 +186,25 @@ pub fn run() {
         .manage(commands::SessionManager::default())
         .manage(commands::PendingReviewLink::default())
         .invoke_handler(tauri::generate_handler![
+            commands::premiere::premiere_bridge_start,
+            commands::premiere::premiere_bridge_stop,
+            commands::premiere::premiere_bridge_status,
+            commands::premiere::premiere_enqueue_note,
+            commands::premiere::premiere_marker_notes,
+            commands::premiere::premiere_install_companion,
+            commands::ndi::ndi_discover,
+            commands::ndi::ndi_preflight,
+            commands::ndi::ndi_set_runtime,
+            commands::ndi::ndi_start,
+            commands::ndi::ndi_stop,
+            commands::ndi::ndi_status,
+            commands::ndi::ndi_timing_probe_start,
+            commands::ndi::ndi_timing_probe_read,
+            commands::ndi::ndi_timing_probe_stop,
+            commands::ndi::ndi_sessions,
+            commands::session::ndi_publish,
+            commands::session::ndi_unpublish,
+            commands::ndi::ndi_remote_source,
             commands::fetch_metadata,
             commands::create_clip,
             commands::download_captions,
@@ -234,6 +254,7 @@ pub fn run() {
             commands::save_poster_to_cache,
             commands::scan_library_folder,
             commands::scan_transcript_library,
+            commands::trash_transcript,
             commands::rename_transcript,
             commands::sniff_page_media,
             commands::create_transcript_folder,
@@ -251,6 +272,7 @@ pub fn run() {
             commands::re_diarize_transcript,
             commands::extract_frame,
             commands::get_direct_stream_url,
+            commands::resolve_presentation_source,
             commands::download_web_preview,
             commands::download_audio_track,
             commands::cancel_job,
@@ -313,6 +335,7 @@ pub fn run() {
             commands::recording_own_window,
             commands::session_broadcast,
             commands::session_send,
+            commands::session_send_to,
             commands::session_offer_file,
             commands::session_clear_offer,
             commands::session_fetch_file,
@@ -435,6 +458,8 @@ pub fn run() {
             // Kill the resident llama-server on quit — it holds a multi-GB
             // model in memory and would otherwise survive as an orphan.
             if let tauri::RunEvent::Exit = event {
+                premiere_bridge::shutdown();
+                commands::ndi::stop_all();
                 app.state::<commands::LlmServer>().shutdown();
                 // Every OTHER sidecar too. Nothing drained the JobRegistry on
                 // exit, so an in-flight yt-dlp/ffmpeg/whisper outlived the app

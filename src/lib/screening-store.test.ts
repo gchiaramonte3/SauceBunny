@@ -252,6 +252,19 @@ describe("the read path", () => {
     // than silently pretending the screening never happened.
     expect(listScreenings().map((r) => r.id)).toContain(doc.id);
   });
+
+  it("refuses malformed or mismatched archive documents without changing them", async () => {
+    resetScreeningStoreForTests();
+    const files = diskBackedInvoke();
+    const doc = newScreening("archive-id", "Archive", "host");
+    await saveScreening(doc);
+    const path = screeningPath(doc.id)!;
+    for (const invalid of [{ ...doc, id: "someone-else" }, { ...doc, segments: [{}] }, { ...doc, participants: [null] }]) {
+      const text = JSON.stringify(invalid); files.set(path, text);
+      expect(await loadScreening(doc.id)).toBeNull();
+      expect(files.get(path)).toBe(text);
+    }
+  });
 });
 
 describe("a failed save is not swallowed", () => {

@@ -12,13 +12,16 @@ type Props = {
 export function VolumeControl({ volume, muted, onVolumeChange, onMutedChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") { setOpen(false); trigger.current?.focus(); }
+    }
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -32,9 +35,10 @@ export function VolumeControl({ volume, muted, onVolumeChange, onMutedChange }: 
   return (
     <div className="cp-volume" ref={ref}>
       <button
+        ref={trigger}
         type="button"
         className={"cp-icon-btn volume" + (effectivelyMuted ? " muted" : "") + (open ? " active" : "")}
-        title={effectivelyMuted ? "Unmute" : "Volume"}
+        title={effectivelyMuted ? "Volume controls (muted)" : "Volume controls"}
         aria-label={effectivelyMuted ? "Volume (muted)" : "Volume"}
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
@@ -58,7 +62,11 @@ export function VolumeControl({ volume, muted, onVolumeChange, onMutedChange }: 
             min={0}
             max={100}
             value={Math.round(volume * 100)}
-            onChange={(e) => onVolumeChange(parseInt(e.target.value, 10) / 100)}
+            onChange={(e) => {
+              const next = parseInt(e.target.value, 10) / 100;
+              onVolumeChange(next);
+              if (next > 0 && muted) onMutedChange(false);
+            }}
             className="cp-volume-slider"
             aria-label="Volume"
           />

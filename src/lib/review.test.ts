@@ -503,7 +503,7 @@ describe("replies", () => {
     const next = removeReply(d, v, rootId, r1);
     expect(repliesOf(next, rootId).map((r) => r.id)).toEqual([r2]);
     expect(rootComments(next, v)).toHaveLength(1); // root survives
-    expect(removeReply(d, v, rootId, "nope")).toBe(d);
+    expect(removeReply(d, v, rootId, "nope", 100).deletedComments?.nope).toBe(100);
     expect(removeReply(d, v, "nope", r1)).toBe(d);
   });
   it("ensureCommentIds assigns an id to a legacy reply without one", () => {
@@ -803,12 +803,13 @@ describe("undo inverse ops (inverseReviewOps / restampReviewOp)", () => {
     const c = mk(v, "c1");
     const addOp = { t: "add", comment: c } as const;
     const after = applyReviewOp(doc, addOp);
-    const undone = inverseReviewOps(doc, addOp, 2000).reduce(applyReviewOp, after);
+    const undone = inverseReviewOps(doc, addOp, 2000).map((o) => restampReviewOp(o, 2000)).reduce(applyReviewOp, after);
     expect(undone.comments).toEqual(doc.comments);
     // redo replays the SAME comment object → identical row, no duplicate
-    const redone = applyReviewOp(applyReviewOp(undone, addOp), addOp);
+    const redo = restampReviewOp(addOp, 3000);
+    const redone = applyReviewOp(applyReviewOp(undone, redo), redo);
     expect(redone.comments).toHaveLength(1);
-    expect(redone.comments[0]).toEqual(c); // id + createdAt/updatedAt intact
+    expect(redone.comments[0]).toMatchObject(c); // id + createdAt/updatedAt intact
   });
 
   it("del of a root resurrects the root AND its replies (peer replies included)", () => {
@@ -817,7 +818,7 @@ describe("undo inverse ops (inverseReviewOps / restampReviewOp)", () => {
     const mine = mk(v, "p1", { parentId: "r1", author: "A" });
     const peers = mk(v, "p2", { parentId: "r1", author: "Peer" });
     let d = [root, mine, peers].reduce((acc, c) => insertComment(acc, c), doc);
-    const delOp = { t: "del", id: "r1" } as const;
+    const delOp = { t: "del", id: "r1", at: 4000 } as const;
     const before = d;
     d = applyReviewOp(d, delOp);
     expect(d.comments).toHaveLength(0);
@@ -831,10 +832,10 @@ describe("undo inverse ops (inverseReviewOps / restampReviewOp)", () => {
     const root = mk(v, "r1");
     const reply = mk(v, "p1", { parentId: "r1" });
     const before = insertComment(insertComment(doc, root), reply);
-    const op = { t: "delReply", versionId: v, commentId: "r1", replyId: "p1" } as const;
+    const op = { t: "delReply", versionId: v, commentId: "r1", replyId: "p1", at: 4000 } as const;
     const after = applyReviewOp(before, op);
     const undone = inverseReviewOps(before, op, 5000).reduce(applyReviewOp, after);
-    expect(undone.comments).toEqual(expect.arrayContaining(before.comments));
+    for (const c of before.comments) expect(undone.comments.find((r) => r.id === c.id)).toMatchObject(c);
     expect(undone.comments).toHaveLength(2);
     expect(inverseReviewOps(doc, op, 5000)).toEqual([]); // reply not in doc
   });
@@ -876,9 +877,9 @@ describe("undo inverse ops (inverseReviewOps / restampReviewOp)", () => {
     expect(undone.comments.find((c) => c.id === "p1")?.body).toBe("old");
   });
 
-  it("restampReviewOp only touches LWW ops", () => {
+  it("restampReviewOp stamps mutations and deletion records", () => {
     const del = { t: "del", id: "x" } as const;
-    expect(restampReviewOp(del, 9000)).toBe(del); // non-LWW → same object
+    expect(restampReviewOp(del, 9000)).toEqual({ ...del, at: 9000 });
     const res = restampReviewOp({ t: "resolve", id: "x", resolved: true, at: 1 }, 9000);
     expect(res).toEqual({ t: "resolve", id: "x", resolved: true, at: 9000 });
   });

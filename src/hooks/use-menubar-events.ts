@@ -40,7 +40,7 @@ export type UseMenubarEventsDeps = {
   /** App's own tab union, not `string`: widening it here would let a typo
    *  through that App itself would have rejected. */
   setSettingsInitialTab: Dispatch<SetStateAction<
-    "general" | "transcription" | "ai-summary" | "commands" | "about">>;
+    "general" | "transcription" | "ai-summary" | "commands" | "about" | "integrations">>;
   setLogsOpen: Dispatch<SetStateAction<boolean>>;
   setPaletteOpen: Dispatch<SetStateAction<boolean>>;
   setShortcutsOpen: Dispatch<SetStateAction<boolean>>;

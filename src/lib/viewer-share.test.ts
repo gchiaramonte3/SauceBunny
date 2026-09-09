@@ -64,7 +64,7 @@ describe("showing a peer what you are watching", () => {
     const { ctl, calls } = harness(el(1, 0));
     expect(ctl.start()).toBe(true);
     expect(calls.video).toHaveLength(1);
-    expect(calls.audio, "an audio override was pushed for a silent capture").toEqual([]);
+    expect(calls.audio, "silent program capture must clear stale program audio, not touch the mic").toEqual([null]);
   });
 
   it("reports failure instead of claiming a share that is not running", () => {

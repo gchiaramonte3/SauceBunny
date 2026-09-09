@@ -21,6 +21,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ScreeningDoc } from "./screening";
 import { screeningCommentCount } from "./screening";
 import { screeningSourceKeys } from "./review-ledger";
+import { sessionSourceSummary } from "./saved-session";
 import { STORE_SCHEMA_VERSION, futureVersionIn, reportFutureVersion } from "./store-schema";
 
 /** One row in the index: everything a library card needs WITHOUT opening the
@@ -43,6 +44,9 @@ export type ScreeningIndexEntry = {
    *  would hide the whole history of anything reviewed before this shipped,
    *  which is exactly the material the ledger exists to show. */
   sourceKeys?: string[];
+  /** Additive source badges. Absent on legacy records, not evidence of file media. */
+  sourceKinds?: ("web" | "file" | "ndi")[];
+  premiere?: boolean;
 };
 
 const INDEX_FILE = "index.json";
@@ -136,6 +140,9 @@ export function parseScreeningIndex(text: unknown): Map<string, ScreeningIndexEn
       sourceKeys: Array.isArray(entry.sourceKeys)
         ? entry.sourceKeys.filter((k): k is string => typeof k === "string")
         : undefined,
+      sourceKinds: Array.isArray(entry.sourceKinds)
+        ? entry.sourceKinds.filter(k => k === "web" || k === "file" || k === "ndi") : undefined,
+      premiere: typeof entry.premiere === "boolean" ? entry.premiere : undefined,
     });
   }
   return out;
@@ -153,6 +160,7 @@ export function indexEntryFor(doc: ScreeningDoc, bytes: number): ScreeningIndexE
     commentCount: screeningCommentCount(doc),
     bytes,
     sourceKeys: screeningSourceKeys(doc),
+    ...sessionSourceSummary(doc),
   };
 }
 
@@ -280,7 +288,17 @@ export async function loadScreening(id: string): Promise<ScreeningDoc | null> {
       path: `${dir}/${entry.file}`,
       maxBytes: 4 * 1024 * 1024,
     });
-    return JSON.parse(text) as ScreeningDoc;
+    const doc = JSON.parse(text) as ScreeningDoc | null;
+    if (!doc || doc.id !== id || typeof doc.title !== "string"
+      || !Array.isArray(doc.participants) || !Array.isArray(doc.segments)
+      || !doc.participants.every(p => p && typeof p.name === "string")
+      || !doc.segments.every(s => s && typeof s.id === "string" && typeof s.title === "string"
+        && ["web", "file", "ndi"].includes(s.kind)
+        && (s.localSourceKey === null || typeof s.localSourceKey === "string")
+        && (s.url === null || typeof s.url === "string")
+        && (s.fingerprint === null || typeof s.fingerprint === "string")
+        && Array.isArray(s.commentIds) && s.commentIds.every(c => typeof c === "string"))) return null;
+    return doc;
   } catch {
     return null;
   }

@@ -127,3 +127,59 @@ test("putting the pen down is still a decision to discard", async ({ page }) => 
   await expect(page.locator(".cp-annot.drawing")).toBeVisible();
   expect(await inkedPixels(page)).toBe(0);
 });
+
+test("Hide drawing does not immediately repaint it through proximity; reopening still works", async ({ page }) => {
+  await bootReview(page);
+  await postDrawnComment(page, "hide this drawing");
+  await page.locator(".cp-review-drawbadge").first().click();
+  await expect.poll(() => inkedPixels(page)).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Hide drawing", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Hide drawing", exact: true })).toHaveCount(0);
+  await expect.poll(() => inkedPixels(page)).toBeLessThanOrEqual(0);
+  await expect(page.locator(".cp-review-comment")).toHaveCount(1);
+  await page.locator(".cp-review-drawbadge").first().click();
+  await expect.poll(() => inkedPixels(page)).toBeGreaterThan(0);
+});
+
+test("reaction menu escapes the comment scroller and returns keyboard focus", async ({ page }) => {
+  await bootReview(page);
+  await postDrawnComment(page, "react to this note");
+  const trigger = page.getByRole("button", { name: "Add a reaction", exact: true }).first();
+  await trigger.click();
+  const menu = page.getByRole("menu", { name: "Pick a reaction" });
+  await expect(menu).toBeVisible();
+  expect(await menu.evaluate(el => el.parentElement === document.body)).toBe(true);
+  const box = (await menu.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(8);
+  expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height - 8);
+  await expect(menu.getByRole("menuitem").first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await page.getByRole("menuitem", { name: "React with 👍" }).click();
+  await expect(page.getByRole("button", { name: "👍 by Nika" })).toBeVisible();
+});
+
+test("composer emoji and green Post remain usable at 125% in a narrow drawer", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await bootReview(page);
+  await page.locator(".cp-review").evaluate(el => { (el as HTMLElement).style.fontSize = "125%"; });
+  const trigger = page.getByRole("button", { name: "Add emoji", exact: true });
+  await trigger.click();
+  const picker = page.getByRole("dialog", { name: "Emoji picker" });
+  await expect(picker).toBeVisible();
+  expect(await picker.evaluate(el => el.parentElement === document.body)).toBe(true);
+  const bounds = (await picker.boundingBox())!;
+  expect(bounds.y).toBeGreaterThanOrEqual(8);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(693);
+  await page.getByRole("textbox", { name: "Search emoji" }).fill("smile");
+  await picker.locator(".cp-emoji-cell").first().click();
+  // Insertion deliberately restores the text caret on the next animation frame.
+  await expect(page.getByRole("textbox", { name: "Comment", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+  const post = page.getByRole("button", { name: "Post", exact: true });
+  await expect(post).toBeEnabled();
+  await expect(post).toHaveCSS("background-color", "rgb(108, 255, 141)");
+});

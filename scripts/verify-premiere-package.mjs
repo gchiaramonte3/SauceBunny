@@ -1,0 +1,17 @@
+import { readFileSync, lstatSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
+import assert from "node:assert/strict";
+const root = fileURLToPath(new URL("../", import.meta.url));
+const app = resolve(process.argv[2] ?? join(root, "src-tauri/target/release/bundle/macos/Sauce Bunny.app"));
+const packaged = join(app, "Contents/Resources/companion/SauceBunnyPremiere.ccx");
+const source = join(root, "premiere-companion/dist/SauceBunnyPremiere.ccx");
+assert(lstatSync(packaged).isFile(), "The CCX resource must be a regular file, not a symlink");
+assert(readFileSync(source).equals(readFileSync(packaged)), "The bundled CCX differs from the verified build");
+execFileSync("/usr/bin/unzip", ["-tq", packaged], { stdio: "pipe" });
+const manifest = JSON.parse(execFileSync("/usr/bin/unzip", ["-p", packaged, "manifest.json"], { encoding: "utf8" }));
+assert.equal(manifest.id, "com.saucebunny.premiere-companion");
+assert.equal(manifest.host.minVersion, "26.3.2");
+assert.deepEqual(manifest.requiredPermissions, { network: { domains: ["ws://localhost"] } });
+console.log(`Verified bundled Premiere companion ${manifest.version}; only loopback network permission.`);

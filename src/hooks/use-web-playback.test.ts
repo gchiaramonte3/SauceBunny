@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { useWebPlayback, shouldRetryWithoutCookies } from "./use-web-playback";
+import { presentationRefreshDelayMs, proxyPresentationSource, useWebPlayback, shouldRetryWithoutCookies } from "./use-web-playback";
 
 /**
  * The WIRING, which is the half that had no tests.
@@ -98,6 +98,19 @@ describe("driving a real download", () => {
     await waitFor(() => expect(result.current.downloadProgress).toBe(42));
   });
 
+  it("resolves presentation in parallel without blocking the review-copy job", async () => {
+    const { result } = await startDownload();
+    expect(result.current.downloading).toBe(true);
+    expect(h.invoked.some((call) => call.cmd === "resolve_presentation_source")).toBe(true);
+  });
+
+  it("cancels an unfinished review-copy download when metadata identifies an active live source", async () => {
+    const { result } = await startDownload();
+    act(() => { result.current.promoteLive("https://y.tld/1", 1); });
+    await waitFor(() => expect(h.invoked.some((call) => call.cmd === "cancel_job")).toBe(true));
+    expect(h.invoked.some((call) => call.cmd === "get_direct_stream_url")).toBe(true);
+  });
+
   it("routes our log lines to the web-preview channel", async () => {
     const { hp, result } = await startDownload();
     const job = result.current.downloadJobId!;
@@ -130,6 +143,38 @@ describe("driving a real download", () => {
     const { result } = await startDownload();
     act(() => { fire("playback-prep-progress", { job_id: "somebody-else", percent: 99 }); });
     expect(result.current.downloadProgress).not.toBe(99);
+  });
+});
+
+describe("independent presentation representation", () => {
+  const base = "http://127.0.0.1:1234/t/token";
+
+  it("routes HLS through the manifest rewriter", () => {
+    const source = proxyPresentationSource({
+      kind: "hls", manifestUrl: "https://cdn.example/master.m3u8", expiresAt: 99,
+      width: 1920, height: 1080, videoCodec: "avc1", audioCodec: "mp4a",
+    }, base);
+    expect(source.kind).toBe("hls");
+    if (source.kind === "hls") expect(source.manifestUrl).toContain("/hls/v1/");
+  });
+
+  it("proxies split video but preserves the separately signed audio URL", () => {
+    const audioUrl = "https://audio.example/a.m4a?sig=1";
+    const source = proxyPresentationSource({
+      kind: "split", videoUrl: "https://video.example/v.mp4?sig=2", audioUrl, expiresAt: 99,
+      width: 3840, height: 2160, videoCodec: "avc1", audioCodec: "mp4a",
+    }, base);
+    expect(source.kind).toBe("split");
+    if (source.kind === "split") {
+      expect(source.videoUrl).toContain("/v1/");
+      expect(source.audioUrl).toBe(audioUrl);
+    }
+  });
+
+  it("refreshes signed sources before expiry without creating a zero-delay loop", () => {
+    const now = 1_800_000_000_000;
+    expect(presentationRefreshDelayMs(1_800_000_120, now)).toBe(60_000);
+    expect(presentationRefreshDelayMs(1_799_999_999, now)).toBe(1_000);
   });
 });
 

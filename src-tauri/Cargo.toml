@@ -59,6 +59,11 @@ xattr = "1"
 plist = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
+# Explicitly paired local Premiere companion only. RFC6455 framing stays in
+# tungstenite rather than a hand-written network parser; no HTTP framework,
+# TLS stack or remote listener. MIT. futures-util already exists via iroh.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", features = ["sink"] }
 url = "2"
 # `blocking` feature powers the localhost media proxy's thread-per-request
 # handler (r58) — reqwest's blocking client must run OUTSIDE a tokio

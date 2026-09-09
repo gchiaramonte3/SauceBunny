@@ -13,7 +13,9 @@ import type { OnboardingStep, OnboardingStepId } from "../lib/onboarding";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
 import { MediaBunnyPlayer } from "./MediaBunnyPlayer";
 import { MSEStreamPlayer } from "./MSEStreamPlayer";
+import { ProxyPresentationPlayer } from "./ProxyPresentationPlayer";
 import type { PlayerHandle } from "./player-handle";
+import type { ResolvedPresentationSource } from "../bindings/ResolvedPresentationSource";
 import { formatPlaybackRate } from "../lib/playback-rate";
 import type { AppStatus, Metadata, SourceKind } from "../types";
 
@@ -65,6 +67,10 @@ type Props = {
    *  files hang WKWebView's media element over asset:// (black canvas, no
    *  error) — the same failure that made local imports mediabunny-first. */
   webCachedUseMediabunny?: boolean;
+  /** High-resolution, expiring representation resolved independently from the
+   * completed web review copy. `undefined` means this is not the dual-source
+   * web path; `null` means its parallel resolve is still pending/failed. */
+  presentationSource?: ResolvedPresentationSource | null;
   /** Seconds the MSE pipeline should start from (fresh-retry resume). */
   streamStartAt?: number;
   /** Tier B peer stream: no random access on the raw route, so the MSE
@@ -164,9 +170,16 @@ type Props = {
    * already live in here.
    */
   stageOverlay?: ReactNode;
+  /** A program feed covers the file picture. Keep that player running, but
+   * remove its covered controls from keyboard and assistive-technology access. */
+  pictureCovered?: boolean;
+  /** Local program framing must not inherit a hidden file's aspect mask. */
+  displayAspect?: number;
+  emptyActions?: ReactNode;
   onToastDismiss: () => void;
   onPlayerTimeUpdate?: (seconds: number) => void;
   onPlayerStateChange?: (playing: boolean) => void;
+  onRepresentationChange?: (representation: "proxy" | "presentation") => void;
   onPlayerReady?: (duration: number) => void;
   onSurfaceClick?: () => void;
   /** Active transcript path (SRT/VTT) for the on-video caption overlay. */
@@ -202,6 +215,8 @@ type Props = {
   proximityAnnotations?: { time: number; strokes: AnnotationStrokes; color?: string }[];
   onAnnotationChange?: (a: AnnotationStrokes) => void;
   onAnnotationDismiss?: () => void;
+  /** Automatic release is not an explicit request to hide nearby drawings. */
+  onAnnotationRelease?: () => void;
   /** True while the Review label tool is active (clicks place text labels). */
   annotationLabelMode?: boolean;
   /** Reviewer colour for annotation label chips. */
@@ -329,21 +344,21 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     errorDetail, extractorRot,
     resumeTitle, onResume, onboarding,
     aspect,
-    sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, streamStartAt, disableScrubPreview, onDiag, onAudioDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
+    sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, presentationSource, streamStartAt, disableScrubPreview, onDiag, onAudioDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
   recording,
     streamRung, onStreamStall, onStreamInfo, streamRungBadge, streamRungBadgeTitle, streamKeepBadge, streamKeepAction, onStreamKeepAction,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs, scrubAudio,
     streamLoadingPhase,
-    toast, onToastDismiss, stageOverlay,
-    onPlayerTimeUpdate, onPlayerStateChange, onPlayerReady, onSurfaceClick,
+    toast, onToastDismiss, stageOverlay, pictureCovered, displayAspect, emptyActions,
+    onPlayerTimeUpdate, onPlayerStateChange, onRepresentationChange, onPlayerReady, onSurfaceClick,
     transcriptPath, transcriptReloadToken, fps, captionsOn, captionStyle, tcOverlay,
     shuttleRate, playbackRateHud,
-    annotation, annotationDrawing, proximityAnnotations, onAnnotationChange, onAnnotationDismiss,
+    annotation, annotationDrawing, proximityAnnotations, onAnnotationChange, onAnnotationDismiss, onAnnotationRelease,
     annotationLabelMode, annotationLabelColor, annotationTime,
   } = props;
 
   const natural = metadata?.width && metadata?.height ? metadata.width / metadata.height : 16 / 9;
-  const ratio: number = aspect === "off"  ? natural
+  const ratio: number = displayAspect && displayAspect > 0 ? displayAspect : aspect === "off"  ? natural
                       : aspect === "16:9" ? 16 / 9
                       : aspect === "9:16" ? 9 / 16
                       : aspect === "1:1"  ? 1
@@ -351,6 +366,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
                       : natural;
   const { ref: monitorRef, dims } = useContainSize(ratio);
   const monitorStyle = dims ? { width: `${dims.w}px`, height: `${dims.h}px` } : undefined;
+  const fileInteraction = { "aria-hidden": pictureCovered || undefined, inert: pictureCovered ? "" : undefined };
 
   /* Floating toast — hoisted above the status early-returns so feedback that
      fires with NO source loaded (a rejected drag-and-drop, a transcript that
@@ -378,7 +394,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
      always a fragment, so the emptiness test is on the members. */
   const statusStack = (chips?: ReactNode) =>
     (toastEl || chips) ? (
-      <div className="cp-monitor-stack">{chips}{toastEl}</div>
+      <div className="cp-monitor-stack">{chips && <div className="cp-monitor-file-layer" {...fileInteraction}>{chips}</div>}{toastEl}</div>
     ) : null;
 
   if (status === "empty") {
@@ -386,8 +402,9 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
       <div className="cp-monitor-area">
         <div className="cp-monitor" ref={monitorRef} style={monitorStyle}>
           {recording && <div className="cp-monitor-rec-frame" aria-hidden />}
-          <div className="cp-empty">
+          <div className="cp-empty" {...fileInteraction}>
             <h3>Paste a URL or drop a file.</h3>
+            {emptyActions}
             {resumeTitle && onResume && (
               <button
                 type="button"
@@ -453,7 +470,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               the app was hanging on yt-dlp. It was not: the label was lying.
               A progress message that names the wrong subsystem does not just
               fail to inform, it actively sends you to debug the wrong thing. */}
-          <div className="cp-fetching">
+          <div className="cp-fetching" {...fileInteraction}>
             <div className="cp-scanline" />
             <div className="status">
               {sourceKind === "file" ? "READING FILE…" : "RESOLVING SOURCE STREAM…"}
@@ -478,7 +495,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             <img className="cp-monitor-img" src={metadata.thumbnail} alt=""
                  style={{ filter: "grayscale(0.6) brightness(0.4)" }} referrerPolicy="no-referrer" />
           )}
-          <div className="cp-error-overlay">
+          <div className="cp-error-overlay" {...fileInteraction}>
             <div className="icon"><IconAlert size={20} /></div>
             <div className="label">Couldn't resolve source</div>
             <div className="detail">{errorDetail ?? "Unknown error"}</div>
@@ -521,6 +538,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     <div className="cp-monitor-area">
       <div className="cp-monitor" ref={monitorRef} style={monitorStyle}>
           {recording && <div className="cp-monitor-rec-frame" aria-hidden />}
+        <div className="cp-monitor-file-layer" {...fileInteraction}>
         {sourceKind === "file" && localFilePath ? (
           useWebCodecs ? (
             <MediaBunnyPlayer
@@ -595,6 +613,24 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               onError={onMediaError}
               onSurfaceClick={onSurfaceClick}
             />
+          ) : webCachedUseMediabunny && presentationSource !== undefined ? (
+            <ProxyPresentationPlayer
+              ref={ref}
+              proxyPath={webStreamUrl}
+              presentation={presentationSource}
+              filename={metadata?.title}
+              initialVolume={initialVolume}
+              scrubAudio={!!scrubAudio}
+              knownDuration={metadata?.duration ?? undefined}
+              onTimeUpdate={onPlayerTimeUpdate}
+              onPlayStateChange={onPlayerStateChange}
+              onRepresentationChange={onRepresentationChange}
+              onReady={onPlayerReady}
+              onError={onMediaError}
+              onDiag={onDiag}
+              onAudioDiag={onAudioDiag}
+              onSurfaceClick={onSurfaceClick}
+            />
           ) : webCachedUseMediabunny ? (
             /* r122: the cached download-fallback copy decodes in-app via
                WebCodecs. Native <video> over asset:// hangs on large local
@@ -654,7 +690,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             watches the playhead at 60Hz and must not drag the overlay's
             canvas into that. */}
         {!annotationDrawing && annotation && annotationTime != null && onAnnotationDismiss && (
-          <PinnedAnnotationRelease time={annotationTime} fps={fps} onRelease={onAnnotationDismiss} />
+          <PinnedAnnotationRelease time={annotationTime} fps={fps} onRelease={onAnnotationRelease ?? onAnnotationDismiss} />
         )}
         {annotationDrawing || annotation || !proximityAnnotations?.length ? (
           <AnnotationOverlay
@@ -670,6 +706,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
           <ProximityAnnotation annotations={proximityAnnotations} fps={fps} />
         )}
 
+        </div>
         {statusStack(
           <>
             {/* Streaming-quality chip. Present only when there is something the
@@ -773,7 +810,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             over the player; Return snaps the playhead, Esc cancels. Driven
             entirely by App's keyboard handler + state. */}
         {tcOverlay && (
-          <div className="cp-tc-hud">
+          <div className="cp-tc-hud" {...fileInteraction}>
             <div className="cp-tc-hud-label">Go to timecode</div>
             <div className="cp-tc-hud-value">{tcOverlay}</div>
             <div className="cp-tc-hud-hint">Return to snap · Esc to cancel</div>
@@ -787,7 +824,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             poster, a spinner, and a phase message so the wait reads as
             intentional, not frozen. Cleared once the player reports ready. */}
         {streamLoadingPhase && (
-          <div className="cp-stream-loading">
+          <div className="cp-stream-loading" {...fileInteraction}>
             {metadata?.thumbnail && (
               <img
                 className="cp-stream-loading-bg"

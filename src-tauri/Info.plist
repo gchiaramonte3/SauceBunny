@@ -36,6 +36,12 @@
     <string>Sauce Bunny uses your microphone for live review sessions (so members can talk) and for voice dictation in review comments. Dictation is transcribed entirely on this Mac. Session audio is encrypted end to end and is never stored or processed by Sauce Bunny servers; on restrictive networks it may pass through a STUN or TURN relay.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Sauce Bunny transcribes your voice into review comments using on-device speech recognition. Speech is recognized entirely on this Mac and never leaves your computer.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Sauce Bunny discovers the NDI program output you explicitly enable in Premiere Pro so it can display that picture and audio in your live review room.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_ndi._tcp</string>
+    </array>
     <!--
         The saucebunny:// scheme, so a review link opens this app.
 

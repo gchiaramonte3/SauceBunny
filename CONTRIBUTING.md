@@ -254,6 +254,28 @@ from the Actions tab (`workflow_dispatch`).
   whenever you change a Rust command the frontend depends on — otherwise
   the in-app red banner will yell at you (and that's the point).
 
+## UI changes
+
+Read [CLAUDE.md's CSS guidance](CLAUDE.md#css) and the normative
+[design rules](docs/DESIGN.md), then the [current audit](docs/DESIGN-SYSTEM-AUDIT.md)
+and [catalog guide](docs/DESIGN-CATALOG.md). Inspect the production component
+before comparing its current and proposed examples with `npm run design:catalog`.
+The [repository entrypoint](AGENTS.md) gives the same reading order for coding
+agents; tools that do not load it automatically need those instructions supplied
+explicitly.
+
+Use existing production patterns, including `GenerateButton` and
+`StatefulButton` for specialized async actions. Preserve Generate, Export and
+transport behavior and geometry; the proposed 30/26px Button is not a universal
+replacement. Only the explicitly approved People indicator/details/theater
+corrections and Preview Live/Premiere recipes are adopted in production.
+Other catalog prototypes remain proposals, not authorization for migration.
+
+Keep examples isolated from saved data, sessions, devices and media jobs. Run
+`npm run check:design-catalog` when changing the catalog; it does not replace
+`npm run verify` or the relevant production and real-media checks above. Update
+the normative design rules only as part of an explicitly approved design change.
+
 ## Filing bugs and feature requests
 
 Use the issue templates under `.github/ISSUE_TEMPLATE/`. Bug reports should

@@ -12,6 +12,7 @@ type Props = {
    * playing. See PlayerHandle.supportsPlaybackRate.
    */
   supported: boolean;
+  disabledReason?: string;
   onRateChange: (r: number) => void;
 };
 
@@ -22,7 +23,7 @@ type Props = {
  * (mirroring the volume button's right-click-to-mute). App owns persistence
  * (`saucebunny.playbackRate`) and pushes the rate to the active player.
  */
-export function SpeedControl({ rate, supported, onRateChange }: Props) {
+export function SpeedControl({ rate, supported, disabledReason, onRateChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   // role="menu" is a promise of arrow-key navigation; this keeps it. The ref
@@ -57,7 +58,7 @@ export function SpeedControl({ rate, supported, onRateChange }: Props) {
         className={"cp-icon-btn speed" + (supported && rate !== 1 ? " engaged" : "") + (open ? " active" : "")}
         title={supported
           ? "Playback speed · right-click resets to 1×"
-          : "Speed control isn't available for the WebCodecs player"}
+          : disabledReason ?? "Speed control isn't available for the WebCodecs player"}
         aria-label={`Playback speed: ${formatPlaybackRate(rate)}`}
         aria-expanded={open}
         aria-haspopup="menu"

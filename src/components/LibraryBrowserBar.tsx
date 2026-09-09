@@ -27,6 +27,7 @@ type Props = {
   dateLabel?: string;
   /** Search placeholder + accessible name; the default is folder-speak. */
   searchLabel?: string;
+  sizeLabel?: string;
   query: string;
   onQuery: (q: string) => void;
   sort: LibrarySortKey;
@@ -85,7 +86,7 @@ type Props = {
  * upstream in one localStorage key; this bar is a pure controlled surface.
  */
 export function LibraryBrowserBar({
-  chain, onCrumb, location, dateLabel, searchLabel, query, onQuery, sort, dir, view, onPrefs, treeOpen, onShowTree, dropOver,
+  chain, onCrumb, location, dateLabel, searchLabel, sizeLabel, query, onQuery, sort, dir, view, onPrefs, treeOpen, onShowTree, dropOver,
   onNewFolder, newFolderLabel, newFolderTargets,
 }: Props) {
   const last = chain ? chain.length - 1 : -1;
@@ -214,7 +215,7 @@ export function LibraryBrowserBar({
         >
           <option value="name">Name</option>
           <option value="date">{dateLabel ?? "Date modified"}</option>
-          <option value="size">Size</option>
+          <option value="size">{sizeLabel ?? "Size"}</option>
         </select>
         <button
           type="button"

@@ -564,3 +564,94 @@ in step if a fix adds a contract. Severity is the auditor's.
   Under `prefers-reduced-motion`, `.btn:hover` keeps its 1px lift (only the duration is zeroed), `.cp-gen-btn:hover` and `.cp-react-pop-btn:hover` have their transform removed, and `.cp-react-pick-btn:hover` (the room's twin of the review reaction button) keeps its scale(1.12). reduced-motion-contract guards keyframes, not these.
   Evidence: src/styles/buttons.css:657-661 (duration only) vs :507 (`transform: none`); src/styles/review.css:996 `.cp-react-pop-btn:hover { transform: none }` vs src/styles/room.css:599 and :1039 (duration only for `.cp-react-pick-btn`).
   Fix: Pick one policy (snap, or remove) and apply it to all four in the same reduced-motion block; if snap, delete buttons.css:507 and review.css:996; if remove, add `.btn:hover, .btn-icon:hover, .cp-react-pick-btn:hover { transform: none }` to buttons.css:657.
+
+---
+
+# RECONCILIATION — 2026-09-07 catalog-first review
+
+The historical documents above are preserved verbatim. Their counts, line
+numbers and proposed fixes describe earlier checkouts, not an implementation
+order for the current app. This reconciliation records what was checked
+against the current working tree while building the isolated
+[design catalog](DESIGN-CATALOG.md).
+
+**This pass changes catalog material and documentation only.** “Completed”
+below means the earlier finding is already addressed in the inspected source;
+it does not mean the catalog implemented a fix. “Keep” means preserve a useful
+existing pattern. “Superseded” means the old proposed solution is no longer the
+selected direction. “Open” means a source-backed issue or review decision
+remains. Unlisted historical findings have not been revalidated by this pass
+and must not be assumed either fixed or approved.
+
+## Reconciled earlier findings
+
+| Earlier finding or proposal | Current status | Evidence and disposition |
+| --- | --- | --- |
+| Rebind green `--accent` to a neutral | **Completed; keep** | [base.css](../src/styles/base.css) already binds `--accent` to `--fg-1`; [buttons.css](../src/styles/buttons.css) makes `.btn-primary` neutral. Do not perform the old one-line rebind again. |
+| Collapse every green name into a new `--live` token | **Superseded** | [DESIGN.md](DESIGN.md) now distinguishes semantic success/live from the brand mark. Identity colors are also separate data. The catalog retains these roles rather than introducing the historical single-green proposal. Remaining aliases are an independent cleanup decision. |
+| Fetch needs a green hover flare | **Superseded** | The actual Fetch/ghost rules in [buttons.css](../src/styles/buttons.css) are neutral. Some nearby comments still describe the earlier flare. Current declarations and the neutral command rule take precedence over that comment. |
+| Generate and Export should be normalized with every command | **Keep as intentional exceptions pending review** | [GenerateButton](../src/components/GenerateButton.tsx), [StatefulButton](../src/components/StatefulButton.tsx) and [buttons.css](../src/styles/buttons.css) implement real asynchronous states and signature action treatments. Retain the current behavior and demonstrate the exception before deciding its frame. |
+| Selects lack a shared native appearance | **Completed; keep** | `.cp-select` and its 30/26/22px variants exist in [buttons.css](../src/styles/buttons.css), with [select-contract](../src/lib/select-contract.test.ts). [DeviceSelect](../src/components/DeviceSelect.tsx) also shares permission-safe device naming. Do not rebuild this as custom menus. |
+| Transcript failure paints an undefined hot-pink warning fallback | **Completed** | The `loadErr` branch of [TranscriptViewer](../src/components/TranscriptViewer.tsx) now uses `--danger-text` and actionable failure copy. The old `--color-warn` fallback is no longer that branch's implementation. |
+| End/Leave room text uses the low-contrast danger fill color | **Completed for End/Leave** | `.cp-room-end` in [room.css](../src/styles/room.css) now uses `--danger-text` at rest and hover. This is not a claim that every danger state elsewhere has been verified. |
+| DESIGN.md describes accent as green and promises `--ease-linear` | **Completed for these claims** | [DESIGN.md](DESIGN.md) now says the accent is neutral and documents plain `linear`. Its older universal “everything is enforced” wording should not be interpreted as runtime coverage of every catalog state. |
+| Popover/dialog elevation has no documented tier | **Completed; keep** | [DESIGN.md](DESIGN.md) documents 10px anchored surfaces, 12px dialogs and the shared shadow roles. This does not prove every legacy consumer or scrim follows the rule. |
+| Toast should not dismiss when any part is clicked | **Completed; keep** | [CanvasToast](../src/components/CanvasToast.tsx) has an explicit dismissal button and remaining-time accounting while hovered. Preserve that behavior rather than restoring the old whole-toast action. |
+| Close/action sizes and icon families need consolidation | **Open, with a narrower candidate** | Current [buttons.css](../src/styles/buttons.css), [review.css](../src/styles/review.css), [transport.css](../src/styles/transport.css) and [queue-drawer.css](../src/styles/queue-drawer.css) still contain distinct recipes. Review 30px default / 26px compact commands first; keep specialized transport and imagery controls. Do not mechanically collapse every family to the historical 24px proposal. |
+| Every gap should fit a 4px scale, or receive new tokens | **Superseded as a blanket migration** | The current [DESIGN.md](DESIGN.md) explicitly tolerates useful dense off-scale spacing. The catalog preserves this rhythm. Any spacing-token proposal must first show an actual reusable role and a visual comparison. |
+| Neutral and violet aliases, plus manual RGB twins, remain | **Open** | [tokens.css](../src/styles/tokens.css) still has `--color-accent-purple`, `--color-text-secondary`, `--color-surface-elevated` and green aliases; [base.css](../src/styles/base.css) still has `--marker-rgb`. No token removal is included in catalog work. |
+| Motion literals and role documentation diverge | **Open** | Generate still uses `0.35s` and `0.12s` transitions in [buttons.css](../src/styles/buttons.css); [tokens.css](../src/styles/tokens.css) still labels 80ms as hover tints. Review role mappings without changing timings or removing transforms that perform positioning. |
+| The focus-color guard still knows the old accent meaning | **Open** | [focus-contract](../src/lib/focus-contract.test.ts) still treats `--accent` as green and omits semantic green aliases such as `--success`. Keep the white-focus rule, but do not mistake this static test for a complete semantic-color check. |
+| Selected rows announce themselves as current location | **Open** | [LibraryListRow](../src/components/LibraryListRow.tsx) still uses `aria-current` for selected rows. Preserve the visual table/selection work while correcting interaction semantics in a later scoped change. |
+| Nested HistoryPopover lacks the menu keyboard model | **Open** | [HistoryPopover](../src/components/transcript/HistoryPopover.tsx) uses `role="menu"` and `useDismiss`, but not `useMenuKeys`. Include nested sources in future audits; the shared dismiss hook alone does not provide arrow navigation or focus return. |
+| Small-target, naming and variant contracts guarantee complete consistency | **Open coverage gaps** | [hit-target-contract](../src/lib/hit-target-contract.test.ts), [control-naming-contract](../src/lib/control-naming-contract.test.ts) and [button-variant-contract](../src/lib/button-variant-contract.test.ts) cover useful subsets. Dynamic class/name expressions, actual spacing, context geometry and complete state matrices need browser evidence as well. |
+
+## Current additions to the worklist
+
+The catalog adds current examples, not a second replacement UI:
+
+- **Preview source/action mismatch:** [App.tsx](../src/App.tsx) gives Premiere
+  the 22px uppercase generic compact recipe beside the passive Live/timecode
+  readout in [Transport](../src/components/Transport.tsx). Align the roles and
+  geometry; do not make Live a button to make it look similar.
+- **Participant clipping and state parity:** [PeoplePanel](../src/components/PeoplePanel.tsx)
+  and [room.css](../src/styles/room.css) allow compact masks to clip status/control
+  chrome and multiple indicators to compete for one corner. The theater call
+  in [App.tsx](../src/App.tsx) omits presenter and self-device props. Review the
+  expanded, compact and theater variants together; a CSS-only correction would
+  leave the state defect intact. Exact viewport bounds still need rendered checks.
+- **Incorrect tooltip/action relationship:** [VolumeControl](../src/components/VolumeControl.tsx)
+  labels its muted trigger “Unmute”, although clicking opens a volume popover.
+  Keep the actual mute action distinct and test dynamic accessible names.
+- **Undefined detached command style:** the Dismiss button in
+  [PanelApp](../src/PanelApp.tsx) uses `cp-btn`, for which no CSS definition is
+  present. Detached surfaces belong in the same inventory and verification matrix.
+- **Incomplete field and tab semantics:** the Filename label in
+  [Sidebar](../src/components/Sidebar.tsx) is not associated with its input;
+  timecode errors and tab-role keyboard behavior need explicit contracts and
+  tests before visual standardization can claim accessibility completeness.
+
+## Carry-forward decision
+
+Keep the established neutral control language, one font, semantic palette,
+shared native selects, table geometry, tooltip exception and real async
+feedback. Preserve the existing Preview monitor, notes, player lifetime,
+source ownership, grants, entered setup values and Library session history.
+No old proposal authorizes replacing these with a new page or moving live
+Preview functionality into Clip.
+
+The next implementation order is documented in [DESIGN-CATALOG.md](DESIGN-CATALOG.md):
+review the isolated catalog, approve the recipes, add compatibility primitives,
+pilot the reported Preview/People issues, then migrate other surfaces in small
+behavior-tested batches. This reconciliation does not claim the catalog fixes
+NDI latency, validates real Premiere media, or satisfies any DMG delivery gate.
+
+## Catalog fidelity follow-up · 2026-09-07
+
+The [application-to-catalog audit](DESIGN-SYSTEM-AUDIT.md) now records the
+current coverage and open findings. It supersedes misleading assumptions that
+every catalog specimen is a mounted production component. Generate, Export
+and Fetch now reuse their actual renderers with isolated props; Speakers has
+its own specialty entry; tables use a source-markup reference alongside a
+clearly labeled schematic. Common developer/AI entrypoints link the rulebook,
+catalog and audit. Application-screen migration still requires approval.

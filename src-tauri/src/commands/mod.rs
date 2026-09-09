@@ -39,6 +39,8 @@ pub mod media;
 pub use media::*;
 pub mod transcript;
 pub use transcript::*;
+pub mod transcript_trash;
+pub use transcript_trash::*;
 pub mod llm;
 pub use llm::*;
 pub mod cloud_ai;
@@ -51,6 +53,8 @@ pub mod review_grant;
 pub use review_grant::*;
 // Tier B bridge (no invoke commands of its own; used by stream_proxy + session).
 pub mod peer_stream;
+pub mod ndi;
+pub mod premiere;
 // Tier B quality ladder (host half of src/lib/stream-rung.ts).
 pub mod rung;
 pub mod session;

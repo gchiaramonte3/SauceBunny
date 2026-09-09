@@ -1,0 +1,23 @@
+/* Catalog host geometry only. Row paint, type, clipping, grid gaps and the
+   striped floor come from the production library.css imported by the catalog.
+   Do not restate those rules here: that would turn the reference into a copy. */
+.cp-ds-current-grid {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 189px;
+  background: var(--bg-1);
+}
+
+.cp-ds-current-grid[data-narrow="true"] {
+  width: min(300px, 100%);
+}
+
+/* Fixture container sizes only; the actual indicators/captions are production CSS. */
+.cp-ds-clip-tag-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--s-3);
+}
+.cp-ds-clip-tag-list { width: min(100%, 600px); }

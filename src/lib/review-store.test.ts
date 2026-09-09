@@ -10,9 +10,10 @@ import {
   reviewFileName, parseReviewIndex, serializeReviewIndex,
   looksLikeReviewDoc, reviewDocHasContent,
   hydrateReviewStore, getReviewDoc, resetReviewStoreForTests,
+  persistReviewDoc,
   type ReviewIndexEntry,
 } from "./review-store";
-import { loadReview, saveReview, emptyDoc, type ReviewDoc, type ReviewComment } from "./review";
+import { loadReview, saveReview, emptyDoc, deleteComment, mergeReviewDoc, type ReviewDoc, type ReviewComment } from "./review";
 
 const LIB = "/docs/Sauce Bunny/Transcripts";
 const DIR = "/docs/Sauce Bunny/Reviews";
@@ -151,6 +152,34 @@ describe("migration decision logic (pure)", () => {
 });
 
 describe("hydration", () => {
+  it("durably saves a deletion and keeps it deleted after reload and old-snapshot merge", async () => {
+    const original = mkDoc("/deleted.mp4", { comments: [mkComment("v1", "note")] });
+    seedLibrary(original);
+    await hydrateReviewStore({ migrate: false });
+    await persistReviewDoc(deleteComment(original, "note", 2000));
+    resetReviewStoreForTests();
+    await hydrateReviewStore({ migrate: false });
+    const reloaded = loadReview(original.sourceKey);
+    expect(reloaded.comments).toEqual([]);
+    expect(reloaded.deletedComments?.note).toBe(2000);
+    expect(mergeReviewDoc(original, reloaded).comments).toEqual([]);
+  });
+
+  it("does not attest durability when the document lands but the index write fails", async () => {
+    const original = mkDoc("/index-failure.mp4", { comments: [mkComment("v1", "note")] });
+    seedLibrary(original);
+    await hydrateReviewStore({ migrate: false });
+    const previous = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "write_text_to_path" && (args as { path?: string })?.path === `${DIR}/index.json`) throw Error("Index unavailable");
+      return previous(command, args);
+    });
+    const deleted = deleteComment(original, "note", 2000);
+    await expect(persistReviewDoc(deleted)).rejects.toThrow("has not reached disk");
+    vi.mocked(invoke).mockImplementation(previous);
+    await expect(persistReviewDoc(deleted)).resolves.toBeUndefined();
+  });
+
   it("loads index + docs so the SYNC loadReview sees them", async () => {
     const rich = mkDoc("/clips/final.mp4", { comments: [mkComment("v1", "c1", "tighten intro")] });
     seedLibrary(rich);

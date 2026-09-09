@@ -96,6 +96,9 @@ export type MarkerExportOptions = { includeResolved?: boolean };
 function buildMarkers(doc: ReviewDoc, opts?: MarkerExportOptions): ExportMarker[] {
   const includeResolved = opts?.includeResolved !== false;
   return rootComments(doc, doc.activeVersionId, "time")
+    // General/manual live notes are not verified positions in this file.
+    // Keep them in Markdown; never silently invent frame-zero NLE markers.
+    .filter((c) => !c.timing)
     .filter((c) => includeResolved || !c.resolved)
     .map((c) => {
     const replies = repliesOf(doc, c.id);

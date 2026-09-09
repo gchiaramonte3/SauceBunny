@@ -36,7 +36,7 @@ describe("npm run verify covers every gate CI runs", () => {
     // neither. Two cue-breaking bugs shipped through that gap.
     ["swift test", "swift test --package-path swift-sidecar"],
     ["npx tsc --noEmit", "npx tsc --noEmit"],
-    ["npx vitest run", "npm test"],
+    ["npm test", "npm test"],
     ["npm run lint", "npm run lint"],
     ["cargo check", "cargo check"],
     ["cargo test --lib", "cargo test --lib"],

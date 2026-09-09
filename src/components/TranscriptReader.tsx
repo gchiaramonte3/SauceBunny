@@ -25,6 +25,7 @@ import { carriedPaths } from "../lib/project-rename-carry";
 import { buildRecentIndex, transcriptArt } from "../lib/transcript-source-resolve";
 import type { RecentSource } from "../lib/recent-sources";
 import { WEB_POSTERS_CHANGED_EVENT } from "../lib/web-poster-store";
+import { subscribeHidden } from "../lib/library-hidden";
 
 /**
  * The Transcripts reader — a reading-first workspace OUTSIDE the Clip editor
@@ -96,6 +97,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   // Re-scan when the reader shows, a new transcript lands, or the library path
   // resolves. Mirrors the Home shelf's refresh discipline.
   useEffect(() => { if (visible) setTick((t) => t + 1); }, [visible]);
+  useEffect(() => subscribeHidden(() => setTick(t => t + 1)), []);
   useEffect(() => {
     const onChange = () => setTick((t) => t + 1);
     window.addEventListener(TRANSCRIPTS_CHANGED_EVENT, onChange);
@@ -609,7 +611,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                     pick.clear();
                     onOpenTranscript(t.entry);
                   }}
-                  onContextMenu={(e) => { e.preventDefault(); setRowMenu({ entry: t.entry, title: t.title, x: e.clientX, y: e.clientY }); }}
+                  onContextMenu={(e) => { e.preventDefault(); e.currentTarget.focus(); setRowMenu({ entry: t.entry, title: t.title, x: e.clientX, y: e.clientY }); }}
                   aria-current={t.path === activePath ? "true" : undefined}
                   title={t.title}
                 >
@@ -722,7 +724,8 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
       )}
       {rowMenu && (
         <ReaderRowMenu
-          target={rowMenu}
+          target={{ ...rowMenu, entries: pick.selected.has(rowMenu.entry.srtPath)
+            ? list.filter(t => pick.selected.has(t.path)).map(t => t.entry) : [rowMenu.entry] }}
           onClose={() => setRowMenu(null)}
           folderOptions={folderOptions}
           libraryPath={transcriptLibraryPath}

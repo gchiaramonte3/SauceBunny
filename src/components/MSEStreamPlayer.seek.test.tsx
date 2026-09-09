@@ -82,8 +82,8 @@ function mountPlayer(diag: Line[], opts: { preview?: boolean } = {}) {
 const overlay = () => document.querySelector(".cp-scrub-preview");
 const overlayShown = () => !!overlay()?.classList.contains("show");
 
-/** The rebuild debounce (280ms) plus a little air. */
-const SETTLE = 400;
+/** Rebuild dispatch is asynchronous, but no longer gesture-debounced. */
+const SETTLE = 1;
 
 let diag: Line[];
 beforeEach(() => { diag = []; vi.useFakeTimers(); });
@@ -116,21 +116,20 @@ describe("a drag", () => {
     //   seek req 2666.0 → target 2666.0
     //   seek out-of-buffer → rebuilding from 3855.5s
     //
-    // A drag emits one seek per animation frame. `seek req` is logged once
-    // per GESTURE (every log line is App state; logging each one re-rendered
-    // the app per vsync), and the rebuild is debounced, so it reports where
-    // the gesture SETTLED. Both numbers were always right.
+    // A drag emits explicit preview updates and one exact landing.
     const ref = mountPlayer(diag);
     const path = [2666.0, 2900.4, 3210.9, 3540.2, 3855.5];
+    ref.current!.beginScrub();
     for (const t of path) {
-      ref.current!.seekTo(t);
-      vi.advanceTimersByTime(16); // one frame, well inside the 280ms debounce
+      ref.current!.scrubTo(t);
+      vi.advanceTimersByTime(16);
+      expect(rebuilds(), "active dragging must not start FFmpeg").toHaveLength(0);
     }
+    void ref.current!.endScrub(path.at(-1)!);
     vi.advanceTimersByTime(SETTLE);
 
-    // ONE request line for the whole drag — this is the reported shape.
-    expect(reqs(), "a drag must not log per frame; that was the render bug").toHaveLength(1);
-    expect(reqs()[0]).toContain("seek req 2666.0 → target 2666.0");
+    // Preview updates do not create request/rebuild log spam.
+    expect(reqs(), "a drag must not log per frame; that was the render bug").toHaveLength(0);
 
     // ONE rebuild, at the release point, and it now names the gesture.
     expect(rebuilds()).toHaveLength(1);
@@ -142,10 +141,12 @@ describe("a drag", () => {
 
   it("counts the seeks the gesture actually emitted", () => {
     const ref = mountPlayer(diag);
+    ref.current!.beginScrub();
     for (const t of [100, 200, 300, 400]) {
-      ref.current!.seekTo(t);
+      ref.current!.scrubTo(t);
       vi.advanceTimersByTime(16);
     }
+    void ref.current!.endScrub(400);
     vi.advanceTimersByTime(SETTLE);
     expect(rebuilds()[0]).toContain("4 seeks");
   });
@@ -154,9 +155,11 @@ describe("a drag", () => {
     // The worst-looking line in the report: `req 4928.8` then `rebuilding
     // from 0.0`. Somebody dragged to the beginning.
     const ref = mountPlayer(diag);
-    ref.current!.seekTo(4928.8);
+    ref.current!.beginScrub();
+    ref.current!.scrubTo(4928.8);
     vi.advanceTimersByTime(16);
-    ref.current!.seekTo(0);
+    ref.current!.scrubTo(0);
+    void ref.current!.endScrub(0);
     vi.advanceTimersByTime(SETTLE);
     expect(rebuilds()[0]).toContain("began 4928.8s");
     expect(rebuilds()[0]).toContain("released 0.0s");
@@ -173,9 +176,11 @@ describe("what the player actually did with the reported gestures", () => {
     for (const [from, to] of gestures) {
       diag = [];
       const ref = mountPlayer(diag);
-      ref.current!.seekTo(from);
+      ref.current!.beginScrub();
+      ref.current!.scrubTo(from);
       vi.advanceTimersByTime(16);
-      if (to !== from) { ref.current!.seekTo(to); vi.advanceTimersByTime(16); }
+      if (to !== from) { ref.current!.scrubTo(to); vi.advanceTimersByTime(16); }
+      void ref.current!.endScrub(to);
       vi.advanceTimersByTime(SETTLE);
       expect(rebuilds()[0], `gesture ${from}→${to}`).toContain(`rebuilding from ${to.toFixed(1)}s`);
       cleanup();

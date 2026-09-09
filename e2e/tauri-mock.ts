@@ -291,12 +291,22 @@ export function tauriMockInit(expectedBuildId: string): void {
     read_finder_tags: (args: unknown) => {
       const paths = (args as { paths?: unknown } | undefined)?.paths;
       const list = Array.isArray(paths) ? paths.map(String) : [];
+      const seeded: Record<string, { name: string; color: number }[]> = JSON.parse(localStorage.getItem("e2e.finderTags") ?? "{}");
       return Promise.resolve(list.map((path) => ({
         path,
-        tags: path.endsWith("/Interviews") ? [{ name: "Purple", color: 3 }] : [],
+        tags: seeded[path] ?? (path.endsWith("/Interviews") ? [{ name: "Purple", color: 3 }] : []),
       })));
     },
-    set_finder_tags: () => Promise.resolve(null),
+    set_finder_tags: (args: unknown) => {
+      // Opt-in writable metadata for clip-tag tests; older fixtures stay unchanged.
+      if (localStorage.getItem("e2e.refuseTagWrite") === "1") return Promise.reject(new Error("Permission denied"));
+      if (localStorage.getItem("e2e.finderTags") !== null) {
+        const { path, tags } = args as { path: string; tags: { name: string; color: number }[] };
+        const seeded = JSON.parse(localStorage.getItem("e2e.finderTags") ?? "{}");
+        localStorage.setItem("e2e.finderTags", JSON.stringify({ ...seeded, [path]: tags }));
+      }
+      return Promise.resolve(null);
+    },
     scan_library_folder: (args: unknown) => {
       const path = String((args as { path?: unknown } | undefined)?.path ?? "");
       if (path.includes("missing")) {

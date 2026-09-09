@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) }));
@@ -172,7 +173,7 @@ describe("a store file from a newer build is never overwritten", () => {
 
 describe("every file store consults the version it writes", () => {
   it("no store writes a version field without checking for a newer one", () => {
-    const dir = new URL(".", import.meta.url).pathname;
+    const dir = fileURLToPath(new URL(".", import.meta.url));
     const offenders: string[] = [];
     const stampers: string[] = [];
     for (const name of readdirSync(dir)) {
@@ -211,7 +212,7 @@ describe("every file store consults the version it writes", () => {
     // nothing about what it WRITES - a v2 build stamping v1 files that a v1
     // build then clobbers with the old shape. That is precisely the data loss
     // F1 exists to prevent, in the mechanism built to prevent it.
-    const dir = new URL(".", import.meta.url).pathname;
+    const dir = fileURLToPath(new URL(".", import.meta.url));
     const bad: string[] = [];
     for (const name of readdirSync(dir)) {
       if (!name.endsWith(".ts") || name.includes(".test.") || name === "store-schema.ts") continue;
@@ -227,7 +228,7 @@ describe("every file store consults the version it writes", () => {
   });
 
   it("covers the five stores that exist today, so the sweep is not vacuous", () => {
-    const dir = new URL(".", import.meta.url).pathname;
+    const dir = fileURLToPath(new URL(".", import.meta.url));
     const wired = readdirSync(dir).filter(
       (n) => n.endsWith(".ts") && !n.includes(".test.") && n !== "store-schema.ts"
         && readFileSync(join(dir, n), "utf8").includes("futureVersionIn"),

@@ -1,8 +1,40 @@
 use std::path::{Path, PathBuf};
 
 fn main() {
+    build_optional_ndi();
     clear_stale_resource_files();
     tauri_build::build();
+}
+
+/// The SDK is developer-supplied, never copied into the public repository or
+/// linked into the app. Packaging separately stages only the approved runtime.
+fn build_optional_ndi() {
+    println!("cargo:rustc-check-cfg=cfg(sauce_ndi)");
+    println!("cargo:rerun-if-env-changed=SAUCE_NDI_SDK_DIR");
+    println!("cargo:rerun-if-changed=native/ndi_bridge.mm");
+    let Some(sdk) = std::env::var_os("SAUCE_NDI_SDK_DIR").map(PathBuf::from) else { return; };
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") { return; }
+    assert!(sdk.join("include/Processing.NDI.Lib.h").is_file(), "SAUCE_NDI_SDK_DIR must point to the extracted NDI SDK for Apple");
+    let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    let arch = if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64") { "arm64" } else { "x86_64" };
+    let result = std::process::Command::new("xcrun").args(["clang++", "-std=c++17", "-fobjc-arc", "-fblocks", "-O2", "-mmacosx-version-min=14.0", "-arch", arch, "-c", "native/ndi_bridge.mm", "-I"])
+        .arg(sdk.join("include")).arg("-o").arg(out.join("ndi_bridge.o")).status().expect("Run Xcode clang++");
+    assert!(result.success(), "Native NDI bridge compilation failed");
+    let result = std::process::Command::new("xcrun").args(["libtool", "-static", "-o"]).arg(out.join("libsauce_ndi.a"))
+        .arg(out.join("ndi_bridge.o")).status().expect("Run Xcode libtool");
+    assert!(result.success(), "Native NDI bridge archive failed");
+    println!("cargo:rustc-cfg=sauce_ndi");
+    println!("cargo:rustc-link-search=native={}", out.display());
+    println!("cargo:rustc-link-lib=static=sauce_ndi");
+    println!("cargo:rustc-link-lib=c++");
+    for framework in ["AVFoundation", "AudioToolbox", "CoreMedia", "CoreVideo", "CoreImage", "CoreGraphics", "Foundation", "UniformTypeIdentifiers", "VideoToolbox"] {
+        println!("cargo:rustc-link-lib=framework={framework}");
+    }
+    // Debug convenience only; release binaries never depend on a developer's
+    // SDK path. The explicit packaging script supplies the licensed runtime.
+    if std::env::var("PROFILE").as_deref() == Ok("debug") {
+        println!("cargo:rustc-env=SAUCE_NDI_DEV_RUNTIME={}", sdk.join("lib/macOS/libndi.dylib").display());
+    }
 }
 
 /// Delete a leftover `licenses` FILE sitting where a DIRECTORY now belongs.

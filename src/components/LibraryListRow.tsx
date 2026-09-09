@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { primarySwatch, type TagColorIndex } from "../lib/finder-tags";
+import { tagSummary, type TagColorIndex } from "../lib/finder-tags";
+import { ClipTagIndicator } from "./ClipTagIndicator";
 import type { FinderTag } from "../bindings/FinderTag";
 import { IconFilm, IconVolume } from "./Icons";
 import { LibraryCardMenu } from "./LibraryCardMenu";
@@ -45,7 +46,7 @@ type Props = {
   deleteLabel?: string;
   /** "Move to folder…" — the drag's keyboard-reachable twin. */
   onMove?: () => void;
-  /** Finder tags: the colour dot in the row, and the menu's colour row. */
+  /** Finder tags: the passive edge stripe and the menu's colour row. */
   tags?: readonly FinderTag[];
   onToggleTagColor?: (index: TagColorIndex) => void;
   onClearTagColors?: () => void;
@@ -70,7 +71,7 @@ export function LibraryListRow({
   item, selected, onSelect, onContextSelect, onRename, onDelete, onRemove, deleteLabel, onMove, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   tags, onToggleTagColor, onClearTagColors, columns, customText, customColumns, onEditCustom,
 }: Props) {
-  const swatch = primarySwatch(tags ?? []);
+  const tagDescription = tagSummary(tags ?? []);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [broken, setBroken] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -92,7 +93,8 @@ export function LibraryListRow({
         aria-current={selected ? "true" : undefined}
         className={"cp-lib-lrow" + (selected ? " selected" : "")}
         data-path={item.path}
-        title={item.name}
+        title={tagDescription ? `${item.name}\nFinder tags: ${tagDescription}` : item.name}
+        aria-description={tagDescription ? `Finder tags: ${tagDescription}` : undefined}
         onClick={(e) => onSelect(e)}
         onDoubleClick={onOpen}
         onContextMenu={(e) => {
@@ -108,16 +110,14 @@ export function LibraryListRow({
           if (e.key === "Enter") { e.preventDefault(); onOpen(); }
         }}
       >
+        <ClipTagIndicator tags={tags} variant="stripe" />
         <span className="cp-lib-lrow-art">
           {showImg
             ? <img src={thumb} alt="" draggable={false} onError={() => setBroken(true)} />
             : (item.kind === "audio" ? <IconVolume size={13} /> : <IconFilm size={13} />)}
         </span>
-        {/* The tag dot lives INSIDE the name cell, like Finder's, and not as
-            its own grid column: the row is a five-track grid shared with the
-            header, and a sixth child shifted every cell one track over — names
-            vanished into the 64px Kind track and dates wrapped onto their own
-            line. A dot needs no track; it needs to sit beside the name. */}
+        {/* The stripe is absolutely positioned, never a sixth grid track.
+            Name and metadata keep the header's existing column geometry. */}
         <span
           className="cp-lib-lrow-name"
           // Finder's slow double-click: a second click on the NAME of a file
@@ -132,13 +132,6 @@ export function LibraryListRow({
             onRename();
           }}
         >
-          {swatch && (
-            <span
-              className="cp-lib-lrow-dot"
-              style={{ background: swatch.hex }}
-              aria-hidden="true"
-            />
-          )}
           {item.name}
         </span>
         {/* The optional cells, in the order the header is showing them and

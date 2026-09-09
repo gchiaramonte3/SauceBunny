@@ -1,0 +1,14 @@
+/* Flow layout: status and timecode never cover a pixel of the program picture. */
+.cp-ndi-preview-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+  width: 100%;
+  margin-bottom: var(--s-3);
+}
+.cp-ndi-publication { color: var(--fg-3); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.cp-ndi-timecode { grid-column: 2; color: var(--fg-3); }
+.cp-ndi-preview-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s-2); }
+.cp-ndi-preview-actions:empty { display: none; }

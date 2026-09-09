@@ -1,0 +1,30 @@
+{
+  "name": "sauce-bunny-premiere-companion",
+  "version": "0.1.6",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "node scripts/prepare-notices.mjs && MODE=build vite build --watch",
+    "build": "tsc --noEmit && node scripts/prepare-notices.mjs && MODE=build vite build",
+    "ccx": "tsc --noEmit && node scripts/prepare-notices.mjs && MODE=package vite build && node scripts/verify-package.mjs",
+    "test": "vitest run",
+    "test:package": "node scripts/smoke-panel.mjs",
+    "check": "tsc --noEmit && vitest run"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@adobe/premierepro": "26.3.0",
+    "@types/node": "22.15.30",
+    "@types/react": "18.3.23",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.5.1",
+    "typescript": "5.8.3",
+    "vite": "6.3.5",
+    "vite-uxp-plugin": "1.3.8",
+    "vitest": "3.2.4"
+  }
+}

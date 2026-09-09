@@ -24,7 +24,7 @@ const VIEWS: Array<[string, string, string]> = [
   ["Home", ".cp-view-home", "Library"],
   ["Library", ".cp-view-library", "Library"],
   ["Clip", ".cp-view-clip", "Clip"],
-  ["Review", ".cp-view-coreview", "Co-Review"],
+  ["Review", ".cp-view-coreview", "Review"],
   ["Transcripts", ".cp-view-reader", "Transcript"],
 ];
 
@@ -48,6 +48,10 @@ test("each view exposes exactly one named main landmark", async ({ page }) => {
     const mains = page.getByRole("main");
     await expect(mains, `${label}: expected one exposed main`).toHaveCount(1);
     await expect(mains).toHaveAccessibleName(name);
+    if (label === "Review") {
+      await expect(page.getByRole("region", { name: "Session setup" })).toBeVisible();
+      await expect(page.locator(".cp-view-clip .cp-monitor")).toBeVisible();
+    }
     seen.push(`${label}=${name}`);
   }
 

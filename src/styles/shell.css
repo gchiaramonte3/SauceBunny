@@ -731,18 +731,18 @@
                 ways), so the OPEN drawer floats OVER the monitor as a
                 right-anchored sheet and the picture keeps its width.
 
-   The co-review room face keeps its docked grid at every size (its
-   drawer IS the room's right rail), hence the :not(.cp-room) guards. */
+   Review's room and standalone Preview keep the notes rail docked at every
+   size. These three-column Clip fallbacks must not cover their viewport. */
 @media (max-width: 1349px) {
-  .cp-body:not(.cp-room) .cp-clip-body .cp-sidebar:not(.closed) {
+  .cp-body:not(.cp-room):not(.cp-preview-setup) .cp-clip-body .cp-sidebar:not(.closed) {
     width: clamp(280px, 26vw, 320px);
   }
-  .cp-body:not(.cp-room) .cp-clip-body .cp-queue-drawer.open {
+  .cp-body:not(.cp-room):not(.cp-preview-setup) .cp-clip-body .cp-queue-drawer.open {
     max-width: min(400px, 34vw);
   }
 }
 @media (max-width: 1199px) {
-  .cp-body:not(.cp-room) .cp-clip-body .cp-queue-drawer.open {
+  .cp-body:not(.cp-room):not(.cp-preview-setup) .cp-clip-body .cp-queue-drawer.open {
     position: absolute;
     top: var(--s-2);
     right: 4px;
@@ -863,6 +863,9 @@
 .cp-rowmenu-dialog {
   width: 380px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
   padding: 18px;
   background: var(--bg-1);
   border: 1px solid var(--line-2);

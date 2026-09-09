@@ -50,10 +50,10 @@ fi
 echo "── 3/6  building (this is the slow part)"
 # Bundling is the only step that trips over a mount, and it happens last, so a
 # retry costs the bundler and not the whole compile.
-if ! npx tauri build; then
+if ! bash scripts/build-app-with-ndi.sh; then
   echo "   build failed; clearing mounts and retrying bundling once"
   bash scripts/detach-stale-dmg.sh
-  npx tauri build
+  bash scripts/build-app-with-ndi.sh
 fi
 
 DMG="src-tauri/target/release/bundle/dmg/Sauce Bunny_${VERSION}_aarch64.dmg"
@@ -64,6 +64,7 @@ fi
 
 echo "── 4/6  verifying the artifact"
 npm run --silent verify:bundle
+npm run --silent verify:packaged
 
 echo "── 5/6  keeping this build"
 # Not fatal, and not quiet either. The build succeeded and the DMG is on disk

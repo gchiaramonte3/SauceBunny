@@ -32,7 +32,6 @@ const ALLOWED: Record<string, string[]> = {
   "queue-drawer.css": [".cp-tab.dragging"],
   // Hover/focus lift on a video tile in the people spine (the contract
   // compares the WHOLE comma list, so the entry is the whole comma list).
-  "room.css": [".cp-people.spine .cp-person:hover video, .cp-people.spine .cp-person:focus-within video"],
   // Hover lift on a comment pin.
   "transport.css": [".cp-track-comment:hover"],
 };

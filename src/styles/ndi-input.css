@@ -1,0 +1,62 @@
+/* Source settings float outside the notes rail. No media element lives here. */
+.cp-modal.cp-ndi-input {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, calc(100vw - var(--s-8)));
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  max-height: calc(100dvh - var(--s-8));
+  color: var(--fg-1);
+  background: var(--bg-1);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+}
+.cp-ndi-input-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-1);
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line-1);
+}
+.cp-ndi-input-header h2 { margin: 0; font-size: var(--text-xl); font-weight: var(--weight-bold); }
+.cp-ndi-input-header > button { margin-left: auto; }
+.cp-premiere-beta {
+  display: inline-block;
+  flex: none;
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  background: var(--gold);
+  color: var(--bg-0);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+  vertical-align: middle;
+}
+.cp-ndi-input-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--s-4); }
+.cp-ndi-input p { margin: var(--s-2) 0; color: var(--fg-3); overflow-wrap: anywhere; }
+.cp-ndi-input p[role="alert"] { color: var(--danger-text); }
+.cp-ndi-input .cp-ndi-input-intro { margin-top: 0; }
+.cp-ndi-input-source-label { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-3); margin: var(--s-4) 0 var(--s-2); }
+.cp-ndi-input-source-label label { font-size: var(--text-md); }
+.cp-ndi-input select { width: 100%; min-width: 0; height: auto; min-height: 32px; padding: 6px 28px 6px 10px; }
+.cp-ndi-input-preview { margin-top: var(--s-3); }
+.cp-ndi-input-connection { margin-top: var(--s-4); }
+.cp-ndi-input-reconnect { margin-top: var(--s-3); }
+.cp-ndi-input-recovery { margin: var(--s-3) 0; }
+.cp-ndi-input-connection > strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.cp-ndi-input-connection p[role="status"] { color: var(--fg-1); }
+.cp-ndi-input-format { display: block; margin-top: var(--s-1); color: var(--fg-3); }
+.cp-ndi-input-share { width: 100%; margin-top: var(--s-2); }
+.cp-ndi-input-share:not(:disabled), .cp-ndi-share-action:not(:disabled) { background: var(--success); border-color: var(--success); color: var(--bg-0); }
+@media (prefers-reduced-motion: no-preference) {
+  .cp-ndi-input-share:not(:disabled), .cp-ndi-share-action:not(:disabled) { animation: cp-share-ready 2.4s ease-in-out 3; }
+  @keyframes cp-share-ready { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 30%, transparent); } }
+}
+.cp-ndi-input-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s-2); margin: var(--s-3) 0 var(--s-4); }
+.cp-ndi-input-settings { white-space: normal; max-width: 100%; }

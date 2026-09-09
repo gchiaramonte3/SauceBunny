@@ -28,11 +28,15 @@ test("the label is attached to the picture, with no gap and a shared surface", a
   await expect(card).toBeVisible({ timeout: 10_000 });
 
   const art = (await card.locator(".cp-lib-card-art").boundingBox())!;
+  const caption = (await card.locator(".cp-lib-card-caption").boundingBox())!;
   const title = (await card.locator(".cp-lib-card-title").boundingBox())!;
   const box = (await card.boundingBox())!;
 
-  // The label starts where the picture ends. A gap here is the old look.
-  expect(title.y - (art.y + art.height)).toBeLessThanOrEqual(1);
+  // Finder's dot and the filename now share a padded caption wrapper. That
+  // surface starts at the art's edge; the inner text is intentionally inset.
+  expect(Math.abs(caption.y - (art.y + art.height))).toBeLessThanOrEqual(1);
+  expect(title.y).toBeGreaterThanOrEqual(caption.y);
+  expect(title.y + title.height).toBeLessThanOrEqual(caption.y + caption.height + 1);
   // Both are inside one card, and the card is what has edges.
   expect(art.y).toBeGreaterThanOrEqual(box.y - 1);
   expect(title.x).toBeGreaterThan(box.x);

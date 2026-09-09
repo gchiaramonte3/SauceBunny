@@ -1,0 +1,27 @@
+/* Local integration setup only; do not change generic buttons or transport. */
+.cp-premiere-setup { min-width: 0; font-family: var(--font-ui); font-size: var(--text-base); line-height: var(--leading-normal); color: var(--fg-3); }
+.cp-premiere-setup :where(p, ol) { font-size: var(--text-md); overflow-wrap: anywhere; }
+.cp-premiere-setup p:not(.cp-pane-sub) { margin: 0 0 var(--s-3); }
+.cp-premiere-setup .cp-pane-title { display: flex; align-items: center; gap: var(--s-2); }
+.cp-premiere-setup .cp-pane-row { margin-bottom: var(--s-3); }
+.cp-premiere-setup .cp-premiere-links p,
+.cp-premiere-setup .cp-ndi-attribution p { font-size: var(--text-base); }
+.cp-premiere-setup .btn { height: auto; min-height: 30px; max-width: 100%; padding: var(--s-1) 14px; white-space: normal; text-transform: none; font-size: var(--text-md); line-height: var(--leading-tight); }
+.cp-premiere-setup p[role="alert"] { color: var(--danger-text); }
+.cp-premiere-setup ol { padding-left: var(--s-5); }
+.cp-premiere-setup li + li { margin-top: var(--s-2); }
+.cp-premiere-setup .cp-ndi-terms { font-size: var(--text-base); }
+.cp-premiere-setup .cp-premiere-companion > .cp-section > .cp-section-head,
+.cp-premiere-setup .cp-premiere-companion > .cp-section > .cp-section-body { padding-left: 0; padding-right: 0; }
+.cp-premiere-companion { border-top: 1px solid var(--line-1); margin-top: var(--s-4); padding-top: var(--s-3); min-width: 0; }
+.cp-premiere-companion .cp-section-label { justify-content: flex-start; gap: var(--s-2); }
+.cp-premiere-companion .cp-premiere-beta { text-transform: none; letter-spacing: normal; }
+.cp-premiere-companion p { overflow-wrap: anywhere; }
+.cp-premiere-companion-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.cp-premiere-companion .btn { white-space: normal; max-width: 100%; }
+.cp-premiere-pairing { display: grid; gap: var(--s-2); margin: var(--s-3) 0; }
+.cp-premiere-pairing .cp-premiere-companion-actions { align-items: center; }
+.cp-premiere-pairing [role="status"], .cp-premiere-setup .cp-premiere-pairing-hint { font-size: var(--text-base); color: var(--fg-3); }
+.cp-premiere-companion summary { min-height: 26px; cursor: pointer; padding: var(--s-1) 0; }
+.cp-premiere-companion pre { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-sm); }
+.cp-premiere-marker-status { color: var(--fg-3); font-size: var(--text-sm); overflow-wrap: anywhere; }

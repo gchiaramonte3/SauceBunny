@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advertisedPosition, decideChase, type ChaseInput } from "./use-co-review";
+import { advertisedPosition, decideChase, synchronizedPlaybackRate, type ChaseInput } from "./use-co-review";
 import { setScrubbing, subscribeScrub } from "../lib/playhead-store";
 
 // The two confirmed RC3 failure modes from the 2026-07-18 review, pinned as
@@ -160,6 +160,19 @@ describe("advertisedPosition, what a presenter tells the room mid-drag", () => {
     const a = advertisedPosition(0, true, null);
     expect(a.held).toBe(0);
     expect(advertisedPosition(55, true, a.held).position).toBe(0);
+  });
+});
+
+describe("versioned transport rate correction", () => {
+  it("gently closes small drift without replacing the presenter's base rate", () => {
+    expect(synchronizedPlaybackRate(1, 0.5, true)).toBeCloseTo(1.04);
+    expect(synchronizedPlaybackRate(1.5, -0.5, true)).toBeCloseTo(1.44);
+  });
+
+  it("uses exact rate while paused, converged, or awaiting a hard correction", () => {
+    expect(synchronizedPlaybackRate(1.25, 0.5, false)).toBe(1.25);
+    expect(synchronizedPlaybackRate(1.25, 0.02, true)).toBe(1.25);
+    expect(synchronizedPlaybackRate(1.25, 2, true)).toBe(1.25);
   });
 });
 

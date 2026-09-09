@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toggleTagColor, clearTagColors, type TagColorIndex } from "../lib/finder-tags";
 import type { FinderTag } from "../bindings/FinderTag";
 import type { TaggedPath } from "../bindings/TaggedPath";
+
+const TAGS_CHANGED_EVENT = "saucebunny.finder-tags-changed";
 
 /**
  * Finder tags for whatever is currently listed.
@@ -18,36 +20,34 @@ import type { TaggedPath } from "../bindings/TaggedPath";
  */
 export function useFinderTags(paths: readonly string[]) {
   const [tags, setTags] = useState<Map<string, FinderTag[]>>(new Map());
-  const keyRef = useRef("");
+  // Depend on the set, not array identity. An unrelated rerender previously
+  // cancelled the in-flight read before the key guard skipped its replacement.
+  const pathsKey = JSON.stringify([...new Set(paths)].sort());
   /** Bumped to force a re-read after a write made OUTSIDE this hook (the
    *  folder menu owns its own xattr write). */
   const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
-    // Re-read only when the SET of paths changes, not on every render — the
-    // array identity churns with each scan.
-    // NUL-joined: paths can contain spaces, so a space join could make two
-    // different sets collide. The tick folds in so an external write re-reads
-    // even an unchanged set.
-    const key = paths.join("\u0000") + "#" + refreshTick;
-    if (key === keyRef.current) return;
-    keyRef.current = key;
-    if (paths.length === 0) { setTags(new Map()); return; }
+    const listedPaths: string[] = JSON.parse(pathsKey);
+    if (listedPaths.length === 0) { setTags(new Map()); return; }
     let stale = false;
-    void invoke<TaggedPath[]>("read_finder_tags", { paths: [...paths] })
+    void invoke<TaggedPath[]>("read_finder_tags", { paths: listedPaths })
       .then((rows) => {
         if (stale) return;
         setTags(new Map(rows.map((r) => [r.path, r.tags])));
       })
       .catch(() => { /* a filesystem without xattrs simply has no tags */ });
     return () => { stale = true; };
-  }, [paths, refreshTick]);
+  }, [pathsKey, refreshTick]);
 
   const write = useCallback(async (path: string, next: FinderTag[]) => {
     const prev = tags.get(path) ?? [];
     setTags((m) => new Map(m).set(path, next));
     try {
       await invoke("set_finder_tags", { path, tags: next });
+      // Home stays mounted while Library edits the same file. Refresh other
+      // visible representations after the native write, not just on OS focus.
+      window.dispatchEvent(new CustomEvent(TAGS_CHANGED_EVENT, { detail: path }));
     } catch {
       // Roll back rather than show a colour the file does not carry.
       setTags((m) => new Map(m).set(path, prev));
@@ -94,6 +94,15 @@ export function useFinderTags(paths: readonly string[]) {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
+
+  useEffect(() => {
+    const listed = new Set<string>(JSON.parse(pathsKey));
+    const onChanged = (event: Event) => {
+      if (listed.has((event as CustomEvent<string>).detail)) refresh();
+    };
+    window.addEventListener(TAGS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(TAGS_CHANGED_EVENT, onChanged);
+  }, [pathsKey, refresh]);
 
   return { tags, toggle, clear, toggleMany, refresh };
 }

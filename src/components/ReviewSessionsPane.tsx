@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import {
-  hydrateScreeningIndex, listScreenings, screeningPath, SCREENINGS_CHANGED,
+  hydrateScreeningIndex, listScreenings, loadScreening, SCREENINGS_CHANGED,
   type ScreeningIndexEntry,
 } from "../lib/screening-store";
 import { listFillPhase, LASSO_GUTTER_SELECTOR } from "../lib/library";
@@ -14,6 +13,8 @@ import { LibraryCardMenu } from "./LibraryCardMenu";
 import { useGridSelection } from "../hooks/use-grid-selection";
 import { useMarquee } from "../hooks/use-marquee";
 import { IconReview } from "./Icons";
+import { SavedReviewSession } from "./SavedReviewSession";
+import { sessionSourceSummary } from "../lib/saved-session";
 
 /**
  * The sessions this Mac has already held.
@@ -93,6 +94,9 @@ export function ReviewSessionsPane({ treeOpen, onShowTree, onOpenLocalPath, onOp
   const colModel = useListColumns(COLS_KEY, COL_DEFAULT);
   const { visible, template } = colModel;
   const [menuAt, setMenuAt] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [openedId, setOpenedId] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const returnTo = useRef<HTMLButtonElement | null>(null);
 
   // Persist OUTSIDE the updater, the way every other pane does: a setState
   // updater must stay pure, and updater-purity-contract enforces it.
@@ -109,10 +113,30 @@ export function ReviewSessionsPane({ treeOpen, onShowTree, onOpenLocalPath, onOp
 
   useEffect(() => {
     let alive = true;
+    let generation = 0;
     const load = () => {
+      const current = ++generation;
       void hydrateScreeningIndex()
-        .then(() => { if (alive) setRows(listScreenings()); })
-        .catch(() => { if (alive) setRows([]); });
+        .then(async () => {
+          if (!alive || current !== generation) return;
+          const entries = listScreenings();
+          setRows(entries);
+          // Old index rows have no source kind. Read records with a bounded
+          // pool, without rewriting the index or opening media/NDI inputs.
+          const unknown = entries.filter(r => !r.sourceKinds);
+          let next = 0;
+          await Promise.all(Array.from({ length: Math.min(3, unknown.length) }, async () => {
+            while (alive && current === generation && next < unknown.length) {
+              const entry = unknown[next++];
+              const doc = await loadScreening(entry.id);
+              if (doc && alive && current === generation) {
+                const summary = sessionSourceSummary(doc);
+                setRows(previous => previous?.map(r => r.id === entry.id ? { ...r, ...summary } : r) ?? null);
+              }
+            }
+          }));
+        })
+        .catch(() => { if (alive && current === generation) setRows([]); });
     };
     load();
     // A session ending while the library is open should appear without a
@@ -147,41 +171,59 @@ export function ReviewSessionsPane({ treeOpen, onShowTree, onOpenLocalPath, onOp
     onEnd: grid.onMarqueeEnd,
   });
 
-  /**
-   * The source this session watched, or null if it recorded none.
-   *
-   * `sourceKeys` is OPTIONAL and absent on every entry written before the
-   * field existed, so absent means UNKNOWN - never "none". A session with no
-   * key is not offered the verb at all; guessing at a source and opening the
-   * wrong clip would be worse than the menu being one item shorter.
-   *
-   * A key is a local path or a URL (see review-store), which is exactly the
-   * pair of openers the library already has.
-   */
-  const sourceOf = (id: string): string | null => {
-    const r = rows?.find((x) => x.id === id);
-    const k = r?.sourceKeys?.[0];
-    return typeof k === "string" && k.trim() !== "" ? k : null;
-  };
   const openOne = (id: string) => {
-    const key = sourceOf(id);
-    if (!key) return;
-    if (/^https?:\/\//i.test(key)) onOpenWebUrl(key);
-    else onOpenLocalPath(key);
+    setMenuAt(null);
+    setOpenedId(id);
   };
-  const revealOne = (id: string) => {
-    const p = screeningPath(id);
-    if (p) void invoke("reveal_in_finder", { path: p }).catch(() => { /* gone */ });
+  const copySessionName = async (id: string) => {
+    const title = rows?.find(r => r.id === id)?.title;
+    if (!title) return;
+    try {
+      await navigator.clipboard.writeText(title);
+      setNotice("Session name copied.");
+    } catch {
+      setNotice("Could not copy the session name. Select and copy it from the session header.");
+    }
+  };
+  const menuHandlers = (id: string) => ({
+    onContextMenu: (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.preventDefault();
+      e.currentTarget.focus();
+      returnTo.current = e.currentTarget;
+      if (!grid.selected.has(id)) grid.onItemClick(id, e);
+      setMenuAt({ x: e.clientX, y: e.clientY, id });
+    },
+    onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (e.key === " " || e.key === "Enter") e.stopPropagation();
+      if (e.key === "Enter") { e.preventDefault(); returnTo.current = e.currentTarget; openOne(id); }
+      if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+        e.preventDefault();
+        returnTo.current = e.currentTarget;
+        const b = e.currentTarget.getBoundingClientRect();
+        setMenuAt({ x: b.left + 18, y: b.bottom - 6, id });
+      }
+    },
+    onDoubleClick: (e: React.MouseEvent<HTMLButtonElement>) => { returnTo.current = e.currentTarget; openOne(id); },
+  });
+  const sourceBadge = (r: Row) => r.sourceKinds?.includes("ndi")
+    ? <span className="cp-session-source-badge" title={r.premiere ? "Premiere Pro live session" : "NDI live session"}>{r.premiere ? "Pr" : "NDI"}</span> : null;
+  const back = () => {
+    setOpenedId(null);
+    requestAnimationFrame(() => returnTo.current?.focus());
   };
 
   return (
-    <div className="cp-web-view">
+    <div className="cp-web-view cp-sessions-view">
+      {openedId && <SavedReviewSession key={openedId} id={openedId} onBack={back}
+        onOpenMedia={path => /^https?:\/\//i.test(path) ? onOpenWebUrl(path) : onOpenLocalPath(path)} />}
+      <div className="cp-session-browser" hidden={openedId !== null}>
       <LibraryBrowserBar
         chain={null}
         onCrumb={() => { /* location is fixed; the crumb slot shows it */ }}
         location="Review sessions"
         dateLabel="Date held"
         searchLabel="Search sessions and people"
+        sizeLabel="Notes"
         query={query}
         onQuery={setQuery}
         sort={prefs.sort}
@@ -191,6 +233,7 @@ export function ReviewSessionsPane({ treeOpen, onShowTree, onOpenLocalPath, onOp
         treeOpen={treeOpen}
         onShowTree={onShowTree}
       />
+      {notice && <p className="cp-session-copy-notice" role="status">{notice}</p>}
       <div
         ref={paneRef}
         className="cp-web-pane"
@@ -233,22 +276,10 @@ export function ReviewSessionsPane({ treeOpen, onShowTree, onOpenLocalPath, onOp
                     data-path={r.id}
                     className={"cp-lib-lrow" + (grid.selected.has(r.id) ? " selected" : "")}
                     onClick={(e) => grid.onItemClick(r.id, e)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      if (!grid.selected.has(r.id)) grid.onItemClick(r.id, e);
-                      setMenuAt({ x: e.clientX, y: e.clientY, id: r.id });
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
-                        e.preventDefault();
-                        const b = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                        setMenuAt({ x: b.left + 18, y: b.bottom - 6, id: r.id });
-                      }
-                    }}
-                    onDoubleClick={() => (sourceOf(r.id) ? openOne(r.id) : revealOne(r.id))}
+                    {...menuHandlers(r.id)}
                     title={r.title}
                   >
-                    <span className="cp-lib-lrow-art" aria-hidden="true"><IconReview size={13} /></span>
+                    <span className="cp-lib-lrow-art">{sourceBadge(r) ?? <IconReview size={13} />}</span>
                     <span className="cp-lib-lrow-name">{r.title}</span>
                     {visible.map((k) => (
                       k === "people"
@@ -271,9 +302,9 @@ export function ReviewSessionsPane({ treeOpen, onShowTree, onOpenLocalPath, onOp
                     data-path={r.id}
                     className={"cp-sess-card" + (grid.selected.has(r.id) ? " selected" : "")}
                     onClick={(e) => grid.onItemClick(r.id, e)}
-                    onDoubleClick={() => (sourceOf(r.id) ? openOne(r.id) : revealOne(r.id))}
+                    {...menuHandlers(r.id)}
                   >
-                    <span className="cp-sess-card-title">{r.title}</span>
+                    <span className="cp-sess-card-title">{sourceBadge(r)} {r.title}</span>
                     <span className="cp-sess-card-meta">{whenLabel(r.startedAt)}</span>
                     <span className="cp-sess-card-meta">
                       {r.participants.join(", ") || "Just you"}
@@ -291,12 +322,8 @@ export function ReviewSessionsPane({ treeOpen, onShowTree, onOpenLocalPath, onOp
         {menuAt && (
           <LibraryCardMenu
             anchor={{ x: menuAt.x, y: menuAt.y }}
-            revealPath={screeningPath(menuAt.id)}
-            /* WAS `revealOne`. "Open in Clip" revealed the session's JSON in
-               Finder - the label named one thing and the handler did another,
-               and the only reason it type-checked is that both are
-               `() => void`. */
-            onOpen={sourceOf(menuAt.id) ? () => openOne(menuAt.id) : undefined}
+            revealPath={null}
+            sessionActions={{ onOpen: () => openOne(menuAt.id), onCopyName: () => { void copySessionName(menuAt.id); } }}
             // A screening is a RECORD of something that happened. There is no
             // sensible "delete" here yet, and inventing one that throws away
             // the only account of a session would be worse than not offering
@@ -305,9 +332,10 @@ export function ReviewSessionsPane({ treeOpen, onShowTree, onOpenLocalPath, onOp
             hasChosenThumbnail={false}
             onChooseThumbnail={() => {}}
             onResetThumbnail={() => {}}
-            onClose={() => setMenuAt(null)}
+            onClose={() => { setMenuAt(null); returnTo.current?.focus(); }}
           />
         )}
+      </div>
       </div>
     </div>
   );

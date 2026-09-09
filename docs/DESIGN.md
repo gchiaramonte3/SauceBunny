@@ -1,11 +1,141 @@
 # Sauce Bunny — the design system
 
-One page. Everything below is enforced by a test, so you will meet it as a
-failure message if you skip it; this exists so you meet it here instead.
+The current application rulebook. Source contracts enforce many of these
+rules, but cannot prove rendered geometry, dynamic names or complete keyboard
+behavior. Use the catalog and browser checks alongside those contracts.
 
 Tokens live in `src/styles/tokens.css`. Component styles live in
 `src/styles/<area>.css`. There is no CSS framework and no component library,
 on purpose — see CLAUDE.md.
+
+The [design catalog](DESIGN-CATALOG.md) records current component families
+and proposed recipes for user review. This page remains the application's
+current rulebook; catalog proposals are not permission to restyle the app.
+The [historical audit](DESIGN-AUDIT.md) is retained with a dated reconciliation
+at its end. Follow that reconciliation over older unverified worklists, and
+do not adopt a catalog recipe in production until the user approves the
+corresponding migration.
+
+The [current application comparison](DESIGN-SYSTEM-AUDIT.md) records coverage,
+remaining defects and specialty controls. Developers and AI contributors
+should start with the repository's `AGENTS.md` and `CLAUDE.md`, then use these
+documents and the actual component source together.
+
+### Adopted People and Preview recipes (2026-09-07)
+
+This is a limited production adoption, not approval of every catalog candidate.
+
+- **Participant picture versus chrome:** the picture mask alone clips video
+  and avatar content. Presenter, media/attention indicators and device controls
+  sit outside that mask. Preserve the 72px compact rail with a 48px picture,
+  240px expanded rail and 168px-wide 16:9 theater picture. Compact rules must
+  exclude theater. All variants receive the same presenter and device truth.
+- **Participant details:** a named native trigger opens the real participant
+  actions with click, Enter/Space or the context-menu key. Details escape the
+  scrolling rail through a viewport-contained portal, support menu keyboard
+  navigation and Escape, and return focus to the trigger. In compact rails,
+  camera/mic icons and buttons are hidden; their truth remains in accessible
+  identity/details and their actions remain in details/the room toolbar.
+  Expanded and theater device buttons remain separate 24px-or-larger targets,
+  never nested inside another button.
+- **Live source status:** `.cp-source-status` is passive, neutral and content
+  sized. It has no field border, bevel, hover treatment or tab stop. The word
+  Live identifies a source type, not proof of current connection health.
+  Actual file timecodes continue to use `.cp-tc` unchanged.
+- **Premiere disclosure:** `.cp-toolbar-disclosure` is the adopted 26px-minimum
+  toolbar action, using sentence case, existing 11px text, neutral bevel/border,
+  and white focus. A chevron, `aria-expanded` and `aria-controls` identify its
+  existing source panel. Expanded does not mean connected or shared.
+
+Keep specialized Play, frame-step, utility and single-volume geometry. Do not
+change `.btn-compact` globally or import catalog mock handlers into production.
+The catalog's **Before the fix** disclosures are historical evidence, not recipes.
+
+### Review correction addendum (2026-09-07, evening)
+
+- **Post and Share with room** are explicit user-approved green-action exceptions,
+  using `--success` fill and `--bg-0` ink only while enabled. Other primary actions
+  remain neutral. Share may pulse three times only with no reduced-motion preference;
+  it never activates itself or claims verified connection health.
+- Comment tools wrap before clipping Post. Reaction and emoji popovers portal
+  outside scrollers and remain inside the viewport. Hiding a drawing suppresses
+  the saved overlay at that moment; reopening its note restores it, without deleting it.
+- Compact live-note context uses the shared type scale, not browser fieldset defaults.
+  Review links are hidden from session onboarding; existing active-host access
+  management and invitation policy remain intact.
+- Expected speakers uses `ExpectedSpeakersMenu`, a controlled radio menu with
+  `--novella-violet-deep` selected fill and shared menu keyboard behavior. This is a
+  scoped exception to native selects, whose macOS popup selection cannot be themed
+  reliably. It does not change Generate artwork or speaker identity colors.
+- Empty Preview uses a flat `--bg-1` tonal surface; avoid quantized brand gradients
+  or visible dither patterns behind the instructions.
+- Premiere keeps the single Clip volume component and Settings-based diagnostics.
+  Incoming dimensions size the initial monitor; do not force every input to 16:9.
+  `Timeline TC unavailable` is honest state, not a substitute numeric clock.
+- Transcript context menus distinguish **Remove from library** (exclusion only,
+  immediate) from **Move to Trash…** (confirmed SRT/VTT-only native action).
+  Keep source videos and sidecars; show partial errors and retry failed files only.
+  This narrowly authorized exception does not reintroduce general media deletion.
+
+### Catalog checkbox density (2026-09-07)
+
+The approved catalog checkbox refinement uses a **13×13px native checkbox**
+inside its associated **26px-minimum-height label**. Keep the label clickable,
+the glyph non-shrinking, native Space activation and a visible 2px focus ring
+with 2px offset. Visual size and pointer-target size are separate decisions.
+This applies to the catalog's `.cp-ds-check` examples and text-size control;
+it does not authorize resizing production settings, speaker controls or all
+checkboxes. A separate approved catalog colour refinement sets the speaker-
+roster checkbox accent to existing `--bg-5` (`#403F46`), preserving its native
+white tick, unchecked state, 13px geometry and focus indication. This is scoped
+to the catalog roster fixtures, not the production speaker/Detect speakers
+recipes. The [frontend re-audit](DESIGN-FRONTEND-AUDIT.md) records remaining
+production conformance work; a passing catalog is not an app-wide sign-off.
+
+### Finder clip indicators (adopted 2026-09-07)
+
+Use `ClipTagIndicator` with parent-provided native Finder tags. In thumbnail
+cards, an **8px dot** sits immediately before the filename in
+`.cp-lib-card-caption`, beneath and outside the artwork. The caption has a
+6px gap; the dot never shrinks and the filename alone ellipsizes. In list
+rows, a **2px stripe** sits at the row's far-left edge, inset **4px vertically**.
+It is absolutely positioned, not another grid track or pointer target.
+
+Use the existing `primarySwatch` (last colored tag), preserving all seven
+Finder hues and the existing name-before-index resolution. Colorless custom
+tags have no marker. Full tag names belong in the clip's tooltip and
+accessible description. Indicators are passive metadata, not selection or
+connection health. Never tint footage, the row fill or focus with a tag color.
+
+Library, Home/search shelves, local recent items and downloaded web clips
+share this recipe. Tag identity is the represented media file, never a URL,
+borrowed transcript poster or session JSON. Parents use bulk reads; native
+writes, failure rollback and Finder focus refresh remain intact. Successful
+in-app writes also refresh other mounted views of the same file. Folders keep
+their existing tinted glyphs. No tag editing is added to previously read-only
+surfaces. See the Tables catalog entry for all-color and narrow examples.
+
+### Premiere workflow correction (2026-09-07)
+
+The Premiere source inspector uses the existing neutral action recipe,
+with a small yellow **Beta** badge (`--gold` background, `--bg-0` text).
+Its source label, refresh action and select have explicit gaps. Opening
+the source settings requests discovery every time; only Preview source starts
+capture, and only Share publishes. A vanished source never selects another.
+
+Installation and receiver diagnostics belong in **Settings → Integrations**.
+The inspector provides an actual Settings shortcut, not collapsed setup help.
+The shared Review / Transcript / AI Summary / Queue drawer stays mounted
+independently of the settings dialog. Session setup and notes can be switched without
+stopping the preview. Private Premiere notes use their own review identity;
+private inspection inside a room cannot misfile notes into the room document.
+
+When Premiere owns playback, omit file Play, step, mark, speed, snapshot and
+caption controls. Preserve their existing geometry for file playback. Preview
+source enables local program monitoring through the existing single volume
+control; a positive slider change unmutes it. Autoplay denial offers a clear
+audio/monitor retry. No button here controls Premiere's transport, and no NDI
+timestamp is represented as verified sequence timecode.
 
 The one rule behind all of the others: **a value in a stylesheet should be a
 name, not a number.** A number is a decision nobody can trace, and the next
@@ -235,6 +365,127 @@ ship.
 24px circle around the target touches nothing else, and that judgement goes in
 the commit message, not in a silent allowlist entry. Grow the hit area with
 padding or a transparent `::before` — not the icon.
+
+---
+
+## Specialty controls are part of the system
+
+Consistency does not mean every button has the same geometry or paint.
+Preserve these existing, named exceptions:
+
+- **Generate transcript + speakers:** use `src/components/GenerateButton.tsx`,
+  with the `.cp-source-action` context where appropriate. Preserve its three
+  sparkle paths, beveled face, existing green brand wash, layered labels,
+  progress and resolution feedback. Its idle brand wash is an intentional
+  exception, not permission to make ordinary primary commands green.
+- **Export and Fetch:** use `StatefulButton` with the actual caller recipes
+  in Sidebar and Toolbar. Export keeps its violet CTA and 36px treatment;
+  Fetch keeps its width lock and spinner-only loading state.
+- **Speaker controls:** the transcript-library **Speakers** button is a
+  pressed filter; **Detect speakers** is a checkbox; **Expected speakers** is
+  a select; **Manage** opens the roster. Speaker identity/color, assignment,
+  insights and detection are different roles, not one generic “Speaker” API.
+- **Transport and editing utilities:** preserve Play, frame-step, mark,
+  source-status, timecode and borderless utility geometry. Do not mechanically
+  apply the proposed catalog command sizes to them.
+
+For Generate and StatefulButton, the caller owns the real work, phase,
+progress, disabled state and result reset. A style change cannot invent job
+timers or alter cancellation. The catalog passes isolated local fixture props
+to the actual components; it does not invoke transcription or export.
+
+See [component recipes and examples](DESIGN-CATALOG.md#specialty-component-recipes)
+before adding a new variant. Proposed 30px/26px generic controls remain
+catalog-only until an adoption batch is approved.
+
+### Premiere companion (internal-test adoption, 2026-09-07)
+
+The user approved matching the small Premiere plugin to this design system.
+Its [design contract](../premiere-companion/DESIGN.md) imports the actual app
+tokens and adopts neutral 30px-minimum commands, shared bevel states, white
+focus, and the 13px dark-neutral checkbox inside a full-height label. This
+does not authorize another application-wide control migration. Native UXP
+font/field limitations are explicit exceptions, not a new font or palette.
+The package's own design and rendered-panel tests protect those recipes;
+real Premiere rendering remains a separate host acceptance gate.
+
+### Saved session history (2026-09-07)
+
+Session rows and grid cards use **Open session** for their primary context
+action, double-click and Enter. Opening a record must not reveal its JSON,
+join a room, publish a source or load video. A read-only archive view keeps
+source context on the left and saved notes/replies on the right. Back restores
+the list and row focus; **Open source in Clip** is a separate explicit action
+only for a recorded, unambiguous file/web source.
+
+Known Premiere senders carry a neutral **Pr** badge; other NDI senders carry
+**NDI**. Neither badge implies connected/live health or verified timecode.
+Source-less/live records explain the lack of a saved video without hiding the
+notes or requiring Premiere to read them. Missing records and missing review
+documents have distinct messages. No approval, editing or marker-sync action
+is implied by this historical reader.
+
+The sessions search field reserves space for “Search sessions and people”;
+its toolbar may wrap at narrow widths. These styles are scoped to the session
+shelf, not a global browser-toolbar or compact-button redesign.
+
+---
+
+## Settings integration panels
+
+Placement correction, 2026-09-08: the Preview sidebar is the shared Clip
+commenting/tool drawer. Never insert NDI configuration between its tabs and
+comments. This supersedes the earlier inline source inspector and transport
+text disclosure placement.
+
+Open source settings from the named **NDI settings** gear using the existing
+`cp-icon-btn` utility recipe, immediately after the single volume control.
+Preserve host/presenter permissions and keep the gear available at narrow widths.
+The picture/audio settings are a viewport-contained portal dialog headed **NDI**
+with a yellow Beta badge, distinct from Premiere's companion/marker integration.
+Use the shared modal focus trap; Escape, Close and Done return focus to the gear.
+Opening discovers sources without starting capture or publishing. Closing must
+preserve source selection, the decoder, the active sidebar tab and comment drafts.
+Installation and Marker setup close this dialog before opening Settings →
+Integrations; instructions and receiver diagnostics remain there.
+
+Keep at least `--s-3` (12px) between Marker setup and Reconnect picture. The
+standalone Preview header uses `--s-3` internal padding and a matching gap below
+it so the paste/watch controls do not touch the monitor surface. These are scoped
+layout rules, not changes to global compact-button sizes or room publication.
+
+Clear-viewport follow-up, 2026-09-08: no source-name, connection-status or
+audio-recovery badges over the NDI picture. Keep passive Not shared / Shared
+with room / Sharing stopped above it, with the sequence-timecode window centered
+in the same header. Use `NdiPreviewHeader` and the existing `cp-tc` recipe;
+`--:--:--:--` is explicitly unavailable, never an invented NDI-to-sequence clock.
+Timeline timecode unavailable and Playback controlled in Premiere share one
+transport line. Do not show the file Shortcuts/marking hint during live input.
+Source details, decoder errors and Enable program audio / Resume program monitor
+belong in NDI settings. Guest settings offer local decoder recovery only: no
+discovery, source selection, marker setup, capture or room publication. Opening
+the gear while viewing an existing input must not switch to a retained private
+candidate. Keep Preview's notes rail docked even below 1200px; only Clip retains
+its narrow floating-drawer behavior. Hide covered file onboarding while awaiting
+the first program frame, without unmounting any file player.
+
+Integration setup uses the same Settings recipes as General: `cp-pane-title`
+for the 18px heading, `cp-pane-sub` for the 12px introduction, `cp-pane-row`
+for status/actions, and `CollapsibleSection` for optional setup and diagnostics.
+Supporting status text uses the 11px description token. Never leave headings
+or paragraphs to browser-default sizing. Settings actions use the neutral,
+sentence-case 30px button recipe; compact transport controls stay unchanged.
+Keep version/runtime metadata inside Connection details and wrap long values.
+Premiere-specific overrides stay inside `cp-premiere-setup`.
+
+Companion pairing is one explicit **Copy pairing code** action in Settings,
+one masked **Pairing code** field in Premiere and a **Connect** command.
+Do not expose two raw credential fields or copy only half the pairing data.
+Copy success/error feedback is inline; neither copying nor pasting connects.
+The native UXP companion keeps its host-painted form controls without adding
+a second CSS border/bevel. Align labels left, use the existing type scale and
+space between sections instead of decorative divider boxes. Empty sequence
+and note controls stay out of the disconnected setup; queued notes survive it.
 
 ---
 

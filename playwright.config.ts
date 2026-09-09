@@ -26,7 +26,7 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "npx vite --port 51730",
+    command: "SAUCE_BROWSER_TEST=1 npx vite --port 51730",
     url: "http://localhost:51730",
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,

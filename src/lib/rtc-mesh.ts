@@ -10,6 +10,7 @@
  * JSON payloads: offer / answer / ice).
  */
 
+import { createProgramStatsSampler, type ProgramDiagnostics } from "./program-diagnostics";
 export type MeshPeerState = "connecting" | "live" | "failed";
 
 /** How long an offerer waits for a peer to go live before offering again. */
@@ -45,6 +46,7 @@ export type MeshDeps = {
    *  peer: session_send Rtc - the transport stamps `from`). */
   sendSignal: (to: string, payload: MeshSignalPayload) => void;
   onRemoteStream: (id: string, stream: MediaStream | null) => void;
+  onRemoteProgram?: (id: string, stream: MediaStream | null) => void;
   onState: (id: string, state: MeshPeerState) => void;
   getLocalStream: () => MediaStream | null;
   log: (tag: "info" | "warn" | "err", msg: string) => void;
@@ -90,6 +92,10 @@ type PeerSlot = {
    *  to guess a null-track sender's kind. */
   videoSenders: RTCRtpSender[];
   audioSenders: RTCRtpSender[];
+  programVideoSenders: RTCRtpSender[];
+  programAudioSenders: RTCRtpSender[];
+  programReceivers: Set<RTCRtpReceiver>;
+  programRemote: MediaStream;
   /** ONE stream per peer for the life of the connection. `ontrack` fires once
    *  per track, and a track arriving on a placeholder transceiver carries no
    *  stream association at all - so building a stream per track handed the
@@ -101,18 +107,57 @@ export class RtcMesh {
   private deps: MeshDeps;
   private slots = new Map<string, PeerSlot>();
   private closed = false;
-  /** Screen share: when set, every video sender carries THIS track instead
-   *  of the camera; null restores the capture's video. */
+  /** Program tracks never replace the conversation's camera or microphone. */
   private videoOverride: MediaStreamTrack | null = null;
   private audioOverride: MediaStreamTrack | null = null;
   /** Stream identity for placeholder transceivers. Giving them a stream means
    *  the msid rides the offer, so the far side receives all four tracks as ONE
    *  stream instead of four anonymous ones. */
   private outStream: MediaStream;
+  private programStream: MediaStream;
+  private senderUpdates = new WeakMap<RTCRtpSender, Promise<void>>();
+  private trackUpdates = new WeakMap<RTCRtpSender, Promise<void>>();
+  private desiredTracks = new WeakMap<RTCRtpSender, MediaStreamTrack | null>();
+
+  private replaceSenderTrack(sender: RTCRtpSender, track: MediaStreamTrack | null, programVideo?: boolean): Promise<void> {
+    this.desiredTracks.set(sender, track);
+    const update = (this.trackUpdates.get(sender) ?? Promise.resolve()).then(async () => {
+      if (this.closed || this.desiredTracks.get(sender) !== track) return;
+      try {
+        await sender.replaceTrack(track);
+        if (programVideo !== undefined && this.desiredTracks.get(sender) === track) {
+          this.tuneVideoSender(sender, programVideo, track?.getSettings?.().height ?? 720);
+        }
+      } catch { /* peer closed or the capture ended during replacement */ }
+    });
+    this.trackUpdates.set(sender, update);
+    return update;
+  }
+  private statsSamplers = new WeakMap<RTCRtpReceiver, ReturnType<typeof createProgramStatsSampler>>();
+
+  async readProgramDiagnostics(id: string): Promise<ProgramDiagnostics | null> {
+    const slot = this.slots.get(id);
+    if (!slot || this.closed) return null;
+    for (const receiver of slot.programReceivers) {
+      if (receiver.track?.kind !== "video" || !receiver.getStats) continue;
+      const stats = await receiver.getStats();
+      if (this.closed || this.slots.get(id) !== slot) return null;
+      let sample: RTCInboundRtpStreamStats | null = null;
+      stats.forEach((entry) => {
+        if (entry.type === "inbound-rtp" && (entry.kind === "video" || entry.mediaType === "video")) sample = entry;
+      });
+      if (!sample) continue;
+      let sampler = this.statsSamplers.get(receiver);
+      if (!sampler) { sampler = createProgramStatsSampler(); this.statsSamplers.set(receiver, sampler); }
+      return sampler(sample);
+    }
+    return null;
+  }
 
   constructor(deps: MeshDeps) {
     this.deps = deps;
     this.outStream = deps.createStream();
+    this.programStream = deps.createStream();
   }
 
   /** Reconcile connections against the roster (minus self): connect to new
@@ -192,78 +237,45 @@ export class RtcMesh {
     }
   }
 
-  /** Device switch: swap every outbound sender track in place (no renegotiation
-   *  needed for same-kind replaceTrack). A live share override keeps owning
-   *  the video senders; the new camera takes over when the share ends. */
+  /** Device switch affects conversation senders only, without renegotiation. */
   async replaceLocalStream(stream: MediaStream | null): Promise<void> {
-    const video = this.videoOverride ?? stream?.getVideoTracks()[0] ?? null;
-    const audio = this.audioOverride ?? stream?.getAudioTracks()[0] ?? null;
-    for (const [, slot] of this.slots) {
-      for (const sender of slot.videoSenders) {
-        try { await sender.replaceTrack(video); } catch { /* sender gone */ }
-      }
-      for (const sender of slot.audioSenders) {
-        try { await sender.replaceTrack(audio); } catch { /* sender gone */ }
-      }
-    }
+    const video = stream?.getVideoTracks()[0] ?? null;
+    const audio = stream?.getAudioTracks()[0] ?? null;
+    await Promise.all([...this.slots.values()].flatMap((slot) => [
+      ...slot.videoSenders.map((sender) => this.replaceSenderTrack(sender, video, false)),
+      ...slot.audioSenders.map((sender) => this.replaceSenderTrack(sender, audio)),
+    ]));
   }
 
-  /** Screen share in/out: the share track replaces the camera on every
-   *  video sender; null restores the capture's camera track. */
+  /** Program video in/out. Null retracts the program track, not the camera. */
   async setVideoOverride(track: MediaStreamTrack | null): Promise<void> {
     this.videoOverride = track;
-    const video = track ?? this.deps.getLocalStream()?.getVideoTracks()[0] ?? null;
-    for (const [, slot] of this.slots) {
-      for (const sender of slot.videoSenders) {
-        try { await sender.replaceTrack(video); } catch { /* sender gone */ }
-        this.tuneVideoSender(sender, !!track, video?.getSettings?.().height ?? 720);
-      }
-    }
+    await Promise.all([...this.slots.values()].flatMap((slot) =>
+      slot.programVideoSenders.map((sender) => this.replaceSenderTrack(sender, track, true))));
   }
 
-  /** A share and a camera want OPPOSITE encodings, and the two places that set
-   *  one had drifted apart: `connectTo` capped whatever it found to tile size,
-   *  so a peer joining mid-share got the share at half resolution even though
-   *  `setVideoOverride` had just made it full size for everyone else. One
-   *  method now decides, so the two paths cannot disagree again. */
+  /** Serialize parameter transactions; concurrent setParameters calls race in WebKit. */
   private tuneVideoSender(sender: RTCRtpSender, sharing: boolean, sourceHeight = 720): void {
-    if (!sharing) {
-      // scaleResolutionDownBy is a SENDER property and survives replaceTrack,
-      // so a camera returning after a share must be capped back down here.
-      this.capTileResolution(sender, sourceHeight);
-      return;
-    }
-    this.setSenderScale(sender, 1);
-    // Screen content is detail, not motion: hold resolution and let the frame
-    // rate absorb congestion, rather than blurring the pixels someone is
-    // trying to read.
-    try {
-      const p = sender.getParameters() as RTCRtpSendParameters & { degradationPreference?: string };
-      p.degradationPreference = "maintain-resolution";
-      void sender.setParameters(p);
-    } catch { /* older engines ignore the hint */ }
+    const update = (this.senderUpdates.get(sender) ?? Promise.resolve()).then(async () => {
+      if (this.closed) return;
+      try {
+        const params = sender.getParameters();
+        params.encodings = params.encodings?.length ? params.encodings : [{}];
+        params.encodings[0].scaleResolutionDownBy = Math.max(1, sourceHeight / (sharing ? 1080 : 360));
+        params.encodings[0].maxBitrate = sharing ? 8_000_000 : 500_000;
+        params.encodings[0].maxFramerate = sharing ? 30 : 15;
+        params.degradationPreference = sharing ? "maintain-framerate" : "balanced";
+        await sender.setParameters(params);
+      } catch { /* unsupported hints must not break the media track */ }
+    });
+    this.senderUpdates.set(sender, update);
   }
 
-  /** Set (or clear) a sender's resolution downscale. */
-  private setSenderScale(sender: RTCRtpSender, factor: number): void {
-    try {
-      const params = sender.getParameters();
-      params.encodings = params.encodings?.length ? params.encodings : [{}];
-      params.encodings[0].scaleResolutionDownBy = factor;
-      void sender.setParameters(params);
-    } catch { /* older engines: full-size is the safe direction */ }
-  }
-
-  /** Share system audio in/out: the share+mic mix replaces the mic on
-   *  every audio sender; null restores the capture's mic track. */
+  /** Program audio in/out. The microphone is never part of this sender. */
   async setAudioOverride(track: MediaStreamTrack | null): Promise<void> {
     this.audioOverride = track;
-    const audio = track ?? this.deps.getLocalStream()?.getAudioTracks()[0] ?? null;
-    for (const [, slot] of this.slots) {
-      for (const sender of slot.audioSenders) {
-        try { await sender.replaceTrack(audio); } catch { /* sender gone */ }
-      }
-    }
+    await Promise.all([...this.slots.values()].flatMap((slot) =>
+      slot.programAudioSenders.map((sender) => this.replaceSenderTrack(sender, track))));
   }
 
   /** Leave/end: every connection closed, every remote stream retracted. */
@@ -282,6 +294,7 @@ export class RtcMesh {
     try { slot.pc.close(); } catch { /* already closed */ }
     this.slots.delete(id);
     this.deps.onRemoteStream(id, null);
+    this.deps.onRemoteProgram?.(id, null);
   }
 
   private clearWatchdog(slot: PeerSlot): void {
@@ -328,13 +341,6 @@ export class RtcMesh {
     this.deps.onState(id, state);
   }
 
-  /** People tiles are ~220px wide; a full mesh must stay lean. Applied to a
-   *  placeholder sender too, so a camera that arrives later is capped from
-   *  its first frame rather than blasting full resolution at every peer. */
-  private capTileResolution(sender: RTCRtpSender, sourceHeight: number): void {
-    this.setSenderScale(sender, Math.max(1, sourceHeight / 360));
-  }
-
   private connectTo(id: string, epoch = 0): PeerSlot | null {
     const pc = this.deps.createPc({ iceServers: this.deps.iceServers });
     const slot: PeerSlot = {
@@ -342,70 +348,28 @@ export class RtcMesh {
       pendingIce: [], hasRemote: false, watchdog: null, offers: 0,
       candTypes: new Set<string>(),
       videoSenders: [], audioSenders: [], remote: this.deps.createStream(),
+      programVideoSenders: [], programAudioSenders: [], programReceivers: new Set(), programRemote: this.deps.createStream(),
     };
     this.slots.set(id, slot);
     this.deps.onState(id, "connecting");
 
-    // Outbound media: the green-room capture, capped for tile-size viewing
-    // (the People tiles are ~220px wide; a full mesh must stay lean).
+    // Reserve four stable m-lines up front: camera, mic, program video,
+    // program audio. Sharing never replaces the conversation tracks.
     const local = this.deps.getLocalStream();
-    if (local) {
-      for (const track of local.getTracks()) {
-        // A live share owns BOTH slots from the first frame a new member
-        // sees (they joined mid-share): the share video, and the share+mic
-        // audio mix (else a late joiner hears the raw mic, not the shared
-        // system audio).
-        const outTrack =
-          track.kind === "video" ? (this.videoOverride ?? track)
-          : (this.audioOverride ?? track);
-        const sender = pc.addTrack(outTrack, local);
-        if (track.kind === "video") {
-          slot.videoSenders.push(sender);
-          // Tune for what this sender ACTUALLY carries (outTrack), not for the
-          // camera track we happened to be iterating: reading `track` here
-          // capped a live share to camera tile size for anyone joining
-          // mid-share, quietly undoing the readable-picture fix.
-          this.tuneVideoSender(sender, outTrack === this.videoOverride, outTrack.getSettings?.().height ?? 720);
-        } else {
-          slot.audioSenders.push(sender);
-        }
-      }
-    }
-    // PLACEHOLDER TRANSCEIVERS (r124) - the camera-reconnect fix.
-    //
-    // addTrack above only runs for tracks that exist RIGHT NOW. Join with the
-    // camera off (or with the mic denied) and that kind gets no sender at all,
-    // so replaceLocalStream later loops over an empty list and turning the
-    // camera on never reaches a single peer - a silent no-op with no error to
-    // catch. Reserving a sendrecv transceiver up front means there is ALWAYS a
-    // sender to replaceTrack into, for the whole life of the connection, with
-    // no renegotiation (which would need glare handling this mesh has never
-    // had). The m-line rides the very first offer, so both directions work
-    // even if the camera comes on much later.
-    //
-    // A placeholder must also be SEEDED with whatever is live right now. The
-    // block above only runs for tracks the capture owns, so joining mid-share
-    // with the camera off left the share sitting in `videoOverride` with no
-    // sender carrying it - the newcomer saw a blank tile forever while the
-    // host's UI said "sharing". Same for the share+mic audio mix.
-    //
-    // `streams: [this.outStream]` gives the m-line an msid, so the far side
-    // receives every track as ONE stream rather than several anonymous ones.
-    if (slot.videoSenders.length === 0) {
-      try {
-        const tx = pc.addTransceiver("video", { direction: "sendrecv", streams: [this.outStream] });
-        slot.videoSenders.push(tx.sender);
-        if (this.videoOverride) void tx.sender.replaceTrack(this.videoOverride);
-        this.tuneVideoSender(tx.sender, !!this.videoOverride);
-      } catch { /* engine without addTransceiver: camera-on still needs a rejoin */ }
-    }
-    if (slot.audioSenders.length === 0) {
-      try {
-        const tx = pc.addTransceiver("audio", { direction: "sendrecv", streams: [this.outStream] });
-        slot.audioSenders.push(tx.sender);
-        if (this.audioOverride) void tx.sender.replaceTrack(this.audioOverride);
-      } catch { /* as above */ }
-    }
+    const attach = (kind: "video" | "audio", track: MediaStreamTrack | null, program: boolean) => {
+      const tx = pc.addTransceiver(kind, { direction: "sendrecv", streams: [program ? this.programStream : this.outStream] });
+      const senders = program
+        ? kind === "video" ? slot.programVideoSenders : slot.programAudioSenders
+        : kind === "video" ? slot.videoSenders : slot.audioSenders;
+      senders.push(tx.sender);
+      if (program) slot.programReceivers.add(tx.receiver);
+      if (track) void tx.sender.replaceTrack(track).catch(() => {});
+      if (kind === "video") this.tuneVideoSender(tx.sender, program, track?.getSettings?.().height ?? 720);
+    };
+    attach("video", local?.getVideoTracks()[0] ?? null, false);
+    attach("audio", local?.getAudioTracks()[0] ?? null, false);
+    attach("video", this.videoOverride, true);
+    attach("audio", this.audioOverride, true);
 
     pc.onicecandidate = (e) => {
       // Record the TYPE as we go: the gathering-complete summary above is what
@@ -418,19 +382,22 @@ export class RtcMesh {
       this.deps.sendSignal(id, { t: "ice", candidate: e.candidate ? e.candidate.toJSON() : null });
     };
     pc.ontrack = (e) => {
-      // ACCUMULATE into the slot's one stream. `ontrack` fires once per track,
-      // and a track on a placeholder transceiver arrives with e.streams empty,
-      // so publishing a per-track stream here handed the tile whichever half
-      // fired last: camera with no audio (permanent "muted" badge and no
-      // speaking ring), or audio with no picture.
-      if (!slot.remote.getTrackById(e.track.id)) slot.remote.addTrack(e.track);
-      // A track the peer replaces with null ends; drop it so the tile falls
-      // back to the avatar instead of holding a frozen last frame.
-      e.track.onended = () => {
-        try { slot.remote.removeTrack(e.track); } catch { /* already gone */ }
-        this.deps.onRemoteStream(id, slot.remote);
+      if (this.closed || this.slots.get(id) !== slot) return;
+      const program = !!e.transceiver && slot.programReceivers.has(e.transceiver.receiver);
+      const remote = program ? slot.programRemote : slot.remote;
+      const publish = () => {
+        if (this.closed || this.slots.get(id) !== slot) return;
+        if (program) this.deps.onRemoteProgram?.(id, remote);
+        else this.deps.onRemoteStream(id, remote);
       };
-      this.deps.onRemoteStream(id, slot.remote);
+      if (!remote.getTrackById(e.track.id)) remote.addTrack(e.track);
+      e.track.onended = () => {
+        // Retain the ended program track/frame until an explicit source
+        // change. Falling back to the file would silently change note timing.
+        if (!program) { try { remote.removeTrack(e.track); } catch {} }
+        publish();
+      };
+      publish();
     };
     // ── Diagnostics ──────────────────────────────────────────────────
     // Only connectionState was ever observed, so a session that never

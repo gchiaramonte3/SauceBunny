@@ -5,7 +5,7 @@ import { filmstripCount, filmstripTimestamps } from "../lib/filmstrip";
 import { extractFilmstrip } from "../lib/mediabunny-helpers";
 import { extractWaveformPeaks, lruSet, type WaveformPeaks } from "../lib/waveform";
 import { TimelineWaveform } from "./TimelineWaveform";
-import { usePlayheadFrames, setScrubbing } from "../lib/playhead-store";
+import { getPlayheadFrames, usePlayheadFrames, setScrubbing } from "../lib/playhead-store";
 import { getGhosts, subscribeGhosts } from "../lib/ghost-store";
 import { loadReviewer, reviewerColorFor } from "../lib/review";
 import { isRealSpan } from "../lib/review-range";
@@ -191,6 +191,11 @@ type Props = {
    *  reviewer-tinted comment dots (which sit mid-track). */
   chapterMarkers?: { time: number; title: string }[];
   onSeek: (f: number) => void;
+  onScrubStart?: () => void;
+  onScrub?: (f: number) => void;
+  onScrubEnd?: (f: number) => void;
+  /** Preserve this footprint when a live source replaces the seekable track. */
+  onHeightChange?: (height: number) => void;
 };
 
 /** The one piece of the timeline that re-renders on a peer's playhead tick.
@@ -220,7 +225,7 @@ function TimelineGhosts({ fps, pct }: { fps: number; pct: (f: number) => number 
 export function Timeline({
   status, durationFrames, inFrames, outFrames, fps,
   queuedRanges, onRangeClick, commentMarkers, reviewRangeDraft, filmstripPath, waveformOn, speakerLanes,
-  chapterMarkers, onSeek,
+  chapterMarkers, onSeek, onScrubStart, onScrub, onScrubEnd, onHeightChange,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -229,19 +234,33 @@ export function Timeline({
   const [wavePeaks, setWavePeaks] = useState<WaveformPeaks | null>(null);
   const filmCacheRef = useRef<Map<string, (string | null)[]>>(new Map());
   const dim = status === "empty" || status === "fetching" || status === "error";
+  // Compatibility defaults keep isolated Timeline consumers working while the
+  // app path uses the explicit lifecycle.
+  const emitScrub = onScrub ?? onSeek;
+  const finishScrub = onScrubEnd ?? onSeek;
 
-  const seekFromX = useCallback((clientX: number) => {
-    if (!trackRef.current || dim || durationFrames <= 0) return;
+  const framesFromX = useCallback((clientX: number): number | null => {
+    if (!trackRef.current || dim || durationFrames <= 0) return null;
     const r = trackRef.current.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-    onSeek(Math.floor(ratio * durationFrames));
-  }, [dim, durationFrames, onSeek]);
+    return Math.floor(ratio * durationFrames);
+  }, [dim, durationFrames]);
+
+  const scrubFromX = useCallback((clientX: number) => {
+    const frames = framesFromX(clientX);
+    if (frames != null) emitScrub(frames);
+  }, [framesFromX, emitScrub]);
 
   const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (dim) return;
     e.preventDefault();
+    // Synchronous: the very first target belongs to the gesture too. The old
+    // effect announced scrubbing after this seek had already reached a player,
+    // forcing each engine to guess whether it was a click or drag.
+    setScrubbing(true);
+    onScrubStart?.();
     setDragging(true);
-    seekFromX(e.clientX);
+    scrubFromX(e.clientX);
   };
 
   // Clicking the playhead triangle itself just starts a drag without
@@ -250,6 +269,8 @@ export function Timeline({
     if (dim) return;
     e.preventDefault();
     e.stopPropagation();
+    setScrubbing(true);
+    onScrubStart?.();
     setDragging(true);
   };
 
@@ -258,7 +279,6 @@ export function Timeline({
     // Tell the rest of the app a drag is in progress. The co-review heartbeat
     // uses it to stop advertising positions the room was never meant to see;
     // the cleanup below covers mouseup, Escape and unmount alike.
-    setScrubbing(true);
     // rAF-coalesce drag seeks: at most ONE seek per display frame. Raw
     // mousemove can fire far faster than a decode completes, and the player's
     // latest-wins guard then drops every in-flight frame — which is why
@@ -272,17 +292,24 @@ export function Timeline({
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
         rafId = 0;
-        if (pendingX != null) seekFromX(pendingX);
+        if (pendingX != null) scrubFromX(pendingX);
       });
     }
     function onUp(e: MouseEvent) {
       // Land exactly where the pointer was released, then stop.
       if (rafId) cancelAnimationFrame(rafId);
       rafId = 0;
-      seekFromX(e.clientX);
+      const frames = framesFromX(e.clientX);
+      finishScrub(frames ?? getPlayheadFrames());
+      setScrubbing(false);
       setDragging(false);
     }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setDragging(false); }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      finishScrub(getPlayheadFrames());
+      setScrubbing(false);
+      setDragging(false);
+    }
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     window.addEventListener("keydown", onKey);
@@ -297,7 +324,7 @@ export function Timeline({
       document.body.style.userSelect = "";
       setScrubbing(false);
     };
-  }, [dragging, seekFromX]);
+  }, [dragging, finishScrub, framesFromX, scrubFromX]);
 
   // Measure the track width so the filmstrip picks a sensible thumbnail count.
   // Bucketed to 24px so a stray 1px resize doesn't re-decode the whole strip.
@@ -314,6 +341,8 @@ export function Timeline({
       // change the cache key, so every trip to Home and back re-decoded the
       // whole strip. Width is never meaningfully 0 while on screen.
       if (w <= 0) return;
+      const height = el.parentElement?.getBoundingClientRect().height ?? 0;
+      if (height > 0) onHeightChange?.(height);
       // First measurement paints immediately; after that, commit only on the
       // trailing edge. The drawer's 280ms width transition fires this
       // continuously, and each distinct 24px bucket used to start a whole new
@@ -325,7 +354,7 @@ export function Timeline({
     });
     ro.observe(el);
     return () => { window.clearTimeout(timer); ro.disconnect(); };
-  }, []);
+  }, [onHeightChange]);
 
   // Build the thumbnail filmstrip from the local file (mediabunny, one pass).
   // Depends on source/duration/width — NOT the playhead — so scrubbing never

@@ -39,3 +39,12 @@ export function buildProxyUrl(base: string | null | undefined, upstreamUrl: stri
   if (!/^https?:\/\//i.test(upstreamUrl)) return upstreamUrl;
   return `${base}/v1/${base64UrlEncode(upstreamUrl)}`;
 }
+
+/** Build the authorized manifest route. The Rust resolver registers the root
+ * manifest before returning it; playlist children are registered as each
+ * manifest is rewritten. */
+export function buildHlsProxyUrl(base: string | null | undefined, manifestUrl: string): string {
+  if (!base) return manifestUrl;
+  if (!/^https?:\/\//i.test(manifestUrl)) return manifestUrl;
+  return `${base}/hls/v1/${base64UrlEncode(manifestUrl)}`;
+}

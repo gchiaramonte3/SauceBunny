@@ -28,7 +28,7 @@ import {
   noteParticipants, markWatched, screeningIsWorthKeeping, type ScreeningDoc,
 } from "../lib/screening";
 import { saveScreening } from "../lib/screening-store";
-import { getLastUserSeekAt, getPlayheadFrames, isScrubbing, subscribeScrub } from "../lib/playhead-store";
+import { getLastUserSeekAt, getPlayheadFrames, isScrubbing } from "../lib/playhead-store";
 import {
   clearGhosts, pruneGhosts, shouldSendPresence, upsertGhost,
 } from "../lib/ghost-store";
@@ -36,7 +36,8 @@ import { clearReactions, pushReaction } from "../lib/reaction-store";
 import { useStreamKeep } from "./use-stream-keep";
 import { acceptTransport, createClockEstimator, expectedPosition } from "../lib/session-clock";
 import { loadReview, saveReview, ensureVersion, applyReviewOp, attributeReviewOp, mergeReviewDoc, adoptSnapshot, resolveByFingerprint, linkFingerprint, sanitizeDocForWire, commentMarkers as reviewMarkersOf, annotationsOf, loadReviewer, reviewerColorFor, initialsOf, type AnnotationStrokes, type ReviewDoc, type ReviewOp, rememberReceivedAs } from "../lib/review";
-import type { PlayerHandle } from "../components/player-handle";
+import type { PlayerHandle, SeekResult } from "../components/player-handle";
+import type { PlaybackCommand, PlaybackSessionController } from "../lib/playback-session-controller";
 import type { Participant } from "../components/PeoplePanel";
 import type { ToastKind } from "../components/CanvasToast";
 import { asLogTag, type LogTag, type Metadata } from "../types";
@@ -52,10 +53,13 @@ import { useRtcMesh, type TurnConfig } from "./use-rtc-mesh";
 import type { MeshPeerState } from "../lib/rtc-mesh";
 import { ShareController, type ShareState } from "../lib/share-machine";
 import { ViewerShareController, type ViewerShareState } from "../lib/viewer-share";
-import { mixShareAudio, openShareStream } from "../lib/share-stream";
-import { getSessionCapture } from "./use-media-capture";
+import { openShareStream } from "../lib/share-stream";
 import type { ShareSourceArg } from "../bindings/ShareSourceArg";
-import { clearDelivered, enqueueOp, pendingCount, pendingOps } from "../lib/review-outbox";
+import { acknowledgeEnvelope, clearDelivered, enqueueEnvelope, pendingEnvelopes, pendingLegacyOps, pendingCount, pendingOps } from "../lib/review-outbox";
+import { applyCommit, createReviewDelivery, createReviewEnvelope, isReviewAck, isReviewEnvelope, isReviewOp, type ReviewEnvelope } from "../lib/review-delivery";
+import { persistReviewDoc } from "../lib/review-store";
+import { setPremiereRoom } from "../lib/premiere-link";
+import { PREMIERE_ROOM_MARKERS_ENABLED } from "../lib/premiere-permissions";
 import { splitReviewCode } from "../lib/review-link";
 
 /** Timeline/monitor read-model of one review comment marker. Shared by the
@@ -81,7 +85,7 @@ export type ReviewAnnotationView = {
  *  "none" → nothing loaded; peers unload
  *  `reviewKey` is the SHARED review-doc identity - never a local path. */
 export type SessionSource = {
-  kind: "web" | "file" | "none";
+  kind: "web" | "file" | "ndi" | "none";
   url: string | null;
   fingerprint: string | null;
   title: string | null;
@@ -90,6 +94,8 @@ export type SessionSource = {
 };
 
 type Args = {
+  /** Local monitor is not showing the published room picture. */
+  privatePreview?: boolean;
   /** Live transport values — mirrored into refs for the interval senders.
    *  (The playhead is NOT passed: it lives in lib/playhead-store, and the
    *  heartbeat/presence/chase read getPlayheadFrames() when they fire — a
@@ -109,12 +115,13 @@ type Args = {
   /** Review storage key of the current source — the host seeds the shared doc from it. */
   reviewSourceKey: string | null;
   playerRef: RefObject<PlayerHandle>;
+  playbackController: PlaybackSessionController;
   /** For the shared doc's version title — read at seed time so it's never stale. */
   metadataRef: MutableRefObject<Metadata | null>;
   /** Chase correction seek. Deliberately NOT App's onSeek: it must not
    *  arm the user-seek latch (review fix: the chase arming its own latch
    *  let two quick host scrubs strand a paused guest). */
-  onChaseSeek: (frames: number) => void;
+  onChaseSeek: (frames: number) => Promise<SeekResult>;
   setUrl: (url: string) => void;
   handleFetch: (url: string) => Promise<void>;
   /** Open a file from THIS Mac's disk. Used by the fingerprint ladder when a
@@ -197,6 +204,8 @@ export type CoReview = {
   theaterParticipants: Participant[];
   /** Live remote camera/mic streams from the webcam mesh, keyed by member id. */
   meshStreams: ReadonlyMap<string, MediaStream>;
+  meshProgramStreams: ReadonlyMap<string, MediaStream>;
+  readProgramDiagnostics: (id: string) => Promise<import("../lib/program-diagnostics").ProgramDiagnostics | null>;
   /** Per-member mesh connection state (connecting / live / failed). */
   meshStates: ReadonlyMap<string, MeshPeerState>;
   /** Peers YOU muted locally (tile "Mute for me"); never signalled to them. */
@@ -316,14 +325,17 @@ export function stampOpWithSession(op: ReviewOp, sc: ScreeningDoc | null): Revie
 }
 
 export function useCoReview({
+  privatePreview = false,
   isPlaying, fps, playbackRate,
   sessionSource, activeSourceUrlRef, reviewSourceKey,
-  playerRef, metadataRef,
+  playerRef, playbackController, metadataRef,
   onChaseSeek, setUrl, handleFetch, loadLocalPath, loadPeerStream, clearStageForPeerSource,
   pushNotification, setQueueOpen,
   setReviewMarkers, setReviewAnnotations,
   turn, stunUrl, appendLog,
 }: Args): CoReview {
+  const privatePreviewRef = useRef(privatePreview);
+  privatePreviewRef.current = privatePreview;
   // Every long-lived listener here is registered ONCE, so it must reach the
   // log through a ref or it captures the first render's closure forever.
   const appendLogRef = useRef(appendLog);
@@ -348,6 +360,8 @@ export function useCoReview({
   // mesh hook must be declared after the message handler's closure).
   const rtcSignalRef = useRef<((from: string, payload: string) => void) | null>(null);
   const [sharingMembers, setSharingMembers] = useState<ReadonlySet<string>>(new Set());
+  const sharingMembersRef = useRef(sharingMembers);
+  sharingMembersRef.current = sharingMembers;
   /**
    * Who is recording, keyed by what they are recording.
    *
@@ -363,24 +377,44 @@ export function useCoReview({
   const [shareStream, setShareStream] = useState<MediaStream | null>(null);
   const coSessionActive = coSession.role !== "off";
   // The shared review doc while in a session (null = solo).
-  const [sessionDoc, setSessionDoc] = useState<ReviewDoc | null>(null);
-  const sessionDocRef = useRef<ReviewDoc | null>(null); sessionDocRef.current = sessionDoc;
+  const [sessionDoc, renderSessionDoc] = useState<ReviewDoc | null>(null);
+  const sessionDocRef = useRef<ReviewDoc | null>(null);
+  const setSessionDoc = useCallback((update: SetStateAction<ReviewDoc | null>) => {
+    const next = typeof update === "function" ? update(sessionDocRef.current) : update;
+    sessionDocRef.current = next;
+    renderSessionDoc(next);
+  }, []);
+  const coSessionIdRef = useRef<string>(crypto.randomUUID());
+  const reviewKeysRef = useRef(new Map<string, string>());
+  const roomSourceKeyRef = useRef("");
   // Live peer playheads → ghost cursors on the timeline (excludes self; the
   // relay never echoes your own presence back).
   const coSeqRef = useRef(0);
   const coPlayingRef = useRef(false); coPlayingRef.current = isPlaying;
   const coFpsRef = useRef(30); coFpsRef.current = fps;
   const coRateRef = useRef(1); coRateRef.current = playbackRate;
+  const coAppliedRateRef = useRef(playbackRate);
   const coRoleRef = useRef("off"); coRoleRef.current = coSession.role;
   const coLastHostPosRef = useRef<number | null>(null);
   /** Cross-machine clock offset estimator (see lib/session-clock.ts). */
   const coClockRef = useRef(createClockEstimator());
   /** Last (epoch, seq) applied, so stale/duplicate heartbeats are ignored. */
   const coLastSeqRef = useRef({ epoch: -1, seq: -1 });
-  /** When we last issued a chase seek — feeds decideChase's cooldown. */
+  /** Legacy protocol-1 correction state. Kept for one mixed-version release. */
   const coLastChaseAtRef = useRef(0);
-  /** The chase target we have asked for and not yet reached. See decideChase. */
   const coPendingChaseRef = useRef<number | null>(null);
+  /** Versioned transport commands are applied once even though the presenter
+   *  repeats them on every heartbeat. A landing promise, rather than a timer
+   *  or playhead-distance guess, owns the pending lifetime. */
+  const coLastCommandRef = useRef({ epoch: -1, command: -1 });
+  const coPendingCommandRef = useRef<string | null>(null);
+  const coDriftCorrectionRef = useRef<string | null>(null);
+  useEffect(() => playbackController.subscribeCommands(() => {
+    // A local gesture supersedes remote pending work without a timer latch.
+    coPendingCommandRef.current = null;
+    coDriftCorrectionRef.current = null;
+  }), [playbackController]);
+  const coCommandRef = useRef(0);
   const coReadyRef = useRef(false); // has OUR player loaded the host's source yet?
   /** Latest persistDoc, so the message handler (registered once) can flush an
    *  outgoing doc without capturing a stale closure. */
@@ -412,7 +446,10 @@ export function useCoReview({
   // Taking the floor restarts our seq at 0. Receivers order across a handover
   // by the host-stamped epoch, which bumps at the same moment - without the
   // reset our first messages would look stale to anyone whose seq is higher.
-  if (isPresenter && !isPresenterRef.current) coSeqRef.current = 0;
+  if (isPresenter && !isPresenterRef.current) {
+    coSeqRef.current = 0;
+    coCommandRef.current = 0;
+  }
   isPresenterRef.current = isPresenter;
   // The presenter's source when WE can't show it yet (a file we don't have,
   // or a web source still resolving). Drives the room's waiting affordance.
@@ -493,6 +530,42 @@ export function useCoReview({
   /** How many notes are waiting to be delivered, for the UI. A queue nobody
    *  can see is the failure this replaces, wearing different clothes. */
   const [outboxDepth, setOutboxDepth] = useState(() => pendingCount());
+  const delivery = useMemo(() => createReviewDelivery({
+    load: (wireKey) => {
+      const localKey = reviewKeysRef.current.get(wireKey);
+      if (!localKey) return null;
+      const current = sessionDocRef.current;
+      return current?.sourceKey === localKey ? mergeReviewDoc(loadReview(localKey), current) : loadReview(localKey);
+    },
+    save: persistReviewDoc,
+    publish: (doc) => {
+      if (coRoleRef.current !== "off" && sessionDocRef.current?.sourceKey === doc.sourceKey) setSessionDoc(doc);
+    },
+    send: async (message) => {
+      if (coRoleRef.current !== "host" || message.sessionId !== coSessionIdRef.current) return;
+      acknowledgeEnvelope(message.reviewKey, message.opId);
+      setOutboxDepth(pendingCount());
+      await invoke("session_broadcast", { msg: { kind: "reviewOp", from: "", op: JSON.stringify(message) } });
+      // Compatibility: older peers cannot parse the envelope. Modern peers
+      // ignore this duplicate; old clients retain their best-effort behavior.
+      if (message.t === "review-commit") {
+        await invoke("session_broadcast", { msg: { kind: "reviewOp", from: "", op: JSON.stringify(message.op) } });
+      }
+    },
+  }), [setSessionDoc]);
+
+  const sendEnvelope = useCallback(async (envelope: ReviewEnvelope) => {
+    if (!PREMIERE_ROOM_MARKERS_ENABLED && envelope.op.t === "add" && envelope.op.comment.premiere)
+      throw new Error("Premiere sequence details cannot be shared with the room yet. This note remains saved locally.");
+    const scoped = { ...envelope, sessionId: coSessionIdRef.current };
+    if (coRoleRef.current === "host") {
+      await delivery.commit(scoped, loadReviewer().name || "You");
+    } else {
+      if (!await trySendSessionMsg({ kind: "reviewOp", from: "", op: JSON.stringify(scoped) })) {
+        throw new Error("The edit is saved locally and will retry when the host is reachable.");
+      }
+    }
+  }, [delivery, trySendSessionMsg]);
 
   /**
    * The room's live drawing, shared while a note is being composed.
@@ -507,6 +580,7 @@ export function useCoReview({
   /** Draw locally + relay. Rides the reviewOp message, which the Rust relay
    *  treats as an opaque string, so this needed no backend change. */
   const postDrawOp = useCallback((op: DrawOp) => {
+    if (privatePreviewRef.current) return;
     setLiveDraw((prev) => applyDrawOp(prev, op));
     sendSessionMsg({ kind: "reviewOp", op: JSON.stringify({ t: "draw", op }), from: "" });
   }, [sendSessionMsg]);
@@ -515,6 +589,7 @@ export function useCoReview({
    *  state through the setter rather than closing over `liveDraw`, so a clear
    *  fired from a stale render still erases what is actually on screen. */
   const clearLiveDraw = useCallback(() => {
+    if (privatePreviewRef.current) return;
     setLiveDraw((prev) => {
       const at = Date.now();
       for (const st of prev.strokes) {
@@ -540,6 +615,9 @@ export function useCoReview({
   }, []);
 
   const postSessionOp = useCallback((op: ReviewOp) => {
+    if (!PREMIERE_ROOM_MARKERS_ENABLED && op.t === "add" && op.comment.premiere)
+      throw new Error("Room marker delivery is not enabled yet. Uncheck Send this note to Premiere to post a general note; your draft is kept.");
+    if (privatePreviewRef.current) throw new Error("Return to the room picture or share the preview before posting. Your draft is still here.");
     // STAMP BEFORE ANYTHING ELSE SEES IT. A note gets the session and segment
     // it was made in here, once, so the local doc, the file on disk and every
     // peer's copy all carry the same value - stamping after the local apply or
@@ -549,23 +627,16 @@ export function useCoReview({
     // op, which the Rust relay treats as an opaque string, so a peer on an
     // older build carries the fields through untouched.
     op = stampOpWithSession(op, screeningRef.current);
-    if (!sessionDocRef.current) pendingOpsRef.current.push(op);
-    else setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
+    const doc = sessionDocRef.current;
+    if (!doc) throw new Error("Wait for the shared review to open before posting.");
+    const wireKey = [...reviewKeysRef.current].find(([, local]) => local === doc.sourceKey)?.[0] ?? doc.sourceKey;
+    const envelope = createReviewEnvelope(doc, op, wireKey, coSessionIdRef.current);
+    // Capture source identity and save the outbox BEFORE any asynchronous send.
+    setOutboxDepth(enqueueEnvelope(envelope));
+    setSessionDoc(applyReviewOp(doc, op));
     recordOpInScreening(op);
-    // `from` is stamped by the HOST on relay; whatever we put here is
-    // overwritten, so send it empty rather than asserting an identity.
-    void trySendSessionMsg({ kind: "reviewOp", op: JSON.stringify(op), from: "" })
-      .then((sent) => {
-        /* A note that did not go out is KEPT, on disk, under the review it
-           belongs to. Before this it was applied to the author's own screen
-           and then dropped: the send was fire-and-forget with a swallowed
-           catch, so a host that had gone away cost the note with no sign
-           anything had happened. */
-        if (sent) return;
-        const key = sessionDocRef.current?.sourceKey ?? sessionSourceRef.current?.reviewKey ?? null;
-        if (key) setOutboxDepth(enqueueOp(key, op));
-      });
-  }, [trySendSessionMsg, recordOpInScreening]);
+    void sendEnvelope(envelope).catch((error) => slog("warn", formatError(error)));
+  }, [sendEnvelope, recordOpInScreening, setSessionDoc, slog]);
 
   /* Deliver what is waiting for a review, then forget exactly what landed.
      
@@ -573,24 +644,55 @@ export function useCoReview({
      host applies them in order, and an edit that overtakes the add it edits
      would be dropped by the LWW guard rather than applied. Stops at the first
      failure - if the connection has gone again, the rest stay queued. */
-  const drainOutbox = useCallback(async (sourceKey: string, ops: readonly ReviewOp[]) => {
-    const sent: ReviewOp[] = [];
-    for (const op of ops) {
-      const ok = await trySendSessionMsg({ kind: "reviewOp", op: JSON.stringify(op), from: "" });
-      if (!ok) break;
-      sent.push(op);
+  const drainOutbox = useCallback(async (sourceKey: string, _ops?: readonly ReviewOp[]) => {
+    const localKey = reviewKeysRef.current.get(sourceKey) ?? sourceKey;
+    const doc = sessionDocRef.current?.sourceKey === localKey ? sessionDocRef.current : loadReview(localKey);
+    if (!doc?.activeVersionId) return;
+    for (const op of pendingLegacyOps(sourceKey)) {
+      const envelope = createReviewEnvelope(doc, op, sourceKey, coSessionIdRef.current);
+      enqueueEnvelope(envelope);
+      clearDelivered(sourceKey, [op]);
     }
-    if (sent.length) clearDelivered(sourceKey, sent);
+    for (const envelope of pendingEnvelopes(sourceKey)) {
+      try { await sendEnvelope(envelope); }
+      catch (error) { slog("warn", formatError(error)); break; }
+    }
     setOutboxDepth(pendingCount());
-  }, [trySendSessionMsg]);
+  }, [sendEnvelope, slog]);
   const drainOutboxRef = useRef(drainOutbox);
   drainOutboxRef.current = drainOutbox;
+  useEffect(() => {
+    if (!coSessionActive) return;
+    let draining = false;
+    const timer = window.setInterval(() => {
+      if (draining || !pendingCount()) return;
+      draining = true;
+      void (async () => {
+        try {
+          for (const key of reviewKeysRef.current.keys()) await drainOutboxRef.current(key);
+        } catch (error) { slog("warn", formatError(error)); }
+        finally { draining = false; }
+      })();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [coSessionActive, slog]);
 
   // Latest-closure ref so the once-registered session:msg listener never stales.
   const coApplyRef = useRef<(m: SessionMsg) => void>(() => {});
   coApplyRef.current = (m) => {
+    if (coRoleRef.current === "off") return;
     switch (m.kind) {
       case "loadSource": {
+        roomSourceKeyRef.current = m.reviewKey;
+        if (m.sourceKind === "ndi") {
+          // A dedicated encoded live program, not a seekable hidden file.
+          coReadyRef.current=false;
+          coPendingCommandRef.current=null;
+          setPendingSource(null);
+          setSourceStatus(new Map());
+          setOfferedFile(null);
+          return;
+        }
         // The presenter changed what the room is watching. We are not synced
         // to it until OUR player reports ready for the NEW source - re-arm so
         // a stale-ready old player can't apply transport to the wrong video.
@@ -707,6 +809,19 @@ export function useCoReview({
         // then a clean replace rather than a silent contamination.
         try {
           const incoming = JSON.parse(m.doc) as ReviewDoc;
+          if (incoming.sync?.sessionId && incoming.sync.sessionId !== coSessionIdRef.current) {
+            coSessionIdRef.current = incoming.sync.sessionId;
+            setPremiereRoom(coRoleRef.current, coSessionIdRef.current);
+            coLastSeqRef.current = { epoch: -1, seq: -1 };
+            coLastCommandRef.current = { epoch: -1, command: -1 };
+            coPendingCommandRef.current = null;
+            coDriftCorrectionRef.current = null;
+            coPendingChaseRef.current = null;
+            coLastChaseAtRef.current = 0;
+            coReadyRef.current = false;
+            coClockRef.current.reset();
+          }
+          reviewKeysRef.current.set(incoming.sourceKey, incoming.sourceKey);
           // Both side effects happen HERE, once, not inside the updater.
           // StrictMode double-invokes updaters in development, and this one
           // used to write to disk and empty pendingOpsRef as it computed: the
@@ -746,10 +861,53 @@ export function useCoReview({
           // payload-agnostic, so trusting it let any peer sign review
           // content (including the source verdict) as somebody else.
           const parsed: unknown = JSON.parse(m.op);
+          if (isReviewAck(parsed)) {
+            if (m.from === "m0" && parsed.sessionId === coSessionIdRef.current) {
+              acknowledgeEnvelope(parsed.reviewKey, parsed.opId);
+              setOutboxDepth(pendingCount());
+            }
+            return;
+          }
+          if (isReviewEnvelope(parsed)) {
+            if (parsed.sessionId !== coSessionIdRef.current) return;
+            if (parsed.t === "review-submit") {
+              if (coRoleRef.current === "host") {
+                void delivery.commit(parsed, nameForMember(m.from)).catch((error) => slog("warn", formatError(error)));
+              }
+              return;
+            }
+            // Only the network host can attest a durable commit. The relay
+            // stamps from; a guest cannot claim to be m0 in its payload.
+            if (m.from !== "m0" || parsed.revision < 1) return;
+            const key = reviewKeysRef.current.get(parsed.reviewKey);
+            if (!key) return; // wait for the source/snapshot; retry stays queued
+            const current = sessionDocRef.current;
+            const doc = current?.sourceKey === key ? current : loadReview(key);
+            const next = applyCommit(doc, parsed);
+            saveReview(next);
+            if (current?.sourceKey === key) setSessionDoc(next);
+            acknowledgeEnvelope(parsed.reviewKey, parsed.opId);
+            setOutboxDepth(pendingCount());
+            recordOpRef.current(parsed.op);
+            return;
+          }
           // Draw ops share this message and are NOT part of the persisted doc.
           if (isDrawRelay(parsed)) {
             const drawOp = attributeDrawOp(parsed.op, nameForMember(m.from));
             setLiveDraw((prev) => applyDrawOp(prev, drawOp));
+            return;
+          }
+          if (!isReviewOp(parsed)) return;
+          // New hosts re-emit committed ops for legacy clients. Do not apply
+          // that compatibility copy over the revisioned state a second time.
+          if (m.from === "m0" && sessionDocRef.current?.sync?.sessionId) return;
+          if (coRoleRef.current === "host" && sessionDocRef.current) {
+            const doc = sessionDocRef.current;
+            const key = [...reviewKeysRef.current].find(([, local]) => local === doc.sourceKey)?.[0];
+            if (key) {
+              const envelope = createReviewEnvelope(doc, parsed, key, coSessionIdRef.current);
+              void delivery.commit(envelope, nameForMember(m.from)).catch((error) => slog("warn", formatError(error)));
+            }
             return;
           }
           const op = attributeReviewOp(parsed as ReviewOp, nameForMember(m.from));
@@ -822,6 +980,17 @@ export function useCoReview({
         upsertGhost(m.name, m.position, Date.now());
         return;
       case "transport": {
+        if (sessionSourceRef.current.kind === "ndi") return;
+        if (m.sessionId && m.sessionId !== coSessionIdRef.current) return;
+        const roomKey = coRoleRef.current === "host" ? sessionSourceRef.current.reviewKey : roomSourceKeyRef.current;
+        if (m.sourceKey && m.sourceKey !== roomKey) return;
+        if (pendingSourceRef.current) return;
+        const presenter = coSessionRef.current.presenter;
+        if (presenter && presenter !== coSessionRef.current.selfId && sharingMembersRef.current.has(presenter)) {
+          coReadyRef.current = false;
+          coPendingCommandRef.current = null;
+          return;
+        }
         const p = playerRef.current;
         // Session-first: hold the playhead chase until OUR player has actually
         // loaded the source — sync activates once both sides have the video.
@@ -847,7 +1016,88 @@ export function useCoReview({
         // Differencing raw Date.now() across two Macs made an ordinary clock
         // offset look like permanent drift and re-seeked every heartbeat.
         const expected = expectedPosition(m, now, coClockRef.current.offsetMs());
-        const cur = getPlayheadFrames() / r;
+        const controllerSnapshot = playbackController.getSnapshot();
+        const cur = Number.isFinite(controllerSnapshot.presentedSeconds)
+          ? controllerSnapshot.presentedSeconds
+          : getPlayheadFrames() / r;
+
+        // Protocol 2 makes the command durable and the heartbeat disposable.
+        // Do not consume a command while the guest is actively browsing: a
+        // playing room will apply it on the first beat after release; a paused
+        // room intentionally leaves the guest on the inspected frame until a
+        // new presenter command arrives.
+        if (m.protocol >= 2 && m.command > 0) {
+          if (isScrubbing()) {
+            coPendingCommandRef.current = null;
+            coDriftCorrectionRef.current = null;
+            if (!m.playing) coLastCommandRef.current = { epoch: m.epoch, command: m.command };
+            return;
+          }
+
+          const previous = coLastCommandRef.current;
+          const newCommand = m.epoch > previous.epoch
+            || (m.epoch === previous.epoch && m.command > previous.command);
+          const room = coSessionIdRef.current;
+          const commandKey = `${room}:${m.epoch}:${m.command}`;
+          const commandTarget = Math.max(0, m.target ?? expected);
+          const drift = expected - cur;
+          if (Math.abs(drift) < 0.1 && !coPendingCommandRef.current) coDriftCorrectionRef.current = null;
+          let seekSeconds: number | null = null;
+
+          if (justLoaded || newCommand) {
+            coLastCommandRef.current = { epoch: m.epoch, command: m.command };
+            const exactCommand = m.phase === "seek" || m.phase === "scrub-release"
+              || m.phase === "frame-step" || !m.playing;
+            if (justLoaded || exactCommand || Math.abs(commandTarget - cur) > PLAYING_TOLERANCE_SEC) {
+              seekSeconds = commandTarget;
+            }
+          } else if (m.playing
+              && coPendingCommandRef.current !== commandKey
+              && coDriftCorrectionRef.current !== commandKey
+              && Math.abs(drift) > PLAYING_TOLERANCE_SEC) {
+            // Material drift receives one hard correction. Repeated beats see
+            // the pending command key and cannot restart the in-flight seek.
+            seekSeconds = expected;
+            coDriftCorrectionRef.current = commandKey;
+          }
+
+          if (seekSeconds != null && coPendingCommandRef.current !== commandKey) {
+            coPendingCommandRef.current = commandKey;
+            if (!m.playing) playbackController.pause({ origin: "remote" });
+            void onChaseSeek(Math.round(seekSeconds * r)).then((result) => {
+              if (coPendingCommandRef.current !== commandKey || room !== coSessionIdRef.current) return;
+              coPendingCommandRef.current = null;
+              if (result.status !== "presented" || isScrubbing()) return;
+              playbackController.setPlaybackRate(m.rate || 1, { origin: "remote" });
+              coAppliedRateRef.current = m.rate || 1;
+              if (m.playing) void playbackController.play({ origin: "remote" });
+            }).catch(() => {
+              if (coPendingCommandRef.current === commandKey) coPendingCommandRef.current = null;
+            });
+            coLastHostPosRef.current = m.presented ?? m.position;
+            return;
+          }
+          if (coPendingCommandRef.current === commandKey) return;
+
+          // Native playback owns A/V. Small playing drift is corrected gently
+          // through rate; exact rate returns as soon as the clocks converge.
+          const desiredRate = synchronizedPlaybackRate(m.rate || 1, drift, m.playing,
+            coDriftCorrectionRef.current === commandKey);
+          if (p.supportsPlaybackRate && Math.abs(desiredRate - coAppliedRateRef.current) > 0.0001) {
+            p.setPlaybackRate(desiredRate);
+            coAppliedRateRef.current = desiredRate;
+          }
+          if (m.playing !== coPlayingRef.current) {
+            if (m.playing) void playbackController.play({ origin: "remote" });
+            else playbackController.pause({ origin: "remote" });
+          }
+          coLastHostPosRef.current = m.presented ?? m.position;
+          return;
+        }
+
+        // Protocol 1 compatibility for one release. Old peers have no command
+        // identity or seek promise, so retain their conservative latch/cooldown
+        // behavior without letting it leak back into the new path.
         const hostScrubbed = coLastHostPosRef.current === null || Math.abs(m.position - coLastHostPosRef.current) > 0.25;
         // "Moved at all": 4ms is under any real frame duration (120fps is
         // 8.3ms) and over transport jitter, so a frame-step registers on the
@@ -886,7 +1136,7 @@ export function useCoReview({
         if (decision.seekSeconds != null) {
           coLastChaseAtRef.current = now;
           coPendingChaseRef.current = decision.seekSeconds;
-          onChaseSeek(Math.floor(decision.seekSeconds * r));
+          void onChaseSeek(Math.floor(decision.seekSeconds * r));
         }
         // Rate was broadcast but never applied - a guest sat at 1x while the
         // presenter ran at 1.5x and got seek-corrected once a second instead.
@@ -895,7 +1145,7 @@ export function useCoReview({
           p.setPlaybackRate(m.rate || 1);
         }
         if (m.playing !== coPlayingRef.current) {
-          if (m.playing) p.play(); else p.pause();
+          if (m.playing) void p.play(); else p.pause();
         }
         return;
       }
@@ -936,13 +1186,58 @@ export function useCoReview({
   }, [onDeeplinkReview]);
 
   useEffect(() => {
+    let receivedState = false;
+    let disposed = false;
     const unState = listen<CoSessionState>("session:state", (e) => {
+      receivedState = true;
       // Diff against what we believed BEFORE adopting it: the roster and the
       // floor are the two things whose disagreement across machines produces
       // "it looks connected and does nothing", and a diff is what tells you
       // which Mac's picture is wrong.
       const prev = coSessionRef.current;
       const next = e.payload;
+      // Joining another room need not pass through an observable "off"
+      // render. Reset before its first message can use the previous room's
+      // command watermarks, source map, or pending seek completion.
+      if (next.role !== "off" && prev.code && next.code !== prev.code) {
+        persistDocRef.current(sessionDocRef.current);
+        setSessionDoc(null);
+        coSessionIdRef.current = crypto.randomUUID();
+        coLastSeqRef.current = { epoch: -1, seq: -1 };
+        coLastCommandRef.current = { epoch: -1, command: -1 };
+        coPendingCommandRef.current = null;
+        coDriftCorrectionRef.current = null;
+        coPendingChaseRef.current = null;
+        coLastChaseAtRef.current = 0;
+        coLastHostPosRef.current = null;
+        coReadyRef.current = false;
+        coClockRef.current.reset();
+        coSeqRef.current = 0;
+        coCommandRef.current = 0;
+        coAppliedRateRef.current = coRateRef.current;
+        reviewKeysRef.current.clear();
+        roomSourceKeyRef.current = "";
+        prevDocKeyRef.current = null;
+        pendingOpsRef.current = [];
+        setPendingSource(null);
+        setOfferedFile(null);
+        setSharingMembers(new Set());
+        setRaisedHands(new Set());
+        setRecordingMembers(new Set());
+        setStageRecorders(new Set());
+        if (screeningSaveRef.current) clearTimeout(screeningSaveRef.current);
+        screeningSaveRef.current = null;
+        if (screeningRef.current) {
+          const finished = closeScreening(screeningRef.current);
+          if (screeningIsWorthKeeping(finished)) void saveScreening(finished).catch((error) => slog("warn", formatError(error)));
+          screeningRef.current = null;
+        }
+        sessionStartedAtRef.current = Date.now();
+        clearGhosts(); clearReactions();
+      }
+      coSessionRef.current = next;
+      coRoleRef.current = next.role;
+      setPremiereRoom(next.role, coSessionIdRef.current);
       if (prev.role !== next.role) slog("info", `Role: ${prev.role} -> ${next.role}`);
       if (prev.selfId !== next.selfId) slog("info", `Self id: ${next.selfId ?? "none"}`);
       const before = new Map(prev.peers.map((p) => [p.id, p]));
@@ -968,14 +1263,21 @@ export function useCoReview({
     // mounted emits nothing (it has not changed), so without this pull the
     // renderer would show a lobby over a live room until something moved.
     void invoke<CoSessionState>("session_state")
-      .then((st) => { if (st.role !== "off") setCoSession(st); })
+      .then((st) => {
+        if (!disposed && !receivedState && st) setPremiereRoom(st.role, coSessionIdRef.current);
+        if (!disposed && !receivedState && st.role !== "off") {
+          coSessionRef.current = st;
+          coRoleRef.current = st.role;
+          setCoSession(st);
+        }
+      })
       .catch(() => { /* backend not up yet; the pushed event still arrives */ });
     const unMsg = listen<SessionMsg>("session:msg", (e) => coApplyRef.current(e.payload));
     const unLog = listen<{ tag: string; line: string }>("session:log", (e) => {
       appendLogRef.current(asLogTag(e.payload.tag), "session", e.payload.line);
     });
-    return () => { unState.then((f) => f()); unMsg.then((f) => f()); unLog.then((f) => f()); };
-  }, [slog]);
+    return () => { disposed = true; unState.then((f) => f()); unMsg.then((f) => f()); unLog.then((f) => f()); };
+  }, [slog, setSessionDoc]);
   /** Write a doc back to ITS OWN source's file. The sourceKey on the doc is
    *  the authority - never the key of whatever source is on screen now. */
   const persistDoc = useCallback((d: ReviewDoc | null) => {
@@ -1012,7 +1314,21 @@ export function useCoReview({
     const prev = prevCoRoleRef.current;
     prevCoRoleRef.current = coSession.role;
 
-    if (coSession.role !== "off" && prev === "off") sessionStartedAtRef.current = Date.now();
+    if (coSession.role !== "off" && prev === "off") {
+      sessionStartedAtRef.current = Date.now();
+      if (coSession.role === "host") coSessionIdRef.current = crypto.randomUUID();
+      setPremiereRoom(coSession.role, coSessionIdRef.current);
+      coLastSeqRef.current = { epoch: -1, seq: -1 };
+      coLastCommandRef.current = { epoch: -1, command: -1 };
+      coPendingCommandRef.current = null;
+      coDriftCorrectionRef.current = null;
+      coPendingChaseRef.current = null;
+      coLastChaseAtRef.current = 0;
+      coClockRef.current.reset();
+      coSeqRef.current = 0;
+      coCommandRef.current = 0;
+      coAppliedRateRef.current = coRateRef.current;
+    }
 
     if (coSession.role === "off" && prev !== "off") {
       persistDoc(sessionDocRef.current);
@@ -1057,6 +1373,9 @@ export function useCoReview({
       pendingOpsRef.current = [];
       coLastHostPosRef.current = null;
       coReadyRef.current = false;
+      coSessionIdRef.current = crypto.randomUUID();
+      setPremiereRoom("off", coSessionIdRef.current);
+      reviewKeysRef.current.clear();
       return;
     }
     if (coSession.role !== "host") return;
@@ -1084,11 +1403,15 @@ export function useCoReview({
     const outgoing = sessionDocRef.current;
     if (outgoing && outgoing.sourceKey !== reviewSourceKey) persistDoc(outgoing);
 
-    const { doc } = ensureVersion(
-      loadReview(reviewSourceKey), reviewSourceKey, metadataRef.current?.title ?? undefined,
+    const { doc: seeded } = ensureVersion(
+      loadReview(reviewSourceKey), reviewSourceKey,
+      (sessionSourceRef.current.kind === "ndi" ? sessionSourceRef.current.title : metadataRef.current?.title) ?? undefined,
     );
+    const doc = { ...seeded, sync: { revision: 0, clock: 0, operations: {}, ...seeded.sync, sessionId: coSessionIdRef.current } };
+    reviewKeysRef.current.set(sessionSourceRef.current.reviewKey || reviewSourceKey, reviewSourceKey);
     prevDocKeyRef.current = reviewSourceKey;
     setSessionDoc(doc);
+    void drainOutboxRef.current(sessionSourceRef.current.reviewKey || reviewSourceKey);
 
     // Guests are still holding the OUTGOING doc, so push the new one now.
     // Previously the snapshot only went out when a peer joined, which meant a
@@ -1099,7 +1422,7 @@ export function useCoReview({
       // stripped (see sanitizeDocForWire). sessionDoc keeps the REAL doc.
       msg: { kind: "reviewDoc", doc: JSON.stringify(sanitizeDocForWire(doc, sessionSourceRef.current.reviewKey || null)) },
     }).catch(() => { /* session raced closed */ });
-  }, [coSession.role, reviewSourceKey, persistDoc, metadataRef]);
+  }, [coSession.role, coSession.code, reviewSourceKey, persistDoc, metadataRef, setSessionDoc]);
   // Presenter → everyone: the current source whenever it changes. r124: this
   // fires for LOCAL FILES and for clearing too. It used to early-return unless
   // a web URL existed, which is why loading a local file broadcast nothing and
@@ -1107,6 +1430,9 @@ export function useCoReview({
   const sessionSourceRef = useRef(sessionSource);
   sessionSourceRef.current = sessionSource;
   const sendLoadSource = useCallback((src: SessionSource) => {
+    // Native NDI publication atomically grants access AND announces the
+    // source. A render/effect must never repeat or undo that commit.
+    if (src.kind === "ndi") return;
     // A source change invalidates any standing Tier C offer: the offered
     // bytes belong to the OUTGOING source. Withdraw before announcing.
     if (offeredFileRef.current && coRoleRef.current === "host") {
@@ -1137,57 +1463,64 @@ export function useCoReview({
     sendLoadSource(sessionSourceRef.current);
   }, [isPresenter, sessionSource.kind, sessionSource.url, sessionSource.fingerprint,
       sessionSource.reviewKey, sendLoadSource]);
-  // Host → new joiner: source + a fresh doc snapshot when the peer count rises.
-  // Fanned to all; existing peers harmlessly re-adopt the identical doc.
-  const prevPeerCountRef = useRef(0);
+  // Welcome one connection generation, without mutating the room's source.
+  const welcomedRef = useRef(new Map<string, number>());
   useEffect(() => {
-    const prev = prevPeerCountRef.current;
-    prevPeerCountRef.current = coSession.peers.length;
-    if (coSession.role !== "host" || coSession.peers.length <= prev) return;
-    if (sessionSourceRef.current.kind !== "none") {
-      sendLoadSource(sessionSourceRef.current);
+    if (coSession.role !== "host") { welcomedRef.current.clear(); return; }
+    for (const id of welcomedRef.current.keys()) {
+      if (!coSession.peers.some((p) => p.id === id)) welcomedRef.current.delete(id);
     }
-    const d = sessionDocRef.current;
-    if (d) {
-      // Same wire-boundary sanitization as the source-follow broadcast above.
-      const wired = sanitizeDocForWire(d, sessionSourceRef.current.reviewKey || null);
-      void invoke("session_broadcast", { msg: { kind: "reviewDoc", doc: JSON.stringify(wired) } }).catch(() => {});
+    for (const peer of coSession.peers) {
+      if (welcomedRef.current.get(peer.id) === peer.epoch) continue;
+      welcomedRef.current.set(peer.id, peer.epoch);
+      const src = sessionSourceRef.current;
+      const messages: SessionMsg[] = [{ kind: "loadSource", from: "m0", sourceKind: src.kind,
+        url: src.url, fingerprint: src.fingerprint, title: src.title, duration: src.duration, reviewKey: src.reviewKey }];
+      const doc = sessionDocRef.current;
+      if (doc) messages.push({ kind: "reviewDoc", doc: JSON.stringify(sanitizeDocForWire(doc, src.reviewKey)) });
+      const offer = offeredFileRef.current;
+      if (offer) messages.push({ kind: "offerFile", from: "m0", ...offer });
+      for (const from of raisedHands) messages.push({ kind: "reaction", from, emote: "hand", on: true });
+      for (const from of sharingMembers) messages.push({ kind: "sharing", from, on: true });
+      if (shareState === "sharing") messages.push({ kind: "sharing", from: "m0", on: true });
+      void (async () => {
+        try {
+          for (const msg of messages) await invoke("session_send_to", { member: peer.id, epoch: peer.epoch, msg });
+        } catch (error) {
+          if (welcomedRef.current.get(peer.id) === peer.epoch) welcomedRef.current.delete(peer.id);
+          slog("warn", `Could not finish welcoming ${peer.name}: ${formatError(error)}`);
+        }
+      })();
     }
-    // A standing Tier C/B offer is room-truth too: without this a late
-    // joiner never sees the Get/Watch chips.
-    const offer = offeredFileRef.current;
-    if (offer) {
-      void invoke("session_broadcast", { msg: {
-        kind: "offerFile", from: "m0", name: offer.name, size: offer.size,
-        blake3: offer.blake3, vcodec: offer.vcodec, acodec: offer.acodec,
-      } }).catch(() => {});
-    }
-    // Re-broadcast persistent presence so a newcomer converges on the live
-    // room: the host's own hand + share, and every currently-raised hand.
-    const selfId = coSessionRef.current.selfId ?? "m0";
-    if (raisedHands.has(selfId)) {
-      void invoke("session_broadcast", { msg: { kind: "reaction", from: selfId, emote: "hand", on: true } }).catch(() => {});
-    }
-    if (shareState === "sharing") {
-      void invoke("session_broadcast", { msg: { kind: "sharing", from: selfId, on: true } }).catch(() => {});
-    }
-  }, [coSession.role, coSession.peers.length, raisedHands, shareState, sendLoadSource]);
-  // Host → peers: 2 Hz transport heartbeat (play/pause/seek/scrub-settle).
+  }, [coSession.role, coSession.peers, raisedHands, shareState, sharingMembers, slog]);
+  // Presenter → peers: a versioned command repeated by a 2 Hz heartbeat.
+  // The command increments once per user transport action; its repetitions
+  // are idempotent and therefore cannot restart a guest's pending landing.
   useEffect(() => {
     if (!isPresenter) return;
-    /** The position advertised for the duration of the current drag. */
-    let held: number | null = null;
-    const send = () => {
-      const r = Math.max(1, Math.round(coFpsRef.current));
-      const advertised = advertisedPosition(getPlayheadFrames() / r, isScrubbing(), held);
-      held = advertised.held;
+    const initial = playbackController.getSnapshot();
+    let latest: PlaybackCommand = {
+      sequence: ++coCommandRef.current, sourceId: initial.sourceId, phase: "seek",
+      target: initial.presentedSeconds, playing: initial.playing, rate: initial.playbackRate,
+    };
+    const send = (released = false) => {
+      if (sessionSourceRef.current.kind === "ndi") return;
+      if (isScrubbing() && !released) return;
+      const snapshot = playbackController.getSnapshot();
       const msg: SessionMsg = {
         kind: "transport",
-        playing: coPlayingRef.current,
-        position: advertised.position,
-        rate: coRateRef.current,
+        playing: latest.playing,
+        position: snapshot.presentedSeconds,
+        rate: latest.rate,
         atMs: Date.now(),
         seq: ++coSeqRef.current,
+        protocol: 2,
+        command: latest.sequence,
+        phase: latest.phase,
+        target: latest.target,
+        presented: snapshot.presentedSeconds,
+        sourceKey: sessionSourceRef.current.reviewKey,
+        sessionId: coSessionIdRef.current,
         // `from` AND `epoch` are stamped by the host: a peer cannot know the
         // authoritative epoch, and sending a stale one strands receivers.
         from: "",
@@ -1195,14 +1528,14 @@ export function useCoReview({
       };
       sendSessionMsg(msg);
     };
+    const offCommands = playbackController.subscribeCommands((event) => {
+      latest = { ...event, sequence: ++coCommandRef.current };
+      send(event.phase === "scrub-release");
+    });
     send();
     const iv = window.setInterval(send, 500);
-    // Settling sends AT ONCE rather than waiting out the next beat: the frame
-    // the presenter stopped on is the point of the whole gesture, and up to
-    // 500ms of extra wait on it is the part a viewer would call slow.
-    const offScrub = subscribeScrub((active) => { if (!active) { held = null; send(); } });
-    return () => { window.clearInterval(iv); offScrub(); };
-  }, [isPresenter, sendSessionMsg]);
+    return () => { window.clearInterval(iv); offCommands(); };
+  }, [isPresenter, playbackController, sendSessionMsg, sessionSource.reviewKey]);
   // Everyone broadcasts their own playhead for ghost cursors: every 350ms
   // tick WHILE IT MOVES, a quiet keepalive beat while parked. The always-on
   // 3 Hz version meant a host alone in a paused room still sent (and every
@@ -1261,6 +1594,7 @@ export function useCoReview({
   const syncSessionState = useCallback(async (): Promise<CoSessionState | null> => {
     try {
       const st = await invoke<CoSessionState>("session_state");
+      setPremiereRoom(st.role, coSessionIdRef.current);
       setCoSession(st);
       return st;
     } catch { return null; }
@@ -1495,6 +1829,7 @@ export function useCoReview({
   );
   const mesh = useRtcMesh({
     active: coSessionActive,
+    sessionKey: coSession.code,
     selfId,
     role: coSession.role,
     memberIds,
@@ -1522,7 +1857,9 @@ export function useCoReview({
       open: openShareStream,
       setOverride: (t) => meshOverrideRef.current(t),
       setAudioOverride: (t) => meshAudioOverrideRef.current(t),
-      mixAudio: (share) => mixShareAudio(share, getSessionCapture()?.getAudioTracks()[0] ?? null),
+      // Conversation has its own audio sender; never mix the microphone a
+      // second time into program audio (which would echo every word).
+      mixAudio: (share) => ({ track: share, close: () => {} }),
       announce: (on) => {
         const msg = { kind: "sharing", from: coRoleRef.current === "host" ? "m0" : "", on };
         const cmd = coRoleRef.current === "host" ? "session_broadcast" : "session_send";
@@ -1786,7 +2123,7 @@ export function useCoReview({
       // on disk for the next session even though this handoff did not land.
       return;
     }
-    onChaseSeek(at);
+    void onChaseSeek(at);
     setKeepTarget(null);
   }, [loadLocalPath, onChaseSeek, slog]);
 
@@ -1911,20 +2248,25 @@ export function useCoReview({
 
   const startShare = useCallback((source: ShareSourceArg) => { void shareRef.current?.start(source); }, []);
   const stopShare = useCallback(() => { void shareRef.current?.stop(); }, []);
-  // Session over -> the share dies with it (same converged cleanup).
+  // A share is consent for THIS room, not for a subsequent room that happens
+  // to reuse our member id. Direct room switches need not render "off".
+  const shareRoomRef = useRef(coSession.code);
   useEffect(() => {
-    if (!coSessionActive) {
+    if (!coSessionActive || shareRoomRef.current !== coSession.code) {
       void shareRef.current?.stop();
+      viewerShareRef.current?.stop();
       setSharingMembers(new Set());
     }
-  }, [coSessionActive]);
+    shareRoomRef.current = coSession.code;
+  }, [coSessionActive, coSession.code]);
 
   return {
     coSession, coSessionActive, sessionDoc, postSessionOp,
     // Live shared drawing: the room's scratch surface before anyone posts.
     liveDraw, postDrawOp, clearLiveDraw, pruneLiveDraw,
     theater, setTheater, theaterParticipants,
-    meshStreams: mesh.remoteStreams, meshStates: mesh.peerStates,
+    meshStreams: mesh.remoteStreams, meshProgramStreams: mesh.remoteProgramStreams, meshStates: mesh.peerStates,
+    readProgramDiagnostics: mesh.readProgramDiagnostics,
     meshMutedForMe: mesh.peerMutedForMe, toggleMuteForMe: mesh.toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
     recordingMembers, stageRecorders, stageRecording, lastRecording,
@@ -2024,6 +2366,20 @@ export function advertisedPosition(
  *  clock offset kept the guest permanently "out of sync"; 0.75s is still well
  *  under a noticeable desync for review and stops the churn. */
 const PLAYING_TOLERANCE_SEC = 0.75;
+/** Below one frame-ish of drift, restore the presenter's exact rate. */
+const RATE_CORRECTION_FLOOR_SEC = 0.08;
+
+/** Gentle correction for ordinary playing drift. Material drift is handled
+ * by one confirmed seek; paused transport is always frame-exact. */
+export function synchronizedPlaybackRate(baseRate: number, driftSeconds: number, playing: boolean, afterHardCorrection = false): number {
+  const base = Math.max(0.01, baseRate || 1);
+  const magnitude = Math.abs(driftSeconds);
+  if (!playing || magnitude < RATE_CORRECTION_FLOOR_SEC
+    || (magnitude > PLAYING_TOLERANCE_SEC && !afterHardCorrection)) return base;
+  const correction = Math.max(-0.05, Math.min(0.05, driftSeconds * 0.08));
+  return base * (1 + correction);
+}
+
 /** No two chase seeks closer together than this. */
 const CHASE_COOLDOWN_MS = 1000;
 export type ChaseDecision = {

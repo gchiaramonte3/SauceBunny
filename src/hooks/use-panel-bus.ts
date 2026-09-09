@@ -45,6 +45,9 @@ import type { TranscriptHistoryEntry } from "../lib/transcript-history";
  */
 
 export type PanelSnapshot = {
+  /** The source shown when a detached action was composed, not at delivery. */
+  sourceIdentity: string | null;
+  programInputActive: boolean;
   queue: QueuedClip[];
   fps: number;
   running: boolean;
@@ -137,6 +140,8 @@ export function coercePanelSnapshot(parsed: unknown): PanelSnapshot {
   return {
     ...INITIAL_SNAPSHOT,
     ...p,
+    sourceIdentity: typeof p.sourceIdentity === "string" ? p.sourceIdentity : null,
+    programInputActive: p.programInputActive === true,
     // Both are read straight through by children, so neither may arrive as
     // undefined or as the wrong kind of thing.
     queue: Array.isArray(p.queue) ? p.queue : INITIAL_SNAPSHOT.queue,
@@ -152,6 +157,8 @@ export function coercePanelSnapshot(parsed: unknown): PanelSnapshot {
  *  Compare it here too, or the panel won't hear about changes to it. */
 export function panelSnapshotsEqual(a: PanelSnapshot, b: PanelSnapshot): boolean {
   return (
+    a.sourceIdentity === b.sourceIdentity &&
+    a.programInputActive === b.programInputActive &&
     a.queue === b.queue &&
     a.fps === b.fps &&
     a.running === b.running &&
@@ -179,6 +186,13 @@ const PUBLISH_DEBOUNCE_MS = 50;
 
 /** Event name for the playhead-only side-channel (main → panel). */
 export const PANEL_PLAYHEAD_EVENT = "panel:playhead";
+export const PANEL_ACTION_REJECTED_EVENT = "panel:action-rejected";
+
+export type PanelSourceAction = { sourceIdentity?: string | null };
+export function panelCanTargetSource(snapshot: PanelSnapshot, action: PanelSourceAction): boolean {
+  return !snapshot.programInputActive && !!snapshot.sourceIdentity &&
+    action.sourceIdentity === snapshot.sourceIdentity;
+}
 
 /** Heartbeat period for `panel:playhead` — 4 Hz, the cadence the playhead
  *  branch established for the panel mirror. The panel karaoke marks whole
@@ -186,6 +200,8 @@ export const PANEL_PLAYHEAD_EVENT = "panel:playhead";
 const PANEL_PLAYHEAD_MS = 250;
 
 export const INITIAL_SNAPSHOT: PanelSnapshot = {
+  sourceIdentity: null,
+  programInputActive: false,
   queue: [],
   fps: 30,
   running: false,
@@ -236,10 +252,12 @@ export function usePanelBus({
   // for the heartbeat below. NaN ≠ anything, so the first beat always sends.
   const lastPlayheadSentRef = useRef(Number.NaN);
   const emitPlayheadBeat = useCallback((force = false) => {
+    if (snapshotRef.current.programInputActive || !snapshotRef.current.sourceIdentity) return;
     const frames = getPlayheadFrames();
     if (!force && frames === lastPlayheadSentRef.current) return;
     lastPlayheadSentRef.current = frames;
     void emit(PANEL_PLAYHEAD_EVENT, {
+      sourceIdentity: snapshotRef.current.sourceIdentity,
       seconds: playheadFramesToSeconds(frames, snapshotRef.current.fps),
     });
   }, []);
@@ -330,6 +348,15 @@ export function usePanelBus({
   useEffect(() => {
     let unlistens: UnlistenFn[] = [];
     let cancelled = false;
+    const sourceAction = (payload: PanelSourceAction, run: () => void) => {
+      if (panelCanTargetSource(snapshotRef.current, payload)) { run(); return; }
+      void emit(PANEL_ACTION_REJECTED_EVENT, {
+        message: snapshotRef.current.programInputActive
+          ? "Playback is controlled in Premiere. File seeks and ranges are unavailable while a program feed is visible."
+          : "The source changed. Check the current transcript before trying again.",
+      });
+      publishNow();
+    };
     (async () => {
       const off = await Promise.all([
         listen("panel:closed", () => {
@@ -352,10 +379,10 @@ export function usePanelBus({
           (e) => handlersRef.current.onRemove(e.payload.id)),
         listen<{ id: string }>("panel:action:retry",
           (e) => handlersRef.current.onRetry(e.payload.id)),
-        listen<{ a: number; b: number }>("panel:action:markRange",
-          (e) => handlersRef.current.onMarkRange(e.payload.a, e.payload.b)),
-        listen<{ a: number; b: number }>("panel:action:queueRange",
-          (e) => handlersRef.current.onQueueRange(e.payload.a, e.payload.b)),
+        listen<PanelSourceAction & { a: number; b: number }>("panel:action:markRange",
+          (e) => sourceAction(e.payload, () => handlersRef.current.onMarkRange(e.payload.a, e.payload.b))),
+        listen<PanelSourceAction & { a: number; b: number }>("panel:action:queueRange",
+          (e) => sourceAction(e.payload, () => handlersRef.current.onQueueRange(e.payload.a, e.payload.b))),
         listen("panel:action:clearAll",
           () => handlersRef.current.onClearAll()),
         listen("panel:action:clearDone",
@@ -364,8 +391,8 @@ export function usePanelBus({
           () => handlersRef.current.onExportAll()),
         listen("panel:action:stop",
           () => handlersRef.current.onStop()),
-        listen<{ seconds: number }>("panel:action:seek",
-          (e) => handlersRef.current.onSeek(e.payload.seconds)),
+        listen<PanelSourceAction & { seconds: number }>("panel:action:seek",
+          (e) => sourceAction(e.payload, () => handlersRef.current.onSeek(e.payload.seconds))),
         listen("panel:action:clearTranscript",
           () => handlersRef.current.onClearTranscript()),
         listen<{ entry: TranscriptHistoryEntry }>("panel:action:loadFromHistory",

@@ -71,6 +71,8 @@ type Props = {
   selection: LibraryCrumb[] | null;
   /** Bumped on each handoff so the same chain re-applies. */
   selectionTick: number;
+  /** Increment to open Library's existing session history from Review. */
+  sessionsRequestTick?: number;
   onOpenLocalPath: (path: string) => void;
   /** "Review this clip": open the source and land in Review. */
   onReviewLocalPath?: (path: string) => void;
@@ -103,7 +105,7 @@ const BROWSE_CAP = 300;
 
 export function LibraryBrowser({
   roots, scans, scanning, addFolder, removeRoot, onOpenWebUrl, rescanAll, requestThumb, invalidateThumb,
-  posterVersions, bumpPoster, resetPoster, selection, selectionTick,
+  posterVersions, bumpPoster, resetPoster, selection, selectionTick, sessionsRequestTick = 0,
   onOpenLocalPath, onReviewLocalPath, onOpenTranscriptHistory,
   onBatchTranscribe, batchLine, onBatchCancel,
 }: Props) {
@@ -173,6 +175,15 @@ export function LibraryBrowser({
     // Re-apply on every handoff even if the chain object is identical.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionTick]);
+
+  useEffect(() => {
+    if (!sessionsRequestTick) return;
+    setShelf("sessions");
+    setDetailItem(null);
+    setSel(EMPTY_SELECTION);
+    setQuery("");
+    setNeedle("");
+  }, [sessionsRequestTick]);
 
   // Scoped search — debounced 150ms, instant clear (mirrors Home).
   useEffect(() => {
@@ -597,9 +608,9 @@ export function LibraryBrowser({
       ? "Scanning…"
       : "No playable media here.";
 
-  // Rootless library — one centered line + the primary action. Nothing else
-  // (no panel, no bar): there is nothing to browse, filter, or sort yet.
-  if (roots.length === 0) {
+  // No folders means no file pane yet, but review history does not depend on
+  // a scanned folder. A request from Review must still reach that shelf.
+  if (roots.length === 0 && shelf === null) {
     return (
       <main className="cp-lib-browse" aria-label="Library">
         <div className="cp-lib-browse-zero">

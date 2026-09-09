@@ -136,12 +136,15 @@ for (const [key, label, root] of [
   test(`${label} text meets WCAG AA contrast`, async ({ page }) => {
     await boot(page);
     await page.keyboard.press(key);
-    // Poll, do not sleep-then-snapshot. `expect(await ...)` captures one moment,
-    // so the fixed wait was load-bearing and fragile under parallel workers.
-    await expect
-      .poll(() => page.evaluate(() => document.querySelector(".cp-view:not([hidden])")?.className ?? ""),
-        { message: `${key} did not switch to ${label}` })
-      .toContain(root);
+    // Review is the shared monitor plus its setup rail, not a separate page.
+    // Confirm both before measuring the entire visible document below.
+    await expect(page.locator(".cp-nav-item.active"), `${key} did not switch to ${label}`).toContainText(label);
+    await expect(page.locator("." + root)).toBeVisible();
+    if (label === "Review") {
+      await expect(page.getByRole("main", { name: "Review", exact: true })).toBeVisible();
+      await expect(page.locator(".cp-view-clip .cp-monitor")).toBeVisible();
+      await expect(page.getByRole("region", { name: "Session setup" })).toBeVisible();
+    }
 
     const bad = await failures(page);
     expect(

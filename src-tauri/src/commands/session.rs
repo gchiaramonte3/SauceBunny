@@ -56,6 +56,17 @@ use std::time::Duration;
 use tokio::io::BufReader;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
+#[path = "session_outbox.rs"]
+mod outbox;
+use outbox::{spawn_writer, ControlSender};
+
+fn replaceable_key(msg: &SessionMsg) -> Option<String> {
+    match msg {
+        SessionMsg::Transport { from, epoch, command, .. } => Some(format!("transport:{from}:{epoch}:{command}")),
+        SessionMsg::Presence { name, .. } => Some(format!("presence:{name}")),
+        _ => None,
+    }
+}
 
 /// Protocol identifier, exchanged in the QUIC handshake. Bump the trailing
 /// version if the wire format ever changes incompatibly.
@@ -111,6 +122,22 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 // ── Tier C file transfer (see _design/p2p-media-plan.md §Phase 2) ──────
 /// Concurrent file substreams the host will serve at once.
 const MAX_TRANSFERS: usize = 4;
+/// Encoded program readers have reserved capacity, independent of file copies.
+const MAX_PROGRAM_READERS: usize = 4;
+/// Bound unauthenticated request headers before their traffic class is known.
+const MAX_PENDING_REQUESTS: usize = 16;
+
+struct SubstreamPermit(Arc<AtomicUsize>);
+impl SubstreamPermit {
+    fn acquire(counter: Arc<AtomicUsize>, limit: usize) -> Option<Self> {
+        counter.fetch_update(Ordering::SeqCst, Ordering::SeqCst,
+            |active| (active < limit).then_some(active + 1)).ok()?;
+        Some(Self(counter))
+    }
+}
+impl Drop for SubstreamPermit {
+    fn drop(&mut self) { self.0.fetch_sub(1, Ordering::SeqCst); }
+}
 
 /// Concurrent live ENCODES the host will run. Passthrough does not count.
 ///
@@ -124,12 +151,22 @@ const MAX_TRANSFERS: usize = 4;
 const MAX_MEDIA_ENCODES: usize = 3;
 /// Read/write chunk for the transfer loops.
 const TRANSFER_CHUNK: usize = 256 * 1024;
-/// Pace the file substream (risk R4): it shares one physical link with the
-/// live camera/mic mesh and the 2 Hz transport heartbeat, and an unpaced
-/// QUIC bulk stream would take the whole uplink. ~24 MB/s (~190 Mbit/s) is
-/// far above any home uplink (where the link itself throttles first) while
-/// still bounding the damage on a LAN.
-const TRANSFER_BYTES_PER_SEC: u64 = 24 * 1024 * 1024;
+/// Aggregate background-copy budget, not a separate allowance per guest.
+/// Live media has its own stream; copies must not consume an entire uplink.
+const TRANSFER_BYTES_PER_SEC: u64 = 512 * 1024;
+static BULK_NEXT_SLOT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+async fn pace_background_copy(bytes: usize) {
+    let wait_until = {
+        let mut next = BULK_NEXT_SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        let now = std::time::Instant::now();
+        let slot = next.unwrap_or(now).max(now);
+        *next = Some(slot + Duration::from_secs_f64(bytes as f64 / TRANSFER_BYTES_PER_SEC as f64));
+        slot
+    };
+    // Reservation is synchronous; no shared lock is held during the wait or write.
+    tokio::time::sleep_until(wait_until.into()).await;
+}
 /// A substream must state its business promptly or it is dropped.
 const SUBSTREAM_REQ_TIMEOUT: Duration = Duration::from_secs(10);
 /// Guest-side stall cutoff: no bytes for this long ends the fetch (the
@@ -206,6 +243,11 @@ pub enum SessionMsg {
         title: Option<String>,
         duration: Option<f64>,
         review_key: String,
+        /// Additive to the original NDI announcement. Older clients can still
+        /// receive live media, but cannot request private or stopped sources.
+        #[serde(default)]
+        #[ts(optional)]
+        live_state: Option<crate::commands::ndi::NdiPublicationState>,
     },
     /// any member → everyone: could I open the presenter's source?
     /// state = "loading" | "ready" | "failed" | "missing".
@@ -225,6 +267,22 @@ pub enum SessionMsg {
         rate: f64,
         at_ms: f64,
         seq: u32,
+        /// Protocol 2 separates a durable transport command from its repeated
+        /// heartbeat. Defaults keep one-release compatibility with old peers.
+        #[serde(default)]
+        protocol: u8,
+        #[serde(default)]
+        command: u32,
+        #[serde(default)]
+        phase: String,
+        #[serde(default)]
+        target: Option<f64>,
+        #[serde(default)]
+        presented: Option<f64>,
+        #[serde(default)]
+        source_key: String,
+        #[serde(default)]
+        session_id: String,
         /// Host-stamped sender id + the presenter epoch it was sent under, so
         /// lines from a superseded presenter can be ordered and discarded.
         from: String,
@@ -361,29 +419,10 @@ pub struct SessionState {
 // peers list must RELEASE it before calling `emit_state_now` (which
 // re-acquires manager → peers).
 //
-// YES, THE WRITES HAPPEN UNDER THE LOCK, AND THAT IS THE DESIGN.
-// `session_send`, `session_broadcast` and `relay_to_others` all await a
-// QUIC `write_all` while holding `inner` (and, for the broadcast paths,
-// `peers`). It looks alarming — one stalled peer appearing to freeze
-// Leave for the whole room — and a code review flagged it as exactly
-// that. Three independent passes then failed to reach the failure:
-//
-//   · The write is BOUNDED by the transport, not by this file. iroh's
-//     QUIC connection carries an idle timeout, so a peer that stops
-//     reading fails its stream rather than blocking forever. The wedge
-//     is bounded by that timeout, not unbounded.
-//   · The alternative is worse. Cloning the peer list and writing
-//     outside the lock means a peer can be removed mid-broadcast and a
-//     write lands on a connection the roster no longer contains, which
-//     is how you get a ghost tile that never clears.
-//   · The messages are small control frames (comments, playhead,
-//     reactions), not media. Media never travels this path — see the
-//     co-review rules in CLAUDE.md.
-//
-// Do not "fix" this by dropping the guard before the write without
-// solving the removal race first. If you are here because a session
-// really did hang, the thing to check is the idle timeout, not the
-// lock.
+// Network writes run in one bounded writer per connection. Under these
+// locks we only enqueue; a stalled peer cannot hold another peer's notes
+// or Leave. Replacement closes the old connection, and cleanup uses its
+// unique connection id, so an obsolete writer cannot remove its successor.
 // ============================================================
 
 pub struct SessionManager {
@@ -439,7 +478,7 @@ enum Session {
         // host would drop us). `send` is also written to by `session_send`
         // (peer→host review ops / presence).
         _conn: Connection,
-        send: SendStream,
+        send: ControlSender,
     },
 }
 
@@ -447,6 +486,9 @@ enum Session {
 /// tasks, and `session_broadcast`.
 #[derive(Default)]
 struct HostShared {
+    generation: u64,
+    published_program: Mutex<Option<Arc<crate::commands::ndi::ProgramPublication>>>,
+    program_source: Mutex<Option<crate::commands::ndi::NdiRoomProgram>>,
     /// The host's own roster display name (heads every `PeerList` as m0).
     host_name: String,
     /// Session-scoped member-id mint (m1, m2, ...; the host is m0). Ids are
@@ -487,10 +529,96 @@ struct HostShared {
     /// Concurrent file substreams being served, bounded by MAX_TRANSFERS so
     /// a guest cannot fan requests into an unbounded set of readers.
     active_transfers: Arc<AtomicUsize>,
+    /// Short-lived request parsing and encode-once program readers are not
+    /// charged to background transfer capacity.
+    pending_requests: Arc<AtomicUsize>,
+    active_program_readers: Arc<AtomicUsize>,
     /// Live ENCODES in flight, bounded by MAX_MEDIA_ENCODES. Separate from
     /// `active_transfers` because only an encode costs the host CPU.
     active_encodes: Arc<AtomicUsize>,
 }
+
+impl HostShared {
+    fn publish_program(&self, program: Arc<crate::commands::ndi::Program>, generation: u64, epoch: u32) -> Result<u64, crate::AppError> {
+        if self.generation != generation || self.presenter.load(Ordering::Acquire)!=0 || self.presenter_epoch.load(Ordering::Acquire)!=u64::from(epoch) {
+            return Err(crate::AppError::invalid("Presentation changed. Return to the room before sharing."));
+        }
+        if !program.encoded_ready() { return Err(crate::AppError::invalid("Wait for the Premiere preview picture before sharing")); }
+        let mut slot=self.published_program.lock().map_err(|_|crate::AppError::internal("Program state unavailable"))?;
+        if let Some(previous)=slot.as_ref().filter(|p|p.active() && p.program.id==program.id && p.presenter_epoch==u64::from(epoch)) {
+            return Ok(previous.revision);
+        }
+        let next=crate::commands::ndi::ProgramPublication::new(program, generation, u64::from(epoch));
+        let revision=next.revision;
+        if let Some(previous)=slot.replace(next) { previous.revoke(); }
+        Ok(revision)
+    }
+    fn unpublish_program(&self, id: &str, generation: u64, epoch: u32, revision: u64) -> Result<bool, crate::AppError> {
+        if self.generation!=generation { return Ok(false); }
+        let mut slot=self.published_program.lock().map_err(|_|crate::AppError::internal("Program state unavailable"))?;
+        if slot.as_ref().is_some_and(|p|p.program.id==id && p.presenter_epoch==u64::from(epoch) && p.revision==revision) {
+            if let Some(previous)=slot.take() { previous.revoke(); return Ok(true); }
+        }
+        Ok(false)
+    }
+    fn revoke_program(&self) {
+        if let Ok(mut slot) = self.published_program.lock() {
+            if let Some(publication) = slot.take() { publication.revoke(); }
+        }
+        if let Ok(mut source) = self.program_source.lock() { source.take(); }
+    }
+    fn commit_program(&self, program: Arc<crate::commands::ndi::Program>, review_key: &str, generation: u64, epoch: u32) -> Result<u64, crate::AppError> {
+        if !review_key.starts_with("ndi:") || review_key.len()>256 || review_key.contains('\0') {
+            return Err(crate::AppError::invalid("Invalid Premiere review identity"));
+        }
+        let mut source=self.program_source.lock().map_err(|_|crate::AppError::internal("Program source unavailable"))?;
+        if let Some(current)=source.as_ref().filter(|s|s.id==program.id && s.state==crate::commands::ndi::NdiPublicationState::Live) {
+            if current.review_key!=review_key { return Err(crate::AppError::invalid("Stop sharing before changing the review pass")); }
+        }
+        let revision=self.publish_program(program.clone(),generation,epoch)?;
+        *source=Some(crate::commands::ndi::NdiRoomProgram { id:program.id.clone(), name:program.name.clone(),
+            review_key:review_key.into(), state:crate::commands::ndi::NdiPublicationState::Live });
+        Ok(revision)
+    }
+    fn stop_program_publication(&self, id:&str, generation:u64, epoch:u32, revision:u64) -> Result<bool,crate::AppError> {
+        let mut source=self.program_source.lock().map_err(|_|crate::AppError::internal("Program source unavailable"))?;
+        let changed=self.unpublish_program(id,generation,epoch,revision)?;
+        if changed { if let Some(current)=source.as_mut() { current.state=crate::commands::ndi::NdiPublicationState::Stopped; } }
+        Ok(changed)
+    }
+    fn program_source_msg(&self) -> Option<SessionMsg> {
+        let source=self.program_source.lock().ok()?.clone()?;
+        Some(SessionMsg::LoadSource { from:"m0".into(), source_kind:"ndi".into(), url:Some(source.id),
+            fingerprint:None, title:Some(source.name), duration:None, review_key:source.review_key,
+            live_state:Some(source.state) })
+    }
+    fn verified_program_source(&self, id:Option<&str>, review_key:&str) -> Result<SessionMsg,crate::AppError> {
+        if self.presenter.load(Ordering::Acquire)!=0 { return Err(crate::AppError::invalid("The host is no longer presenting")); }
+        let message=self.program_source_msg().filter(|msg|matches!(msg,
+            SessionMsg::LoadSource {url,review_key:key,..} if url.as_deref()==id && key==review_key));
+        message.ok_or_else(||crate::AppError::invalid("This Premiere source has not been shared with the room"))
+    }
+    fn welcome_source(&self, fallback:SessionMsg) -> Result<SessionMsg,crate::AppError> {
+        // Native commit can finish before React renders the new source. A
+        // joining guest must see that committed source, not the old closure
+        // (and never an uncommitted candidate supplied by the renderer).
+        if self.presenter.load(Ordering::Acquire)==0 {
+            if let Some(committed)=self.program_source_msg() { return Ok(committed); }
+        }
+        if matches!(&fallback,SessionMsg::LoadSource {source_kind,..} if source_kind=="ndi") {
+            return Err(crate::AppError::invalid("This Premiere source has not been shared with the room"));
+        }
+        Ok(fallback)
+    }
+    fn program_for_peer(&self, id: &str) -> Option<Arc<crate::commands::ndi::ProgramPublication>> {
+        if self.presenter.load(Ordering::Acquire) != 0 { return None; }
+        self.published_program.lock().ok()?.as_ref().filter(|p|
+            p.active() && p.program.id == id && p.room_generation == self.generation &&
+            p.presenter_epoch == self.presenter_epoch.load(Ordering::Acquire)
+        ).cloned()
+    }
+}
+
 
 /// The host-side record of a Tier C offer: where the bytes live and the
 /// identity guests verify against. The path NEVER crosses the wire.
@@ -519,7 +647,7 @@ struct PeerConn {
     /// How many times this member id has been claimed. Rides the roster so
     /// the mesh can distinguish a reconnect from an unchanged member.
     epoch: u32,
-    send: SendStream,
+    send: ControlSender,
 }
 
 static NEXT_PEER_ID: AtomicU64 = AtomicU64::new(1);
@@ -627,6 +755,7 @@ pub async fn session_start(
         .map(|t| t.trim().chars().take(80).collect::<String>())
         .filter(|t| !t.is_empty());
     let shared = Arc::new(HostShared {
+        generation: inner.generation + 1,
         host_name: clean_host_name(name.as_deref().unwrap_or("")),
         next_member: AtomicU64::new(1), // m0 is the host
         title: title.clone(),
@@ -748,8 +877,8 @@ pub async fn session_join(
         presenter_epoch: peer_presenter_epoch,
         read_task,
         media_task,
+        send: spawn_writer(conn.clone(), send),
         _conn: conn,
-        send,
     };
 
     let snap = snapshot_state(&inner).await;
@@ -781,6 +910,77 @@ pub async fn session_state(
     Ok(snapshot_state(&inner).await)
 }
 
+#[cfg(sauce_ndi)]
+pub(crate) async fn ndi_room_generation(app:&AppHandle) -> Option<u64> {
+    let manager=app.state::<SessionManager>();
+    let inner=manager.inner.lock().await;
+    (!matches!(inner.session, Session::Off)).then_some(inner.generation)
+}
+
+pub(crate) async fn ndi_room_state(app:&AppHandle) -> Option<crate::commands::ndi::NdiRoomState> {
+    let manager=app.state::<SessionManager>();
+    let inner=manager.inner.lock().await;
+    let Session::Host { shared, .. } = &inner.session else { return None; };
+    let publication=shared.published_program.lock().ok().and_then(|p|p.as_ref().filter(|p|p.active()).cloned());
+    Some(crate::commands::ndi::NdiRoomState {
+        generation:inner.generation,
+        presenter_epoch:shared.presenter_epoch.load(Ordering::Acquire) as u32,
+        presenting:shared.presenter.load(Ordering::Acquire)==0,
+        published_id:publication.as_ref().map(|p|p.program.id.clone()),
+        publication_revision:publication.map(|p|p.revision),
+        source:shared.program_source.lock().ok().and_then(|p|p.clone()),
+    })
+}
+
+pub(crate) async fn ndi_stop_local(app:&AppHandle, id:&str) -> Result<(), crate::AppError> {
+    // Serialize cancellation with publish/unpublish and room teardown. An
+    // atomic revision check alone has a check-then-stop race with publication.
+    let manager=app.state::<SessionManager>();
+    let _inner=manager.inner.lock().await;
+    crate::commands::ndi::stop_program(id)
+}
+
+/// Commit permission, not merely a visible-source selection. Both identity
+/// checks are mandatory: the join code persists across consecutive rooms.
+#[tauri::command]
+pub async fn ndi_publish(app:AppHandle, state: State<'_, SessionManager>, id: String, generation: u64, epoch: u32, review_key:String) -> Result<u64, crate::AppError> {
+    let inner=state.inner.lock().await;
+    let Session::Host { shared, .. } = &inner.session else { return Err(crate::AppError::invalid("Start a review session before sharing Premiere")); };
+    if inner.generation != generation || shared.presenter.load(Ordering::Acquire)!=0 || shared.presenter_epoch.load(Ordering::Acquire)!=u64::from(epoch) {
+        return Err(crate::AppError::invalid("Presentation changed. Return to the room before sharing."));
+    }
+    let program=crate::commands::ndi::find_program(&id).filter(|p|p.encoded_ready())
+        .ok_or_else(||crate::AppError::invalid("Wait for the Premiere preview picture before sharing"))?;
+    let previous=shared.program_for_peer(&id).map(|p|p.revision);
+    let revision=shared.commit_program(program, &review_key, generation, epoch)?;
+    if previous!=Some(revision) {
+        // One native commit owns both permission and the announcement. React
+        // effects cannot reorder this with a cancelled preview or a heartbeat.
+        if let Ok(mut offer)=shared.offered.lock() { offer.take(); }
+        if let Some(msg)=shared.program_source_msg() {
+            relay_to_others(shared,0,&msg).await;
+            let _=app.emit("session:msg",&msg);
+        }
+    }
+    Ok(revision)
+}
+
+/// A late cancellation is scoped to its old source AND room; it must never
+/// withdraw a newer source or the same source republished in another epoch.
+#[tauri::command]
+pub async fn ndi_unpublish(app:AppHandle, state: State<'_, SessionManager>, id: String, generation: u64, epoch: u32, revision: u64) -> Result<(), crate::AppError> {
+    let inner=state.inner.lock().await;
+    let Session::Host { shared, .. } = &inner.session else { return Ok(()); };
+    if inner.generation!=generation { return Ok(()); }
+    if shared.stop_program_publication(&id, generation, epoch, revision)? {
+        if let Some(msg)=shared.program_source_msg() {
+            relay_to_others(shared,0,&msg).await;
+            let _=app.emit("session:msg",&msg);
+        }
+    }
+    Ok(())
+}
+
 /// Leave / end the session (both roles). Idempotent: calling while "off"
 /// just clears any stale error and re-emits state.
 #[tauri::command]
@@ -789,6 +989,8 @@ pub async fn session_leave(
     state: State<'_, SessionManager>,
 ) -> Result<(), crate::AppError> {
     let mut inner = state.inner.lock().await;
+    if !matches!(inner.session, Session::Off) { crate::commands::ndi::stop_room(inner.generation); }
+    if let Session::Host { shared, .. } = &inner.session { shared.revoke_program(); }
     inner.generation += 1;
     inner.last_error = None;
     let old = std::mem::replace(&mut inner.session, Session::Off);
@@ -821,19 +1023,27 @@ pub async fn session_broadcast(
         SessionMsg::Recording { what, on, .. } =>
             SessionMsg::Recording { from: "m0".into(), what, on },
         SessionMsg::Reaction { emote, on, .. } => SessionMsg::Reaction { from: "m0".into(), emote, on },
-        SessionMsg::LoadSource { source_kind, url, fingerprint, title, duration, review_key, .. } =>
-            SessionMsg::LoadSource { from: "m0".into(), source_kind, url, fingerprint, title, duration, review_key },
+        SessionMsg::LoadSource { source_kind, url, fingerprint, title, duration, review_key, .. } => {
+            if source_kind == "ndi" {
+                shared.verified_program_source(url.as_deref(),&review_key)?
+            } else {
+                shared.revoke_program();
+                SessionMsg::LoadSource { from: "m0".into(), source_kind, url, fingerprint, title, duration, review_key, live_state:None }
+            }
+        },
         SessionMsg::SourceStatus { state, detail, .. } =>
             SessionMsg::SourceStatus { from: "m0".into(), state, detail },
         SessionMsg::ReviewOp { op, .. } => SessionMsg::ReviewOp { op, from: "m0".into() },
-        SessionMsg::Transport { playing, position, rate, at_ms, seq, .. } =>
+        SessionMsg::Transport { playing, position, rate, at_ms, seq, protocol, command, phase, target, presented, source_key, session_id, .. } =>
             SessionMsg::Transport {
-                playing, position, rate, at_ms, seq, from: "m0".into(),
+                playing, position, rate, at_ms, seq, protocol, command, phase, target, presented, source_key, session_id, from: "m0".into(),
                 epoch: shared.presenter_epoch.load(Ordering::Relaxed) as u32,
             },
         // Granting the floor updates the host's own gate before it goes out,
         // so a peer's very next LoadSource is accepted by the relay.
         SessionMsg::Presenter { member, .. } => {
+            shared.revoke_program();
+            if member_num(&member)!=0 { crate::commands::ndi::stop_room(inner.generation); }
             shared.presenter.store(member_num(&member), Ordering::Relaxed);
             // The HOST owns the epoch; the caller's value is advisory.
             let epoch = shared.presenter_epoch.fetch_add(1, Ordering::Relaxed) as u32 + 1;
@@ -858,7 +1068,7 @@ pub async fn session_broadcast(
         let mut peers = shared.peers.lock().await;
         let mut dead: Vec<u64> = Vec::new();
         for p in peers.iter_mut() {
-            if p.send.write_all(line.as_bytes()).await.is_err() {
+            if p.send.enqueue(Arc::from(line.as_str()), replaceable_key(&msg)).is_err() {
                 dead.push(p.id);
             }
         }
@@ -879,17 +1089,58 @@ pub async fn session_broadcast(
 /// PEER only: send `msg` up to the host (which relays review ops / presence to
 /// everyone else). Errors if not a peer.
 #[tauri::command]
+pub async fn session_send_to(
+    state: State<'_, SessionManager>,
+    member: String,
+    epoch: u32,
+    msg: SessionMsg,
+) -> Result<(), crate::AppError> {
+    let inner = state.inner.lock().await;
+    let Session::Host { shared, .. } = &inner.session else {
+        return Err(crate::AppError::invalid("Only the host can welcome a guest"));
+    };
+    let msg = match msg {
+        SessionMsg::LoadSource { source_kind, url, fingerprint, title, duration, review_key, .. } => {
+            shared.welcome_source(SessionMsg::LoadSource { from: "m0".into(), source_kind, url, fingerprint, title, duration, review_key, live_state:None })?
+        },
+        SessionMsg::Sharing { from, on } => SessionMsg::Sharing { from, on },
+        SessionMsg::Reaction { from, emote, on } => SessionMsg::Reaction { from, emote, on },
+        SessionMsg::ReviewDoc {doc} => {
+            if let Some(SessionMsg::LoadSource {review_key,..})=shared.program_source_msg() {
+                let document:serde_json::Value=serde_json::from_str(&doc)?;
+                if document.get("sourceKey").and_then(|v|v.as_str())!=Some(review_key.as_str()) {
+                    return Err(crate::AppError::invalid("Review source changed while welcoming this guest"));
+                }
+            }
+            SessionMsg::ReviewDoc {doc}
+        },
+        other @ SessionMsg::OfferFile { .. } => other,
+        _ => return Err(crate::AppError::invalid("Not a welcome message")),
+    };
+    let mut line = serde_json::to_string(&msg)?;
+    line.push('\n');
+    if line.len() > MAX_MSG_BYTES { return Err(crate::AppError::invalid("Session snapshot too large")); }
+    let peers = shared.peers.lock().await;
+    let peer = peers.iter().find(|p| p.member == member && p.epoch == epoch)
+        .ok_or_else(|| crate::AppError::invalid("Guest connection changed"))?;
+    peer.send.enqueue(Arc::from(line), None)
+}
+
+#[tauri::command]
 pub async fn session_send(
     state: State<'_, SessionManager>,
     msg: SessionMsg,
 ) -> Result<(), crate::AppError> {
-    let mut inner = state.inner.lock().await;
-    let Session::Peer { send, .. } = &mut inner.session else {
+    let inner = state.inner.lock().await;
+    let Session::Peer { send, .. } = &inner.session else {
         return Err(crate::AppError::invalid("Not in a co-review session"));
     };
     // Tiny line; the brief write under the manager lock mirrors how
     // session_broadcast already writes under `inner`.
-    write_msg_line(send, &msg).await
+    let mut line = serde_json::to_string(&msg)?;
+    line.push('\n');
+    if line.len() > MAX_MSG_BYTES { return Err(crate::AppError::invalid("Session message too large")); }
+    send.enqueue(Arc::from(line), replaceable_key(&msg))
 }
 
 /// Read one newline-terminated line WITHOUT ever buffering more than `cap`
@@ -1085,14 +1336,16 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
         // A reclaimed id may still have its PREVIOUS connection in the list
         // (the old socket hasn't hit EOF yet). Evict it first, or the roster
         // carries the same person twice - the duplicate-tile bug.
-        peers.retain(|p| p.member != member);
+        peers.retain(|p| {
+            if p.member == member { p.conn.close(1u32.into(), b"replaced by reconnect"); false } else { true }
+        });
         if peers.len() >= MAX_PEERS {
             drop(peers);
             conn.close(1u32.into(), b"session is full");
             return;
         }
         peers.push(PeerConn {
-            id, member: member.clone(), name, epoch: member_epoch, send,
+            id, member: member.clone(), name, epoch: member_epoch, send: spawn_writer(conn.clone(), send),
             grant: grant_id.clone(),
             conn: conn.clone(),
         });
@@ -1186,17 +1439,17 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
                         SessionMsg::LoadSource {
                             source_kind, url, fingerprint, title, duration, review_key, ..
                         } => {
-                            if !can_drive(shared.presenter.load(Ordering::Relaxed), &member) {
+                            if source_kind=="ndi" || !can_drive(shared.presenter.load(Ordering::Relaxed), &member) {
                                 continue;
                             }
                             let msg = SessionMsg::LoadSource {
                                 from: member.clone(),
-                                source_kind, url, fingerprint, title, duration, review_key,
+                                source_kind, url, fingerprint, title, duration, review_key, live_state:None,
                             };
                             let _ = app.emit("session:msg", &msg);
                             relay_to_others(&shared, id, &msg).await;
                         }
-                        SessionMsg::Transport { playing, position, rate, at_ms, seq, .. } => {
+                        SessionMsg::Transport { playing, position, rate, at_ms, seq, protocol, command, phase, target, presented, source_key, session_id, .. } => {
                             if !can_drive(shared.presenter.load(Ordering::Relaxed), &member) {
                                 continue;
                             }
@@ -1204,7 +1457,7 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
                             // cannot know the current epoch reliably, and a
                             // stale or spoofed one would strand receivers.
                             let msg = SessionMsg::Transport {
-                                playing, position, rate, at_ms, seq,
+                                playing, position, rate, at_ms, seq, protocol, command, phase, target, presented, source_key, session_id,
                                 from: member.clone(),
                                 epoch: shared.presenter_epoch.load(Ordering::Relaxed) as u32,
                             };
@@ -1345,33 +1598,22 @@ struct SubstreamReq {
 }
 
 /// Accept every bi-stream a registered peer opens after its control stream,
-/// and serve typed requests. Bounded by MAX_TRANSFERS across the room.
+/// and serve typed requests. Header parsing and each traffic class are bounded
+/// independently so long-lived program readers cannot starve file copies, or
+/// vice versa. Parsing permits are released before streaming any payload.
 async fn serve_substreams(app: AppHandle, conn: Connection, shared: Arc<HostShared>, member: String) {
     while let Ok((send, recv)) = conn.accept_bi().await {
-        let counter = shared.active_transfers.clone();
-        if counter.fetch_add(1, Ordering::SeqCst) >= MAX_TRANSFERS {
-            counter.fetch_sub(1, Ordering::SeqCst);
-            tokio::spawn(async move {
-                let mut send = send;
-                let _ = send
-                    .write_all(b"{\"t\":\"file-response\",\"ok\":false,\"error\":\"busy\"}\n")
-                    .await;
-                let _ = send.finish();
-            });
+        let Some(request_permit) = SubstreamPermit::acquire(shared.pending_requests.clone(), MAX_PENDING_REQUESTS) else {
+            // Do not spawn an unbounded set of busy-response writers.
+            let mut send = send;
+            let _ = send.finish();
             continue;
-        }
+        };
         let app = app.clone();
         let shared = shared.clone();
         let member = member.clone();
         tokio::spawn(async move {
-            struct Guard(Arc<AtomicUsize>);
-            impl Drop for Guard {
-                fn drop(&mut self) {
-                    self.0.fetch_sub(1, Ordering::SeqCst);
-                }
-            }
-            let _g = Guard(counter);
-            serve_file_substream(app, send, recv, shared, member).await;
+            serve_file_substream(app, send, recv, shared, member, request_permit).await;
         });
     }
 }
@@ -1384,6 +1626,7 @@ async fn serve_file_substream(
     recv: iroh::endpoint::RecvStream,
     shared: Arc<HostShared>,
     member: String,
+    request_permit: SubstreamPermit,
 ) {
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
@@ -1402,8 +1645,60 @@ async fn serve_file_substream(
             return;
         }
     };
+    let (counter, limit) = if req.t == "program-request" {
+        (shared.active_program_readers.clone(), MAX_PROGRAM_READERS)
+    } else {
+        (shared.active_transfers.clone(), MAX_TRANSFERS)
+    };
+    let permit = SubstreamPermit::acquire(counter, limit);
+    drop(request_permit);
+    let Some(_permit) = permit else {
+        let _ = tokio::time::timeout(Duration::from_secs(2), send.write_all(
+            b"{\"t\":\"file-response\",\"ok\":false,\"error\":\"busy\"}\n")).await;
+        let _ = send.finish(); return;
+    };
     // Tier B live stream shares the substream shape (risk R5: one explicit
     // discriminator, every unknown type refused with a header).
+    if req.t == "program-request" {
+        if shared.presenter.load(Ordering::SeqCst) != 0 {
+            let _ = send.write_all(b"{\"ok\":false,\"error\":\"NDI prototype requires the host to present\"}\n").await;
+            let _ = send.finish(); return;
+        }
+        let Some(id) = req.blake3.strip_prefix("ndi:").filter(|id|crate::commands::ndi::valid_program_id(id)) else { return; };
+        let Some(publication) = shared.program_for_peer(id) else {
+            let _ = send.write_all(b"{\"ok\":false,\"error\":\"Program source is not shared\"}\n").await;
+            let _ = send.finish(); return;
+        };
+        let _ = send.set_priority(50);
+        if send.write_all(b"{\"ok\":true,\"timeline\":\"rebased\"}\n").await.is_err() { return; }
+        let (tx,mut rx)=tokio::sync::mpsc::channel::<Vec<u8>>(4);
+        let reader_publication=publication.clone();
+        tokio::task::spawn_blocking(move || {
+            use std::io::Read;
+            let mut reader=crate::commands::ndi::ProgramReader::remote(reader_publication);
+            let mut bytes=vec![0u8;64*1024];
+            while !tx.is_closed() { match reader.read(&mut bytes) {
+                Ok(0)|Err(_)=>break,
+                Ok(n)=>if tx.blocking_send(bytes[..n].to_vec()).is_err(){break;},
+            }}
+        });
+        loop {
+            let bytes=tokio::select! {
+                biased;
+                _=publication.cancelled()=>break,
+                bytes=rx.recv()=>match bytes { Some(bytes)=>bytes, None=>break },
+            };
+            if !publication.active() { break; }
+            tokio::select! {
+                biased;
+                _=publication.cancelled()=>break,
+                result=tokio::time::timeout(Duration::from_secs(2),send.write_all(&bytes))=>{
+                    if !matches!(result,Ok(Ok(()))) { return; }
+                }
+            }
+        }
+        let _=send.finish(); return;
+    }
     if req.t == "media-request" {
         return serve_media_substream(app, send, shared, member, req.blake3, req.start, req.rung)
             .await;
@@ -1448,9 +1743,9 @@ async fn serve_file_substream(
     if send.write_all(header.as_bytes()).await.is_err() {
         return;
     }
-    session_log(&app, "info", format!("Sending \"{}\" to {member} from byte {offset}.", file_info.name));
+    let _ = send.set_priority(-10);
+    session_log(&app, "info", format!("Sending \"{}\" to {member} from byte {offset} (background priority).", file_info.name));
 
-    let started = std::time::Instant::now();
     let mut last_emit = std::time::Instant::now();
     let mut sent: u64 = offset;
     let mut buf = vec![0u8; TRANSFER_CHUNK];
@@ -1460,6 +1755,7 @@ async fn serve_file_substream(
             Ok(n) => n,
             Err(_) => break,
         };
+        pace_background_copy(n).await;
         if send.write_all(&buf[..n]).await.is_err() {
             // Receiver cancelled or dropped; their partial stays resumable.
             let _ = app.emit("session:transfer", serde_json::json!({
@@ -1469,12 +1765,6 @@ async fn serve_file_substream(
             return;
         }
         sent += n as u64;
-        // R4 pacing: sleep whenever we are ahead of the byte budget.
-        let target = Duration::from_secs_f64((sent - offset) as f64 / TRANSFER_BYTES_PER_SEC as f64);
-        let elapsed = started.elapsed();
-        if target > elapsed {
-            tokio::time::sleep(target - elapsed).await;
-        }
         if last_emit.elapsed().as_millis() >= 250 {
             last_emit = std::time::Instant::now();
             let _ = app.emit("session:transfer", serde_json::json!({
@@ -1734,7 +2024,7 @@ async fn relay_to_others(shared: &HostShared, sender_id: u64, msg: &SessionMsg) 
         if p.id == sender_id {
             continue;
         }
-        if p.send.write_all(line.as_bytes()).await.is_err() {
+        if p.send.enqueue(Arc::from(line.as_str()), replaceable_key(msg)).is_err() {
             dead.push(p.id);
         }
     }
@@ -1754,7 +2044,7 @@ async fn relay_to_member(shared: &HostShared, member: &str, msg: &SessionMsg) {
     let mut peers = shared.peers.lock().await;
     let mut dead = false;
     if let Some(p) = peers.iter_mut().find(|p| p.member == member) {
-        dead = p.send.write_all(line.as_bytes()).await.is_err();
+        dead = p.send.enqueue(Arc::from(line.as_str()), replaceable_key(msg)).is_err();
         if dead {
             let gone = p.id;
             peers.retain(|q| q.id != gone);
@@ -1780,7 +2070,7 @@ async fn broadcast_peer_list(shared: &HostShared) {
 
         let mut dead: Vec<u64> = Vec::new();
         for p in peers.iter_mut() {
-            if p.send.write_all(line.as_bytes()).await.is_err() {
+            if p.send.enqueue(Arc::from(line.as_str()), None).is_err() {
                 dead.push(p.id);
             }
         }
@@ -1915,6 +2205,7 @@ async fn fail_peer_to_off(app: AppHandle, generation: u64, error: String) {
     if inner.generation != generation {
         return;
     }
+    crate::commands::ndi::stop_room(generation);
     inner.generation += 1;
     inner.last_error = Some(error);
     let old = std::mem::replace(&mut inner.session, Session::Off);
@@ -2005,12 +2296,8 @@ async fn peer_media_service(
                 Ok(v) => v,
                 Err(e) => return refuse(format!("open substream: {e}"), &req.resp),
             };
-            let line = format!(
-                "{{\"t\":\"media-request\",\"blake3\":\"{}\",\"start\":{},\"rung\":{}}}\n",
-                req.blake3,
-                req.start,
-                req.rung.unwrap_or(0)
-            );
+            let request_type=if req.blake3.starts_with("ndi:") { "program-request" } else { "media-request" };
+            let line = format!("{}\n", serde_json::json!({"t":request_type,"blake3":req.blake3,"start":req.start,"rung":req.rung.unwrap_or(0)}));
             if send.write_all(line.as_bytes()).await.is_err() {
                 return refuse("send request".into(), &req.resp);
             }
@@ -2094,6 +2381,7 @@ async fn shutdown_session(old: Session) {
             accept_task,
             ..
         } => {
+            shared.revoke_program();
             accept_task.abort();
             if let Ok(mut tasks) = shared.tasks.lock() {
                 for t in tasks.drain(..) {
@@ -2630,6 +2918,33 @@ pub fn session_cancel_fetch(blake3_hex: String) -> Result<(), crate::AppError> {
 #[cfg(test)]
 mod tests {
 
+    #[test]
+    fn background_copies_cannot_consume_program_reader_capacity() {
+        let shared = HostShared::default();
+        let copies: Vec<_> = (0..MAX_TRANSFERS).map(|_| {
+            SubstreamPermit::acquire(shared.active_transfers.clone(), MAX_TRANSFERS).unwrap()
+        }).collect();
+        assert!(SubstreamPermit::acquire(shared.active_transfers.clone(), MAX_TRANSFERS).is_none());
+        let program = SubstreamPermit::acquire(shared.active_program_readers.clone(), MAX_PROGRAM_READERS).unwrap();
+        assert_eq!(shared.active_program_readers.load(Ordering::SeqCst), 1);
+        drop(copies);
+        assert_eq!(shared.active_transfers.load(Ordering::SeqCst), 0);
+        assert_eq!(shared.active_program_readers.load(Ordering::SeqCst), 1);
+        drop(program);
+        assert_eq!(shared.active_program_readers.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn request_admission_is_bounded_and_released_on_cancellation() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let permit = SubstreamPermit::acquire(counter.clone(), 1).unwrap();
+        assert!(SubstreamPermit::acquire(counter.clone(), 1).is_none());
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        drop(permit);
+        assert!(SubstreamPermit::acquire(counter.clone(), 1).is_some());
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
     /// Peer display names arrive over the wire from another machine and are
     /// rendered in the roster, so they are untrusted input. `sanitize_name`
     /// had no test.
@@ -2713,6 +3028,13 @@ mod tests {
             rate: 1.0,
             at_ms: 1_750_000_000_000.0,
             seq: 7,
+            protocol: 2,
+            command: 3,
+            phase: "seek".into(),
+            target: Some(12.5),
+            presented: Some(12.5),
+            source_key: "review-A".into(),
+            session_id: "room-A".into(),
             from: "m0".into(),
             epoch: 1,
         };
@@ -2724,6 +3046,8 @@ mod tests {
         assert!(json.contains(r#""position":12.5"#), "json: {json}");
         assert!(json.contains(r#""rate":1.0"#), "json: {json}");
         assert!(json.contains(r#""seq":7"#), "json: {json}");
+        assert!(json.contains(r#""protocol":2"#), "json: {json}");
+        assert!(json.contains(r#""command":3"#), "json: {json}");
         assert!(json.contains(r#""epoch":1"#), "json: {json}");
     }
 
@@ -2755,6 +3079,7 @@ mod tests {
             title: None,
             duration: None,
             review_key: url.into(),
+            live_state: None,
         }
     }
 
@@ -2785,6 +3110,7 @@ mod tests {
             title: Some("cut-v4.mov".into()),
             duration: Some(123.4),
             review_key: "cut-v4.mov|1234|1920x1080|999".into(),
+            live_state: None,
         };
         let line = serde_json::to_string(&msg).unwrap();
         let back: SessionMsg = serde_json::from_str(line.trim()).unwrap();
@@ -3553,3 +3879,7 @@ mod offer_hash_tests {
         assert_eq!(h3, direct);
     }
 }
+
+#[path = "session_ndi_tests.rs"]
+#[cfg(test)]
+mod session_ndi_tests;

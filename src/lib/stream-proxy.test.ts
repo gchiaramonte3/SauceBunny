@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { base64UrlEncode, buildProxyUrl } from "./stream-proxy";
+import { base64UrlEncode, buildHlsProxyUrl, buildProxyUrl } from "./stream-proxy";
 
 /**
  * A cross-language wire format, and the two guards that keep the loopback
@@ -96,5 +96,20 @@ describe("buildProxyUrl", () => {
 
   it("accepts either scheme case, since yt-dlp does not normalise", () => {
     expect(buildProxyUrl(BASE, "HTTPS://cdn.example/v.mp4")).toContain("/v1/");
+  });
+});
+
+describe("buildHlsProxyUrl", () => {
+  const BASE = "http://127.0.0.1:52431/t/capability";
+
+  it("uses the distinct manifest-rewriting route and preserves the signed URL", () => {
+    const manifest = "https://cdn.example/master.m3u8?expire=1900000000&sig=a/b+c";
+    const out = buildHlsProxyUrl(BASE, manifest);
+    expect(out.startsWith(`${BASE}/hls/v1/`)).toBe(true);
+    expect(decodeUrlSafeNoPad(out.slice(`${BASE}/hls/v1/`.length))).toBe(manifest);
+  });
+
+  it("never wraps non-http sources", () => {
+    expect(buildHlsProxyUrl(BASE, "file:///tmp/master.m3u8")).toBe("file:///tmp/master.m3u8");
   });
 });

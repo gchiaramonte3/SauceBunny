@@ -12,7 +12,7 @@ import { tauriMockInit } from "./tauri-mock";
 
 const pageErrors: string[] = [];
 
-async function boot(page: Page): Promise<void> {
+async function boot(page: Page, configure?: () => Promise<void>): Promise<void> {
   pageErrors.length = 0;
   page.on("pageerror", (e) => pageErrors.push(String(e)));
   await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
@@ -25,6 +25,7 @@ async function boot(page: Page): Promise<void> {
     localStorage.setItem("saucebunny.welcomed", "1");
     localStorage.setItem("saucebunny.permissioned", "1");
   });
+  await configure?.();
   await page.goto("/");
   // Every launch lands on Home (r140); the suite's tests exercise the Clip
   // workbench, so boot() walks there the way a user would (mod+3) and hands
@@ -115,21 +116,16 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Meta+1");
   await expect(page.getByRole("heading", { name: "Welcome to Sauce Bunny" })).toBeVisible();
-  // Co-Review is a first-class destination: the rail item reads "Review" (short
-  // rail label) + ⌘4 → the lobby, a centered green room titled "Review together"
-  // with the Host and Join cards stacked. Keep-alive like the others (Clip
-  // stays mounted).
+  // Review reuses the mounted monitor with a compact setup rail. It does not
+  // replace that viewport with the old full-page stacked setup cards.
   await rail.getByRole("button", { name: "Review", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Review together" })).toBeVisible();
-  await expect(page.locator(".cp-view-clip")).toBeHidden();
+  await expect(page.locator(".cp-view-clip .cp-monitor-area")).toBeVisible();
   await expect(page.locator(".cp-view-clip .cp-toolbar")).toBeAttached();
-  // The lobby is session-first: hosting is available with no source loaded.
-  // Fresh profile lands on the green room's IDENTITY step; Start lives on
-  // the READY step behind it (covered by the green-room specs).
+  // A name still gates room entry, but not the independent private preview.
   await expect(page.getByPlaceholder("Your name")).toBeVisible();
-  // The identity step gates Continue until a name is present (Join lives on
-  // the READY step, covered by the green-room spec below).
-  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Done", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Start session", exact: true })).toBeDisabled();
   await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Meta+1");
@@ -587,15 +583,22 @@ test("recent exports: grouped per source, chevron reveals older exports", async 
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
-test("green room: identity, devices, ready; saved identity skips ahead", async ({ page }) => {
+test("Review setup: identity and explicit device choices beside one selected form", async ({ page }) => {
   await boot(page);
   await page.getByRole("button", { name: "Review" }).click();
   const lobby = page.locator(".cp-view-coreview");
 
-  // Fresh profile: IDENTITY first. Name + a swatch, then continue.
+  await expect(lobby.getByRole("tab", { name: "Host a session" })).toHaveAttribute("aria-selected", "true");
+  await expect(lobby.getByRole("tab", { name: "Join a session" })).toBeVisible();
+  await expect(lobby.getByPlaceholder("Paste a join code")).toBeHidden();
+  // Identity does not implicitly enter the device editor or acquire devices.
   await lobby.getByPlaceholder("Your name").fill("Nika");
   await lobby.locator(".cp-swatch").nth(2).click();
-  await lobby.getByRole("button", { name: "Continue" }).click();
+  await lobby.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(lobby.getByRole("button", { name: "Start session" })).toBeEnabled();
+  await expect(lobby.locator(".cp-gr-devices")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("e2e.avGranted"))).toBeNull();
+  await lobby.getByRole("button", { name: "Change…" }).click();
 
   // DEVICES: one Enable button pre-grant; the mock grants and streams.
   await lobby.getByRole("button", { name: "Enable camera and mic" }).click();
@@ -604,38 +607,89 @@ test("green room: identity, devices, ready; saved identity skips ahead", async (
   await expect(lobby.locator(".cp-gr-selects select").first()).toBeVisible();
   await lobby.getByRole("button", { name: "Continue" }).click();
 
-  // READY: the two verbs this screen exists for. The old proof of READY was a
-  // "Default camera · Default mic" strip, which was removed - devices belong
-  // in the step you just came through, not on the screen you read to start.
-  await expect(lobby.getByRole("heading", { name: "Host a session" })).toBeVisible();
-  await expect(lobby.getByRole("heading", { name: "Join a session" })).toBeVisible();
+  await expect(lobby.getByRole("button", { name: "Change…" })).toBeFocused();
+  await expect(lobby.locator(".cp-setup-summary")).toContainText("Camera on");
+  await expect(lobby.locator(".cp-setup-summary")).toContainText("Microphone on");
   await expect(lobby.getByRole("button", { name: "Start session" })).toBeEnabled();
+  await lobby.getByRole("textbox", { name: "Session name" }).fill("First review pass");
+  await lobby.getByRole("tab", { name: "Join a session" }).click();
+  await expect(lobby.getByRole("textbox", { name: "Session name" })).toBeHidden();
   await expect(lobby.getByPlaceholder("Paste a join code")).toBeVisible();
+  await lobby.getByPlaceholder("Paste a join code").fill("SAUC-PENDING");
+  await lobby.getByRole("tab", { name: "Host a session" }).click();
+  await expect(lobby.getByRole("textbox", { name: "Session name" })).toHaveValue("First review pass");
+  await lobby.getByRole("tab", { name: "Join a session" }).click();
+  await expect(lobby.getByPlaceholder("Paste a join code")).toHaveValue("SAUC-PENDING");
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
-test("green room: returning user with granted devices lands on READY", async ({ page }) => {
+test("Review setup: returning user keeps access policy without onboarding review links", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("saucebunny.review.author", JSON.stringify("Nika"));
     localStorage.setItem("e2e.avGranted", "1");
   });
-  await boot(page);
+  await boot(page, () => page.addInitScript(() => {
+    const w = window as unknown as {
+      __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
+      __setupCommands: string[]; __setupCaptureCalls: number;
+    };
+    w.__setupCommands = []; w.__setupCaptureCalls = 0;
+    const invoke = w.__TAURI_INTERNALS__.invoke;
+    w.__TAURI_INTERNALS__.invoke = (command, args) => {
+      w.__setupCommands.push(command);
+      if (command === "list_review_grants") return Promise.resolve([{ id: "grant-dana", label: "Dana", revoked: false, lastSeenAt: null }]);
+      if (command === "review_invited_only") return Promise.resolve(true);
+      return invoke(command, args);
+    };
+    const acquire = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = (...args) => { w.__setupCaptureCalls++; return acquire(...args); };
+  }));
   await page.getByRole("button", { name: "Review" }).click();
   const lobby = page.locator(".cp-view-coreview");
-  // Straight to READY: no devices step at all for someone who has granted.
-  await expect(lobby.getByRole("heading", { name: "Host a session" })).toBeVisible();
+  await expect(lobby.getByRole("tab", { name: "Host a session" })).toHaveAttribute("aria-selected", "true");
   await expect(lobby.getByRole("button", { name: "Start session" })).toBeEnabled();
   await expect(lobby.getByRole("button", { name: "Enable camera and mic" })).toHaveCount(0);
-  // Review links live on the idle lobby: a durable link is for someone who is
-  // NOT in the room, so requiring a live session to mint one was backwards.
-  // (This asserted their ABSENCE, on a plan to move them onto the clip that
-  // was never built - which left the panel reachable only while hosting.)
-  // Original note kept for the record: a link
-  // is for someone who is not in the room, so the lobby was the wrong place
-  // to ask for one. And the device strip is gone with it.
-  await expect(lobby.getByRole("heading", { name: "Review links" })).toBeVisible();
-  await expect(lobby.locator(".cp-gr-strip")).toHaveCount(0);
+  await expect(lobby.locator(".cp-setup-summary")).toContainText("Nika");
+  await expect(lobby.locator(".cp-setup-summary")).toContainText("Camera off · Microphone off");
+  await expect(lobby.getByRole("heading", { name: "Review links" })).toBeHidden();
+  await expect(lobby.locator(".cp-setup-access")).toBeHidden();
+  // Preserve the loaded policy/records without exposing active-host controls
+  // during setup. CoReviewLobby's component tests exercise those host actions.
+  await expect(lobby.locator(".cp-setup-access input[type=checkbox]")).toBeChecked();
+  await expect(lobby.locator(".cp-setup-access")).toContainText("Dana");
+  // StrictMode may replay initial reads. Tab switches must not remount access
+  // management or fetch new credentials; compare against the loaded baseline.
+  const initialGrantReads = await page.evaluate(() =>
+    (window as unknown as { __setupCommands: string[] }).__setupCommands
+      .filter(command => command === "list_review_grants").length);
+  expect(initialGrantReads).toBeGreaterThan(0);
+  await lobby.getByRole("tab", { name: "Join a session" }).click();
+  await expect(lobby.locator(".cp-setup-access")).toBeHidden();
+  await lobby.getByRole("tab", { name: "Host a session" }).click();
+  await expect(lobby.locator(".cp-setup-access")).toBeHidden();
+  const observed = await page.evaluate(() => {
+    const w = window as unknown as { __setupCommands: string[]; __setupCaptureCalls: number };
+    return { commands: w.__setupCommands, captureCalls: w.__setupCaptureCalls };
+  });
+  expect(observed.commands).toContain("review_invited_only");
+  expect(observed.commands).not.toContain("set_review_invited_only");
+  expect(observed.commands.filter(command => command === "list_review_grants")).toHaveLength(initialGrantReads);
+  expect(observed.commands).not.toContain("create_review_grant");
+  expect(observed.captureCalls).toBe(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
+test("Review setup opens Library session history without requiring a media folder", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("saucebunny.review.author", JSON.stringify("Nika")));
+  await boot(page);
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await page.getByRole("button", { name: "Past sessions in Library" }).click();
+  await expect(page.locator(".cp-view-library")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Search sessions and people" })).toBeVisible();
+  await expect(page.getByText("No review sessions yet", { exact: true })).toBeVisible();
+  await expect(page.getByText("Add a folder to build your library.")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("saucebunny.libraryRoots"))).toBeNull();
+  expect(pageErrors).toHaveLength(0);
 });
 
 test("session room: people tiles + control bar render; clip furniture stays out", async ({ page }) => {
