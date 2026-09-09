@@ -3,6 +3,26 @@
 September 8, 2026 local build (September 9 UTC). This is a numbered internal
 test installer, not a new public semver release. NDI remains experimental.
 
+## Verified installer
+
+`Sauce Bunny 0.5.0 (2026090901).dmg` is archived in the Desktop's
+`Sauce Bunny Builds` folder. The release builder completed; automated bundle
+and packaged-resource checks passed. Read-only mounting independently confirmed
+build 2026090901, the exact compiled executable, companion 0.1.6, and the approved
+NDI 6.3.2.0 runtime. The app inside the DMG passed strict deep signature
+verification, and the DMG's checksum verified. Signing is ad-hoc, not Developer ID.
+
+The build-directory app acquired Finder metadata after signing and failed its
+strict check; the actual mounted installer app did not contain that detritus
+and passed. The installer itself, not that mutable build folder, is the artifact
+verified here. No installed application or Premiere project was replaced.
+
+SHA-256:
+
+```text
+10c001e79c33be4d58fceaa0214d955931506f007c98225b8ac596117cc0e212
+```
+
 ## NDI continuity correction
 
 - Preserve the next retained encoded fragment after a brief reader delay.
