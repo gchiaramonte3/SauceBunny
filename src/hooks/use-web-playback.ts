@@ -40,6 +40,8 @@ import type { ResolvedPresentationSource } from "../bindings/ResolvedPresentatio
 // this was the lone copy, and a copy of a union is a copy that drifts.
 import type { ToastKind } from "../components/CanvasToast";
 import { newJobId } from "../lib/job-id";
+import { publicFirst, authenticationRetry } from "../lib/web-source-policy";
+import { mediaDiagnostic } from "../lib/media-diagnostics";
 import { useTauriListeners } from "./use-tauri-listeners";
 
 type Helpers = {
@@ -95,36 +97,12 @@ export type WebPlayback = {
   /** Returns true if the error was handled (→ download fallback); false if the
    *  caller should fall through to its generic error handling. */
   onMediaError: (message: string) => boolean;
+  onPresentationExpired: () => void;
   reset: () => void;
   stop: () => void;
 };
 
 const WATCHDOG_MS = 15000;
-
-/**
- * Whether a failed preview download is worth retrying WITHOUT sign-in cookies.
- *
- * Yes for a genuine failure with cookies attached: public social posts
- * (LinkedIn and friends) break precisely because the cookies are there.
- *
- * No when yt-dlp exited CLEANLY. That message means the download worked and
- * the app then failed to find the file it had just written, so cookies were
- * never the problem — and a retry is a second full download of the same
- * source for nothing. One 4K YouTube video fetched 119 MB + 89 MB twice
- * before reporting failure, because a bug in our own file lookup was being
- * read as an auth problem.
- *
- * No for cancellation or a source switch — those are the user, not a failure.
- */
-export function shouldRetryWithoutCookies(message: string, hadCookies: boolean): boolean {
-  if (!hadCookies) return false;
-  if (message.includes("exited cleanly")) return false;
-  if (message.includes("Cancelled") || message.includes("Source changed")) return false;
-  // Dropping cookies cannot repair a broken route or a server rate limit.
-  // In either case another automatic full download only prolongs the wait.
-  if (/timed out|timeout|HTTP (?:Error )?429|rate.limit/i.test(message)) return false;
-  return true;
-}
 
 export function proxyPresentationSource(
   source: ResolvedPresentationSource,
@@ -190,6 +168,8 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   const peerStreamRef = useRef<{ seq: number; url: string; videoCodec: string | null; audioCodec: string | null } | null>(null);
   const presentationSeqRef = useRef(-1);
   const presentationRequestRef = useRef(0);
+  const presentationPreparedSeqRef = useRef(-1);
+  const expiredRetrySeqRef = useRef(-1);
   useEffect(() => () => { presentationRequestRef.current++; }, []);
 
   // Effect keys: only kind / seq / streaming-readiness re-trigger work — NOT
@@ -373,11 +353,11 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
         const cookies = h.cookiesBrowser();
         let cachePath: string;
         try {
-          cachePath = await attempt(cookies);
+          cachePath = await attempt(publicFirst(url) ? undefined : cookies);
         } catch (err) {
-          if (!cancelled && shouldRetryWithoutCookies(formatError(err), !!cookies)) {
-            h.appendLog("info", "web-preview", "Download failed with sign-in cookies. Retrying without…");
-            cachePath = await attempt(undefined);
+          if (!cancelled && authenticationRetry(url, cookies, formatError(err))) {
+            h.appendLog("info", "web-preview", "This source requires authentication. Trying the selected browser once…");
+            cachePath = await attempt(cookies);
           } else {
             throw err;
           }
@@ -415,6 +395,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   }, []);
 
   const resolvePresentation = useCallback((url: string, seqArg: number, refresh = false) => {
+    presentationPreparedSeqRef.current = seqArg;
     presentationSeqRef.current = seqArg;
     const request = ++presentationRequestRef.current;
     // A refresh is a candidate, not permission to remount the active player.
@@ -427,6 +408,10 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
           cookiesBrowser: h.cookiesBrowser(),
         });
         if (!source || presentationSeqRef.current !== seqArg || presentationRequestRef.current !== request) return;
+        if (refresh && source.expiresAt * 1000 <= Date.now() + 60_000) {
+          h.appendLog("warn", "yt-dlp", "The refreshed source is already expiring. Keeping the local copy; no automatic retry loop.");
+          return;
+        }
         if (!proxyBaseFetchedRef.current) {
           proxyBaseRef.current = await invoke<string | null>("get_stream_proxy_base").catch(() => null);
           proxyBaseFetchedRef.current = true;
@@ -438,14 +423,30 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
           "yt-dlp",
           `High-quality source resolved · ${source.height ?? "?"}p · ${source.kind}`,
         );
-      } catch {
+      } catch (error) {
         if (presentationSeqRef.current !== seqArg || presentationRequestRef.current !== request) return;
         // The completed proxy remains a fully playable source. Presentation
         // resolution is an enhancement and must never fail the review copy.
-        h.appendLog("warn", "yt-dlp", "High-quality source unavailable; the local review copy remains playable.");
+        h.appendLog("warn", "yt-dlp", `High-quality source unavailable: ${mediaDiagnostic(formatError(error))}. The local copy remains playable.`);
       }
     })();
   }, []);
+
+  const onPresentationExpired = useCallback(() => {
+    const current = stateRef.current;
+    if (current.kind !== "cached" || expiredRetrySeqRef.current === current.seq) return;
+    expiredRetrySeqRef.current = current.seq;
+    resolvePresentation(current.url, current.seq, true);
+  }, [resolvePresentation]);
+
+  // Finish the essential copy before spending network/CPU on optional quality.
+  // The source generation also coalesces repeated cached-state notifications.
+  useEffect(() => {
+    const current = stateRef.current;
+    if (current.kind === "cached" && presentationPreparedSeqRef.current !== current.seq) {
+      resolvePresentation(current.url, current.seq);
+    }
+  }, [kind, seq, resolvePresentation]);
 
   useEffect(() => {
     if (!presentationSource) return;
@@ -466,10 +467,9 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     warmStreamRef.current = mode === "stream-first" && warmStream
       ? { seq: seqArg, stream: warmStream }
       : null;
-    if (mode === "download-first") resolvePresentation(url, seqArg);
-    else { presentationRequestRef.current++; presentationSeqRef.current = seqArg; setPresentationSource(null); }
+    presentationRequestRef.current++; presentationSeqRef.current = seqArg; setPresentationSource(null);
     dispatch({ t: "LOAD", seq: seqArg, url, mode });
-  }, [resolvePresentation]);
+  }, []);
 
   const loadCached = useCallback((url: string, cachePath: string, seqArg: number) => {
     warmStreamRef.current = null;
@@ -578,6 +578,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     onPlayerReady,
     consumeResume,
     onMediaError,
+    onPresentationExpired,
     reset,
     stop,
   };

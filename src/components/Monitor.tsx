@@ -71,6 +71,7 @@ type Props = {
    * completed web review copy. `undefined` means this is not the dual-source
    * web path; `null` means its parallel resolve is still pending/failed. */
   presentationSource?: ResolvedPresentationSource | null;
+  onPresentationExpired?: () => void;
   /** Seconds the MSE pipeline should start from (fresh-retry resume). */
   streamStartAt?: number;
   /** Tier B peer stream: no random access on the raw route, so the MSE
@@ -344,7 +345,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     errorDetail, extractorRot,
     resumeTitle, onResume, onboarding,
     aspect,
-    sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, presentationSource, streamStartAt, disableScrubPreview, onDiag, onAudioDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
+    sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, presentationSource, onPresentationExpired, streamStartAt, disableScrubPreview, onDiag, onAudioDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
   recording,
     streamRung, onStreamStall, onStreamInfo, streamRungBadge, streamRungBadgeTitle, streamKeepBadge, streamKeepAction, onStreamKeepAction,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs, scrubAudio,
@@ -618,6 +619,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               ref={ref}
               proxyPath={webStreamUrl}
               presentation={presentationSource}
+              onSourceExpired={onPresentationExpired}
               fps={metadata?.fps ?? undefined}
               filename={metadata?.title}
               initialVolume={initialVolume}
@@ -786,7 +788,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
                   <div className="cp-prep-sub">
                     {sourceKind === "file"
                       ? "Transcoding via ffmpeg for in-app compatibility"
-                      : "CDN blocked in-app streaming. Fetching via yt-dlp so you can scrub."}
+                  : "Preparing a local copy for playback and scrubbing."}
                     {playbackPrepProgress != null && playbackPrepProgress > 0
                       ? ` · ${Math.round(playbackPrepProgress)}%`
                       : ""}

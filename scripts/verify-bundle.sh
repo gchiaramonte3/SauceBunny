@@ -275,7 +275,7 @@ SIGINFO="$(codesign -dvv "${APP}" 2>&1 || true)"
 SIGNED_FOR_REAL=0
 case "${SIGINFO}" in
   *"Signature=adhoc"*) warn "ad-hoc signed (expected locally; a release needs a Developer ID)" ;;
-  *"Signature="*)      pass "signed with an identity"; SIGNED_FOR_REAL=1 ;;
+  *"Authority="*)      pass "signed with a certificate identity"; SIGNED_FOR_REAL=1 ;;
   *) if [ "${ALLOW_STUBS}" -eq 1 ]; then
        warn "unsigned (CI has no signing identity)"
      else
@@ -307,7 +307,13 @@ fi
 # sentence a person reads, telling them the opposite of what would happen on
 # someone else's Mac. Contents and signing are separate verdicts, so say both.
 if [ "${SIGNED_FOR_REAL}" -eq 1 ]; then
-  printf '\033[32m✓ bundle looks shippable\033[0m\n\n'
+  printf '\033[32m✓ bundle contents and certificate signature verified\033[0m\n'
+  case "${SIGINFO}" in
+    *"Authority=Developer ID Application:"*)
+      printf '  Verify notarization and Gatekeeper acceptance before distribution.\n\n' ;;
+    *)
+      printf '  Internal testing only; distribution requires Developer ID and notarization.\n\n' ;;
+  esac
 else
   printf '\033[32m✓ bundle contents check out\033[0m — but it is \033[33mNOT shippable\033[0m:\n'
   printf '  ad-hoc signed, so Gatekeeper will reject it on any other Mac.\n'

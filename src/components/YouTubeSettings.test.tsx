@@ -32,6 +32,30 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it.each(["readable", "denied", "missing", "error"])("renders truthful Safari access: %s without opening Settings", async (access) => {
+  invoke.mockImplementation((cmd) => Promise.resolve(cmd === "safari_fda_status" ? access : updated));
+  render(<YouTubeSettings defaults={{ ...defaults, ytCookiesBrowser: "safari" }} setDefaults={vi.fn()}
+    sectionOpen={() => true} toggleSection={vi.fn()} />);
+  const text = { readable: /cookie store is readable/, denied: /macOS denied access/, missing: /No Safari cookie store/, error: /access could not be checked/ }[access]!;
+  expect(await screen.findByText(text)).toBeTruthy();
+  expect(!!screen.queryByRole("button", { name: "Check access ↗" })).toBe(access === "denied");
+  expect(invoke.mock.calls.some(([cmd]) => cmd === "open_full_disk_access")).toBe(false);
+});
+
+it("rechecks Safari on focus and ignores an older denied result", async () => {
+  const old = deferred<string>(), fresh = deferred<string>();
+  let checks = 0;
+  invoke.mockImplementation((cmd) => cmd === "safari_fda_status" ? (++checks === 1 ? old.promise : fresh.promise) : Promise.resolve(updated));
+  render(<YouTubeSettings defaults={{ ...defaults, ytCookiesBrowser: "safari" }} setDefaults={vi.fn()}
+    sectionOpen={() => true} toggleSection={vi.fn()} />);
+  expect(screen.getByText(/Checking Safari cookie access/)).toBeTruthy();
+  fireEvent(window, new Event("focus"));
+  await act(async () => fresh.resolve("readable"));
+  await act(async () => old.resolve("denied"));
+  expect(screen.getByText(/cookie store is readable/)).toBeTruthy();
+  expect(screen.queryByText(/macOS denied access/)).toBeNull();
+});
+
 it("disables changes until the live version check completes", async () => {
   const probe = deferred<YtdlpStatus>();
   invoke.mockReturnValueOnce(probe.promise);

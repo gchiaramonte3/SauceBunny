@@ -1,9 +1,9 @@
 import type { ResolvedPresentationSource } from "../bindings/ResolvedPresentationSource";
 import type { PlayerHandle, SeekResult } from "../components/player-handle";
-import { presentationCanPlay, sameSourceFrame } from "./presentation-readiness";
+import { presentationCanPlay, presentationCanSwitch, sameSourceFrame } from "./presentation-readiness";
 
 export type PresentationMount = { source: ResolvedPresentationSource; epoch: number; target: number };
-type Candidate = { target: number; epoch: number; phase: "waiting" | "seeking" | "buffering" | "ready" | "failed"; generation?: number };
+type Candidate = { target: number; epoch: number; phase: "waiting" | "seeking" | "buffering" | "ready" | "aligning" | "armed" | "rehearsing" | "failed"; generation?: number; deadline?: number };
 type Ports = {
   proxy: () => PlayerHandle | null;
   high: () => PlayerHandle | null;
@@ -14,10 +14,11 @@ type Ports = {
   playing: (value: boolean) => void;
   diag: (tag: string, message: string) => void;
   error: (message: string) => void;
+  now?: () => number;
 };
 
-/** The local copy owns transport. A standby stream may prepare, but never
- * holds a transport promise or promotes itself while playback is running. */
+/** Local transport never waits for a standby stream. Only a synchronized,
+ * decoded and buffered rehearsal may take ownership during ordinary play. */
 export function createPresentationPlayback(p: Ports) {
   let disposed = false;
   let active: "proxy" | "presentation" = "proxy";
@@ -35,16 +36,21 @@ export function createPresentationPlayback(p: Ports) {
   let volume = 1;
   let muted = false;
   let rate = 1;
+  let shuttling = false;
+  const now = () => p.now?.() ?? performance.now();
   const sameFrame = (a: number, b: number) => sameSourceFrame(a, b, p.fps());
   const current = () => active === "proxy" ? p.proxy() : p.high();
   const show = (value: typeof active) => {
     if (active === value) return;
+    // Close the old output BEFORE opening the new one, in the same task.
+    current()?.setMuted(true);
     active = value;
+    current()?.setMuted(muted);
     p.representation(value);
   };
   const configure = () => {
     p.high()?.setVolume(volume);
-    p.high()?.setMuted(muted);
+    p.high()?.setMuted(active !== "presentation" || muted);
     p.high()?.setPlaybackRate(rate);
   };
   const targetNow = () => current()?.getPlaybackReadiness?.().confirmedSeconds
@@ -52,17 +58,75 @@ export function createPresentationPlayback(p: Ports) {
   const qualified = (target: number) => {
     const state = p.high()?.getPlaybackReadiness?.();
     return !!mounted && !!candidate && candidate.epoch === mounted.epoch
-      && candidate.phase !== "failed" && candidate.phase !== "seeking"
+      && (candidate.phase === "ready" || candidate.phase === "buffering")
       && candidate.generation === state?.generation
       && presentationCanPlay(state, target, p.fps());
+  };
+  const discardStandby = () => {
+    candidate = null; mounted = null; epoch++;
+    p.mount(null);
+  };
+  const abandon = (reason: string) => {
+    if (candidate) candidate.phase = "failed";
+    blocked = true;
+    p.high()?.setMuted(true); p.high()?.pause();
+    discardStandby();
+    p.diag("warn", `High-quality preparation stopped: ${reason}. Continuing locally.`);
+  };
+  const rehearse = () => {
+    const pending = candidate, high = p.high(), proxy = p.proxy();
+    if (!pending || !high || !proxy || !playing || active !== "proxy" || blocked
+      || phase !== "idle" || shuttling || rate !== 1) return;
+    if (pending.deadline != null && now() > pending.deadline) { abandon("synchronization deadline reached"); return; }
+    const at = proxy.getCurrentTime(), state = high.getPlaybackReadiness?.();
+    if (!state || state.failed) return;
+    if (pending.phase === "rehearsing") {
+      if (state.generation === pending.generation && presentationCanSwitch(state, at, p.fps(), now())) {
+        // Standby has already decoded/played silently; play() is not on this path.
+        proxy.setMuted(true); proxy.pause();
+        position = Math.max(at, state.confirmedSeconds ?? at);
+        pending.phase = "ready";
+        pending.target = position;
+        show("presentation");
+        p.time(position);
+        p.diag("ok", `High resolution active at ${position.toFixed(2)}s (source ${pending.epoch})`);
+      }
+      return;
+    }
+    if (pending.phase === "armed") {
+      if (at >= pending.target) {
+        pending.phase = "rehearsing";
+        high.setMuted(true);
+        void Promise.resolve(high.play()).catch(() => { if (candidate === pending) abandon("standby playback failed"); });
+      }
+      return;
+    }
+    if (pending.phase !== "buffering" && pending.phase !== "ready") return;
+    // One buffered alignment, never a network rebuild chasing each clock tick.
+    const target = Math.ceil((at + 0.75) * (p.fps() || 30)) / (p.fps() || 30);
+    const remaining = state.durationSeconds - target;
+    if (remaining <= 0 || state.bufferedStartSeconds == null || state.bufferedEndSeconds == null
+      || target < state.bufferedStartSeconds || state.bufferedEndSeconds - target < Math.min(5, remaining)) return;
+    pending.phase = "aligning";
+    pending.target = target;
+    pending.deadline ??= now() + 20_000;
+    high.setMuted(true); high.pause();
+    void high.seekTo(target).then((result) => {
+      if (disposed || candidate !== pending || pending.phase !== "aligning" || blocked || !playing || phase !== "idle") return;
+      if (result.status !== "presented") { abandon("buffered alignment unavailable"); return; }
+      pending.generation = high.getPlaybackReadiness?.().generation;
+      pending.phase = "armed";
+      rehearse();
+    }).catch(() => { if (candidate === pending && !disposed) abandon("buffered alignment failed"); });
   };
   const inspect = (eventEpoch: number) => {
     if (disposed || mounted?.epoch !== eventEpoch || !candidate
       || candidate.phase === "waiting" || candidate.phase === "seeking" || candidate.phase === "failed") return;
+    if (playing) { rehearse(); return; }
     if (!qualified(candidate.target)) return;
     if (candidate.phase !== "ready") {
       candidate.phase = "ready";
-      p.diag("ok", `High-quality buffer ready at ${candidate.target.toFixed(2)}s`);
+      p.diag("ok", `Buffer ready at ${candidate.target.toFixed(2)}s`);
     }
     if (playing || blocked || active === "presentation" || phase !== "idle" || !sameFrame(position, candidate.target)) return;
     p.proxy()?.pause();
@@ -70,17 +134,18 @@ export function createPresentationPlayback(p: Ports) {
     p.diag("ok", `High-quality picture selected while paused at ${position.toFixed(2)}s`);
   };
   const prepare = () => {
-    if (disposed || playing || blocked || phase !== "idle" || !latest || !p.proxy()?.isReady()) return;
+    if (disposed || blocked || phase !== "idle" || !latest || !p.proxy()?.isReady()
+      || active !== "proxy" || shuttling || (playing && rate !== 1)) return;
     if (!mounted || mounted.source !== latest) {
       mounted = { source: latest, target: position, epoch: ++epoch };
-      candidate = { target: position, epoch, phase: "waiting" };
+      candidate = { target: position, epoch, phase: "waiting", deadline: playing ? now() + 20_000 : undefined };
       p.mount(mounted);
       return;
     }
     const high = p.high();
     if (!high?.isReady()) return;
     configure();
-    if (!candidate || !sameFrame(candidate.target, position)) {
+    if (!candidate || (!playing && !sameFrame(candidate.target, position))) {
       high.pause();
       candidate = { target: position, epoch: mounted.epoch, phase: "waiting" };
     }
@@ -93,9 +158,10 @@ export function createPresentationPlayback(p: Ports) {
     pending.phase = "seeking";
     p.diag("info", `Preparing high-quality buffer at ${pending.target.toFixed(2)}s (source ${pending.epoch})`);
     void high.seekTo(pending.target).then((result) => {
-      if (disposed || candidate !== pending || mounted?.epoch !== pending.epoch) return;
+      if (disposed || candidate !== pending || pending.phase !== "seeking" || blocked || mounted?.epoch !== pending.epoch) return;
       if (result.status !== "presented") {
         pending.phase = "failed";
+        if (playing) blocked = true;
         p.diag("warn", "High-quality preparation unavailable; local playback remains ready.");
         return;
       }
@@ -105,6 +171,7 @@ export function createPresentationPlayback(p: Ports) {
     }).catch(() => {
       if (candidate === pending && !disposed) {
         pending.phase = "failed";
+        if (playing) blocked = true;
         p.diag("warn", "High-quality preparation failed; local playback remains ready.");
       }
     });
@@ -132,22 +199,25 @@ export function createPresentationPlayback(p: Ports) {
     if (disposed || command !== id) return;
     phase = "idle";
     show("proxy");
+    if (blocked) discardStandby();
     playing = true;
+    proxy.setMuted(muted);
     await proxy.play();
-    if (!disposed && command === id) p.playing(true);
+    if (!disposed && command === id) { p.playing(true); prepare(); }
   };
   const fallback = (eventEpoch: number, reason: string, fatal = false) => {
     if (disposed || blocked || mounted?.epoch !== eventEpoch) return;
     const state = p.high()?.getPlaybackReadiness?.();
     if (!fatal && (!playing || phase !== "idle" || state?.seeking)) return;
     if (candidate) candidate.phase = "failed";
-    if (active !== "presentation") return;
-    const at = state?.confirmedSeconds ?? position;
+    if (active !== "presentation") { abandon(reason); return; }
+    const at = Math.max(position, state?.confirmedSeconds ?? position);
     const resume = playing;
     const id = ++command;
     blocked = true;
     phase = "landing";
     p.high()?.pause();
+    p.high()?.setMuted(true);
     p.diag("warn", `Using local playback at ${at.toFixed(2)}s: ${reason}`);
     position = at;
     if (resume) void startLocal(at, id).catch(() => failLocal(id));
@@ -183,9 +253,11 @@ export function createPresentationPlayback(p: Ports) {
       position = result.presentedSeconds;
       p.time(position);
       playing = resume;
+      blocked = false;
       if (resume) {
         if (!proxy?.isPlaying()) void proxy?.play();
         p.playing(true);
+        prepare();
       } else { blocked = false; prepare(); }
     } else {
       playing = false;
@@ -206,13 +278,25 @@ export function createPresentationPlayback(p: Ports) {
     },
     proxyReady() { prepare(); },
     inspect,
-    error: (eventEpoch: number) => fallback(eventEpoch, "high-quality media failed", true),
+    tick() {
+      if (disposed) return;
+      if (active === "proxy") rehearse();
+      else if (playing && phase === "idle" && !shuttling) {
+        const state = p.high()?.getPlaybackReadiness?.();
+        if (state?.sampledAtMs != null && now() - state.sampledAtMs > 750) fallback(mounted!.epoch, "high-quality picture stopped advancing", true);
+        else if (state?.confirmedSeconds != null
+          && Math.abs((p.high()?.getCurrentTime() ?? state.confirmedSeconds) - state.confirmedSeconds) > Math.max(.25, 3 / (p.fps() || 30))) {
+          fallback(mounted!.epoch, "high-quality picture lost synchronization", true);
+        }
+      }
+    },
+    error: (eventEpoch: number, reason = "high-quality media failed") => fallback(eventEpoch, reason, true),
     waiting: (eventEpoch: number) => fallback(eventEpoch, "high-quality buffer ran dry"),
     reportTime(engine: typeof active, seconds: number, eventEpoch?: number) {
       if (disposed || engine !== active || phase !== "idle"
         || (engine === "presentation" && mounted?.epoch !== eventEpoch)) return;
-      position = seconds;
-      p.time(seconds);
+      position = playing ? Math.max(position, seconds) : seconds;
+      p.time(position);
     },
     reportPlaying(engine: typeof active, value: boolean, eventEpoch?: number) {
       if (disposed || engine !== active || phase !== "idle"
@@ -233,6 +317,7 @@ export function createPresentationPlayback(p: Ports) {
       const at = localLanding?.target ?? targetNow();
       const id = ++command;
       playing = true;
+      shuttling = false;
       phase = "idle";
       if (!blocked && qualified(at)) {
         phase = "landing";
@@ -244,8 +329,7 @@ export function createPresentationPlayback(p: Ports) {
         await p.high()?.play();
         if (!disposed && command === id) p.playing(true);
       } else {
-        // A paused standby seek can finish filling its bounded buffer, but
-        // inspect() cannot promote it during this playback run.
+        if (candidate) candidate.deadline = now() + 20_000;
         if (active === "presentation") { phase = "landing"; p.high()?.pause(); }
         p.diag("info", "Play: local review copy (no high-quality wait)");
         await startLocal(at, id).catch(() => failLocal(id));
@@ -256,6 +340,7 @@ export function createPresentationPlayback(p: Ports) {
       const at = localLanding?.target ?? targetNow();
       const id = ++command;
       playing = false;
+      shuttling = false;
       resumeScrub = false;
       blocked = false;
       phase = "landing";
@@ -271,9 +356,18 @@ export function createPresentationPlayback(p: Ports) {
         if (disposed || command !== id) return;
         phase = "idle";
         if (result && result.status !== "presented") return; // retain the confirmed high-quality picture
+        // Keep a qualified, already-active engine and its warm decoder on resume.
+        if (active === "presentation" && mounted?.source === latest && candidate?.phase === "ready") {
+          candidate.target = at;
+          // Native HLS/progressive adapters invalidate pending seek callbacks
+          // on Pause. The decoded parked frame is still valid; re-observe it
+          // under the adapter's current generation before checking the buffer.
+          candidate.generation = p.high()?.getPlaybackReadiness?.().generation;
+          if (qualified(at)) return;
+        }
         show("proxy");
         if (candidate?.phase === "failed") { mounted = null; candidate = null; }
-        else if (candidate?.phase === "seeking") candidate = null;
+        else if (candidate && ["seeking", "aligning", "armed", "rehearsing"].includes(candidate.phase)) candidate = null;
         prepare();
       }).catch(() => { if (!disposed && command === id) phase = "idle"; });
     },
@@ -293,6 +387,7 @@ export function createPresentationPlayback(p: Ports) {
     scrubTo(target: number) { p.proxy()?.scrubTo(Math.max(0, target)); },
     endScrub: (target: number) => land(Math.max(0, target), true),
     current,
+    acceptsEpoch: (value: number) => !disposed && mounted?.epoch === value,
     position: () => phase === "idle" ? targetNow() : position,
     isPlaying: () => playing,
     isProxy: () => active === "proxy",
@@ -300,6 +395,7 @@ export function createPresentationPlayback(p: Ports) {
       if (disposed) return;
       command++;
       playing = value !== 0;
+      shuttling = value !== 0;
       phase = "idle";
       if (active === "proxy") p.high()?.pause();
       current()?.setShuttle(value);
@@ -307,7 +403,8 @@ export function createPresentationPlayback(p: Ports) {
       p.playing(playing);
     },
     setVolume(value: number) { volume = value; p.proxy()?.setVolume(value); p.high()?.setVolume(value); },
-    setMuted(value: boolean) { muted = value; p.proxy()?.setMuted(value); p.high()?.setMuted(value); },
+    setMuted(value: boolean) { muted = value; p.proxy()?.setMuted(active !== "proxy" || value); p.high()?.setMuted(active !== "presentation" || value); },
+    isMuted: () => muted,
     setRate(value: number) { rate = value; p.proxy()?.setPlaybackRate(value); p.high()?.setPlaybackRate(value); },
     dispose() {
       disposed = true; command++; epoch++;

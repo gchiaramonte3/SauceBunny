@@ -30,6 +30,14 @@ export type PlaybackReadiness = {
   seeking: boolean;
   failed: boolean;
   hasFutureData: boolean;
+  /** False when a required muxed audio track has not actually been observed. */
+  hasRequiredTracks?: boolean;
+  /** Only decoded video callbacks supply these; clock ticks are not frames. */
+  sampledAtMs?: number;
+  advancingFrames?: number;
+  /** Absolute contiguous range, used to align standby without a rebuild. */
+  bufferedStartSeconds?: number;
+  bufferedEndSeconds?: number;
 };
 
 export type PlayerHandle = {

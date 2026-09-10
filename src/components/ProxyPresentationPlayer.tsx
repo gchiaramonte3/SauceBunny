@@ -11,6 +11,7 @@ type Props = {
   presentation: ResolvedPresentationSource | null;
   filename?: string;
   initialVolume: number;
+  onSourceExpired?: () => void;
   scrubAudio: boolean;
   knownDuration?: number;
   fps?: number;
@@ -32,6 +33,7 @@ const PlaybackStage = forwardRef<PlayerHandle, Props>(function PlaybackStage(pro
   const highRef = useRef<PlayerHandle | null>(null);
   const [mount, setMount] = useState<PresentationMount | null>(null);
   const [showProxy, setShowProxy] = useState(true);
+  const [playing, setPlaying] = useState(false);
   const [controller] = useState(() => createPresentationPlayback({
     proxy: () => proxyRef.current,
     high: () => highRef.current,
@@ -42,11 +44,16 @@ const PlaybackStage = forwardRef<PlayerHandle, Props>(function PlaybackStage(pro
       latest.current.onRepresentationChange?.(value);
     },
     time: (seconds) => latest.current.onTimeUpdate?.(seconds),
-    playing: (value) => latest.current.onPlayStateChange?.(value),
+    playing: (value) => { setPlaying(value); latest.current.onPlayStateChange?.(value); },
     diag: (tag, message) => latest.current.onDiag?.(tag, message),
     error: (message) => latest.current.onError?.(message),
   }));
   useEffect(() => { controller.activate(); return () => controller.dispose(); }, [controller]);
+  useEffect(() => {
+    if (!playing) return;
+    const timer = window.setInterval(() => controller.tick(), 16);
+    return () => window.clearInterval(timer);
+  }, [controller, playing]);
   useEffect(() => { controller.updateSource(presentation); }, [controller, presentation]);
   useEffect(() => { controller.setVolume(initialVolume); }, [controller, initialVolume]);
 
@@ -64,7 +71,7 @@ const PlaybackStage = forwardRef<PlayerHandle, Props>(function PlaybackStage(pro
     setVolume: controller.setVolume,
     getVolume: () => controller.current()?.getVolume() ?? initialVolume,
     setMuted: controller.setMuted,
-    isMuted: () => controller.current()?.isMuted() ?? false,
+    isMuted: controller.isMuted,
     setShuttle: controller.setShuttle,
     setPlaybackRate: controller.setRate,
     supportsPlaybackRate: !showProxy,
@@ -78,7 +85,11 @@ const PlaybackStage = forwardRef<PlayerHandle, Props>(function PlaybackStage(pro
     onPlayStateChange: (playing: boolean) => controller.reportPlaying("presentation", playing, mount.epoch),
     onReady: () => controller.ready(mount.epoch),
     onReadinessChange: () => controller.inspect(mount.epoch),
-    onError: () => controller.error(mount.epoch),
+    onError: (message: string) => {
+      if (!controller.acceptsEpoch(mount.epoch)) return;
+      controller.error(mount.epoch, message);
+      if (message.includes("[expired_url]")) latest.current.onSourceExpired?.();
+    },
     onStall: () => controller.waiting(mount.epoch),
   } : {};
   return (
@@ -91,12 +102,12 @@ const PlaybackStage = forwardRef<PlayerHandle, Props>(function PlaybackStage(pro
             audioStreamUrl={mount.source.audioUrl}
             videoCodec={mount.source.videoCodec ?? undefined} audioCodec={mount.source.audioCodec ?? undefined}
             knownDuration={knownDuration} startAtSeconds={mount.target} disableScrubPreview
-            initialVolume={initialVolume} {...highEvents}
+            initialVolume={initialVolume} initiallyMuted sourceGeneration={mount.epoch} {...highEvents}
             onDiag={props.onDiag} onSurfaceClick={onSurfaceClick} />
         ) : (
           <LocalMediaPlayer key={mount.epoch} ref={highRef}
             path={mount.source.kind === "hls" ? mount.source.manifestUrl : mount.source.videoUrl}
-            filename={filename} hasVideo initialVolume={initialVolume} preload="metadata"
+            filename={filename} hasVideo initialVolume={initialVolume} initiallyMuted preload="metadata" requireAudio={!!mount.source.audioCodec}
             {...highEvents} onDiag={props.onDiag} onSurfaceClick={onSurfaceClick} />
         ))}
       </div>

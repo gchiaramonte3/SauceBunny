@@ -575,6 +575,7 @@ All sidecars are bundled binaries invoked through `tauri-plugin-shell`. Each lon
 | Sidecar | Purpose | Update mechanism |
 |---------|---------|-----------------|
 | yt-dlp | Video/URL download | `npm run refresh:sidecars` (pulls yt-dlp's static binary) |
+| deno | Restricted YouTube challenge runtime, invoked by yt-dlp via an explicit bundled path | `bash scripts/fetch-deno.sh` (pinned official 2.8.0 release) |
 | ffmpeg | Clip cutting, transcode, audio extraction | `npm run refresh:ffmpeg` (osxexperts.net static arm64) |
 | ffprobe | yt-dlp stream fixups (HLS aac_adtstoasc) | `npm run refresh:ffprobe` (martin-riedl.de static arm64) |
 | whisper-cli | Local speech-to-text (whisper.cpp) | `npm run build:whisper` (builds from source, statically linked) |
@@ -741,7 +742,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and seven rules in this file are checked by a test rather than remembered. If you
+One hundred and eight rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -797,6 +798,7 @@ written after finding the rule already broken somewhere.
 | `event-surface-contract` | Every event Rust emits has a listener, every listened event is emitted (`panel:*` is the frontend-only bus), and each handler is named after its event so a mis-wire is visible |
 | `sidecar-surface-contract` | Everything `externalBin` ships is spawnable, documented in the table above AND in SIDECAR-VERSIONS.md, and (for ours) has a build script |
 | `docs-contract` | `npm run verify` runs every gate CI runs; the bundled ffmpeg's licence is stated the same way in CLAUDE.md, README and THIRD-PARTY-LICENSES |
+| `bundle-signature-contract` | The packaged verifier recognizes macOS certificate authority output without mistaking it for ad-hoc or unsigned code, retains strict deep signature verification, and distinguishes local signing from distribution readiness |
 | `menu-surface-contract` | Every native menu item has a handler (React binding or a native arm), and no binding points at an item that does not exist |
 | `settings-pointer-contract` | "Settings → X" in user-facing copy names a tab or section that exists (labels read from SettingsModal, never retyped) |
 | `command-coverage-contract` | Every rebindable action has a ⌘K entry, and `onNavigateView` accepts every view that has one |

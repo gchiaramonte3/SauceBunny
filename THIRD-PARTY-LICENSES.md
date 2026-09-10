@@ -128,6 +128,7 @@ explicitly **LGPL** ffmpeg build (no `--enable-gpl` / `--enable-nonfree`); see
 | Binary | Upstream | License |
 |---|---|---|
 | `yt-dlp` | https://github.com/yt-dlp/yt-dlp | The Unlicense (public domain) |
+| `deno` 2.8.0 | https://github.com/denoland/deno/tree/v2.8.0 | MIT; runtime license in `licenses/DENO-LICENSE.md` |
 | `ffmpeg` | https://ffmpeg.org ([osxexperts.net](https://www.osxexperts.net/) build) | **GPLv2 or later** — `--enable-gpl`, no `--enable-version3`; see note above |
 | `ffprobe` | https://ffmpeg.org ([ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de/) build) | **GPLv3 or later** — `--enable-gpl --enable-version3`; see note above |
 | `whisper-cli` (whisper.cpp) | https://github.com/ggerganov/whisper.cpp | MIT |

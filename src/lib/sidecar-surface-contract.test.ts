@@ -62,7 +62,8 @@ describe("the sidecar surface", () => {
   it("ships nothing it cannot spawn", () => {
     // ffprobe is the documented exception: the app never spawns it. It rides
     // along so yt-dlp can find it beside ffmpeg (`--ffmpeg-location`).
-    const NOT_SPAWNED = new Set(["ffprobe"]);
+    // Deno is likewise invoked by yt-dlp, through --js-runtimes deno:<bundled path>.
+    const NOT_SPAWNED = new Set(["ffprobe", "deno"]);
     const orphans = shipped.filter((n) => !spawned.has(n) && !NOT_SPAWNED.has(n));
     expect(orphans, "bundled but never spawned").toEqual([]);
   });

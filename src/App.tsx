@@ -28,7 +28,6 @@ import {
   tcDigitsToDisplay,
 } from "./lib/timecode";
 import { currentQueueSource, queuedRangesForSource } from "./lib/queue-ranges";
-import { FDA_GRANTED, NO_PERMISSION_BROWSERS, safariGuidance, shouldCheckSafariFda } from "./lib/safari-fallback";
 import { hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
 import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { decodeHtmlEntities } from "./lib/text";
@@ -47,7 +46,8 @@ import { migrateCaptionFont } from "./lib/caption-font";
 import { isMissingCommandError, staleBinaryMessage } from "./lib/stale-backend";
 import { newJobId } from "./lib/job-id";
 import { DEFAULT_STUN_URL } from "./lib/ice-servers";
-
+  // Cookie access is checked in Web sources or for an explicit authenticated
+  // retry. Opening cached/public media never opens system permission settings.
 const DEFAULT_FPS_FALLBACK: Record<string, number> = { "24": 24, "25": 25, "30": 30 };
 
 
@@ -1596,70 +1596,6 @@ export default function App() {
   // Stop can't cancel_job something that hasn't spawned yet, so handleStop
   // flips this to bail out of extraction and skip the backend invoke.
   const transcriptAbortRef = useRef<AbortController | null>(null);
-  // Safari sign-in guidance (r123): picking Safari for cookies without Full
-  // Disk Access silently degrades to no-auth (cookies_args skips it so the
-  // fetch doesn't die) - the user believes they're signed in when they
-  // aren't. Whenever the choice BECOMES safari (modal or Settings), probe
-  // FDA; if missing, open the exact pane and say what to do in one line.
-  const safariFdaPromptedRef = useRef(false);
-  /** Removes the grant-watch listener when the choice changes or we unmount. */
-  const fdaFocusCleanupRef = useRef<(() => void) | null>(null);
-  // Out of `inactive` exactly when a WEB source is in play; a local open never
-  // moves this machine. See shouldCheckSafariFda.
-  const webSourceActive = webPlayback.state.kind !== "inactive";
-  useEffect(() => {
-    if (defaults.ytCookiesBrowser !== "safari") {
-      safariFdaPromptedRef.current = false;
-      return;
-    }
-    if (!shouldCheckSafariFda({ cookieBrowser: defaults.ytCookiesBrowser, webSourceActive })) return;
-    if (safariFdaPromptedRef.current) return;
-    safariFdaPromptedRef.current = true;
-    let cancelled = false;
-    void (async () => {
-      const ok = await invoke<boolean>("safari_fda_status").catch(() => true);
-      if (cancelled || ok) return;
-
-      // Which OTHER browsers actually have cookies here. Safari is the only one
-      // that needs Full Disk Access, so if any of these is signed in the whole
-      // permission dance is avoidable — and never suggest one that is not
-      // installed, which is the lesson cookie_browser_ready already encodes.
-      const ready: string[] = [];
-      for (const b of NO_PERMISSION_BROWSERS) {
-        const has = await invoke<boolean>("cookie_browser_ready", { browser: b }).catch(() => false);
-        if (has) ready.push(b);
-      }
-      if (cancelled) return;
-
-      const g = safariGuidance(ready);
-      pushNotification("info", g.title, g.body);
-      // Only open System Settings when a permission is genuinely the answer.
-      // Throwing the pane at someone we just told to switch browsers is the
-      // dead end this replaces.
-      if (!g.suggestsAlternative) {
-        void invoke("open_full_disk_access").catch(() => { /* best-effort */ });
-      }
-
-      // CLOSE THE LOOP. Granting Full Disk Access usually means macOS quits and
-      // reopens the app, but not always — if access appears while we are still
-      // running, say so, rather than leaving someone to guess whether the
-      // toggle took. Same focus probe the Settings pane already uses.
-      const onFocus = () => {
-        void invoke<boolean>("safari_fda_status").then((now) => {
-          if (!now) return;
-          window.removeEventListener("focus", onFocus);
-          pushNotification("info", FDA_GRANTED.title, FDA_GRANTED.body);
-        }).catch(() => {});
-      };
-      window.addEventListener("focus", onFocus);
-      fdaFocusCleanupRef.current = () => window.removeEventListener("focus", onFocus);
-    })();
-    return () => {
-      cancelled = true;
-      fdaFocusCleanupRef.current?.();
-      fdaFocusCleanupRef.current = null;
-    };
-  }, [defaults.ytCookiesBrowser, pushNotification, webSourceActive]);
 
   // Pipeline-log channel label for transcription ("whisper" | "parakeet"), in a
   // ref so the long-lived transcript-log listener tags lines with the engine
@@ -5155,6 +5091,7 @@ export default function App() {
                        native <video> over asset:// — same lesson as r107 locals). */
                     webCachedUseMediabunny={webCachedPlayer === "mediabunny"}
                     presentationSource={webPlayback.presentationSource}
+                    onPresentationExpired={webPlayback.onPresentationExpired}
                     streamStartAt={webPlayback.streamStartAt}
                     disableScrubPreview={activeSourceUrl?.startsWith("peer://") ?? false}
                     /* "This stage is being recorded" - by me, or by whoever

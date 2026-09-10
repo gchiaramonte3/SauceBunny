@@ -5,7 +5,7 @@ import { assetUrl } from "../lib/asset-url";
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle, SeekResult } from "./player-handle";
 import { confirmDecodedFrame } from "../lib/confirm-decoded-frame";
-import { contiguousBufferAhead } from "../lib/presentation-readiness";
+import { contiguousBufferAhead, contiguousRange, observeDecodedFrame, observedRequiredAudio, type DecodedObservation } from "../lib/presentation-readiness";
 
 type Props = {
   path: string;
@@ -13,6 +13,9 @@ type Props = {
   /** True if the file actually has a video stream (vs. audio-only). */
   hasVideo: boolean;
   initialVolume: number; // 0..1
+  /** Close the audio output from the first render, before readiness callbacks. */
+  initiallyMuted?: boolean;
+  requireAudio?: boolean;
   onTimeUpdate?: (seconds: number) => void;
   onPlayStateChange?: (playing: boolean) => void;
   onReady?: (duration: number) => void;
@@ -33,13 +36,14 @@ type Props = {
  * the same imperative handle as YouTubePlayer.
  */
 export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function LocalMediaPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onReadinessChange, onStall, preload = "auto", onError, onSurfaceClick, onDiag },
+  { path, filename, hasVideo, initialVolume, initiallyMuted = false, requireAudio = false, onTimeUpdate, onPlayStateChange, onReady, onReadinessChange, onStall, preload = "auto", onError, onSurfaceClick, onDiag },
   ref,
 ) {
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const readyRef = useRef(false);
   const playingRef = useRef(false);
   const confirmedFrameRef = useRef<number | null>(null);
+  const decodedObservationRef = useRef<DecodedObservation | null>(null);
   const readinessChangedRef = useRef(onReadinessChange);
   readinessChangedRef.current = onReadinessChange;
   const stallRef = useRef(onStall);
@@ -196,6 +200,26 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     return result;
   }, [seekExact]);
 
+  // Standby promotion needs decoded frames, not HTML timeupdate clock ticks.
+  useEffect(() => {
+    const el = mediaRef.current as HTMLVideoElement | null;
+    if (!hasVideo || !el?.requestVideoFrameCallback) return;
+    let id = 0;
+    const frame = (now: number, metadata: VideoFrameCallbackMetadata) => {
+      id = 0;
+      if (!el.seeking) {
+        confirmedFrameRef.current = metadata.mediaTime;
+        decodedObservationRef.current = observeDecodedFrame(decodedObservationRef.current, seekGenerationRef.current, metadata.mediaTime, now);
+        readinessChangedRef.current?.();
+      }
+      if (!el.paused) id = el.requestVideoFrameCallback(frame);
+    };
+    const start = () => { if (!id) id = el.requestVideoFrameCallback(frame); };
+    el.addEventListener("playing", start);
+    start();
+    return () => { el.removeEventListener("playing", start); if (id) el.cancelVideoFrameCallback(id); };
+  }, [path, hasVideo]);
+
   useImperativeHandle(ref, () => ({
     // The element a live session captures to show a peer what the
     // presenter is watching. See lib/viewer-capture.ts.
@@ -242,6 +266,8 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     isReady: () => readyRef.current,
     getPlaybackReadiness: () => {
       const el = mediaRef.current;
+      const observed = decodedObservationRef.current;
+      const range = el ? contiguousRange(el.buffered, el.currentTime) : undefined;
       return {
         generation: seekGenerationRef.current,
         confirmedSeconds: confirmedFrameRef.current,
@@ -250,6 +276,10 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
         seeking: !el || el.seeking,
         failed: !!el?.error,
         hasFutureData: !!el && el.readyState >= 3,
+        hasRequiredTracks: observedRequiredAudio(el, requireAudio),
+        sampledAtMs: observed?.generation === seekGenerationRef.current ? observed.sampledAtMs : undefined,
+        advancingFrames: !el?.paused && observed?.generation === seekGenerationRef.current ? observed.advancingFrames : 0,
+        bufferedStartSeconds: range?.[0], bufferedEndSeconds: range?.[1],
       };
     },
     isPlaying: () => playingRef.current,
@@ -326,7 +356,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       };
       shuttleRafRef.current = requestAnimationFrame(tick);
     },
-  }), [beginScrub, endScrub, scrubTo, seekExact]);
+  }), [beginScrub, endScrub, scrubTo, seekExact, requireAudio]);
 
   useEffect(() => {
     const el = mediaRef.current;
@@ -357,7 +387,6 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     // bails when it's unchanged, so this only re-renders on a real frame change.
     let rafId = 0;
     const reportTime = () => {
-      if (!el.seeking && el.readyState >= 2) confirmedFrameRef.current = el.currentTime;
       onTimeUpdateRef.current?.(el.currentTime);
     };
     const tick = () => { rafId = 0; if (!playingRef.current) return; reportTime(); rafId = requestAnimationFrame(tick); };
@@ -570,7 +599,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
           onCanPlay={() => readinessChangedRef.current?.()}
           onWaiting={() => stallRef.current?.()}
           playsInline
-          muted={false}
+          muted={initiallyMuted}
           className="cp-local-video"
         />
       ) : (
@@ -580,6 +609,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
             ref={(el) => { mediaRef.current = el; }}
             src={src}
             preload={preload}
+            muted={initiallyMuted}
           />
           {/* Visible card so the user can tell something is loaded and playing. */}
           <div className="cp-audio-card">

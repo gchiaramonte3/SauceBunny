@@ -2,6 +2,13 @@
   "schema": 1,
   "_readme": "Trust-on-first-use pins for every binary that ships inside the signed .dmg. The fetch scripts verify a download against this file and REFUSE to install on a mismatch; scripts/verify-sidecars.sh checks what is currently installed and runs as part of the release gate. Moving a pin requires re-running the fetch script with --accept-new, which rewrites this file - and the resulting git diff IS the human review step. That is the whole point: an upstream swap becomes a visible change to a committed file instead of a silent one on the network. Publisher checksums are cross-checked where they exist, but they are served by the same host as the artifact, so this file is the only anchor a compromised publisher cannot move. kind=source pins bytes we built ourselves: a changed hash there means a rebuild, not an attack, but it should still be a deliberate diff.",
   "binaries": {
+    "deno": {
+      "kind": "download-zip",
+      "source": "github.com/denoland/deno/releases/tag/v2.8.0",
+      "publisher_checksums": "deno-aarch64-apple-darwin.sha256sum on the immutable release",
+      "sha256": "eeb555a6cb902f5a08c0e3a629e011fa9da21d74b5a686939b5e119c1f0f7323",
+      "bytes": 89007024
+    },
     "ffmpeg": {
       "kind": "download-zip",
       "source": "osxexperts.net (ffmpegNNarm.zip)",

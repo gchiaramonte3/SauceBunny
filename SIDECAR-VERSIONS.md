@@ -48,6 +48,7 @@ guard rail and refuses to install a leaky binary.
 | Binary | Updater | Source |
 |---|---|---|
 | `yt-dlp-aarch64-apple-darwin` | `npm run refresh:sidecars` | yt-dlp official GitHub release (single-file static) |
+| `deno-aarch64-apple-darwin` | `bash scripts/fetch-deno.sh` | Official Deno 2.8.0; pinned archive and executable SHA-256, called by yt-dlp without Homebrew |
 | `ffmpeg-aarch64-apple-darwin` | `npm run refresh:ffmpeg` | osxexperts.net (static arm64) |
 | `ffprobe-aarch64-apple-darwin` | `npm run refresh:ffprobe` | ffmpeg.martin-riedl.de (static arm64) — yt-dlp finds it beside ffmpeg for HLS fixup |
 | `whisper-cli-aarch64-apple-darwin` | `npm run build:whisper` | whisper.cpp source, CMake `-DBUILD_SHARED_LIBS=OFF` |

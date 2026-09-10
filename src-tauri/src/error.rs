@@ -52,7 +52,7 @@ use serde::Serialize;
 /// TypeScript discriminated-union shape — `{ kind: "...", data: ... }`.
 /// Variants without payload serialize as `{ kind: "..." }` (no `data`
 /// key), which ts-rs reflects as `{ kind: "Cancelled" }` etc.
-#[derive(Debug, Serialize, ts_rs::TS)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[serde(tag = "kind", content = "data")]
 #[ts(export, export_to = "../../src/bindings/")]
 pub enum AppError {

@@ -17,9 +17,9 @@
 # and the two together are the whole point: a folder where "the build I sent
 # on Tuesday" is a file you can actually put your hands on.
 #
-# The Desktop is the default because that is where it was asked for and where
-# a build is easy to find. SB_BUILD_ARCHIVE overrides it, which is how you
-# move the archive to another disk later without editing this script.
+# Keep the archive beside the project so relocating the project and its
+# archive together does not send future builds back to the old folder.
+# SB_BUILD_ARCHIVE still overrides this for a separate disk or destination.
 #
 # Nothing here ever deletes or overwrites. Old builds accumulate on purpose;
 # that is the feature. The size is printed on every run so it stays a thing
@@ -90,7 +90,7 @@ if [ -z "$BUILD" ]; then
   exit 1
 fi
 
-ARCHIVE="${SB_BUILD_ARCHIVE:-$HOME/Desktop/Sauce Bunny Builds}"
+ARCHIVE="${SB_BUILD_ARCHIVE:-$(dirname "$(pwd)")/Sauce Bunny Builds}"
 mkdir -p "$ARCHIVE"
 
 TARGET="$ARCHIVE/Sauce Bunny $VERSION ($BUILD).dmg"

@@ -37,7 +37,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   MediaSourceDouble.instances = [];
   vi.stubGlobal("MediaSource", MediaSourceDouble);
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([1]), {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1])); } }), {
     headers: { "x-timeline": "absolute", "x-stream-epoch": "0" },
   })));
   vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test");
@@ -48,15 +48,16 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-async function mount(onError?: (message: string) => void) {
+async function mount(onError?: (message: string) => void, duration = 149, startAtSeconds = 0) {
   const player = createRef<PlayerHandle>();
   const view = render(<MSEStreamPlayer ref={player} path="http://127.0.0.1/v1/media"
-    hasVideo initialVolume={1} knownDuration={149} videoCodec="avc1.640028"
-    audioCodec="mp4a.40.2" disableScrubPreview onError={onError} />);
+    hasVideo initialVolume={1} knownDuration={duration} videoCodec="avc1.640028"
+    audioCodec="mp4a.40.2" startAtSeconds={startAtSeconds} disableScrubPreview onError={onError} />);
   const video = view.container.querySelector("video")!;
   Object.defineProperties(video, {
     readyState: { configurable: true, value: 2 },
     videoWidth: { configurable: true, value: 1920 },
+    audioTracks: { configurable: true, value: { length: 1 } },
     requestVideoFrameCallback: { configurable: true, value: vi.fn(() => 7) },
     cancelVideoFrameCallback: { configurable: true, value: vi.fn() },
   });
@@ -64,6 +65,16 @@ async function mount(onError?: (message: string) => void) {
   expect(player.current!.isReady()).toBe(true);
   return { player, video };
 }
+
+it.each([1919, 2113.9])("reuses the initial pipeline at %s before any bytes arrive", async (target) => {
+  vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+  const { player } = await mount(undefined, 4610, target);
+  const first = player.current!.seekTo(target);
+  for (let i = 0; i < 8; i++) expect(player.current!.seekTo(target)).toBe(first);
+  await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+  expect(MediaSourceDouble.instances).toHaveLength(1);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
 
 it("confirms an already-decoded zero-distance seek without another seeked/rVFC event", async () => {
   const { player } = await mount();
@@ -86,6 +97,8 @@ it("reports playable element A/V intersection, not a larger SourceBuffer range",
     bufferedAheadSeconds: 1, seeking: false, failed: false, hasFutureData: true });
   Object.defineProperty(video, "buffered", { configurable: true, value: { length: 0 } });
   expect(player.current!.getPlaybackReadiness!().bufferedAheadSeconds).toBe(0);
+  Object.defineProperty(video, "audioTracks", { configurable: true, value: { length: 0 } });
+  expect(player.current!.getPlaybackReadiness!().hasRequiredTracks).toBe(false);
 });
 
 it("only the newest command can settle after the compositor stays quiet", async () => {
@@ -177,4 +190,28 @@ it("keeps reading until a rebuilt absolute stream reaches its landing frame", as
   expect(video.currentTime).toBeCloseTo(68.3);
   await act(async () => { video.dispatchEvent(new Event("seeked")); });
   expect((await landing).status).toBe("presented");
+});
+
+it.each([105.7, 67.8, 1919, 2113.9])("shares a pending native seek at %s without repeated FFmpeg rebuilds", async (target) => {
+  const requests: AbortSignal[] = [];
+  vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
+    requests.push(init?.signal as AbortSignal);
+    return new Promise<Response>(() => {});
+  }));
+  const { player } = await mount(undefined, 4610);
+  const first = player.current!.seekTo(target);
+  for (let n = 0; n < 10; n++) {
+    expect(player.current!.seekTo(target)).toBe(first);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+  }
+  expect(requests).toHaveLength(2); // initial pipeline and one necessary rebuild
+  cleanup(); expect((await first).status).toBe("unavailable");
+});
+
+it("reports a clean but premature response as failure, not high-quality readiness", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([1]))));
+  const error = vi.fn(); const { player } = await mount(error);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+  expect(player.current!.getPlaybackReadiness!().failed).toBe(true);
+  expect(error).toHaveBeenCalledWith(expect.stringContaining("premature_end"));
 });

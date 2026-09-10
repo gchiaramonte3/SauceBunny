@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { presentationRefreshDelayMs, proxyPresentationSource, useWebPlayback, shouldRetryWithoutCookies } from "./use-web-playback";
+import { presentationRefreshDelayMs, proxyPresentationSource, useWebPlayback } from "./use-web-playback";
 
 /**
  * The WIRING, which is the half that had no tests.
@@ -100,9 +100,13 @@ describe("driving a real download", () => {
     await waitFor(() => expect(result.current.downloadProgress).toBe(42));
   });
 
-  it("resolves presentation in parallel without blocking the review-copy job", async () => {
+  it("defers optional resolution until the review copy finishes", async () => {
     const { result } = await startDownload();
     expect(result.current.downloading).toBe(true);
+    expect(h.invoked.some((call) => call.cmd === "resolve_presentation_source")).toBe(false);
+    const job = result.current.downloadJobId!;
+    act(() => { fire("playback-prep-done", { job_id: job, success: true, path: "/cache/a.mp4" }); });
+    await waitFor(() => expect(result.current.cachePath).toBe("/cache/a.mp4"));
     expect(h.invoked.some((call) => call.cmd === "resolve_presentation_source")).toBe(true);
   });
 
@@ -210,41 +214,5 @@ describe("independent presentation representation", () => {
     const now = 1_800_000_000_000;
     expect(presentationRefreshDelayMs(1_800_000_120, now)).toBe(60_000);
     expect(presentationRefreshDelayMs(1_799_999_999, now)).toBe(1_000);
-  });
-});
-
-describe("shouldRetryWithoutCookies", () => {
-  /**
-   * The retry is expensive: it re-downloads the whole source. It fired on any
-   * error that was not a cancellation, so a bug in the app's own file lookup
-   * ("yt-dlp exited cleanly but no file was found in cache") was read as an
-   * auth problem and cost a second 119 MB + 89 MB fetch before failing
-   * identically.
-   */
-  it("does not retry when yt-dlp exited cleanly — the download worked", () => {
-    expect(shouldRetryWithoutCookies(
-      "yt-dlp exited cleanly but no file was found in cache", true)).toBe(false);
-    expect(shouldRetryWithoutCookies(
-      "yt-dlp exited cleanly but no audio file was found in cache", true)).toBe(false);
-  });
-
-  it("still retries a genuine failure, which is what the retry is for", () => {
-    // Public social posts break BECAUSE the cookies are attached.
-    expect(shouldRetryWithoutCookies("download failed (yt-dlp exit Some(1))", true)).toBe(true);
-    expect(shouldRetryWithoutCookies("HTTP Error 403: Forbidden", true)).toBe(true);
-  });
-
-  it("never retries when no cookies were sent — there is nothing to drop", () => {
-    expect(shouldRetryWithoutCookies("download failed (yt-dlp exit Some(1))", false)).toBe(false);
-  });
-
-  it("does not turn network timeouts or rate limits into cookie retries", () => {
-    for (const message of ["The media connection timed out.", "socket timeout", "HTTP Error 429: Too Many Requests", "The site is rate-limiting downloads (HTTP 429)."])
-      expect(shouldRetryWithoutCookies(message, true)).toBe(false);
-  });
-
-  it("treats cancellation and a source switch as the user, not a failure", () => {
-    expect(shouldRetryWithoutCookies("Cancelled", true)).toBe(false);
-    expect(shouldRetryWithoutCookies("Source changed", true)).toBe(false);
   });
 });

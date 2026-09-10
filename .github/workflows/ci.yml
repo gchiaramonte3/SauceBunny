@@ -59,7 +59,7 @@ jobs:
       - name: Stub sidecars so cargo check passes
         run: |
           mkdir -p src-tauri/binaries
-          for name in yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate saucebunny-capture llama-server; do
+          for name in yt-dlp deno ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate saucebunny-capture llama-server; do
             touch "src-tauri/binaries/${name}-aarch64-apple-darwin"
             chmod +x "src-tauri/binaries/${name}-aarch64-apple-darwin"
           done
@@ -165,7 +165,7 @@ jobs:
       - name: Stub sidecars
         run: |
           mkdir -p src-tauri/binaries
-          for n in yt-dlp ffmpeg ffprobe whisper-cli llama-server \
+          for n in yt-dlp deno ffmpeg ffprobe whisper-cli llama-server \
                    saucebunny-diarize saucebunny-dictate saucebunny-capture; do
             : > "src-tauri/binaries/${n}-aarch64-apple-darwin"
             chmod +x "src-tauri/binaries/${n}-aarch64-apple-darwin"

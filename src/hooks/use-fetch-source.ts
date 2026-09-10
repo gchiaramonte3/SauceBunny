@@ -306,7 +306,7 @@ export function useFetchSource(p: FetchSourceProps) {
           (instantStream
             ? `Resolving stream URL for ${hostnameOf(full)}…`
             : `Downloading ${hostnameOf(full)} for in-app playback…`)
-          + (ck ? ` (cookies: ${ck})` : " (no cookies)"),
+          + (ck ? ` (browser selected: ${ck}; access and source acceptance not yet confirmed)` : " (no cookies)"),
         );
       }
       loadWebPlayback(full, instantStream ? "stream-first" : "download-first", seq, warmStream);

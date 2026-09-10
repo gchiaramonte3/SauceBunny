@@ -4,6 +4,7 @@ import { formatError } from "../lib/error-format";
 import { CollapsibleSection } from "./CollapsibleSection";
 import type { Defaults } from "./SettingsModal";
 import type { YtdlpStatus } from "../bindings/YtdlpStatus";
+import type { SafariCookieAccess } from "../bindings/SafariCookieAccess";
 
 
 import { browserLabel } from "../lib/safari-fallback";
@@ -24,7 +25,8 @@ type EngineAction = "checking" | "updating" | "resetting";
  *      for site changes constantly) + Reset-to-bundled.
  *
  * This is cookie-borrowing ONLY — Sauce Bunny never sees a password and never
- * creates an account. Cookies are read locally by yt-dlp and never leave the Mac.
+ * creates an account. yt-dlp reads cookies locally and sends applicable cookies
+ * to the source site when authentication is required.
  * (Component/file name kept as YouTubeSettings to avoid churn; it's web-generic.)
  */
 export function YouTubeSettings({
@@ -129,13 +131,20 @@ export function YouTubeSettings({
 
   // Live Full Disk Access state for the Safari note (re-checked on selection
   // and on window focus, so granting in System Settings updates the line).
-  const [safariFda, setSafariFda] = useState<boolean | null>(null);
+  const [safariFda, setSafariFda] = useState<SafariCookieAccess | "checking">("checking");
   useEffect(() => {
     if (browser !== "safari") return;
-    const check = () => { void invoke<boolean>("safari_fda_status").then(setSafariFda).catch(() => setSafariFda(null)); };
+    let generation = 0;
+    const check = () => {
+      const request = ++generation;
+      setSafariFda("checking");
+      void invoke<SafariCookieAccess>("safari_fda_status").then((value) => {
+        if (request === generation) setSafariFda(value);
+      }).catch(() => { if (request === generation) setSafariFda("error"); });
+    };
     check();
     window.addEventListener("focus", check);
-    return () => window.removeEventListener("focus", check);
+    return () => { generation++; window.removeEventListener("focus", check); };
   }, [browser]);
 
   // Does the picked browser actually HAVE a cookie database on this Mac?
@@ -146,9 +155,12 @@ export function YouTubeSettings({
   const [dbReady, setDbReady] = useState<boolean | null>(null);
   useEffect(() => {
     if (browser === "none" || browser === "safari") { setDbReady(null); return; }
+    let cancelled = false;
+    setDbReady(null);
     void invoke<boolean>("cookie_browser_ready", { browser })
-      .then(setDbReady)
-      .catch(() => setDbReady(null));
+      .then((ready) => { if (!cancelled) setDbReady(ready); })
+      .catch(() => { if (!cancelled) setDbReady(null); });
+    return () => { cancelled = true; };
   }, [browser]);
 
   // Contextual hint under the browser picker — collapses the old standalone
@@ -156,9 +168,11 @@ export function YouTubeSettings({
   // that changes with the selection (progressive disclosure).
   const cookieNote: { text: string; action?: { label: string; fn: () => void } } =
     browser === "safari"
-      ? safariFda
-        ? { text: "Full Disk Access is on. Safari sign-ins are picked up automatically." }
-        : { text: "Safari needs Full Disk Access. Grant it, then sign-ins are picked up automatically.", action: { label: "Grant access ↗", fn: openFda } }
+      ? safariFda === "checking" ? { text: "Checking Safari cookie access…" }
+        : safariFda === "readable" ? { text: "Safari's cookie store is readable. Sign-in validity is checked by the source when needed; cached and public YouTube videos do not need cookies." }
+        : safariFda === "denied" ? { text: "macOS denied access to Safari's cookie store. Check Full Disk Access and reopen Sauce Bunny if macOS requests it.", action: { label: "Check access ↗", fn: openFda } }
+        : safariFda === "missing" ? { text: "No Safari cookie store was found. Open Safari and sign in, or select another browser. This is not a permission denial." }
+        : { text: "Safari cookie access could not be checked. Return to this window to check again. Public and cached media are unaffected." }
       : browser === "none"
         ? { text: "Public videos only. Pick a browser to load age-gated or members-only sources." }
         : dbReady === false
@@ -171,8 +185,8 @@ export function YouTubeSettings({
     <section>
       <h3 className="cp-pane-title">Web sources</h3>
       <p className="cp-pane-sub">
-        How pasted web video loads. 100% local: your browser's cookies are borrowed,
-        your password is never seen, and nothing leaves your Mac.
+        Public YouTube videos are tried without cookies first. For gated content,
+        the local downloader can send your selected browser's cookies directly to the source site.
       </p>
 
       <CollapsibleSection id="web-signin" label="Sign in" open={sectionOpen("web-signin")} onToggle={() => toggleSection("web-signin")}>
@@ -219,7 +233,7 @@ export function YouTubeSettings({
           <div className="k">
             YouTube account
             <span className="desc" title={`Opens YouTube in ${browserLabel(browser)} so you can log in; the cookies are picked up automatically.`}>
-              Sign in once for reliable, bot-check-free loads.
+              Use your account for content that requires sign-in. Site restrictions may still apply.
             </span>
           </div>
           <div className="v">

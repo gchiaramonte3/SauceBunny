@@ -22,31 +22,15 @@ use super::*;
 /// yt-dlp tries several YouTube "player clients" in order; we exclude `tv`
 /// (needs PO Token negotiation that often fails) but allow the rest. The
 /// `web` client deobfuscates YouTube's `nsig` parameter via a JS runtime
-/// — requires `deno` on PATH (brew install deno) for 1080p+ formats; without
-/// it, yt-dlp falls back to lower-resolution clients automatically.
+/// using the pinned Deno sidecar supplied explicitly by the command factory.
 pub(crate) const YT_EXTRACTOR_ARGS: [&str; 2] = ["--extractor-args", "youtube:player_client=default,-tv"];
 
-/// Every JS runtime yt-dlp knows, not just the one it enables by default.
-///
-/// yt-dlp ships with ONLY `deno` enabled, and the note above accepted that as
-/// the cost of not being able to bundle a 141 MB binary. But the flag takes a
-/// list, and yt-dlp also accepts `node`, `quickjs` and `bun` — it just will not
-/// look for them unless asked. So a machine with any of the three was falling
-/// back to a low-resolution player client while a perfectly good runtime sat on
-/// its PATH, for want of one argument.
-///
-/// Measured on the same video with our ffmpeg and no deno anywhere: 360p
-/// without a runtime, 2160p with `node` named here. Node is on far more Macs
-/// than deno is, and nothing is downloaded or bundled to gain it.
-///
-/// Naming a runtime that is absent is harmless — yt-dlp uses the
-/// highest-priority one that is both enabled AND available, and falls back
-/// exactly as before when none are.
-pub(crate) const YT_JS_RUNTIME_ARGS: [&str; 6] = [
-    "--js-runtimes", "deno",
-    "--js-runtimes", "node",
-    "--js-runtimes", "quickjs",
-];
+/// Use the verified bundled runtime, never a Homebrew/PATH installation.
+fn js_runtime_args() -> Result<Vec<String>, crate::AppError> {
+    let path = super::sidecar_path("deno")?;
+    if !path.is_file() { return Err(crate::AppError::SidecarMissing { name: "deno".into() }); }
+    Ok(vec!["--no-js-runtimes".into(), "--js-runtimes".into(), format!("deno:{}", path.display())])
+}
 
 /// Build the `--cookies-from-browser <name>` argv fragment if the user
 /// has picked a browser in Settings. Returns an empty Vec for `None` /
@@ -61,7 +45,7 @@ pub(crate) fn cookies_args(browser: Option<&str>) -> Vec<String> {
             // works unless YouTube is actively bot-checking, in which case the
             // sign-in modal pops). The frontend warns that Safari needs FDA.
             if b.eq_ignore_ascii_case("safari") && !safari_cookies_readable() {
-                eprintln!("[cookies] Safari cookies need Full Disk Access — proceeding without cookies");
+                eprintln!("[cookies] Safari cookie store is not readable ({:?}); no cookies supplied", safari_fda_status());
                 return vec![];
             }
             // Same degrade for a browser that has no cookie database at all
@@ -117,15 +101,31 @@ pub fn cookie_browser_ready(browser: String) -> bool {
     cookie_db_present(&browser)
 }
 
-/// True if we can open Safari's cookie store — i.e. the app has Full Disk
-/// Access. The file lives in a sandboxed container; opening it returns
-/// "Operation not permitted" without FDA.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub enum SafariCookieAccess { Readable, Denied, Missing, Error }
+
+/// Match yt-dlp's legacy-then-container order. Missing is not denied, and
+/// readability does not establish that a browser has a valid login.
+fn safari_access_at(home: &std::path::Path) -> SafariCookieAccess {
+    for suffix in ["Library/Cookies/Cookies.binarycookies", "Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies"] {
+        match std::fs::File::open(home.join(suffix)) {
+            Ok(file) => match file.metadata() {
+                Ok(meta) if meta.is_file() => return SafariCookieAccess::Readable,
+                Ok(_) => continue,
+                Err(_) => return SafariCookieAccess::Error,
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return SafariCookieAccess::Denied,
+            Err(_) => return SafariCookieAccess::Error,
+        }
+    }
+    SafariCookieAccess::Missing
+}
+
 fn safari_cookies_readable() -> bool {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let p = format!(
-        "{home}/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies"
-    );
-    std::fs::File::open(&p).is_ok()
+    safari_fda_status() == SafariCookieAccess::Readable
 }
 
 /// Frontend-visible Full Disk Access probe (r123): can the app actually read
@@ -133,8 +133,32 @@ fn safari_cookies_readable() -> bool {
 /// user picks Safari sign-in - without it, cookies_args silently degrades to
 /// no-auth and the user believes they're signed in when they aren't.
 #[tauri::command]
-pub fn safari_fda_status() -> bool {
-    safari_cookies_readable()
+pub fn safari_fda_status() -> SafariCookieAccess {
+    std::env::var_os("HOME").map(|home| safari_access_at(std::path::Path::new(&home)))
+        .unwrap_or(SafariCookieAccess::Error)
+}
+
+fn public_first(url: &str) -> bool {
+    tauri::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|h| h == "youtu.be" || h == "youtube.com" || h.ends_with(".youtube.com"))
+}
+
+fn authentication_retry(url: &str, browser: Option<&str>, error: &str) -> bool {
+    let e = error.to_ascii_lowercase();
+    public_first(url) && browser.is_some_and(|b| !b.is_empty() && b != "none")
+        && !["403", "429", "timeout", "timed out", "rate-limit", "cancelled", "permission"].iter().any(|s| e.contains(s))
+        && (is_youtube_auth_error_line(&e) || e.contains("requires you to be signed in") || e.contains("private video"))
+}
+
+fn authentication_browser(browser: Option<&str>) -> Result<Option<&str>, crate::AppError> {
+    if browser == Some("safari") && !safari_cookies_readable() {
+        return Err(crate::AppError::invalid(match safari_fda_status() {
+            SafariCookieAccess::Denied => "Safari cookie access was denied. Check Sauce Bunny in Full Disk Access, then reopen the app if macOS requests it.",
+            SafariCookieAccess::Missing => "Safari's cookie store was not found. Open Safari and sign in, or select another browser in Web sources.",
+            _ => "Safari cookie access could not be checked. Review Web sources settings; public and cached media do not need this access.",
+        }));
+    }
+    Ok(browser)
 }
 
 /// True when `cookies_args` would actually inject `--cookies-from-browser` for
@@ -154,19 +178,54 @@ const RESOLVE_TIMEOUT_SECS: u64 = 40;
 /// extractor — or a site that serves a logged-in page our extractor can't
 /// parse and then retries (LinkedIn does exactly this with auth cookies) — can
 /// still run for minutes. This guarantees the call RETURNS so the caller can
-/// retry without cookies or fall back to download, instead of the UI hanging
+/// retain local playback instead of the UI hanging
 /// (the stream watchdog only arms *after* resolution returns). On timeout the
-/// child is abandoned; the bounded `--socket-timeout` we pass keeps it
-/// short-lived rather than a long-running orphan.
+/// child is killed and reaped, including when this future is cancelled.
+struct TimedOutput {
+    status: std::process::ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+struct AcquisitionChild(std::process::Child);
+impl Drop for AcquisitionChild {
+    fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); }
+}
+
 async fn output_timed(
     cmd: tauri_plugin_shell::process::Command,
     secs: u64,
-) -> Result<tauri_plugin_shell::process::Output, crate::AppError> {
-    match tokio::time::timeout(std::time::Duration::from_secs(secs), cmd.output()).await {
-        Ok(Ok(out)) => Ok(out),
-        Ok(Err(e)) => Err(crate::AppError::internal(format!("yt-dlp failed: {e}"))),
-        Err(_) => Err(crate::AppError::internal(format!("timed out after {secs}s"))),
+) -> Result<TimedOutput, crate::AppError> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut command: std::process::Command = cmd.into();
+    let mut child = AcquisitionChild(command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?);
+    fn drain(pipe: impl Read + Send + 'static, limit: u64) -> std::thread::JoinHandle<std::io::Result<Vec<u8>>> {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            pipe.take(limit + 1).read_to_end(&mut bytes)?;
+            if bytes.len() as u64 > limit { return Err(std::io::Error::other("Downloader output exceeded its diagnostic limit")); }
+            Ok(bytes)
+        })
     }
+    let stdout = drain(child.0.stdout.take().ok_or_else(|| crate::AppError::internal("Downloader stdout unavailable"))?, 32 * 1024 * 1024);
+    let stderr = drain(child.0.stderr.take().ok_or_else(|| crate::AppError::internal("Downloader stderr unavailable"))?, 1024 * 1024);
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.0.try_wait()? { break status; }
+        if started.elapsed().as_secs() >= secs { return Err(crate::AppError::internal(format!("timed out after {secs}s"))); }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    };
+    let stdout = stdout.join().map_err(|_| crate::AppError::internal("Downloader stdout reader failed"))??;
+    let stderr = stderr.join().map_err(|_| crate::AppError::internal("Downloader stderr reader failed"))??;
+    // Extraction is observed separately from choosing a browser. This reports
+    // only a count, never cookie names/values, and is not a login-validity claim.
+    for line in String::from_utf8_lossy(&stderr).lines() {
+        if let Some(count) = line.strip_prefix("Extracted ").and_then(|s| s.split_whitespace().next()).and_then(|s| s.parse::<u64>().ok()) {
+            eprintln!("[cookies] downloader extracted {count} cookies; source acceptance is separate");
+        }
+    }
+    Ok(TimedOutput { status, stdout, stderr })
 }
 
 /// Resolve the `yt-dlp` to run. Prefers a user-updated copy in app-data
@@ -191,6 +250,7 @@ pub(crate) fn ytdlp(
 ) -> Result<tauri_plugin_shell::process::Command, crate::AppError> {
     let sidecars = super::sidecar_dir();
     let network_args = ytdlp_network_args(url);
+    let runtime_args = js_runtime_args()?;
     if let Ok(data) = app.path().app_data_dir() {
         let bin_dir = data.join("bin");
         if bin_dir.join("yt-dlp").is_file() {
@@ -202,7 +262,7 @@ pub(crate) fn ytdlp(
             // without it every spawn of an >90-day binary dumps a 4-line
             // "run yt-dlp -U" lecture into the pipeline log that users can't
             // act on (the bundled copy isn't theirs to -U).
-            return Ok(app.shell().command("yt-dlp").arg("--no-update").args(network_args).env("PATH", path));
+            return Ok(app.shell().command("yt-dlp").arg("--no-update").args(network_args).args(runtime_args).env("PATH", path));
         }
     }
     eprintln!("[yt-dlp] using {} copy (sidecar)", resolved_ytdlp_kind(false));
@@ -215,6 +275,7 @@ pub(crate) fn ytdlp(
         .map_err(|e| crate::AppError::invalid(format!("sidecar yt-dlp not found: {e}")))?
         .arg("--no-update")
         .args(network_args)
+        .args(runtime_args)
         .env("PATH", super::compose_spawn_path(None, sidecars.as_deref())))
 }
 
@@ -608,8 +669,8 @@ pub(crate) fn is_youtube_auth_error_line(line: &str) -> bool {
         // yt-dlp tells the user to pass cookies. Same remedy as YouTube — reuse
         // the signed-in browser's cookies — so treat it as an auth error.
         || l.contains("account authentication is required")
-        || l.contains("--cookies-from-browser")
-        || l.contains("use --cookies")
+        || l.contains("requires you to be signed in")
+        || l.contains("private video")
 }
 
 /// First `[Extractor]` tag yt-dlp prints (e.g. "Reddit", "youtube"). Used to
@@ -631,17 +692,23 @@ fn ytdlp_extractor_tag(stderr: &str) -> Option<String> {
 /// Standard auth-issue message — kept identical to `humanize_ytdlp_error`'s
 /// branch so the user sees the same text whether the failure was caught at
 /// the one-shot `output()` boundary or in a streaming loop.
-pub(crate) const YT_AUTH_HINT: &str = "YouTube is asking for sign-in to confirm you're not a bot. \
-    Check the yt-dlp line just above: if it says \"(no cookies)\", open Settings → Web sources \
-    and pick the browser you're already logged into YouTube on. If it names a browser, the \
-    cookies were sent but YouTube rejected them - sign in again in that browser, then retry.";
+pub(crate) const YT_AUTH_HINT: &str = "YouTube is asking for sign-in. Choose your signed-in browser in Settings → Web sources. Browser selection alone does not confirm cookie access or acceptance; public videos are tried without cookies first.";
 
-/// Map common yt-dlp failure modes into actionable error messages.
-/// YouTube's bot-detection error is the headline case — the raw stderr
-/// dumps a stack trace and a wiki link; we turn it into one sentence
-/// pointing at Settings → YouTube auth.
+/// Map downloader failures without inferring cookie use from browser selection.
 pub(crate) fn humanize_ytdlp_error(stderr: &str) -> String {
     let trimmed = stderr.trim();
+    // Transport failures take precedence over generic cookie advice appended
+    // by an extractor. Never turn a rejection/rate limit into auth cycling.
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.contains("429") || lower.contains("too many requests") {
+        return "The site is rate-limiting downloads (HTTP 429). Wait before retrying; changing sign-in settings will not clear a rate limit.".into();
+    }
+    if lower.contains("403") {
+        return "The site refused the media download (HTTP 403). This is not necessarily a sign-in problem; the completed local copy remains available.".into();
+    }
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return "The media connection timed out. Check your connection and retry; the download has not completed.".into();
+    }
     if trimmed.contains("Sign in to confirm you")
         || trimmed.contains("LOGIN_REQUIRED")
         || trimmed.contains("not a bot")
@@ -654,8 +721,8 @@ pub(crate) fn humanize_ytdlp_error(stderr: &str) -> String {
     // Login-gated, non-YouTube sources (Reddit requires this as of late 2025).
     // yt-dlp can't even read the metadata without the user's cookies.
     if trimmed.contains("Account authentication is required")
-        || trimmed.contains("--cookies-from-browser")
-        || (trimmed.contains("use --cookies") && !trimmed.contains("Sign in to confirm"))
+        || trimmed.contains("requires you to be signed in")
+        || trimmed.contains("Private video")
     {
         let host = ytdlp_extractor_tag(trimmed).unwrap_or_else(|| "This site".to_string());
         return format!(
@@ -669,16 +736,6 @@ pub(crate) fn humanize_ytdlp_error(stderr: &str) -> String {
     }
     if trimmed.contains("age") && trimmed.contains("restricted") {
         return "Age-restricted video — set Settings → Web sources so yt-dlp can use your signed-in cookies.".into();
-    }
-    if trimmed.contains("HTTP Error 429") || trimmed.contains("Too Many Requests") {
-        return "The site is rate-limiting downloads (HTTP 429). Wait before retrying; changing sign-in settings will not clear a rate limit.".into();
-    }
-    if trimmed.contains("HTTP Error 403") {
-        return "The site refused the media download (HTTP 403). Retry to request a fresh media URL. This is not necessarily a sign-in problem.".into();
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    if lower.contains("timed out") || lower.contains("timeout") {
-        return "The media connection timed out. Check your connection and retry; the download has not completed.".into();
     }
     // Generic fall-through: surface the first non-empty line so we don't
     // dump the whole Python stack into the UI.
@@ -750,7 +807,7 @@ async fn run_metadata_ytdlp(
     app: &AppHandle,
     url: &str,
     cookies_browser: Option<&str>,
-) -> Result<tauri_plugin_shell::process::Output, crate::AppError> {
+) -> Result<TimedOutput, crate::AppError> {
     let cmd = ytdlp(app, url)?;
     let mut args: Vec<String> = vec![
         "--dump-json".into(),
@@ -760,12 +817,6 @@ async fn run_metadata_ytdlp(
         "--socket-timeout".into(), "10".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[0].into(),
-        YT_JS_RUNTIME_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[2].into(),
-        YT_JS_RUNTIME_ARGS[3].into(),
-        YT_JS_RUNTIME_ARGS[4].into(),
-        YT_JS_RUNTIME_ARGS[5].into(),
     ];
     args.extend(cookies_args(cookies_browser));
     args.push(url.to_string());
@@ -865,18 +916,20 @@ pub async fn fetch_metadata(
     url: String,
     cookies_browser: Option<String>,
 ) -> Result<Metadata, crate::AppError> {
+    static GATE: std::sync::OnceLock<crate::acquisition_gate::AcquisitionGate<Metadata>> = std::sync::OnceLock::new();
+    GATE.get_or_init(Default::default).run(format!("{url}|{cookies_browser:?}"), || fetch_metadata_inner(app, url, cookies_browser)).await
+}
+
+async fn fetch_metadata_inner(app: AppHandle, url: String, cookies_browser: Option<String>) -> Result<Metadata, crate::AppError> {
     validate_source_url(&url)?;
 
-    // Cookies-first (YouTube bot-checks / private content), then retry WITHOUT
-    // cookies if that failed and cookies were actually applied — some sites
-    // (LinkedIn) serve a logged-in page yt-dlp can't parse, while the public
-    // page resolves fine. Mirrors get_direct_stream_url so title/duration still
-    // populate when the cookied probe is the one that fails.
-    let cookied = cookies_active(cookies_browser.as_deref());
-    let mut result = run_metadata_ytdlp(&app, &url, cookies_browser.as_deref()).await;
-    if !matches!(&result, Ok(o) if o.status.success()) && cookied {
-        eprintln!("[metadata] resolve with cookies failed; retrying without cookies");
-        result = run_metadata_ytdlp(&app, &url, None).await;
+    // Public YouTube first; one selected-browser retry only for explicit auth.
+    let initial_browser = if public_first(&url) { None } else { cookies_browser.as_deref() };
+    let mut result = run_metadata_ytdlp(&app, &url, initial_browser).await;
+    if let Ok(output) = &result {
+        if !output.status.success() && authentication_retry(&url, cookies_browser.as_deref(), &String::from_utf8_lossy(&output.stderr)) {
+            result = run_metadata_ytdlp(&app, &url, authentication_browser(cookies_browser.as_deref())?).await;
+        }
     }
     let output = result?;
 
@@ -1201,12 +1254,6 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
         "--no-progress".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[0].into(),
-        YT_JS_RUNTIME_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[2].into(),
-        YT_JS_RUNTIME_ARGS[3].into(),
-        YT_JS_RUNTIME_ARGS[4].into(),
-        YT_JS_RUNTIME_ARGS[5].into(),
         "-o".into(), template_str.clone(),
     ];
     // `caption_args` stays the cookie-free, URL-free base; each attempt appends
@@ -1566,9 +1613,6 @@ async fn resolve_presentation_tiers(
         "-f".into(), presentation_selector(),
         "-S".into(), "res,vbr,ext".into(),
         YT_EXTRACTOR_ARGS[0].into(), YT_EXTRACTOR_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[0].into(), YT_JS_RUNTIME_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[2].into(), YT_JS_RUNTIME_ARGS[3].into(),
-        YT_JS_RUNTIME_ARGS[4].into(), YT_JS_RUNTIME_ARGS[5].into(),
         "--print".into(), PRESENTATION_PRINT_TEMPLATE.into(),
     ];
     args.extend(cookies_args(cookies_browser));
@@ -1588,12 +1632,17 @@ pub async fn resolve_presentation_source(
     url: String,
     cookies_browser: Option<String>,
 ) -> Result<ResolvedPresentationSource, crate::AppError> {
+    static GATE: std::sync::OnceLock<crate::acquisition_gate::AcquisitionGate<ResolvedPresentationSource>> = std::sync::OnceLock::new();
+    GATE.get_or_init(Default::default).run(format!("{url}|{cookies_browser:?}"), || resolve_presentation_inner(app, url, cookies_browser)).await
+}
+
+async fn resolve_presentation_inner(app: AppHandle, url: String, cookies_browser: Option<String>) -> Result<ResolvedPresentationSource, crate::AppError> {
     validate_source_url(&url)?;
-    let source = match resolve_presentation_tiers(&app, &url, cookies_browser.as_deref()).await {
+    let initial_browser = if public_first(&url) { None } else { cookies_browser.as_deref() };
+    let source = match resolve_presentation_tiers(&app, &url, initial_browser).await {
         Ok(source) => Ok(source),
-        Err(_error) if cookies_active(cookies_browser.as_deref()) => {
-            eprintln!("[presentation] resolve with cookies failed; retrying without cookies");
-            resolve_presentation_tiers(&app, &url, None).await
+        Err(error) if authentication_retry(&url, cookies_browser.as_deref(), &error.to_string()) => {
+            resolve_presentation_tiers(&app, &url, authentication_browser(cookies_browser.as_deref())?).await
         }
         Err(error) => Err(error),
     }?;
@@ -1616,19 +1665,15 @@ pub async fn get_direct_stream_url(
     max_height: Option<u32>,
 ) -> Result<DirectStreamResult, crate::AppError> {
     validate_source_url(&url)?;
-    // Cookies-first (needed for YouTube bot-checks / private content). If that
-    // fails AND cookies were actually applied, retry once WITHOUT them: some
-    // sites (LinkedIn) serve a logged-in page variant yt-dlp can't parse
-    // ("Unable to extract video"), while the public page resolves fine.
-    // Genuinely gated content still errors → download fallback / sign-in modal.
-    let resolved = match resolve_stream_tiers(&app, &url, cookies_browser.as_deref(), max_height).await {
+    // The same public-first policy as metadata and optional high quality.
+    let initial_browser = if public_first(&url) { None } else { cookies_browser.as_deref() };
+    let resolved = match resolve_stream_tiers(&app, &url, initial_browser, max_height).await {
         Ok(r) => r,
         Err(e) => {
-            if !cookies_active(cookies_browser.as_deref()) {
+            if !authentication_retry(&url, cookies_browser.as_deref(), &e.to_string()) {
                 return Err(e);
             }
-            eprintln!("[stream] resolve with cookies failed; retrying without cookies");
-            resolve_stream_tiers(&app, &url, None, max_height).await?
+            resolve_stream_tiers(&app, &url, authentication_browser(cookies_browser.as_deref())?, max_height).await?
         }
     };
     // Warm-boot cache (r112): remember the signed URLs + their expiry so a
@@ -1734,12 +1779,6 @@ async fn resolve_stream_tiers(
         "-S".into(), "res,vbr,ext".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[0].into(),
-        YT_JS_RUNTIME_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[2].into(),
-        YT_JS_RUNTIME_ARGS[3].into(),
-        YT_JS_RUNTIME_ARGS[4].into(),
-        YT_JS_RUNTIME_ARGS[5].into(),
         // ONE template serving both shapes. `requested_formats` exists only for
         // a `+` (split) selection; for a muxed one those fields print "NA" and
         // `%(url)s` carries the single URL. That difference is how the parse
@@ -1847,6 +1886,9 @@ pub async fn download_web_preview(
     // names a directory: this comment used to say "cache ROOT" while the code
     // wrote to scratch/, and the finder believed the comment.
     let prefix = format!("webcache-{}", args.job_id);
+    // Only an explicitly authenticated attempt reaches this with Safari.
+    // Cache reuse above never needs or probes browser access.
+    let _ = authentication_browser(args.cookies_browser.as_deref())?;
     let template = scratch_download_template(&cache, &prefix);
 
     let cmd = ytdlp(&app, &args.url)?;
@@ -1935,12 +1977,6 @@ pub async fn download_web_preview(
         "--abort-on-unavailable-fragments".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[0].into(),
-        YT_JS_RUNTIME_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[2].into(),
-        YT_JS_RUNTIME_ARGS[3].into(),
-        YT_JS_RUNTIME_ARGS[4].into(),
-        YT_JS_RUNTIME_ARGS[5].into(),
         "--concurrent-fragments".into(), "16".into(),
         "--http-chunk-size".into(), "10M".into(),
         // r81: we pass the bundled ffmpeg *file* here, and yt-dlp derives the
@@ -2501,12 +2537,6 @@ pub async fn download_audio_track(
         "--newline".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[0].into(),
-        YT_JS_RUNTIME_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[2].into(),
-        YT_JS_RUNTIME_ARGS[3].into(),
-        YT_JS_RUNTIME_ARGS[4].into(),
-        YT_JS_RUNTIME_ARGS[5].into(),
         "--concurrent-fragments".into(), "16".into(),
         "--ffmpeg-location".into(), ffmpeg_str,
         "-o".into(), template.clone(),
@@ -2654,6 +2684,40 @@ mod warm_cache_tests {
 #[cfg(test)]
 mod youtube_network_tests {
     use super::{humanize_ytdlp_error, ytdlp_network_args};
+
+    #[test]
+    fn safari_checks_both_supported_locations_without_confusing_missing_with_denied() {
+        let dir = std::env::temp_dir().join(format!("sauce-safari-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        assert_eq!(super::safari_access_at(&dir), super::SafariCookieAccess::Missing);
+        let container = dir.join("Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies");
+        std::fs::create_dir_all(container.parent().unwrap()).unwrap();
+        std::fs::write(&container, b"test fixture, not cookies").unwrap();
+        assert_eq!(super::safari_access_at(&dir), super::SafariCookieAccess::Readable);
+        let legacy = dir.join("Library/Cookies/Cookies.binarycookies");
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, b"test fixture").unwrap();
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o0)).unwrap();
+            assert_eq!(super::safari_access_at(&dir), super::SafariCookieAccess::Denied);
+            std::fs::set_permissions(&legacy, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn public_first_retries_only_explicit_authentication() {
+        let url = "https://youtu.be/fixture";
+        assert!(super::authentication_retry(url, Some("safari"), "Sign in to confirm your age"));
+        for error in ["403 Forbidden", "429 Too Many Requests", "Read timed out", "Permission denied", "cancelled"] {
+            assert!(!super::authentication_retry(url, Some("safari"), &format!("{error}; Sign in to confirm; --cookies-from-browser")));
+        }
+        assert!(!super::authentication_retry(url, Some("none"), "Private video"));
+        assert!(!super::authentication_retry("https://youtube.com.evil.test/", Some("safari"), "Private video"));
+        assert!(humanize_ytdlp_error("ERROR: HTTP Error 429; use --cookies-from-browser").contains("429"));
+        assert!(humanize_ytdlp_error("ERROR: HTTP Error 403; use --cookies-from-browser").contains("403"));
+    }
 
     #[test]
     fn youtube_extraction_and_download_use_the_same_ipv4_route() {
@@ -3087,35 +3151,12 @@ mod js_runtime_tests {
     /// reports as a bug, and the reason this is a test and not a convention.
     #[test]
     fn every_youtube_spawn_enables_the_js_runtimes() {
-        let src = include_str!("download.rs");
-        // Only the SHIPPING half of the file. This test names
-        // "YT_EXTRACTOR_ARGS[1]" in its own body, and the first version of it
-        // duly reported itself as an unpatched call site - the seventh time in
-        // this codebase a scanner has read a description of a thing as the
-        // thing, and the second time one has done it to itself.
-        let code = src.split("#[cfg(test)]").next().unwrap_or(src);
-        let lines: Vec<&str> = code.lines().collect();
-        let mut missing = Vec::new();
-        for (i, l) in lines.iter().enumerate() {
-            // The [1] half marks a real spawn; the const definition is one line
-            // and the scan below never sees it as a call site.
-            if !l.contains("YT_EXTRACTOR_ARGS[1]") {
-                continue;
-            }
-            let window = lines[i..(i + 3).min(lines.len())].join("\n");
-            if !window.contains("YT_JS_RUNTIME_ARGS[0]") {
-                missing.push(i + 1);
-            }
-        }
-        assert!(
-            missing.is_empty(),
-            "yt-dlp spawn(s) pass extractor args without JS runtimes, at line(s) {missing:?}"
-        );
-        // Canary: a scan that matched nothing would pass forever.
-        assert!(
-            code.matches("YT_EXTRACTOR_ARGS[1]").count() >= 5,
-            "the scan matched too little to be checking anything"
-        );
+        let args = super::js_runtime_args().expect("bundled runtime");
+        assert_eq!(args[0], "--no-js-runtimes");
+        assert!(args[2].starts_with("deno:"));
+        let code = include_str!("download.rs").split("#[cfg(test)]").next().unwrap();
+        assert_eq!(code.matches(".args(runtime_args)").count(), 2, "both updated and bundled factories must use the pinned runtime");
+        assert!(!code.contains("YT_JS_RUNTIME_ARGS["), "per-call PATH runtime overrides are forbidden");
     }
 }
 

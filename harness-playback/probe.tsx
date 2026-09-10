@@ -4,6 +4,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { ProxyPresentationPlayer } from "../src/components/ProxyPresentationPlayer";
 import type { PlayerHandle } from "../src/components/player-handle";
 import type { ResolvedPresentationSource } from "../src/bindings/ResolvedPresentationSource";
+import type { Metadata } from "../src/bindings/Metadata";
+import type { SafariCookieAccess } from "../src/bindings/SafariCookieAccess";
+import type { YtdlpStatus } from "../src/bindings/YtdlpStatus";
 import "../src/styles/app.css";
 
 const origin = "http://127.0.0.1:5197";
@@ -29,11 +32,11 @@ window.fetch = async (input, init) => {
     });
   }
   const response = await originalFetch(input, init);
-  if (!String(input).includes("/fmp4/v1/") || !starve || !response.body) return response;
+  if (!String(input).includes("/fmp4/v1/") || !response.body) return response;
   let delivered = 0;
   const stream = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
     async transform(chunk, controller) {
-      if (delivered >= 1_500_000) {
+      if (starve && delivered >= 1_500_000) {
         await new Promise<void>((_, reject) => {
           const abort = () => reject(new DOMException("Cancelled", "AbortError"));
           if (init?.signal?.aborted) abort(); else init?.signal?.addEventListener("abort", abort, { once: true });
@@ -75,8 +78,26 @@ function App() {
   const [presentation, setPresentation] = useState<ResolvedPresentationSource | null>(null);
   const [status, setStatus] = useState("Opening completed review copy…");
   const [running, setRunning] = useState(false);
+  async function checkAcquisition() {
+    setRunning(true); setStatus("Checking app-launched downloader and Safari access; no permission settings are changed…");
+    try {
+      const access = await invoke<SafariCookieAccess>("safari_fda_status");
+      const backend = await invoke<string>("get_backend_build_id");
+      const engine = await invoke<YtdlpStatus>("ytdlp_version");
+      // The public URL from the reported failure. Only public-first metadata,
+      // never a second media download or an exported browser cookie file.
+      const metadata = await invoke<Metadata>("fetch_metadata", { url: "https://www.youtube.com/watch?v=18NJ_Kt89E4", cookiesBrowser: "safari" });
+      const report = { check: "native public-first acquisition", access, backend, engine,
+        width: metadata.width, height: metadata.height, fps: metadata.fps, duration: metadata.duration };
+      await fetch(`${origin}/result`, { method: "POST", body: JSON.stringify(report) });
+      setStatus(`Safari: ${access} · public metadata loaded · yt-dlp ${engine.version}`);
+    } catch (error) {
+      setStatus(`Acquisition check: ${String(error)}`);
+      await fetch(`${origin}/result`, { method: "POST", body: JSON.stringify({ check: "native acquisition", error: String(error) }) });
+    } finally { setRunning(false); }
+  }
   async function checkRecovery() {
-    setRunning(true); slow = false; starve = true;
+    setRunning(true); slow = true; starve = false;
     const waitUntil = async (condition: () => boolean, timeout: number) => {
       const start = performance.now();
       while (!condition()) { if (performance.now() - start > timeout) throw new Error("Native recovery check timed out"); await sleep(20); }
@@ -86,19 +107,21 @@ function App() {
       setPresentation(source);
       player.current!.beginScrub(); player.current!.scrubTo(43);
       await player.current!.endScrub(43);
-      setStatus("Waiting for a decoded, buffered paused high-quality frame…");
-      await waitUntil(() => !!player.current!.supportsPlaybackRate, 15000);
-      if (player.current!.isPlaying()) throw new Error("Paused promotion started playback");
       const parked = player.current!.getCurrentTime();
       await player.current!.play();
+      if (player.current!.supportsPlaybackRate) throw new Error("Expected local-first playback with delayed quality");
+      setStatus("Local playback running; waiting for synchronized automatic high-resolution upgrade…");
+      await waitUntil(() => !!player.current!.supportsPlaybackRate, 25000);
+      if (!player.current!.isPlaying()) throw new Error("Automatic promotion paused playback");
+      starve = true;
       setStatus("High quality playing; withholding delivery until native waiting fires…");
       const started = performance.now();
-      await waitUntil(() => !player.current!.supportsPlaybackRate && player.current!.isPlaying(), 15000);
+      await waitUntil(() => !player.current!.supportsPlaybackRate && player.current!.isPlaying(), 45000);
       await waitUntil(audioActive, 2000);
-      const report = { check: "native promotion and genuine buffer starvation", parked,
+      const report = { check: "native automatic running promotion and genuine buffer starvation", parked,
         fallbackAfterMs: performance.now() - started, fallbackPosition: player.current!.getCurrentTime(), logs };
       await fetch(`${origin}/result`, { method: "POST", body: JSON.stringify(report) });
-      setStatus("Passed: paused promotion, buffered Play, genuine waiting → local picture and rendered audio.");
+      setStatus("Passed: automatic running promotion, genuine waiting → local picture and rendered audio.");
     } catch (error) {
       const video = document.querySelector("video")!;
       const report = { check: "native recovery", error: String(error), logs,
@@ -148,6 +171,7 @@ function App() {
   return <main style={{ padding: 24 }}><h2>Packaged WKWebView playback test</h2><p>{status}</p>
     <button disabled={!ready || running} onClick={() => void run()}>Run 20 warm-cache resumes</button>
     <button disabled={!ready || running} onClick={() => void checkRecovery()}>Check buffered promotion and starvation</button>
+    <button disabled={running} onClick={() => void checkAcquisition()}>Check public acquisition and Safari access</button>
     <div style={{ position: "relative", width: "100%", height: 540, marginTop: 20 }}>
       <ProxyPresentationPlayer ref={player} proxyPath={config.local} presentation={presentation} initialVolume={.12}
         fps={config.fps} knownDuration={config.duration} scrubAudio={false}

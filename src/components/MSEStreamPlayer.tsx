@@ -3,6 +3,9 @@ import {
 } from "react";
 import { Input, UrlSource, CanvasSink, EncodedPacketSink, ALL_FORMATS } from "mediabunny";
 import { BunnyMark } from "./BunnyMark";
+import { invoke } from "@tauri-apps/api/core";
+import type { StreamFailure } from "../bindings/StreamFailure";
+import { mediaDiagnostic } from "../lib/media-diagnostics";
 import type { PlayerHandle, SeekResult } from "./player-handle";
 import { base64UrlEncode } from "../lib/stream-proxy";
 import { encodedStreamMime, peerStreamMime } from "../lib/codec-strings";
@@ -10,7 +13,7 @@ import { rebuildLogLine } from "../lib/seek-log";
 import { mayHideScrubOverlay, shouldFreezeOutgoingFrame } from "../lib/scrub-freeze";
 import { planFirstAppend } from "../lib/first-append";
 import { confirmDecodedFrame } from "../lib/confirm-decoded-frame";
-import { contiguousBufferAhead } from "../lib/presentation-readiness";
+import { contiguousBufferAhead, contiguousRange, observeDecodedFrame, observedRequiredAudio, type DecodedObservation } from "../lib/presentation-readiness";
 
 /**
  * Streams a web source (YouTube/Vimeo/…) into a NATIVE `<video>` element via
@@ -45,6 +48,8 @@ type Props = {
   filename?: string;
   hasVideo: boolean;
   initialVolume: number; // 0..1
+  initiallyMuted?: boolean;
+  sourceGeneration?: number;
   onTimeUpdate?: (seconds: number) => void;
   onPlayStateChange?: (playing: boolean) => void;
   onReady?: (duration: number) => void;
@@ -96,13 +101,14 @@ type Props = {
 const BUFFER_AHEAD_SECONDS = 30;
 
 export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSEStreamPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onReadinessChange, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec, onDiag, startAtSeconds, disableScrubPreview, rung, onStall, onStreamInfo },
+  { path, filename, hasVideo, initialVolume, initiallyMuted = false, sourceGeneration = 0, onTimeUpdate, onPlayStateChange, onReady, onReadinessChange, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec, onDiag, startAtSeconds, disableScrubPreview, rung, onStall, onStreamInfo },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readyRef = useRef(false);
   const playingRef = useRef(false);
   const confirmedFrameRef = useRef<{ generation: number; seconds: number } | null>(null);
+  const decodedObservationRef = useRef<DecodedObservation | null>(null);
   const readinessChangedRef = useRef(onReadinessChange);
   readinessChangedRef.current = onReadinessChange;
   const [isPlaying, setIsPlaying] = useState(false);
@@ -197,6 +203,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // Absolute-mode rebuilds land here once the buffer covers the request —
   // input-side -ss starts the stream at the keyframe AT-OR-BEFORE it.
   const pendingLandRef = useRef<number | null>(null);
+  // A mount/rebuild already owns this landing. Repeated preparation must wait
+  // for its frame, even before the first fragment has reached SourceBuffer.
+  const pipelineTargetRef = useRef<number | null>(null);
 
   const msRef = useRef<MediaSource | null>(null);
   const sbRef = useRef<SourceBuffer | null>(null);
@@ -226,6 +235,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     target: number;
     timer: number;
     resolve: (result: SeekResult) => void;
+    promise: Promise<SeekResult>;
   } | null>(null);
   const playerHandleRef = useRef<PlayerHandle | null>(null);
   // Shuttle (J-K-L): forward uses native playbackRate (capped 4× — beyond that
@@ -332,13 +342,14 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const armSeek = useCallback((target: number): Promise<SeekResult> => {
     finishSeek("superseded");
     const id = ++seekCommandRef.current;
-    return new Promise<SeekResult>((resolve) => {
-      const timer = window.setTimeout(() => {
-        if (seekCompletionRef.current?.id !== id) return;
-        finishSeek("unavailable", livePosRef.current);
-      }, 20_000);
-      seekCompletionRef.current = { id, target, timer, resolve };
-    });
+    let settle!: (result: SeekResult) => void;
+    const promise = new Promise<SeekResult>((resolve) => { settle = resolve; });
+    const timer = window.setTimeout(() => {
+      if (seekCompletionRef.current?.id !== id) return;
+      finishSeek("unavailable", livePosRef.current);
+    }, 20_000);
+    seekCompletionRef.current = { id, target, timer, resolve: settle, promise };
+    return promise;
   }, [finishSeek]);
 
   const beginScrub = useCallback(() => {
@@ -406,6 +417,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       // it clamp a valid forward seek.
       const total = Math.max(totalDurationRef.current || 0, knownDurationRef.current || 0);
       const target = clampTarget(s);
+      if (seekCompletionRef.current?.target === target) return seekCompletionRef.current.promise;
       const completion = armSeek(target);
       const co = clockOriginRef.current;
       const rel = target - baseTimeRef.current;
@@ -475,6 +487,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       }
 
       // ── Out of buffer → debounce the heavy rebuild ──────────────────
+      if (pipelineTargetRef.current === target
+        && confirmedFrameRef.current?.generation !== genRef.current && !failedRef.current) {
+        pendingLandRef.current = target;
+        return completion;
+      }
       pendingSeekRef.current = target;
       if (rebuildTimerRef.current != null) window.clearTimeout(rebuildTimerRef.current);
       rebuildTimerRef.current = window.setTimeout(() => {
@@ -579,6 +596,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     getPlaybackReadiness: () => {
       const el = videoRef.current;
       const confirmed = confirmedFrameRef.current;
+      const observed = decodedObservationRef.current;
+      const range = el ? contiguousRange(el.buffered, el.currentTime) : undefined;
+      const absolute = (t: number) => baseTimeRef.current + Math.max(0, t - clockOriginRef.current);
       return {
         generation: genRef.current,
         confirmedSeconds: confirmed?.generation === genRef.current ? confirmed.seconds : null,
@@ -587,6 +607,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         seeking: !el || el.seeking || seekingRef.current || !!seekCompletionRef.current,
         failed: failedRef.current || !!el?.error,
         hasFutureData: !!el && el.readyState >= 3,
+        hasRequiredTracks: observedRequiredAudio(el, !!audioCodecRef.current || !!audioStreamUrl),
+        sampledAtMs: observed?.generation === genRef.current ? observed.sampledAtMs : undefined,
+        advancingFrames: !el?.paused && observed?.generation === genRef.current ? observed.advancingFrames : 0,
+        bufferedStartSeconds: range ? absolute(range[0]) : undefined,
+        bufferedEndSeconds: range ? absolute(range[1]) : undefined,
       };
     },
     isPlaying: () => playingRef.current,
@@ -704,7 +729,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     };
     playerHandleRef.current = handle;
     return handle;
-  }, [onError, armSeek, beginScrub, clampTarget, finishSeek, scrubTo]);
+  }, [onError, armSeek, beginScrub, clampTarget, finishSeek, scrubTo, audioStreamUrl]);
 
   // ─── Pipeline lifecycle ─────────────────────────────────────────────
   useEffect(() => {
@@ -983,6 +1008,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     teardownRef.current = teardownPipeline;
 
     const buildPipeline = (fromSeconds: number) => {
+      pipelineTargetRef.current = fromSeconds;
       // Review fix: seek rebuilds had NO stall rescue (the app-level 15s
       // watchdog disarms after the first pipeline opens). If this pipeline
       // produces no data within 20s of its fetch starting (wedged epoch
@@ -1212,12 +1238,18 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             // The exact sub-second target is unaffected: it rides in
             // pendingLand and is landed by planFirstAppend's seek, not by -ss.
             const startArg = Math.floor(from);
+            // Diagnostic identity only; cancellation is owned by fetchAbortRef,
+            // not the backend JobRegistry used for file-writing jobs.
+            const requestId = crypto.randomUUID();
+            const readFailure = () => invoke<StreamFailure | null>("get_stream_failure", { requestId }).catch(() => null);
+            const describeFailure = (failure: StreamFailure) => `[${failure.kind}] ${failure.message} (request ${requestId})`;
             try {
               // path is the RAW proxy URL …/v1/<b64>; the fMP4 route is the
               // same b64 under /fmp4/v1/ with an optional ?start= seek, plus an
               // optional ?audio=<b64> second input for DASH-split sources so the
               // proxy merges video+audio into one fMP4 (full audio, no download).
               const qs: string[] = [];
+              qs.push(`request=${requestId}`);
               if (startArg > 0) qs.push(`start=${startArg}`);
               if (audioStreamUrl) qs.push(`audio=${base64UrlEncode(audioStreamUrl)}`);
               // Tier B quality rung. Omitted entirely for a web source and for
@@ -1228,6 +1260,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
                 + (qs.length ? `?${qs.join("&")}` : "");
               const controller = new AbortController();
               fetchAbortRef.current = controller;
+              onDiagRef.current?.("info", `High-quality fetch source=${sourceGeneration} pipeline=${g} request=${requestId} start=${startArg}s`);
               const resp = await fetch(fmp4Url, { signal: controller.signal });
               if (disposed || g !== genRef.current) { try { await resp.body?.cancel(); } catch { /* ignore */ } return; }
               if (!resp.ok || !resp.body) { fail(`fMP4 stream HTTP ${resp.status}`); return; }
@@ -1280,7 +1313,18 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
                 // only BEFORE await let that old EOF end the NEW MediaSource
                 // during a seek, or let an old chunk enter its append queue.
                 if (disposed || g !== genRef.current) return;
-                if (done) { endedRef.current = true; pump(); break; }
+                if (done) {
+                  const failure = await readFailure();
+                  if (disposed || g !== genRef.current) return;
+                  if (failure && failure.kind !== "cancelled") { fail(describeFailure(failure)); return; }
+                  const ranges = videoRef.current?.buffered;
+                  const tail = ranges?.length ? ranges.end(ranges.length - 1) : 0;
+                  const sourceTail = baseTimeRef.current + Math.max(0, tail - clockOriginRef.current);
+                  if (total > 0 && sourceTail < total - 2) {
+                    fail(`[premature_end] High-quality stream ended before its media duration (request ${requestId})`); return;
+                  }
+                  endedRef.current = true; pump(); break;
+                }
                 if (value && value.byteLength) {
                   // Resolve fires on appendBuffer's updateend; pump won't
                   // append while buffer-ahead is capped → this await stalls
@@ -1294,7 +1338,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
               }
             } catch (err) {
               if (disposed || g !== genRef.current) return;
-              fail(`fMP4 stream failed: ${err instanceof Error ? err.message : String(err)}`);
+              const failure = await readFailure();
+              if (disposed || g !== genRef.current || failure?.kind === "cancelled") return;
+              fail(failure ? describeFailure(failure) : `[local_proxy] fMP4 stream failed: ${mediaDiagnostic(err instanceof Error ? err.message : String(err))} (request ${requestId})`);
             }
           };
         } catch (err) {
@@ -1387,16 +1433,21 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       if (!seekingRef.current) {
         const at = corrected(el.currentTime);
         livePosRef.current = at;
-        if (el.readyState >= 2 && !el.seeking) confirmedFrameRef.current = { generation: genRef.current, seconds: at };
         onTimeUpdateRef.current?.(at);
       }
     };
     // Drive the playhead from currentTime every frame via
     // requestVideoFrameCallback (smooth, ~display refresh); rAF is the fallback
     // when rVFC is throttled/occluded.
-    const onFrame = () => {
+    const onFrame = (now: number, metadata: { mediaTime?: number }) => {
       rvfcId = 0;
       if (!playingRef.current) return;
+      if (!el.seeking && !seekingRef.current && metadata.mediaTime != null) {
+        const at = corrected(metadata.mediaTime);
+        confirmedFrameRef.current = { generation: genRef.current, seconds: at };
+        decodedObservationRef.current = observeDecodedFrame(decodedObservationRef.current, genRef.current, at, now);
+        readinessChangedRef.current?.();
+      }
       reportTime();
       rvfcId = rvfc.requestVideoFrameCallback(onFrame);
     };
@@ -1569,7 +1620,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     <div className="cp-local-media" onClick={onSurfaceClick}>
       {hasVideo ? (
         <>
-          <video ref={(el) => { videoRef.current = el; }} playsInline className="cp-local-video" />
+          <video ref={(el) => { videoRef.current = el; }} muted={initiallyMuted} playsInline className="cp-local-video" />
           {/* Frame-accurate scrub preview overlay (r68) — WebCodecs-decoded
               frame at the cursor, shown only while scrubbing. */}
           <canvas
@@ -1580,7 +1631,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         </>
       ) : (
         <>
-          <video ref={(el) => { videoRef.current = el; }} style={{ display: "none" }} />
+          <video ref={(el) => { videoRef.current = el; }} muted={initiallyMuted} style={{ display: "none" }} />
           <div className="cp-audio-card">
             <div className={"cp-audio-icon" + (isPlaying ? " playing" : "")}>
               <BunnyMark size={52} />

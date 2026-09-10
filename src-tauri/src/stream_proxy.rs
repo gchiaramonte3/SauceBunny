@@ -1026,6 +1026,9 @@ fn decode_after(prefix: &str, url_path: &str) -> Option<String> {
 /// for a file), never HLS handling (a filename containing "m3u8" must not
 /// trigger the ADTS filter), and logs never print the path.
 fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: Option<String>, local: bool) -> std::io::Result<()> {
+    let diagnostic_id = crate::stream_failure::request_id(request.url());
+    let expires_at = std::iter::once(upstream.as_str()).chain(audio.as_deref())
+        .filter_map(crate::commands::download::parse_url_expiry).min();
     // Each remux is a whole ffmpeg process; MSE teardown/seek churn can pile
     // them up faster than they die. Beyond the cap the player's onMediaError
     // path takes over (download fallback), same as any other stream failure.
@@ -1141,7 +1144,7 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
         .arg("-f").arg("mp4")
         .arg("pipe:1")
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
+        .stderr(std::process::Stdio::piped());
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -1215,15 +1218,12 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
     let response = tiny_http::Response::new(
         tiny_http::StatusCode(200),
         headers,
-        stdout,
+        crate::stream_failure::RemuxReader::new(child, stdout, diagnostic_id, expires_at),
         None,
         None,
     );
-    let result = request.respond(response);
-    // Client done or disconnected → tear ffmpeg down so it can't linger.
-    let _ = child.kill();
-    let _ = child.wait();
-    result
+    // Reader teardown owns cancellation and preserves bounded stderr on EOF.
+    request.respond(response)
 }
 
 // ── Peer media (Tier B): registered local files ─────────────────────

@@ -51,6 +51,7 @@
     ],
     "externalBin": [
       "binaries/yt-dlp",
+      "binaries/deno",
       "binaries/ffmpeg",
       "binaries/ffprobe",
       "binaries/whisper-cli",
@@ -63,12 +64,13 @@
       "../LICENSE": "licenses/LICENSE",
       "../THIRD-PARTY-LICENSES.md": "licenses/THIRD-PARTY-LICENSES.md",
       "../licenses/GPLv3.txt": "licenses/GPLv3.txt",
+      "../licenses/DENO-LICENSE.md": "licenses/DENO-LICENSE.md",
       "icons/Assets.car": "."
     },
     "macOS": {
       "minimumSystemVersion": "14.0",
       "entitlements": "entitlements.plist",
-      "bundleVersion": "2026090905"
+      "bundleVersion": "2026091002"
     },
     "category": "public.app-category.video"
   },

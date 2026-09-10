@@ -22,6 +22,8 @@ have() { [ -x "src-tauri/binaries/$1-aarch64-apple-darwin" ]; }
 step "yt-dlp"
 if have yt-dlp; then echo "already present — skipping (refresh: npm run refresh:sidecars)"; else bash scripts/refresh-sidecars.sh; fi
 
+step "Deno"
+if have deno; then echo "Deno already present"; else bash scripts/fetch-deno.sh; fi
 step "ffmpeg"
 if have ffmpeg; then echo "already present — skipping (refresh: npm run refresh:ffmpeg)"; else bash scripts/fetch-ffmpeg.sh; fi
 

@@ -5,6 +5,8 @@ mod error;
 #[cfg(test)]
 mod nightly;
 mod stream_proxy;
+mod stream_failure;
+mod acquisition_gate;
 mod premiere_bridge;
 pub use error::AppError;
 
@@ -311,6 +313,7 @@ pub fn run() {
             commands::forget_cached_web,
             commands::get_backend_build_id,
             commands::get_stream_proxy_base,
+            stream_failure::get_stream_failure,
             commands::peer_media_register,
             commands::peer_media_register_remote,
             commands::peer_media_unregister,

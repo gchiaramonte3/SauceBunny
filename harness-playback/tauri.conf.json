@@ -6,5 +6,5 @@
     "frontendDist": "/private/tmp/sauce-playback-harness-dist"
   },
   "app": { "windows": [{ "label": "main", "title": "Playback-first native test", "width": 1120, "height": 760, "resizable": true }] },
-  "bundle": { "targets": ["app"] }
+  "bundle": { "targets": ["app"], "macOS": { "infoPlist": "../harness-playback/Info.plist" } }
 }

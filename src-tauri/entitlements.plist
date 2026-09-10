@@ -24,7 +24,8 @@
         kernels. Metal shaders are technically JIT-compiled at first
         use; without allow-jit, the hardened runtime blocks the
         writable-executable memory pages Metal needs.
-        Also covers WKWebView's JavaScript JIT.
+        Also covers the bundled Deno/V8 runtime used by yt-dlp's JavaScript
+        challenge solver, and WKWebView's JavaScript JIT.
     -->
     <key>com.apple.security.cs.allow-jit</key>
     <true/>

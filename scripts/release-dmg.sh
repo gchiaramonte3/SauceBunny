@@ -26,6 +26,9 @@
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Distributed builds require Developer ID and notarization credentials. The
+# internal build:dmg path may use Apple Development, but is not a release.
+bash scripts/check-notarization-ready.sh
 
 WANT_VERSION="${1:-}"
 
