@@ -1,5 +1,5 @@
-/** Room metadata sharing was held at the implementation permission gate.
- * Enable only after approval to send project/sequence names and identifiers
- * to active room participants. Local pairing and the diagnostic proof work
- * without this; no pairing secret or project path belongs on the room wire. */
-export const PREMIERE_ROOM_MARKERS_ENABLED: boolean = false;
+/** Approved September 10: selected project/sequence names and identifiers
+ * may reach active session participants. Pairing codes, project paths and
+ * native diagnostics remain private. Explicit binding/marker intent and
+ * editor confirmation are still required; this never enables placement. */
+export const PREMIERE_ROOM_MARKERS_ENABLED: boolean = true;

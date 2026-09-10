@@ -610,6 +610,32 @@ impl HostShared {
         }
         Ok(fallback)
     }
+    fn welcome_message(&self, msg: SessionMsg) -> Result<SessionMsg, crate::AppError> {
+        match msg {
+            SessionMsg::LoadSource { source_kind, url, fingerprint, title, duration, review_key, .. } => {
+                self.welcome_source(SessionMsg::LoadSource { from: "m0".into(), source_kind, url, fingerprint, title, duration, review_key, live_state: None })
+            }
+            SessionMsg::Sharing { from, on } => Ok(SessionMsg::Sharing { from, on }),
+            SessionMsg::Reaction { from, emote, on } => Ok(SessionMsg::Reaction { from, emote, on }),
+            SessionMsg::ReviewDoc { doc } => {
+                if let Some(SessionMsg::LoadSource { review_key, .. }) = self.program_source_msg() {
+                    let document: serde_json::Value = serde_json::from_str(&doc)?;
+                    if document.get("sourceKey").and_then(|v| v.as_str()) != Some(review_key.as_str()) {
+                        return Err(crate::AppError::invalid("Review source changed while welcoming this guest"));
+                    }
+                }
+                Ok(SessionMsg::ReviewDoc { doc })
+            }
+            // The frontend's welcome follows the saved review with the current
+            // Premiere binding and receipts. Like broadcast review operations,
+            // these are opaque here, host-stamped, and scope-checked by the
+            // recipient. Rejecting them stranded late joins/rejoins until the
+            // host happened to change its binding or ledger again.
+            SessionMsg::ReviewOp { op, .. } => Ok(SessionMsg::ReviewOp { from: "m0".into(), op }),
+            other @ SessionMsg::OfferFile { .. } => Ok(other),
+            _ => Err(crate::AppError::invalid("Not a welcome message")),
+        }
+    }
     fn program_for_peer(&self, id: &str) -> Option<Arc<crate::commands::ndi::ProgramPublication>> {
         if self.presenter.load(Ordering::Acquire) != 0 { return None; }
         self.published_program.lock().ok()?.as_ref().filter(|p|
@@ -853,7 +879,7 @@ pub async fn session_join(
     let peer_presenter: Arc<Mutex<String>> = Arc::new(Mutex::new("m0".into()));
     let peer_presenter_epoch: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let read_task = tokio::spawn(peer_read_loop(
-        app.clone(), recv,
+        app.clone(), recv, conn.clone(),
         PeerShared {
             roster: roster.clone(),
             self_id: self_id.clone(),
@@ -1086,8 +1112,7 @@ pub async fn session_broadcast(
     Ok(())
 }
 
-/// PEER only: send `msg` up to the host (which relays review ops / presence to
-/// everyone else). Errors if not a peer.
+/// HOST only: send an ordered welcome item to one connection generation.
 #[tauri::command]
 pub async fn session_send_to(
     state: State<'_, SessionManager>,
@@ -1099,24 +1124,7 @@ pub async fn session_send_to(
     let Session::Host { shared, .. } = &inner.session else {
         return Err(crate::AppError::invalid("Only the host can welcome a guest"));
     };
-    let msg = match msg {
-        SessionMsg::LoadSource { source_kind, url, fingerprint, title, duration, review_key, .. } => {
-            shared.welcome_source(SessionMsg::LoadSource { from: "m0".into(), source_kind, url, fingerprint, title, duration, review_key, live_state:None })?
-        },
-        SessionMsg::Sharing { from, on } => SessionMsg::Sharing { from, on },
-        SessionMsg::Reaction { from, emote, on } => SessionMsg::Reaction { from, emote, on },
-        SessionMsg::ReviewDoc {doc} => {
-            if let Some(SessionMsg::LoadSource {review_key,..})=shared.program_source_msg() {
-                let document:serde_json::Value=serde_json::from_str(&doc)?;
-                if document.get("sourceKey").and_then(|v|v.as_str())!=Some(review_key.as_str()) {
-                    return Err(crate::AppError::invalid("Review source changed while welcoming this guest"));
-                }
-            }
-            SessionMsg::ReviewDoc {doc}
-        },
-        other @ SessionMsg::OfferFile { .. } => other,
-        _ => return Err(crate::AppError::invalid("Not a welcome message")),
-    };
+    let msg = shared.welcome_message(msg)?;
     let mut line = serde_json::to_string(&msg)?;
     line.push('\n');
     if line.len() > MAX_MSG_BYTES { return Err(crate::AppError::invalid("Session snapshot too large")); }
@@ -2099,6 +2107,7 @@ struct PeerShared {
 async fn peer_read_loop(
     app: AppHandle,
     recv: iroh::endpoint::RecvStream,
+    conn: iroh::endpoint::Connection,
     shared: PeerShared,
     generation: u64,
 ) {
@@ -2122,11 +2131,20 @@ async fn peer_read_loop(
                 // reader can't skip past an unbounded line, so the session
                 // ends the same way a closed stream does (it used to buffer
                 // the whole line before checking).
-                session_log(&app, "warn", format!("Session stream violated the protocol: {e}."));
+                let admission = match conn.close_reason() {
+                    Some(iroh::endpoint::ConnectionError::ApplicationClosed(close))
+                        if close.error_code == 1u32.into() => admission_refusal_message(&close.reason),
+                    _ => None,
+                };
+                if let Some(message) = admission {
+                    session_log(&app, "warn", message.to_string());
+                } else {
+                    session_log(&app, "warn", format!("Session stream failed: {e}."));
+                }
                 tokio::spawn(fail_peer_to_off(
                     app,
                     generation,
-                    "The session stream broke".to_string(),
+                    admission.unwrap_or("The session stream broke").to_string(),
                 ));
                 return;
             }
@@ -2192,6 +2210,30 @@ async fn peer_read_loop(
                 }
             }
         }
+    }
+}
+
+/// A host's close text is untrusted. Surface only the fixed admission
+/// reasons our protocol sends, never arbitrary remote text or credentials.
+fn admission_refusal_message(reason: &[u8]) -> Option<&'static str> {
+    match reason {
+        b"this session is invite only" => Some("This session is invitation-only. Ask the host for your review link, then paste it into Join."),
+        b"that link is not valid" => Some("This review link is not valid. Ask the host for a new invitation."),
+        b"that link was withdrawn" => Some("The host withdrew this review link. Ask for a new invitation."),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod admission_message_tests {
+    use super::admission_refusal_message;
+    #[test]
+    fn exposes_only_known_refusals_not_untrusted_close_text() {
+        for reason in ["this session is invite only", "that link is not valid", "that link was withdrawn"] {
+            assert!(admission_refusal_message(reason.as_bytes()).is_some());
+        }
+        assert!(admission_refusal_message(b"private arbitrary text").is_none());
+        assert!(admission_refusal_message(&[0xff; 2000]).is_none());
     }
 }
 
@@ -2917,6 +2959,19 @@ pub fn session_cancel_fetch(blake3_hex: String) -> Result<(), crate::AppError> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn welcome_delivers_premiere_context_and_receipts_as_host() {
+        let shared = HostShared::default();
+        for kind in ["premiere-context", "premiere-receipts"] {
+            let op = serde_json::json!({ "t": kind, "protocol": 1, "sessionId": "room" }).to_string();
+            let message = shared.welcome_message(SessionMsg::ReviewOp { from: "m7".into(), op: op.clone() }).unwrap();
+            assert!(matches!(message, SessionMsg::ReviewOp { from, op: body } if from == "m0" && body == op));
+        }
+        // Welcoming never grants a new presenter or admits guest control traffic.
+        assert!(shared.welcome_message(SessionMsg::Presenter { member: "m7".into(), epoch: 7 }).is_err());
+        assert!(shared.welcome_message(SessionMsg::Bye).is_err());
+    }
 
     #[test]
     fn background_copies_cannot_consume_program_reader_capacity() {

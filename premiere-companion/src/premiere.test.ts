@@ -58,6 +58,19 @@ describe("Premiere sequence marker safety", () => {
     expect(f.actions[0].comments).toContain(`[Sauce Bunny note:${"a".repeat(64)}]`);
     expect(f.sequence.setPlayerPosition).not.toHaveBeenCalled(); expect(f.project.setActiveSequence).not.toHaveBeenCalled(); expect(f.project.save).not.toHaveBeenCalled();
   });
+  it("awaits UXP target lookups before reading their native identity", async () => {
+    const f = fixture(); const binding = await f.adapter.bindActive();
+    // UXP can return a promise despite the 26.3 declaration's synchronous
+    // return type. A Promise has no guid; capture must not dereference it.
+    f.api.Project.getProject.mockImplementation(() => Promise.resolve(f.project) as unknown as typeof f.project);
+    f.project.getSequence.mockImplementation(() => Promise.resolve(f.sequence) as unknown as Sequence);
+    const placement = await f.adapter.capturePlacement(binding);
+    expect(placement.sequenceTicks).toBe(position);
+    expect(await f.adapter.insertConfirmed(note(binding), placement)).toEqual({ outcome: "found", markerGuid: "marker-1" });
+    expect(f.actions).toHaveLength(1);
+    f.nativeMarkers.splice(0);
+    expect(await f.adapter.reconcile(note(binding))).toEqual({ outcome: "undone" });
+  });
   it("deduplicates a retry and a lost acknowledgement after plugin restart", async () => {
     const f = fixture(); const binding = await f.adapter.bindActive(); const placement = await f.adapter.capturePlacement(binding);
     await f.adapter.insertConfirmed(note(binding), placement);
@@ -87,6 +100,15 @@ describe("Premiere sequence marker safety", () => {
     const f = fixture(); const binding = await f.adapter.bindActive();
     f.project.getActiveSequence.mockResolvedValue({ ...f.sequence, guid: guid("other") } as unknown as Sequence);
     await expect(f.adapter.capturePlacement(binding)).rejects.toThrow("Activate and park");
+  });
+  it("revalidates Save As while an asynchronous target lookup is pending", async () => {
+    const f = fixture(); const binding = await f.adapter.bindActive();
+    f.project.getSequence.mockImplementation(() => Promise.resolve().then(() => {
+      f.project.path = "/other/Save As.prproj";
+      return f.sequence;
+    }) as unknown as Sequence);
+    await expect(f.adapter.capturePlacement(binding)).rejects.toThrow("Save As");
+    expect(f.project.executeTransaction).not.toHaveBeenCalled();
   });
   it("preserves the captured position after a long decision delay and later playhead movement", async () => {
     const f = fixture(); const binding = await f.adapter.bindActive(); const placement = await f.adapter.capturePlacement(binding);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { reviewInviteMessage } from "../lib/review-link";
@@ -49,7 +49,9 @@ export function ReviewGrants({ sessionCode }: {
   }, []);
   const [grants, setGrants] = useState<GrantSummary[] | null>(null);
   const [label, setLabel] = useState("");
-  const [invitedOnly, setInvitedOnly] = useState(false);
+  const [invitedOnly, setInvitedOnly] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [justMade, setJustMade] = useState<{ label: string; secret: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -71,6 +73,8 @@ export function ReviewGrants({ sessionCode }: {
   useEffect(() => { void refresh(); }, [refresh]);
 
   const create = async () => {
+    if (busyRef.current || !label.trim()) return;
+    busyRef.current = true; setBusy(true);
     setError(null);
     try {
       const made = await invoke<NewGrant>("create_review_grant", { label });
@@ -78,6 +82,7 @@ export function ReviewGrants({ sessionCode }: {
       setLabel("");
       await refresh();
     } catch (e) { setError(formatError(e)); }
+    finally { busyRef.current = false; setBusy(false); }
   };
 
   const [removed, setRemoved] = useState<string | null>(null);
@@ -94,7 +99,7 @@ export function ReviewGrants({ sessionCode }: {
     } catch (e) { setError(formatError(e)); }
   };
 
-  const copyLink = async (secret: string) => {
+  const copyLink = async (secret?: string) => {
     if (!code) return;
     try {
       await navigator.clipboard.writeText(reviewInviteMessage(code, secret));
@@ -126,8 +131,8 @@ export function ReviewGrants({ sessionCode }: {
             onKeyDown={(e) => { if (e.key === "Enter" && label.trim()) void create(); }}
           />
         </label>
-        <button type="button" className="btn btn-ghost" disabled={!label.trim()} onClick={() => void create()}>
-          Make a link
+        <button type="button" className="btn btn-ghost" disabled={!label.trim() || busy} onClick={() => void create()}>
+          {busy ? "Making link…" : "Make a link"}
         </button>
       </div>
 
@@ -153,6 +158,8 @@ export function ReviewGrants({ sessionCode }: {
 
       {error && <p className="cp-grants-error" role="alert">{error}</p>}
       {removed && <p className="cp-grants-made-line" role="status">{removed}</p>}
+      {invitedOnly === false && sessionCode && <button type="button" className="btn btn-ghost"
+        disabled={!code} onClick={() => void copyLink()}>Copy open join link</button>}
 
       {grants && grants.length > 0 && (
         <ul className="cp-grants-list">
@@ -181,11 +188,17 @@ export function ReviewGrants({ sessionCode }: {
       <label className="cp-grants-strict">
         <input
           type="checkbox"
-          checked={invitedOnly}
+          checked={invitedOnly === true}
+          disabled={invitedOnly === null || busy}
           onChange={(e) => {
+            if (busyRef.current) return;
             const on = e.target.checked;
-            setInvitedOnly(on);
-            void invoke("set_review_invited_only", { on }).catch((err) => setError(formatError(err)));
+            busyRef.current = true; setBusy(true); setError(null);
+            // The checkbox reports the confirmed policy, never a failed
+            // optimistic change that could misrepresent room access.
+            void invoke("set_review_invited_only", { on }).then(() => setInvitedOnly(on))
+              .catch((err) => setError(formatError(err)))
+              .finally(() => { busyRef.current = false; setBusy(false); });
           }}
         />
         <span>

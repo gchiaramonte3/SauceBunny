@@ -1,3 +1,4 @@
+import { RoomAccessDialog } from "./components/RoomAccessDialog";
 import {
   useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"; import { invoke } from "@tauri-apps/api/core"; import { notifyFramesChanged } from "./lib/frames"; import { getVersion } from "@tauri-apps/api/app"; import { listen } from "@tauri-apps/api/event"; import { save as saveDialog } from "@tauri-apps/plugin-dialog"; import {   isPermissionGranted, requestPermission, sendNotification, } from "@tauri-apps/plugin-notification"; import { Toolbar } from "./components/Toolbar"; import { NavRail } from "./components/NavRail";  import { LibraryView } from "./components/LibraryView"; import { LibraryBrowser } from "./components/LibraryBrowser"; import { useTranscriptListeners } from "./hooks/use-transcript-listeners"; import { useDiarizerPrepare } from "./hooks/use-diarizer-prepare"; import { useLibraryScan } from "./hooks/use-library-scan"; import { Sidebar } from "./components/Sidebar"; import { PeoplePanel } from "./components/PeoplePanel"; import { ReactionLayer } from "./components/ReactionLayer";
 import { PeerStageVideo } from "./components/PeerStageVideo"; import { MediaSpikePanel } from "./components/MediaSpikePanel"; import { PeerStreamSpike } from "./components/PeerStreamSpike"; import { CoReviewLobby } from "./components/CoReviewLobby"; import { Monitor, type AspectId } from "./components/Monitor"; import type { Notif } from "./components/NotificationBell"; import type { ToastKind } from "./components/CanvasToast"; import { playSuccess, playError, playInfo } from "./lib/sound"; import { Transport } from "./components/Transport"; import { Timeline } from "./components/Timeline"; import { ViewOptions } from "./components/ViewOptions"; import { LogsPanel } from "./components/LogsPanel"; import { RoomControlBar } from "./components/RoomControlBar"; import { ReviewStatusChip } from "./components/ReviewStatusChip"; import { useMediaCapture, subscribeCaptureError, setCaptureLogSink } from "./hooks/use-media-capture"; import { SettingsModal, type Defaults } from "./components/SettingsModal"; import { YouTubeAuthModal } from "./components/YouTubeAuthModal"; import type { PlayerHandle } from "./components/player-handle"; import type {   AppStatus, ClientLog, ExportOpts, LocalFileMeta, Metadata, QueuedClip, RecentClip, SourceKind, WhisperModel, ReviewRangeDraft, } from "./types"; import { isQueuedClip } from "./types"; import { asLogTag } from "./types"; import { formatError } from "./lib/error-format"; import { fmtElapsed, stageLabel } from "./lib/elapsed"; import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase"; import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek } from "./lib/playhead-store"; import { usePanelBus } from "./hooks/use-panel-bus"; import { useStreamRung } from "./hooks/use-stream-rung"; import type { YtdlpStatus } from "./bindings/YtdlpStatus"; import { clipTranscriptPath, type ActiveTranscript } from "./lib/transcript-owner"; import { useTransport } from "./hooks/use-transport"; import { useSourceMarks } from "./hooks/use-source-marks"; import { useTranscriptJobs } from "./hooks/use-transcript-jobs"; import { useFetchSource } from "./hooks/use-fetch-source"; import { useLocalSource } from "./hooks/use-local-source"; import { useWebPlayback } from "./hooks/use-web-playback"; import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type SessionSource } from "./hooks/use-co-review"; import { QueueDrawer } from "./components/QueueDrawer"; import { TranscriptReader } from "./components/TranscriptReader"; import { TranscriptViewer } from "./components/TranscriptViewer"; import { ReaderPlayerStage, type ReaderSource } from "./components/ReaderPlayerStage"; import { useReaderMarkers } from "./hooks/use-reader-markers"; import { ReaderAnalysis } from "./components/ReaderAnalysis"; import { CommandPalette } from "./components/CommandPalette"; import { ShortcutSheet } from "./components/ShortcutSheet"; import { DropTarget } from "./components/DropTarget"; import { WelcomeScreen } from "./components/WelcomeScreen"; import { PermissionsOnboarding } from "./components/PermissionsOnboarding"; import { RoomSourceBar } from "./components/RoomSourceBar"; import { LiveDrawLayer } from "./components/LiveDrawLayer"; import { AnnotationOverlay } from "./components/AnnotationOverlay";
@@ -647,6 +648,7 @@ export default function App() {
   const [ndiRefreshRequest,setNdiRefreshRequest] = useState(0);
   const [previewSelected,setPreviewSelected] = useState(false);
   const [reviewLobbyOpen,setReviewLobbyOpen] = useState(false);
+  const [roomAccessOpen,setRoomAccessOpen] = useState(false);
   const openPremiere = useCallback(() => {
     setReviewLobbyOpen(false);
     setPreviewSelected(true); setNdiPanelOpen(true);
@@ -3514,7 +3516,7 @@ export default function App() {
   // the empty state. A file travels as its fingerprint (content identity), not
   // as a host-local path the peer could never open.
   const sessionSource = useMemo<SessionSource>(() => {
-    if (ndiRoomSource) return { kind:"ndi",url:ndiRoomSource.id,fingerprint:null,title:ndiRoomSource.name,duration:null,reviewKey:ndiRoomSource.reviewKey };
+    if (ndiRoomSource) return { kind:"ndi",url:ndiRoomSource.id,fingerprint:null,title:ndiRoomSource.name,duration:null,reviewKey:ndiRoomSource.reviewKey,liveState:ndiRoomSource.state };
     if (!metadata) {
       return { kind: "none", url: null, fingerprint: null, title: null, duration: null, reviewKey: "" };
     }
@@ -3796,6 +3798,7 @@ export default function App() {
     stunUrl: defaults.stunUrl,
     appendLog,
   });
+  useEffect(() => { setRoomAccessOpen(false); }, [coSession.role, coSession.code]);
 
   /* A clicked review link takes you to the lobby, where the code is already in
      the field and Join is one press away.
@@ -4780,10 +4783,10 @@ export default function App() {
                 onMakePresenter={makePresenter}
                 /* Your own tile is also your device control - same capture
                    singleton the room bar drives, so the two stay in step. */
-                selfCamOff={capture.choice.cameraOff}
-                selfMicMuted={capture.choice.micMuted}
-                onToggleCam={() => capture.setEnabled("video", capture.choice.cameraOff)}
-                onToggleMic={() => capture.setEnabled("audio", capture.choice.micMuted)}
+                selfCamOff={!capture.cameraOn}
+                selfMicMuted={!capture.micOn}
+                onToggleCam={() => capture.setEnabled("video", !capture.cameraOn)}
+                onToggleMic={() => capture.setEnabled("audio", !capture.micOn)}
               />
               <Sidebar
                 reviewStatus={reviewStatus}
@@ -4926,9 +4929,10 @@ export default function App() {
                         <button
                           type="button"
                           className="btn btn-ghost btn-compact cp-room-code"
-                          onClick={() => { if (coSession.code) void navigator.clipboard.writeText(coSession.code).then(() => pushNotification("success", "Join code copied", "")); }}
+                          aria-haspopup="dialog"
+                          onClick={() => setRoomAccessOpen(true)}
                         >
-                          Copy join code
+                          Invite…
                         </button>
                       )}
                       <button
@@ -5372,10 +5376,10 @@ export default function App() {
                     onPlaybackRateChange={handlePlaybackRateChange}
                     roomControls={roomActive ? (
                       <RoomControlBar
-                        micOn={!capture.choice.micMuted}
-                        camOn={!capture.choice.cameraOff}
-                        onToggleMic={() => capture.setEnabled("audio", capture.choice.micMuted)}
-                        onToggleCam={() => capture.setEnabled("video", capture.choice.cameraOff)}
+                        micOn={capture.micOn}
+                        camOn={capture.cameraOn}
+                        onToggleMic={() => capture.setEnabled("audio", !capture.micOn)}
+                        onToggleCam={() => capture.setEnabled("video", !capture.cameraOn)}
                         shareState={shareState}
                         onStartShare={startShare}
                         onStopShare={stopShare}
@@ -5464,10 +5468,10 @@ export default function App() {
                       presenter={coSession.presenter}
                       canGrantPresenter={coSession.role === "host"}
                       onMakePresenter={makePresenter}
-                      selfCamOff={capture.choice.cameraOff}
-                      selfMicMuted={capture.choice.micMuted}
-                      onToggleCam={() => capture.setEnabled("video", capture.choice.cameraOff)}
-                      onToggleMic={() => capture.setEnabled("audio", capture.choice.micMuted)}
+                      selfCamOff={!capture.cameraOn}
+                      selfMicMuted={!capture.micOn}
+                      onToggleCam={() => capture.setEnabled("video", !capture.cameraOn)}
+                      onToggleMic={() => capture.setEnabled("audio", !capture.micOn)}
                       remoteStreams={meshStreams}
                       peerStates={meshStates}
                       mutedForMe={meshMutedForMe}
@@ -5701,6 +5705,8 @@ export default function App() {
       </div>
 
 
+      <RoomAccessDialog open={roomAccessOpen && coSession.role === "host"}
+        sessionCode={coSession.role === "host" ? coSession.code : null} onClose={() => setRoomAccessOpen(false)} />
       <SettingsModal
         open={settingsOpen}
         ndiTelemetry={privateInspectionVisible ? ndiInput.previewState : ndiInput.state}

@@ -58,11 +58,13 @@ export function PremiereSetup({ telemetry }: { telemetry?: NdiTelemetry }) {
   const check = useCallback(async () => {
     if (pending.current) return;
     const turn = ++generation.current; pending.current = true;
-    setBusy(true); setError(null);
+    // A refresh supersedes the previous observation. If it fails, neither a
+    // stale "found" nor a stale "not found" result describes this check.
+    setBusy(true); setError(null); setPreflight(null);
     try {
       const result = await invoke<NdiPreflightResult>("ndi_preflight");
       if (turn === generation.current) setPreflight(result);
-    } catch (cause) { if (turn === generation.current) setError(formatError(cause)); }
+    } catch (cause) { if (turn === generation.current) setError(`Could not check Premiere setup. Try Check again. ${formatError(cause)}`); }
     finally { if (turn === generation.current) { pending.current = false; setBusy(false); } }
   }, []);
   const cancelChecks = useCallback(() => { generation.current++; pending.current = false; }, []);
@@ -79,12 +81,12 @@ export function PremiereSetup({ telemetry }: { telemetry?: NdiTelemetry }) {
       <div className="k">Premiere output plugin
         <span className="desc" role="status" aria-label="NDI installation">{busy ? "Checking this Mac…" : preflight?.pluginInstalled ? "Premiere output plugin found" : preflight ? "Premiere output plugin not found" : "Installation status unavailable"}</span>
       </div>
-      <div className="v"><button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void check()}>Check again</button></div>
+      <div className="v"><button type="button" className="btn btn-ghost cp-premiere-recheck" aria-disabled={busy} aria-busy={busy} onClick={() => void check()}>Check again</button></div>
     </div>
     {preflight?.pluginInstalled && <p className="cp-settings-note">The plugin is installed. Enable its output in Premiere, then choose the source in Sauce Bunny. Installation alone does not confirm a working picture.</p>}
     {preflight && !preflight.bridgeCompiled && <p role="alert">This Sauce Bunny build does not include Premiere input. Install a build with NDI support.</p>}
     {preflight?.bridgeCompiled && preflight.runtime !== "ready" && <p role="alert">{preflight.error || "The included NDI runtime could not load. Reinstall Sauce Bunny."}</p>}
-    {import.meta.env.DEV && preflight?.runtimeOrigin !== "bundled" && <CollapsibleSection {...disclosure("runtime", "Developer runtime override")}>
+    {import.meta.env.DEV && preflight && preflight.runtimeOrigin !== "bundled" && <CollapsibleSection {...disclosure("runtime", "Developer runtime override")}>
       <p>Unbundled developer builds only. Packaged Sauce Bunny always uses its included runtime.</p>
       <button type="button" className="btn" onClick={()=>{
         void (async()=>{

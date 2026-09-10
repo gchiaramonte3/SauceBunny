@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useReducer, useState } from "react";
 import {
   type AvDevices, type AvPermission, type DeviceChoice,
-  enumerateAv, loadDeviceChoice, openCapture, queryAvPermission,
+  captureDeviceState, enumerateAv, loadDeviceChoice, openCapture, queryAvPermission,
   saveDeviceChoice, stopStream,
 } from "../lib/media-devices";
 
@@ -125,6 +125,28 @@ export function useMediaCapture() {
   const [devices, setDevices] = useState<AvDevices>({ cameras: [], mics: [], speakers: [] });
   const [choice, setChoiceState] = useState<DeviceChoice>(currentChoice);
   const [error, setErrorState] = useState<string | null>(currentError);
+  const [, refreshTrackState] = useReducer((version: number) => version + 1, 0);
+
+  useEffect(() => {
+    // Tracks can end without a new stream object or a changed preference.
+    const tracks = new Set<MediaStreamTrack>();
+    const observe = () => {
+      for (const track of stream?.getTracks() ?? []) {
+        if (tracks.has(track)) continue;
+        tracks.add(track);
+        track.addEventListener("ended", refreshTrackState);
+      }
+      refreshTrackState();
+    };
+    observe();
+    stream?.addEventListener("addtrack", observe);
+    stream?.addEventListener("removetrack", observe);
+    return () => {
+      for (const track of tracks) track.removeEventListener("ended", refreshTrackState);
+      stream?.removeEventListener("addtrack", observe);
+      stream?.removeEventListener("removetrack", observe);
+    };
+  }, [stream]);
 
   useEffect(() => {
     const l = (s: MediaStream | null) => setStream(s);
@@ -183,6 +205,7 @@ export function useMediaCapture() {
       await refreshDevices(); // labels populate post-grant
       return true;
     } catch (err) {
+      if (gen !== captureGen) return false;
       const name = err instanceof DOMException ? err.name : "";
       if (name === "NotAllowedError" || name === "SecurityError") {
         publishPermission("denied");
@@ -215,9 +238,20 @@ export function useMediaCapture() {
    *  with no way back short of leaving the session. */
   const setEnabled = useCallback((kind: "audio" | "video", enabled: boolean) => {
     const prev = currentChoice;
-    commitChoice({ ...prev, ...(kind === "audio" ? { micMuted: !enabled } : { cameraOff: !enabled }) });
     const s = activeStream;
-    const tracks = s ? (kind === "audio" ? s.getAudioTracks() : s.getVideoTracks()) : [];
+    const tracks = (s ? (kind === "audio" ? s.getAudioTracks() : s.getVideoTracks()) : [])
+      .filter(t => t.readyState === "live");
+    // Even an off click with no track must cancel a pending getUserMedia.
+    captureGen++;
+    const actual = captureDeviceState(s, prev);
+    const next = { ...prev, ...(kind === "audio" ? { micMuted: !enabled } : { cameraOff: !enabled }) };
+    if (enabled && tracks.length === 0) {
+      // An explicit camera click does not authorize reviving a microphone
+      // merely because its saved preference was on (and vice versa).
+      if (kind === "audio") next.cameraOff = !actual.cameraOn;
+      else next.micMuted = !actual.micOn;
+    }
+    commitChoice(next);
     clog("info",
       `${kind} ${enabled ? "on" : "off"} (${tracks.length} track${tracks.length === 1 ? "" : "s"}`
       + `${s ? "" : ", no capture"}) -> ${enabled && tracks.length === 0 ? "reopening" : "toggling"}`);
@@ -225,7 +259,8 @@ export function useMediaCapture() {
       // Roll the choice back if the device never opened, so the control bar
       // can't advertise a camera that isn't running. acquire() has already
       // surfaced the reason via `permission` or `error`.
-      void acquire(currentChoice).then((ok) => { if (!ok) commitChoice(prev); });
+      const attempt = captureGen + 1;
+      void acquire(next).then((ok) => { if (!ok && captureGen === attempt) commitChoice(prev); });
       return;
     }
     for (const t of tracks) t.enabled = enabled;
@@ -237,5 +272,6 @@ export function useMediaCapture() {
     commitChoice({ ...currentChoice, ...patch });
   }, []);
 
-  return { stream, permission, devices, choice, error, acquire, release, refreshDevices, setEnabled, updateChoice };
+  return { stream, permission, devices, choice, ...captureDeviceState(stream, choice), error,
+    acquire, release, refreshDevices, setEnabled, updateChoice };
 }

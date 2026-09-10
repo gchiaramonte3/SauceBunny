@@ -69,7 +69,7 @@ async function bootRoom(page: Page, title: string): Promise<void> {
 }
 
 const clearBtn = (page: Page) => page.locator(".cp-room-source-bar").getByRole("button", { name: "Clear" });
-const codeBtn = (page: Page) => page.getByRole("button", { name: "Copy join code" });
+const codeBtn = (page: Page) => page.getByRole("button", { name: "Invite…" });
 
 /** What the user's pointer would actually hit at the centre of `sel`. */
 const topmostAt = (page: Page, sel: string) => page.evaluate((s) => {

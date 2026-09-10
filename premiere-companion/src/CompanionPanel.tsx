@@ -63,7 +63,7 @@ export function CompanionPanel({ companion }: { companion: Companion }) {
     </section>}
     {(snapshot.connected || snapshot.notes.length > 0) && <section className="cp-companion-section" aria-labelledby="notes-heading">
       <h2 id="notes-heading">Pending notes{snapshot.status ? ` · ${snapshot.status.pendingCount}` : ""}</h2>
-      {pending.length === 0 && <p className="cp-companion-muted">Queued timeline notes appear here. General notes stay in Sauce Bunny. Room delivery is not enabled in this local proof.</p>}
+      {pending.length === 0 && <p className="cp-companion-muted">Notes sent to this bound sequence appear here for confirmation. General notes stay in Sauce Bunny.</p>}
       {pending.map(note => <PendingNote key={note.id} note={note} companion={companion}
         connected={snapshot.connected} bound={sameBinding(binding ?? null, note.request.anchor.binding)}
         enabled={snapshot.connected && !!snapshot.status?.syncEnabled && !busy} />)}
@@ -77,6 +77,10 @@ export function CompanionPanel({ companion }: { companion: Companion }) {
     </section>}
     {completed.length > 0 && <section className="cp-companion-section" aria-labelledby="recent-heading">
       <h2 id="recent-heading">Recent deliveries</h2>
+      <button disabled={!snapshot.connected || !snapshot.status?.syncEnabled || busy || !completed.some(note => sameBinding(binding ?? null, note.request.anchor.binding))}
+        onClick={() => { void run(async () => {
+          for (const note of completed) if (sameBinding(binding ?? null, note.request.anchor.binding)) await companion.reconcile(note);
+        }); }}>Check recent markers</button>
       {completed.map(note => <p key={note.id}><strong>{note.request.author}</strong>: {note.status === "added" ? "Added to Premiere" : "Removed in Premiere; will not be recreated"}</p>)}
     </section>}
     {snapshot.connected && <p className="cp-companion-muted">Save your project in Premiere after adding markers. Undo is preserved.</p>}

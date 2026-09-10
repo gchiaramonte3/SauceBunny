@@ -49,6 +49,16 @@ export function saveDeviceChoice(c: DeviceChoice): void {
   saveJson(DEVICE_CHOICE_KEY, c);
 }
 
+/** Preferences are intent, not evidence of capture. A released or ended
+ * device must read off in both setup and the live room. */
+export function captureDeviceState(stream: MediaStream | null, choice: Pick<DeviceChoice, "cameraOff" | "micMuted">) {
+  const live = (tracks: MediaStreamTrack[] | undefined) => !!tracks?.some(t => t.enabled && t.readyState === "live");
+  return {
+    cameraOn: !choice.cameraOff && live(stream?.getVideoTracks()),
+    micOn: !choice.micMuted && live(stream?.getAudioTracks()),
+  };
+}
+
 // ── Session volume (r122) ───────────────────────────────────────────────
 // INPUT: a GainNode between the mic and everything downstream (mesh, mic
 // check, level meter), built inside openCapture so every consumer hears the

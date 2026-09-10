@@ -29,11 +29,11 @@ enum ClientCommand {
 }
 
 fn valid_origin(origin: Option<&str>) -> bool {
-    // Ordinary web origins cannot drive the editor bridge. UXP's exact
-    // packaged Origin remains a real-host acceptance gate; absent/null are
-    // permitted because some native UXP builds omit it. The 256-bit secret
-    // is still required in the first message, never in a URL/query string.
-    origin.is_none_or(|s| s == "null" || s.starts_with("uxp://"))
+    // UXP's native WebSocket client uses the opaque `file://` Origin, not
+    // the plugin's uxp:// URL. Accept that exact value, never file paths or
+    // arbitrary HTTP origins. Origin is not authentication: every client
+    // still needs the current 256-bit secret in its first message.
+    origin.is_none_or(|s| s == "null" || s == "file://" || s.starts_with("uxp://"))
 }
 
 fn token_matches(expected: &str, supplied: &str) -> bool {
@@ -126,8 +126,8 @@ fn decode(text: &str) -> Result<ClientEnvelope, AppError> {
 
 pub async fn start(app: AppHandle) -> Result<PremierePairing, AppError> {
     let bridge = instance(&app)?;
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
-    let port = listener.local_addr()?.port();
+    let (ipv4, ipv6) = bind_loopback().await?;
+    let port = ipv4.local_addr()?.port();
     let mut secret = [0u8; 32]; getrandom::getrandom(&mut secret).map_err(|_| AppError::internal("Cannot create Premiere pairing"))?;
     let token = hex::encode(secret);
     let expires_at = now_ms() + PAIR_LIFETIME_MS;
@@ -142,23 +142,32 @@ pub async fn start(app: AppHandle) -> Result<PremierePairing, AppError> {
         state.generation
     };
     publish(&app, &bridge);
-    tokio::spawn(serve(listener, app, bridge, generation, receiver));
+    tokio::spawn(serve(ipv4, ipv6, app, bridge, generation, receiver));
     Ok(PremierePairing { url: format!("ws://127.0.0.1:{port}/premiere"), token, expires_at })
 }
 
-async fn serve(listener: TcpListener, app: AppHandle, bridge: Arc<PremiereBridge>, generation: u64, mut stop: watch::Receiver<bool>) {
+// The manifest-approved localhost name can resolve to either address family.
+// Bind the same port on both loopback addresses; never bind an unspecified
+// address or rely on the native client retrying IPv4 after an IPv6 refusal.
+async fn bind_loopback() -> std::io::Result<(TcpListener, TcpListener)> {
+    let ipv4 = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+    let ipv6 = TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, ipv4.local_addr()?.port())).await?;
+    Ok((ipv4, ipv6))
+}
+
+async fn serve(ipv4: TcpListener, ipv6: TcpListener, app: AppHandle, bridge: Arc<PremiereBridge>, generation: u64, mut stop: watch::Receiver<bool>) {
     let slots = Arc::new(tokio::sync::Semaphore::new(4));
     loop {
-        tokio::select! {
+        let accepted = tokio::select! {
             _ = stop.changed() => break,
-            accepted = listener.accept() => {
-                let Ok((stream, address)) = accepted else { break; };
-                if !address.ip().is_loopback() { continue; }
-                let Ok(permit) = slots.clone().try_acquire_owned() else { continue; };
-                let app = app.clone(); let bridge = bridge.clone(); let stop = stop.clone();
-                tokio::spawn(async move { let _permit = permit; connection(stream, app, bridge, generation, stop).await; });
-            }
-        }
+            accepted = ipv4.accept() => accepted,
+            accepted = ipv6.accept() => accepted,
+        };
+        let Ok((stream, address)) = accepted else { break; };
+        if !address.ip().is_loopback() { continue; }
+        let Ok(permit) = slots.clone().try_acquire_owned() else { continue; };
+        let app = app.clone(); let bridge = bridge.clone(); let stop = stop.clone();
+        tokio::spawn(async move { let _permit = permit; connection(stream, app, bridge, generation, stop).await; });
     }
 }
 
@@ -166,22 +175,44 @@ async fn serve(listener: TcpListener, app: AppHandle, bridge: Arc<PremiereBridge
 // is checked at the same boundary as production, not against a second parser.
 #[allow(clippy::result_large_err)]
 fn handshake_response(request: &Request, response: Response, port: u16) -> Result<Response, tokio_tungstenite::tungstenite::handshake::server::ErrorResponse> {
+    if let Some(reason) = handshake_rejection(request, port) {
+        let mut rejected = tokio_tungstenite::tungstenite::http::Response::new(Some(reason.into()));
+        *rejected.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
+        return Err(rejected);
+    }
+    Ok(response)
+}
+
+fn handshake_rejection(request: &Request, port: u16) -> Option<&'static str> {
     // UXP uses the manifest-approved localhost alias. Accept only these two
     // exact authorities on the listener's port; never an arbitrary hostname,
-    // wildcard, or DNS-derived address. The listener remains IPv4 loopback.
+    // wildcard, or DNS-derived address. Both listeners remain loopback-only.
     let ipv4_host = format!("127.0.0.1:{port}");
     let localhost = format!("localhost:{port}");
     let host = request.headers().get("host").and_then(|s| s.to_str().ok());
     let allowed_host = host == Some(ipv4_host.as_str()) || host == Some(localhost.as_str());
     let origin = request.headers().get("origin").map(|s| s.to_str().unwrap_or("invalid"));
-    if request.uri().path_and_query().map(|p| p.as_str()) != Some("/premiere")
-        || !allowed_host || request.headers().get_all("host").iter().count() != 1 || !valid_origin(origin) {
-        let mut rejected = tokio_tungstenite::tungstenite::http::Response::new(
-            Some("Not an allowed Premiere companion connection".into()));
-        *rejected.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
-        return Err(rejected);
+    if request.uri().path_and_query().map(|p| p.as_str()) != Some("/premiere") {
+        return Some("Companion connection rejected: unexpected pairing path.");
     }
-    Ok(response)
+    if !allowed_host || request.headers().get_all("host").iter().count() != 1 {
+        return Some("Companion connection rejected: the address does not match this pairing port.");
+    }
+    if request.headers().get_all("origin").iter().count() > 1 || !valid_origin(origin) {
+        return Some("Companion connection rejected: the client supplied an unsupported Origin header.");
+    }
+    None
+}
+
+// Report stages, not raw requests: headers, tokens, URLs and Adobe project
+// data never belong in a connection error. A stale or unauthenticated socket
+// must not overwrite the status of a successfully paired companion.
+fn connection_failed(app: &AppHandle, bridge: &Arc<PremiereBridge>, generation: u64, reason: &str) {
+    if let Ok(mut state) = lock(bridge) {
+        if state.generation != generation || state.connected { return; }
+        state.error = Some(reason.into());
+    }
+    publish(app, bridge);
 }
 
 // tungstenite's required handshake callback returns an unboxed HTTP response.
@@ -190,21 +221,32 @@ async fn connection(stream: TcpStream, app: AppHandle, bridge: Arc<PremiereBridg
     let port = match stream.local_addr() { Ok(addr) => addr.port(), Err(_) => return };
     let config = WebSocketConfig::default().max_message_size(Some(MAX_INPUT_BYTES)).max_frame_size(Some(MAX_INPUT_BYTES))
         .max_write_buffer_size(MAX_OUTPUT_BYTES).write_buffer_size(0);
-    let handshake = accept_hdr_async_with_config(stream, move |request: &Request, response: Response|
-        handshake_response(request, response, port), Some(config));
+    let handshake_app = app.clone(); let handshake_bridge = bridge.clone();
+    let handshake = accept_hdr_async_with_config(stream, move |request: &Request, response: Response| {
+        if let Some(reason) = handshake_rejection(request, port) {
+            connection_failed(&handshake_app, &handshake_bridge, generation, reason);
+        }
+        handshake_response(request, response, port)
+    }, Some(config));
     let mut ws = tokio::select! {
         _ = stop.changed() => return,
         result = tokio::time::timeout(Duration::from_secs(3), handshake) => match result { Ok(Ok(ws)) => ws, _ => return }
     };
     let first = tokio::select! {
         _ = stop.changed() => return,
-        result = tokio::time::timeout(Duration::from_secs(3), ws.next()) => match result { Ok(Some(Ok(Message::Text(text)))) => text, _ => return }
+        result = tokio::time::timeout(Duration::from_secs(3), ws.next()) => match result { Ok(Some(Ok(Message::Text(text)))) => text, _ => {
+            connection_failed(&app, &bridge, generation, "The companion opened a connection but did not send its pairing acknowledgement in time.");
+            return;
+        } }
     };
     let Ok(message) = decode(&first) else { return; };
     let ClientCommand::Hello { token } = message.command else { return; };
     let response = match lock(&bridge).and_then(|mut state| {
         authenticate(&mut state, &token, generation, now_ms())?; Ok(response_snapshot(&state, &message.id))
-    }) { Ok(response) => response, Err(_) => return };
+    }) { Ok(response) => response, Err(_) => {
+        connection_failed(&app, &bridge, generation, "Pairing expired or was superseded. Copy a new pairing code from this app.");
+        return;
+    } };
     publish(&app, &bridge);
     let first_sent = tokio::time::timeout(Duration::from_secs(3), ws.send(Message::Text(response.to_string().into()))).await;
     if matches!(first_sent, Ok(Ok(()))) {
@@ -241,6 +283,32 @@ async fn connection(stream: TcpStream, app: AppHandle, bridge: Arc<PremiereBridg
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn localhost_pairing_reaches_both_loopback_families_on_one_port() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let (ipv4, ipv6) = bind_loopback().await.unwrap();
+        let v4 = ipv4.local_addr().unwrap();
+        let v6 = ipv6.local_addr().unwrap();
+        assert_eq!(v4.ip(), std::net::Ipv4Addr::LOCALHOST);
+        assert_eq!(v6.ip(), std::net::Ipv6Addr::LOCALHOST);
+        assert_eq!(v4.port(), v6.port());
+        for listener in [ipv4, ipv6] {
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (stream, remote) = listener.accept().await.unwrap();
+                assert!(remote.ip().is_loopback());
+                #[allow(clippy::result_large_err)]
+                let check = move |request: &Request, response: Response| handshake_response(request, response, address.port());
+                accept_hdr_async_with_config(stream, check, None).await.is_ok()
+            });
+            let request = format!("ws://localhost:{}/premiere", address.port()).into_client_request().unwrap();
+            let stream = TcpStream::connect(address).await.unwrap();
+            let result = tokio::time::timeout(Duration::from_secs(3), tokio_tungstenite::client_async(request, stream)).await.unwrap();
+            assert!(result.is_ok(), "{address}: {result:?}");
+            assert!(server.await.unwrap());
+        }
+    }
+
     #[test]
     fn handshake_rejects_missing_duplicate_and_wrong_port_hosts() {
         for host in [None, Some("localhost"), Some("localhost:51701"), Some("127.0.0.1:51701"),
@@ -260,11 +328,14 @@ mod tests {
         for (host, path, origin, accepted) in [
             ("localhost", "/premiere", None, true),
             ("127.0.0.1", "/premiere", Some("uxp://plugin"), true),
+            ("localhost", "/premiere", Some("file://"), true),
             ("localhost.evil.test", "/premiere", None, false),
             ("evil.test", "/premiere", None, false),
             ("localhost", "/premiere?token=not-allowed", None, false),
             ("localhost", "/other", None, false),
             ("localhost", "/premiere", Some("http://localhost"), false),
+            ("localhost", "/premiere", Some("file:///plugin/index.html"), false),
+            ("localhost", "/premiere", Some("file://evil.test"), false),
         ] {
             let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
             let address = listener.local_addr().unwrap();
@@ -296,10 +367,28 @@ mod tests {
     #[test]
     fn browser_origins_and_bad_tokens_are_refused() {
         assert!(valid_origin(None)); assert!(valid_origin(Some("null"))); assert!(valid_origin(Some("uxp://plugin")));
-        for origin in ["https://evil.test", "http://127.0.0.1:5173", "file://", "https://uxp://evil"] { assert!(!valid_origin(Some(origin))); }
+        assert!(valid_origin(Some("file://")));
+        for origin in ["https://evil.test", "http://127.0.0.1:5173", "file:///index.html", "file://evil.test", "https://uxp://evil"] { assert!(!valid_origin(Some(origin))); }
         let secret = "a".repeat(64); assert!(token_matches(&secret, &secret));
         assert!(!token_matches(&secret, &"b".repeat(64))); assert!(!token_matches("", ""));
         assert!(!token_matches(&secret, &(secret.clone() + "a")));
+    }
+
+    #[test]
+    fn handshake_diagnostics_are_stage_specific_without_echoing_headers() {
+        for (path, host, origin, expected) in [
+            ("/premiere?token=private", "localhost:51700", "file://", "unexpected pairing path"),
+            ("/premiere", "private.example:51700", "file://", "address does not match"),
+            ("/premiere", "localhost:51700", "https://private.example", "unsupported Origin"),
+        ] {
+            let request = Request::builder().uri(path).header("host", host).header("origin", origin).body(()).unwrap();
+            let reason = handshake_rejection(&request, 51700).unwrap();
+            assert!(reason.contains(expected));
+            assert!(!reason.contains("private"));
+        }
+        let request = Request::builder().uri("/premiere").header("host", "localhost:51700")
+            .header("origin", "file://").header("origin", "https://evil.test").body(()).unwrap();
+        assert!(handshake_rejection(&request, 51700).unwrap().contains("unsupported Origin"));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { applyReviewOp, attributeReviewOp, type ReviewDoc, type ReviewOp } from "./review";
-import { isPremiereAnchor } from "./premiere-notes";
+import { copyPremiereAnchor, isPremiereAnchor, isPremiereRoomScope, type PremiereRoomScope } from "./premiere-notes";
 
 export type ReviewEnvelope = {
   t: "review-submit" | "review-commit";
@@ -11,6 +11,7 @@ export type ReviewEnvelope = {
   revision: number;
   clock: number;
   op: ReviewOp;
+  premiereContext?: PremiereRoomScope;
 };
 export type ReviewAck = {
   t: "review-ack"; protocol: 1; opId: string; reviewKey: string; sessionId: string; revision: number;
@@ -60,7 +61,14 @@ export function isReviewEnvelope(value: unknown): value is ReviewEnvelope {
   const v = value as ReviewEnvelope;
   return (v.t === "review-submit" || v.t === "review-commit") && v.protocol === 1
     && str(v.opId) && str(v.reviewKey) && str(v.versionId) && str(v.sessionId)
-    && Number.isSafeInteger(v.revision) && v.revision >= 0 && num(v.clock) && isReviewOp(v.op);
+    && Number.isSafeInteger(v.revision) && v.revision >= 0 && num(v.clock) && isReviewOp(v.op)
+    && (v.premiereContext === undefined || isPremiereRoomScope(v.premiereContext));
+}
+
+/** Whitelist extension data on submissions, commits and compatibility copies. */
+export function sanitizeReviewOpForWire(op: ReviewOp): ReviewOp {
+  if (op.t !== "add" || !op.comment.premiere) return op;
+  return { ...op, comment: { ...op.comment, premiere: copyPremiereAnchor(op.comment.premiere) } };
 }
 
 export function isReviewAck(value: unknown): value is ReviewAck {
@@ -96,6 +104,7 @@ export function prepareCommit(doc: ReviewDoc, envelope: ReviewEnvelope, author: 
     // A sender cannot make its note immune to future edits by supplying a
     // revision higher than the host's. Only the host assigns this coordinate.
     revision: (doc.sync?.revision ?? 0) + 1,
+    sessionId: envelope.sessionId,
     updatedAt: clock, ...(op.comment.restoredAt ? { restoredAt: clock } : {}),
   } };
   else op = { ...op, at: clock };
@@ -128,6 +137,8 @@ export type DeliveryDeps = {
   save: (doc: ReviewDoc) => Promise<void>;
   publish: (doc: ReviewDoc) => void;
   send: (message: ReviewEnvelope | ReviewAck) => Promise<unknown>;
+  /** Runs inside the serial commit, before persistence; may reject stale intent. */
+  authorize?: (envelope: ReviewEnvelope) => ReviewEnvelope;
 };
 
 /** Serial host commits. No acknowledgement is emitted before both durable writes finish. */
@@ -148,7 +159,7 @@ export function createReviewDelivery(deps: DeliveryDeps) {
             reviewKey: envelope.reviewKey, sessionId: envelope.sessionId, revision });
           return;
         }
-        const commit = prepareCommit(doc, envelope, author);
+        const commit = prepareCommit(doc, deps.authorize?.(envelope) ?? envelope, author);
         const next = applyCommit(doc, commit);
         next.sync = { ...next.sync!, commits: { ...doc.sync?.commits,
           [commit.opId]: { op: commit.op, revision: commit.revision, clock: commit.clock, versionId: commit.versionId },

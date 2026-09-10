@@ -37,6 +37,23 @@ export function splitReviewCode(delivered: string): { code: string; grant: strin
   return { code: (code ?? "").trim(), grant: grant?.trim() || null };
 }
 
+/** Accept our copied invitation (including its download footer), a native
+ * deep-link delivery, or a plain legacy ticket. Never log the credential or
+ * attach a previous invitation's grant to a different pasted code. */
+export function parseReviewInvitation(input: string): { code: string; grant: string | null } | null {
+  const value = input.trim();
+  if (!value || value.length > 8192) return null;
+  const link = value.match(/^saucebunny:\/\/+review\/([^\s?#]+)/);
+  const payload = link ? link[1] : value;
+  if (!link && (value.includes("://") || /\s/.test(value))) return null;
+  try {
+    const { code, grant } = splitReviewCode(payload);
+    const decoded = { code: decodeURIComponent(code), grant: grant ? decodeURIComponent(grant) : null };
+    if (!decoded.code || /[\s/]/.test(decoded.code) || (decoded.grant && /[\s/]/.test(decoded.grant))) return null;
+    return decoded;
+  } catch { return null; }
+}
+
 /**
  * What goes on the clipboard: the link, then where to get the app.
  *

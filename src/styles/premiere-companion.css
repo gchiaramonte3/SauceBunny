@@ -7,6 +7,8 @@
 .cp-premiere-setup .cp-premiere-links p,
 .cp-premiere-setup .cp-ndi-attribution p { font-size: var(--text-base); }
 .cp-premiere-setup .btn { height: auto; min-height: 30px; max-width: 100%; padding: var(--s-1) 14px; white-space: normal; text-transform: none; font-size: var(--text-md); line-height: var(--leading-tight); }
+/* Keep keyboard focus during an async recheck; the handler coalesces repeats. */
+.cp-premiere-setup .cp-premiere-recheck[aria-disabled="true"] { opacity: 0.35; cursor: not-allowed; box-shadow: var(--bevel-raised); transform: none; }
 .cp-premiere-setup p[role="alert"] { color: var(--danger-text); }
 .cp-premiere-setup ol { padding-left: var(--s-5); }
 .cp-premiere-setup li + li { margin-top: var(--s-2); }

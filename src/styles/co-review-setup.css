@@ -36,10 +36,9 @@
 .cp-setup-editor .cp-gr-preview-state { padding: var(--s-2); }
 .cp-setup-editor .cp-gr-preview-state > svg { display: none; }
 .cp-setup-editor .cp-gr-state-sub { font-size: var(--text-base); }
-.cp-setup-access { border-top: 1px solid var(--line-1); padding-top: var(--s-3); }
-.cp-setup-access > summary { min-height: 28px; color: var(--fg-3); font-size: var(--text-md); cursor: pointer; }
-.cp-setup-access > summary:hover { color: var(--fg-1); }
-.cp-setup-access .cp-grants { margin-top: var(--s-2); padding-top: 0; border-top: 0; }
-.cp-setup-access .cp-grants-new { align-items: stretch; flex-direction: column; }
+.cp-room-access-backdrop[hidden] { display: none; }
+.cp-room-access { max-width: 640px; height: auto; max-height: 86%; }
+.cp-room-access .cp-grants { margin-top: 0; padding-top: 0; border-top: 0; }
+.cp-room-access .cp-grants-new { flex-wrap: wrap; }
 .cp-setup-history { display: inline-flex; align-items: center; justify-content: space-between; gap: var(--s-2); min-height: 28px; padding: 0; border: 0; background: none; color: var(--fg-3); font-family: var(--font-ui); font-size: var(--text-md); text-align: left; cursor: pointer; }
 .cp-setup-history:hover { color: var(--fg-1); }

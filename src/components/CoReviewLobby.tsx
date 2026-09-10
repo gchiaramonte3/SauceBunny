@@ -4,14 +4,14 @@ import { ColorSwatches } from "./ColorSwatches";
 import { IconCrown, IconLink, IconPlay } from "./Icons";
 import { AUTHOR_COLOR_KEY, AUTHOR_KEY, AVATAR_COLORS, REVIEW_CHANGED_EVENT, initialsOf, loadReviewer } from "../lib/review";
 import { useMediaCapture } from "../hooks/use-media-capture";
+import { captureDeviceState } from "../lib/media-devices";
 import { GreenRoomDevices } from "./GreenRoomDevices";
 import type { Participant } from "./PeoplePanel";
 import type { SessionState } from "../bindings/SessionState";
 import { shortJoinCode } from "../lib/join-code";
 import { hydrateScreeningIndex, listScreenings, SCREENINGS_CHANGED } from "../lib/screening-store";
 import { isSessionNameTaken, nextFreeSessionName } from "../lib/session-name";
-import { reviewInviteMessage } from "../lib/review-link";
-import { ReviewGrants } from "./ReviewGrants";
+import { parseReviewInvitation, reviewInviteMessage } from "../lib/review-link";
 import "../styles/co-review-setup.css";
 
 type SetupMode = "host" | "join";
@@ -25,7 +25,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   participants: Participant[];
   onStart: (title?: string) => void;
   /** Resolve when the attempt ends, including an already reported failure. */
-  onJoin: (ticket: string, name: string) => void | Promise<void>;
+  onJoin: (ticket: string, name: string, grant?: string | null) => void | Promise<void>;
   /** A received link fills Join without joining or acquiring devices. */
   initialCode?: string | null;
   onInitialCodeUsed?: () => void;
@@ -46,6 +46,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   const [editor, setEditor] = useState<Editor>(() => loadReviewer().name ? null : "identity");
   const [sessionTitle, setSessionTitle] = useState(() => loadJson<string>("saucebunny.sessionTitle", "") || defaultTitle);
   const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
   const [takenTitles, setTakenTitles] = useState<string[]>([]);
   const [titlesReady, setTitlesReady] = useState(false);
   const titleEditedRef = useRef(false);
@@ -111,9 +112,12 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   const joinSession = async () => {
     const n = name.trim(), t = ticket.trim();
     if (!n || !t || joining) return;
+    const invitation = parseReviewInvitation(t);
+    if (!invitation) { setJoinError("Paste a Sauce Bunny review link or join code."); return; }
+    setJoinError(null);
     persistIdentity(n, color);
     setJoining(true);
-    try { await onJoin(t, n); } catch { /* surfaced by the handler */ }
+    try { await onJoin(invitation.code, n, invitation.grant); } catch { /* surfaced by the handler */ }
     finally { setJoining(false); }
   };
   const [linkArrived, setLinkArrived] = useState(false);
@@ -132,8 +136,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
       window.setTimeout(() => setCopied(false), 1600);
     } catch { /* clipboard unavailable */ }
   };
-  const cameraOn = !cap.choice.cameraOff && !!cap.stream?.getVideoTracks().some((t) => t.enabled && t.readyState === "live");
-  const micOn = !cap.choice.micMuted && !!cap.stream?.getAudioTracks().some((t) => t.enabled && t.readyState === "live");
+  const { cameraOn, micOn } = captureDeviceState(cap.stream, cap.choice);
 
   return (
     <section className="cp-coreview-lobby cp-setup-rail" aria-label="Session setup">
@@ -180,12 +183,21 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
             id={id + "-join-panel"} aria-labelledby={id + "-join-tab"} hidden={mode !== "join"}>
             {linkArrived && <p className="cp-colobby-linkbanner" role="status">Your review link is ready. Check your name and devices, then join.</p>}
             <label className="cp-colobby-field"><span className="cp-colobby-field-label">Join code</span>
-              <input className="cp-colobby-input" value={ticket} spellCheck={false} placeholder="Paste a join code"
-                onChange={(e) => setTicket(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void joinSession(); }} />
+              <input className="cp-colobby-input" value={ticket} spellCheck={false} placeholder="Paste a review link or join code"
+                onPaste={event => {
+                  // A text input removes newlines BEFORE onChange, gluing our
+                  // download footer onto the private grant. Parse the original
+                  // clipboard text, then store just the invitation payload.
+                  const invitation = parseReviewInvitation(event.clipboardData.getData("text"));
+                  if (!invitation) return;
+                  event.preventDefault(); setJoinError(null);
+                  setTicket(invitation.grant ? `${invitation.code}/${invitation.grant}` : invitation.code);
+                }}
+                onChange={(e) => { setTicket(e.target.value); setJoinError(null); }} onKeyDown={(e) => { if (e.key === "Enter") void joinSession(); }} />
             </label>
             <button type="button" className="btn cp-colobby-cta join" disabled={!joinReady || joining}
               onClick={() => { void joinSession(); }}><IconLink size={12} /> {joining ? "Connecting…" : "Join"}</button>
-            {session.error && <p className="cp-colobby-err" role="alert">{session.error}</p>}
+            {(joinError || session.error) && <p className="cp-colobby-err" role="alert">{joinError || session.error}</p>}
           </section>
           {onConnectPremiere && <div className="cp-setup-premiere">
             <button type="button" className="btn btn-ghost" onClick={onConnectPremiere}>Preview Premiere…</button>
@@ -235,12 +247,6 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
           {session.error && <p className="cp-colobby-err center" role="alert">{session.error}</p>}
           <div className="cp-colobby-actions"><button type="button" className="cp-colobby-leave" onClick={onLeave}>{isHost ? "End session" : "Leave session"}</button></div>
         </>}
-        <details className="cp-setup-access" hidden={!active || !isHost}>
-          <summary>Manage access</summary>
-          {/* One stable instance across hidden setup, host/join changes and
-              room entry: an issued secret cannot be fetched a second time. */}
-          <ReviewGrants sessionCode={isHost ? session.code : null} />
-        </details>
         {!active && onOpenSessionHistory && <button type="button" className="cp-setup-history" onClick={onOpenSessionHistory}>Past sessions in Library <IconLink size={12} /></button>}
       </div>
     </section>

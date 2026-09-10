@@ -451,11 +451,27 @@ pub async fn ndi_preflight() -> Result<NdiPreflightResult, AppError> {
     let version=plist::Value::from_file(app.join("Contents/Info.plist")).ok()
         .and_then(|v|v.as_dictionary().and_then(|d|d.get("CFBundleShortVersionString")).and_then(|v|v.as_string()).map(str::to_owned));
     let plugin=PathBuf::from("/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/NDI_Transmit_AdobeCC.bundle");
+    let premiere_installed=installation_directory(&app,"Premiere application")?;
+    let plugin_installed=installation_directory(&plugin,"Premiere output plugin")?;
     Ok(NdiPreflightResult {
         bridge_compiled:runtime.bridge_compiled, runtime:runtime.runtime, runtime_version:runtime.runtime_version,
         runtime_origin:if bundled_runtime().is_some_and(|p|p.is_file()) { "bundled" } else if runtime.runtime!=NdiRuntimeState::Missing { "developer" } else { "missing" }.into(),
-        premiere_installed:app.is_dir(), premiere_version:version, plugin_installed:plugin.is_dir(), error:runtime.error,
+        premiere_installed, premiere_version:version, plugin_installed, error:runtime.error,
     })
+}
+
+// Path::is_dir collapses permission and other I/O failures into false. Only a
+// successful inspection or NotFound may support an installation claim.
+fn installation_directory(path: &std::path::Path, label: &str) -> Result<bool, AppError> {
+    installation_observation(std::fs::metadata(path), label)
+}
+
+fn installation_observation(result: io::Result<std::fs::Metadata>, label: &str) -> Result<bool, AppError> {
+    match result {
+        Ok(metadata) => Ok(metadata.is_dir()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(AppError::Io(format!("Cannot inspect the {label}: {error}"))),
+    }
 }
 
 /// Explicit user-selected SDK folder or libndi.dylib; no remote path or
@@ -622,6 +638,44 @@ impl Read for ProgramReader {
 
 #[cfg(test)] mod tests {
     use super::*;
+    struct InstallationFixture(PathBuf);
+    impl InstallationFixture {
+        fn new() -> Self {
+            let path=std::env::temp_dir().join(format!("sb-ndi-preflight-{}",uuid::Uuid::new_v4()));
+            std::fs::create_dir(&path).unwrap();Self(path)
+        }
+        fn path(&self) -> &std::path::Path { &self.0 }
+    }
+    impl Drop for InstallationFixture {
+        fn drop(&mut self) { let _=std::fs::remove_dir_all(&self.0); }
+    }
+    #[test] fn preflight_distinguishes_present_missing_and_non_directory_installations() {
+        let root=InstallationFixture::new();
+        let plugin=root.path().join("NDI_Transmit_AdobeCC.bundle");
+        assert!(!installation_directory(&plugin,"Premiere output plugin").unwrap());
+        std::fs::create_dir(&plugin).unwrap();
+        assert!(installation_directory(&plugin,"Premiere output plugin").unwrap());
+        let ordinary_file=root.path().join("not-a-plugin");
+        std::fs::write(&ordinary_file,b"not a bundle").unwrap();
+        assert!(!installation_directory(&ordinary_file,"Premiere output plugin").unwrap());
+    }
+    #[cfg(unix)]
+    #[test] fn preflight_follows_an_installed_bundle_symlink() {
+        let root=InstallationFixture::new();
+        let bundle=root.path().join("installed.bundle");std::fs::create_dir(&bundle).unwrap();
+        let link=root.path().join("NDI_Transmit_AdobeCC.bundle");
+        std::os::unix::fs::symlink(&bundle,&link).unwrap();
+        assert!(installation_directory(&link,"Premiere output plugin").unwrap());
+    }
+    #[test] fn preflight_reports_unreadable_installation_as_an_error_not_missing() {
+        // Deterministic even in a root-run CI process where chmod cannot deny
+        // metadata access. These are the actual filesystem result variants.
+        for kind in [io::ErrorKind::PermissionDenied,io::ErrorKind::Interrupted,io::ErrorKind::Other] {
+            let result=installation_observation(Err(io::Error::from(kind)),"Premiere output plugin");
+            assert!(matches!(result,Err(AppError::Io(message)) if message.contains("Cannot inspect the Premiere output plugin")));
+        }
+        assert!(!installation_observation(Err(io::Error::from(io::ErrorKind::NotFound)),"Premiere output plugin").unwrap());
+    }
     #[test] fn timing_probe_is_opt_in_source_scoped_and_never_a_peer_media_record() {
         let source=Program::new("source".into(),"Premiere".into(),None);
         let other=Program::new("other".into(),"Second Premiere".into(),None);

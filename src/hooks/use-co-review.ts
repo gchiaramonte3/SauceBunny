@@ -56,9 +56,11 @@ import { ViewerShareController, type ViewerShareState } from "../lib/viewer-shar
 import { openShareStream } from "../lib/share-stream";
 import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 import { acknowledgeEnvelope, clearDelivered, enqueueEnvelope, pendingEnvelopes, pendingLegacyOps, pendingCount, pendingOps } from "../lib/review-outbox";
-import { applyCommit, createReviewDelivery, createReviewEnvelope, isReviewAck, isReviewEnvelope, isReviewOp, type ReviewEnvelope } from "../lib/review-delivery";
+import { applyCommit, createReviewDelivery, createReviewEnvelope, isReviewAck, isReviewEnvelope, isReviewOp, sanitizeReviewOpForWire, type ReviewEnvelope } from "../lib/review-delivery";
 import { persistReviewDoc } from "../lib/review-store";
-import { setPremiereRoom } from "../lib/premiere-link";
+import { acceptPremiereContext, acceptPremiereReceipts, authorizePremiereEnvelope, currentPremiereRoomContext,
+  premiereRoomReceipts, scopePremiereEnvelope, setPremiereRoom, setPremiereRoomSource, subscribePremiereLink } from "../lib/premiere-link";
+import { isPremiereContext, isPremiereReceipts } from "../lib/premiere-notes";
 import { PREMIERE_ROOM_MARKERS_ENABLED } from "../lib/premiere-permissions";
 import { splitReviewCode } from "../lib/review-link";
 
@@ -91,6 +93,7 @@ export type SessionSource = {
   title: string | null;
   duration: number | null;
   reviewKey: string;
+  liveState?: "live" | "stopped";
 };
 
 type Args = {
@@ -290,7 +293,7 @@ export type CoReview = {
   /** Raise/lower your hand (persistent state, relayed). */
   toggleHand: () => void;
   startCoReview: (title?: string) => Promise<void>;
-  joinCoReview: (ticket: string, name: string) => Promise<void>;
+  joinCoReview: (ticket: string, name: string, grant?: string | null) => Promise<void>;
   leaveCoReview: () => void;
   /** How many notes are waiting to be delivered, across every review.
    *  Zero when everything the user wrote has gone out. */
@@ -530,7 +533,13 @@ export function useCoReview({
   /** How many notes are waiting to be delivered, for the UI. A queue nobody
    *  can see is the failure this replaces, wearing different clothes. */
   const [outboxDepth, setOutboxDepth] = useState(() => pendingCount());
+  const peerPremiereSourceRef = useRef<{ reviewKey: string; programId: string; presenterEpoch: number } | null>(null);
   const delivery = useMemo(() => createReviewDelivery({
+    authorize: (envelope) => {
+      if (coRoleRef.current !== "host" || envelope.sessionId !== coSessionIdRef.current)
+        throw new Error("The review session changed before this note could be committed.");
+      return authorizePremiereEnvelope(envelope);
+    },
     load: (wireKey) => {
       const localKey = reviewKeysRef.current.get(wireKey);
       if (!localKey) return null;
@@ -545,11 +554,12 @@ export function useCoReview({
       if (coRoleRef.current !== "host" || message.sessionId !== coSessionIdRef.current) return;
       acknowledgeEnvelope(message.reviewKey, message.opId);
       setOutboxDepth(pendingCount());
-      await invoke("session_broadcast", { msg: { kind: "reviewOp", from: "", op: JSON.stringify(message) } });
+      const wire = message.t === "review-commit" ? { ...message, op: sanitizeReviewOpForWire(message.op) } : message;
+      await invoke("session_broadcast", { msg: { kind: "reviewOp", from: "", op: JSON.stringify(wire) } });
       // Compatibility: older peers cannot parse the envelope. Modern peers
       // ignore this duplicate; old clients retain their best-effort behavior.
       if (message.t === "review-commit") {
-        await invoke("session_broadcast", { msg: { kind: "reviewOp", from: "", op: JSON.stringify(message.op) } });
+        await invoke("session_broadcast", { msg: { kind: "reviewOp", from: "", op: JSON.stringify(sanitizeReviewOpForWire(message.op)) } });
       }
     },
   }), [setSessionDoc]);
@@ -557,7 +567,10 @@ export function useCoReview({
   const sendEnvelope = useCallback(async (envelope: ReviewEnvelope) => {
     if (!PREMIERE_ROOM_MARKERS_ENABLED && envelope.op.t === "add" && envelope.op.comment.premiere)
       throw new Error("Premiere sequence details cannot be shared with the room yet. This note remains saved locally.");
-    const scoped = { ...envelope, sessionId: coSessionIdRef.current };
+    // Ordinary outbox edits may resume in a new room. A Premiere intent must
+    // retain the original room/sequence authorization, never be retargeted.
+    const scoped = { ...envelope, op: sanitizeReviewOpForWire(envelope.op),
+      sessionId: envelope.op.t === "add" && envelope.op.comment.premiere ? envelope.sessionId : coSessionIdRef.current };
     if (coRoleRef.current === "host") {
       await delivery.commit(scoped, loadReviewer().name || "You");
     } else {
@@ -630,7 +643,7 @@ export function useCoReview({
     const doc = sessionDocRef.current;
     if (!doc) throw new Error("Wait for the shared review to open before posting.");
     const wireKey = [...reviewKeysRef.current].find(([, local]) => local === doc.sourceKey)?.[0] ?? doc.sourceKey;
-    const envelope = createReviewEnvelope(doc, op, wireKey, coSessionIdRef.current);
+    const envelope = scopePremiereEnvelope(createReviewEnvelope(doc, sanitizeReviewOpForWire(op), wireKey, coSessionIdRef.current));
     // Capture source identity and save the outbox BEFORE any asynchronous send.
     setOutboxDepth(enqueueEnvelope(envelope));
     setSessionDoc(applyReviewOp(doc, op));
@@ -683,6 +696,13 @@ export function useCoReview({
     if (coRoleRef.current === "off") return;
     switch (m.kind) {
       case "loadSource": {
+        if (coRoleRef.current === "peer") {
+          if (m.from !== "m0") return;
+          peerPremiereSourceRef.current = coSessionRef.current.presenter === "m0" && m.sourceKind === "ndi"
+            && m.liveState !== "stopped" && m.url && /^[a-f0-9]{32}$/i.test(m.url)
+            ? { reviewKey: m.reviewKey, programId: m.url, presenterEpoch: coSessionRef.current.presenterEpoch } : null;
+          setPremiereRoomSource(peerPremiereSourceRef.current);
+        }
         roomSourceKeyRef.current = m.reviewKey;
         if (m.sourceKind === "ndi") {
           // A dedicated encoded live program, not a seekable hidden file.
@@ -812,6 +832,7 @@ export function useCoReview({
           if (incoming.sync?.sessionId && incoming.sync.sessionId !== coSessionIdRef.current) {
             coSessionIdRef.current = incoming.sync.sessionId;
             setPremiereRoom(coRoleRef.current, coSessionIdRef.current);
+            setPremiereRoomSource(peerPremiereSourceRef.current);
             coLastSeqRef.current = { epoch: -1, seq: -1 };
             coLastCommandRef.current = { epoch: -1, command: -1 };
             coPendingCommandRef.current = null;
@@ -861,6 +882,8 @@ export function useCoReview({
           // payload-agnostic, so trusting it let any peer sign review
           // content (including the source verdict) as somebody else.
           const parsed: unknown = JSON.parse(m.op);
+          if (isPremiereContext(parsed)) { acceptPremiereContext(parsed, m.from); return; }
+          if (isPremiereReceipts(parsed)) { acceptPremiereReceipts(parsed, m.from, sessionDocRef.current); return; }
           if (isReviewAck(parsed)) {
             if (m.from === "m0" && parsed.sessionId === coSessionIdRef.current) {
               acknowledgeEnvelope(parsed.reviewKey, parsed.opId);
@@ -1166,14 +1189,12 @@ export function useCoReview({
      code is buffered in Rust and pulled here on mount. Same shape as the
      panel window's request-state handshake. */
   const [pendingJoinCode, setPendingJoinCode] = useState<string | null>(null);
-  /** The grant secret from the same link, held beside the code so joining can
-   *  present it. Not shown anywhere: it is a credential, not a label. */
-  const pendingGrantRef = useRef<string | null>(null);
   const onDeeplinkReview = useCallback((delivered: string) => {
     const { code, grant } = splitReviewCode(delivered);
     if (!code) return;
-    pendingGrantRef.current = grant;
-    setPendingJoinCode(code);
+    // Keep both parts together through the explicit Join form. Keeping the
+    // secret in an unused ref silently discarded invitation-only admission.
+    setPendingJoinCode(grant ? `${code}/${grant}` : code);
   }, []);
   useEffect(() => {
     const un = listen<string>("deeplink:review", (e) => onDeeplinkReview(e.payload));
@@ -1196,6 +1217,11 @@ export function useCoReview({
       // which Mac's picture is wrong.
       const prev = coSessionRef.current;
       const next = e.payload;
+      if (prev.code !== next.code || prev.role !== next.role || prev.presenter !== next.presenter
+        || prev.presenterEpoch !== next.presenterEpoch) {
+        peerPremiereSourceRef.current = null;
+        setPremiereRoomSource(null);
+      }
       // Joining another room need not pass through an observable "off"
       // render. Reset before its first message can use the previous room's
       // command watermarks, source map, or pending seek completion.
@@ -1429,6 +1455,47 @@ export function useCoReview({
   // the guest sat on the empty state with no timeline.
   const sessionSourceRef = useRef(sessionSource);
   sessionSourceRef.current = sessionSource;
+  // Host scope comes only from the published native room source, not from a
+  // private candidate or a received metadata packet. Guests scope on the
+  // host-stamped loadSource event above, before receiving a context.
+  useEffect(() => {
+    if (coSession.role !== "host") return;
+    setPremiereRoomSource(coSession.presenter === "m0" && sessionSource.kind === "ndi" && sessionSource.liveState !== "stopped" && sessionSource.url
+      && /^[a-f0-9]{32}$/i.test(sessionSource.url)
+      ? { reviewKey: sessionSource.reviewKey, programId: sessionSource.url, presenterEpoch: coSession.presenterEpoch } : null);
+  }, [coSession.role, coSession.code, coSession.presenter, coSession.presenterEpoch,
+    sessionSource.kind, sessionSource.url, sessionSource.reviewKey, sessionSource.liveState]);
+  useEffect(() => {
+    let disposed = false, scheduled = false, last = "";
+    const publish = () => {
+      if (scheduled || disposed) return;
+      scheduled = true;
+      queueMicrotask(() => {
+        scheduled = false;
+        if (disposed || coRoleRef.current !== "host") return;
+        const context = currentPremiereRoomContext(), doc = sessionDocRef.current;
+        if (!context || !doc || doc.sourceKey !== context.reviewKey) { last = ""; return; }
+        const messages = [context, ...premiereRoomReceipts(doc)];
+        const key = JSON.stringify(messages);
+        if (last === key) return;
+        last = key;
+        void (async () => {
+          try {
+            for (const message of messages) {
+              if (disposed || coRoleRef.current !== "host" || context.sessionId !== coSessionIdRef.current
+                || currentPremiereRoomContext()?.revision !== context.revision) return;
+              await invoke("session_broadcast", { msg: { kind: "reviewOp", from: "", op: JSON.stringify(message) } });
+            }
+          } catch { last = ""; }
+        })();
+      });
+    };
+    const unsubscribe = subscribePremiereLink(publish);
+    publish();
+    // Recovery for a missed status packet; unchanged metadata is not resent.
+    const timer = window.setInterval(publish, 2000);
+    return () => { disposed = true; unsubscribe(); window.clearInterval(timer); };
+  }, [coSession.role, coSession.code, sessionDoc]);
   const sendLoadSource = useCallback((src: SessionSource) => {
     // Native NDI publication atomically grants access AND announces the
     // source. A render/effect must never repeat or undo that commit.
@@ -1475,9 +1542,15 @@ export function useCoReview({
       welcomedRef.current.set(peer.id, peer.epoch);
       const src = sessionSourceRef.current;
       const messages: SessionMsg[] = [{ kind: "loadSource", from: "m0", sourceKind: src.kind,
-        url: src.url, fingerprint: src.fingerprint, title: src.title, duration: src.duration, reviewKey: src.reviewKey }];
+        url: src.url, fingerprint: src.fingerprint, title: src.title, duration: src.duration, reviewKey: src.reviewKey,
+        ...(src.liveState ? { liveState: src.liveState } : {}) }];
       const doc = sessionDocRef.current;
       if (doc) messages.push({ kind: "reviewDoc", doc: JSON.stringify(sanitizeDocForWire(doc, src.reviewKey)) });
+      const context = currentPremiereRoomContext();
+      if (context && context.reviewKey === src.reviewKey && doc) {
+        for (const message of [context, ...premiereRoomReceipts(doc)])
+          messages.push({ kind: "reviewOp", from: "m0", op: JSON.stringify(message) });
+      }
       const offer = offeredFileRef.current;
       if (offer) messages.push({ kind: "offerFile", from: "m0", ...offer });
       for (const from of raisedHands) messages.push({ kind: "reaction", from, emote: "hand", on: true });

@@ -4,10 +4,10 @@ Beta connection and **editor-confirmed sequence marker proof** for
 Premiere Pro 2026 **26.3.2**. This is not a frame-accurate automatic NDI marker
 integration. No companion is needed on a reviewer's machine.
 
-The current proof is **local only**. Review-room metadata wiring awaits user
-permission; no Premiere context is sent to room participants. See the
-[implementation status and permission gate](../docs/PREMIERE-MARKER-PROOF.md)
-before treating this as an end-to-end live-session feature.
+Selected project/sequence names and IDs were approved for room sharing on
+September 10. The room receiving path is now wired, with private paths and
+pairing data excluded. See the [current native verification status](../docs/PREMIERE-LIVE-MARKERS-2026-09-10.md)
+before treating this as a fully verified end-to-end live-session feature.
 
 ## Foundation and build
 
@@ -41,7 +41,8 @@ launch, string-code-generation and hybrid-addon permissions are deliberately
 absent. The only network permission is `ws://localhost`; the client accepts
 only Sauce Bunny's exact `ws://127.0.0.1:PORT/premiere` input and converts that
 validated address to its localhost alias for UXP. It rejects arbitrary hostnames,
-credentials and query strings. The desktop listener remains IPv4-loopback-only.
+credentials and query strings. The desktop listens on IPv4 and IPv6 loopback
+at one ephemeral port; the expiring secret is still required.
 It does not use `fetch`, remote services or a browser fallback for Adobe APIs.
 
 `npm run test:package` reuses the parent application's Playwright install to
@@ -50,6 +51,18 @@ It checks mounting, keyboard fields, overflow and absence of unsolicited
 connections. This is not a substitute for the native UXP acceptance matrix.
 
 ## Local editor workflow
+
+### September 10 native receiving follow-up
+
+The installed 0.1.6 companion paired with the updated desktop and received a
+saved room note in a disposable project. Capture parked position then failed
+before any timeline mutation. Version 0.1.7 awaits native project/sequence
+lookups before reading their identity, including a repeated Save As check
+across asynchronous boundaries. The regression reproduces the exact prior
+undefined `toString` failure. Native capture, one insertion, Undo, and repeated
+read-only reconciliation now pass in the disposable project. Check recent
+markers updates completed-note status after Undo; it never inserts anything.
+The desktop verification notes retain the remaining two-client acceptance gap.
 
 ### September 8 host verification
 

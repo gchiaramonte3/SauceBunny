@@ -43,15 +43,28 @@ export class PremiereAdapter {
     return binding;
   }
 
-  private exactTarget(binding: Binding): { project: Project; sequence: Sequence } {
+  private checkTarget(binding: Binding, project: Project, sequence?: Sequence): void {
     const expectedPath = this.ledger.projectPath(binding.bindingId);
     if (!expectedPath) throw new Error("This captured binding is not known on this editor's machine. No marker was placed.");
-    const project = this.api.Project.getProject(this.api.Guid.fromString(binding.projectId));
-    if (!project || guid(project.guid) !== binding.projectId || project.path !== expectedPath) {
+    if (!project?.guid || guid(project.guid) !== binding.projectId || project.path !== expectedPath) {
       throw new Error("Open the original bound project. A moved or Save As project is not silently substituted.");
     }
-    const sequence = project.getSequence(this.api.Guid.fromString(binding.sequenceId));
-    if (!sequence || guid(sequence.guid) !== binding.sequenceId) throw new Error("The originally bound sequence is unavailable.");
+    if (sequence && (!sequence.guid || guid(sequence.guid) !== binding.sequenceId))
+      throw new Error("The originally bound sequence is unavailable.");
+  }
+
+  private async exactTarget(binding: Binding): Promise<{ project: Project; sequence: Sequence }> {
+    if (!this.ledger.projectPath(binding.bindingId))
+      throw new Error("This captured binding is not known on this editor's machine. No marker was placed.");
+    // Await native lookups even where the 26.3 declarations say synchronous.
+    // Runtime UXP handles may arrive asynchronously; Promise.guid is undefined.
+    const projectId = await this.api.Guid.fromString(binding.projectId);
+    const project = await this.api.Project.getProject(projectId);
+    this.checkTarget(binding, project);
+    const sequenceId = await this.api.Guid.fromString(binding.sequenceId);
+    const sequence = await project.getSequence(sequenceId);
+    if (!sequence) throw new Error("The originally bound sequence is unavailable.");
+    this.checkTarget(binding, project, sequence);
     return { project, sequence };
   }
 
@@ -65,14 +78,14 @@ export class PremiereAdapter {
   }
 
   async restoreBinding(binding: Binding): Promise<Binding> {
-    const { sequence } = this.exactTarget(binding);
+    const { sequence } = await this.exactTarget(binding);
     await this.validateClock(sequence, binding);
-    this.exactTarget(binding);
+    await this.exactTarget(binding);
     return binding;
   }
 
   async capturePlacement(binding: Binding): Promise<Placement> {
-    const { project, sequence } = this.exactTarget(binding);
+    const { project, sequence } = await this.exactTarget(binding);
     const activeProject = await this.api.Project.getActiveProject();
     const activeSequence = await project.getActiveSequence();
     if (!activeProject || !activeSequence || guid(activeProject.guid) !== binding.projectId
@@ -82,7 +95,7 @@ export class PremiereAdapter {
     await this.validateClock(sequence, binding);
     const position = await sequence.getPlayerPosition();
     validTicks(position.ticks, binding.timebaseTicks);
-    this.exactTarget(binding); // Save As may mutate the Project handle across await.
+    await this.exactTarget(binding); // Save As may mutate the Project handle across await.
     return { binding, sequenceTicks: position.ticks, frame: (BigInt(position.ticks) / BigInt(binding.timebaseTicks)).toString() };
   }
 
@@ -95,9 +108,9 @@ export class PremiereAdapter {
 
   async reconcile(note: MarkerNote): Promise<MarkerResult> {
     const binding = note.request.anchor.binding;
-    const { sequence } = this.exactTarget(binding);
+    const { sequence } = await this.exactTarget(binding);
     const markers = await this.api.Markers.getMarkers(sequence);
-    this.exactTarget(binding);
+    await this.exactTarget(binding);
     const found = this.find(markers, note);
     if (found) {
       const markerGuid = guid(found.guid);
@@ -119,17 +132,19 @@ export class PremiereAdapter {
     const result = await this.reconcile(note);
     requireCurrent();
     if (result.outcome !== "absent") return result;
-    const { project, sequence } = this.exactTarget(binding);
+    const { project, sequence } = await this.exactTarget(binding);
     await this.validateClock(sequence, binding);
     const markers = await this.api.Markers.getMarkers(sequence);
-    this.exactTarget(binding);
+    await this.exactTarget(binding);
     requireCurrent();
     if (this.ledger.delivery(note.id)) return this.reconcile(note);
     this.ledger.attempted(note.id, binding.bindingId);
     let applied = false;
     project.lockedAccess(() => {
       requireCurrent();
-      this.exactTarget(binding);
+      // No asynchronous native lookup inside the project lock. Check the
+      // resolved handles' synchronous properties again at the mutation edge.
+      this.checkTarget(binding, project, sequence);
       // Recheck within the project lock. Other local requests must not create
       // a second marker while the durable queue waits for its acknowledgement.
       if (this.find(markers, note)) return;

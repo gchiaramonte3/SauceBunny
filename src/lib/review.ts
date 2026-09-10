@@ -19,6 +19,7 @@
 import { loadJson, saveJson } from "./storage";
 import { getReviewDoc, putReviewDoc } from "./review-store";
 import { PREMIERE_ROOM_MARKERS_ENABLED } from "./premiere-permissions";
+import { copyPremiereAnchor, isPremiereAnchor } from "./premiere-notes";
 import { secondsToHms } from "./timecode";
 import { pathKey } from "./repath";
 
@@ -244,10 +245,12 @@ export function sanitizeDocForWire(doc: ReviewDoc, wireKey: string | null): Revi
     ...(doc.sync ? { sync: { ...doc.sync, commits: undefined } } : {}),
     sourceKey: isHostLocalKey(doc.sourceKey) ? (wireKey || "shared-local") : doc.sourceKey,
     versions: doc.versions.map((v) => (isHostLocalKey(v.path) ? { ...v, path: "" } : v)),
-    // Keep the local anchor, but do not leak newly introduced sequence details
-    // through an ordinary review snapshot while room sharing is unapproved.
-    comments: PREMIERE_ROOM_MARKERS_ENABLED ? doc.comments : doc.comments.map(comment => {
+    // Selected names/IDs are approved; paths and credentials are not. Never
+    // spread an anchor read from disk onto the room wire.
+    comments: doc.comments.map(comment => {
       if (!comment?.premiere) return comment;
+      if (PREMIERE_ROOM_MARKERS_ENABLED && isPremiereAnchor(comment.premiere))
+        return { ...comment, premiere: copyPremiereAnchor(comment.premiere) };
       const { premiere: _localAnchor, ...wireComment } = comment;
       return wireComment;
     }),

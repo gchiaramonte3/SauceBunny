@@ -66,7 +66,9 @@ export function PremiereCompanionSetup() {
       {link.association && <p>Input bound for notes. This does not verify that NDI carries sequence timecode.</p>}
     </>}
     <p>Automatic placement is off. Timeline notes capture the displayed moment and wait for the editor to confirm a position in Premiere. General notes are not turned into markers.</p>
-    {!PREMIERE_ROOM_MARKERS_ENABLED && <p>Local companion proof only. Sharing sequence details and marker requests with a review room is not enabled in this build.</p>}
+    {PREMIERE_ROOM_MARKERS_ENABLED
+      ? <p>Sharing this bound input lets participants send timeline notes and see the selected project and sequence names and IDs. Project paths and pairing codes stay private.</p>
+      : <p>Room marker delivery is unavailable in this build. Local notes remain available.</p>}
     {bridge && <p>{bridge.pendingCount} notes waiting for Premiere. Added markers still require you to save the Premiere project.</p>}
     {(error || link.error || bridge?.error) && <p role="alert">{error || link.error || bridge?.error}</p>}
     <CollapsibleSection id="premiere-settings-recovery" label="Installation and recovery" open={recoveryOpen} onToggle={() => setRecoveryOpen(value => !value)}>

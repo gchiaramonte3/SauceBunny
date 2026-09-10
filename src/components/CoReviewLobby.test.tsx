@@ -128,42 +128,10 @@ describe("compact Review setup", () => {
     fireEvent.click(screen.getByRole("button", { name: "Past sessions in Library" }));
     expect(history).toHaveBeenCalledOnce(); expect(document.querySelector(".cp-screenings")).toBeNull();
   });
-  it("hides review links from onboarding without resetting invitations or policy", async () => {
-    const { props, rerender } = mount();
-    const details = screen.getByText("Manage access").closest("details")!;
-    await waitFor(() => expect((screen.getByLabelText(/Only let people in through a link/) as HTMLInputElement).checked).toBe(true));
-    expect(details.open).toBe(false);
-    expect(details.hidden).toBe(true);
+  it("keeps invitation management out of onboarding", () => {
+    mount();
+    expect(screen.queryByRole("heading", { name: "Review links" })).toBeNull();
     expect(screen.queryByRole("textbox", { name: "Who is this for" })).toBeNull();
-    expect(screen.getByText("Dana")).toBeTruthy();
-    expect(vi.mocked(invoke).mock.calls.some(([c]) => c === "set_review_invited_only")).toBe(false);
-    rerender(<CoReviewLobby {...props} session={{ role: "host", code: "SAUC-HOST", error: null, peers: [] } as never} />);
-    expect(details.hidden).toBe(false);
-    details.open = true;
-    fireEvent.change(screen.getByRole("textbox", { name: "Who is this for" }), { target: { value: "New reviewer" } });
-    fireEvent.click(screen.getByRole("button", { name: "Make a link" }));
-    await screen.findByText("New reviewer");
-    details.open = false; details.open = true;
-    expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
-    expect(vi.mocked(invoke).mock.calls.filter(([c]) => c === "create_review_grant")).toHaveLength(1);
-  });
-  it("retains a newly issued one-time secret through room entry and exit", async () => {
-    const { props, rerender } = mount({ session: { role: "host", code: "SAUC-HOST", error: null, peers: [] } as never });
-    const details = screen.getByText("Manage access").closest("details")!;
-    details.open = true;
-    fireEvent.change(screen.getByRole("textbox", { name: "Who is this for" }), { target: { value: "New reviewer" } });
-    fireEvent.click(screen.getByRole("button", { name: "Make a link" }));
-    await screen.findByText("New reviewer");
-    const grantPanel = document.querySelector(".cp-grants");
-    rerender(<CoReviewLobby {...props} session={{ role: "host", code: "SAUC-HOST", error: null, peers: [] } as never} />);
-    expect(document.querySelector(".cp-grants")).toBe(grantPanel);
-    expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
-    rerender(<CoReviewLobby {...props} session={session} />);
-    expect(document.querySelector(".cp-grants")).toBe(grantPanel);
-    expect(screen.queryByRole("button", { name: "Copy link" })).toBeNull();
-    rerender(<CoReviewLobby {...props} session={{ role: "host", code: "SAUC-HOST", error: null, peers: [] } as never} />);
-    expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
-    expect(vi.mocked(invoke).mock.calls.filter(([c]) => c === "review_code")).toHaveLength(1);
   });
 });
 
@@ -178,8 +146,17 @@ describe("Join recovers", () => {
   });
   it("passes the trimmed code and name", async () => {
     const { props } = mount(); join();
-    await waitFor(() => expect(props.onJoin).toHaveBeenCalledWith("SAUC-ABCDE", "Ada"));
+    await waitFor(() => expect(props.onJoin).toHaveBeenCalledWith("SAUC-ABCDE", "Ada", null));
   });
+  it.each(["saucebunny://review/SAUC-ABCDE/private-grant\n\nNo Sauce Bunny yet? https://example.com", "SAUC-ABCDE/private-grant"])
+    ("preserves a pasted or delivered invitation grant: %s", async (initialCode) => {
+      const { props } = mount({ initialCode });
+      fireEvent.click(screen.getByRole("button", { name: "Join" }));
+      await waitFor(() => expect(props.onJoin).toHaveBeenCalledWith("SAUC-ABCDE", "Ada", "private-grant"));
+      fireEvent.change(screen.getByRole("textbox", { name: "Join code" }), { target: { value: "SAUC-OTHER" } });
+      fireEvent.click(screen.getByRole("button", { name: "Join" }));
+      await waitFor(() => expect(props.onJoin).toHaveBeenLastCalledWith("SAUC-OTHER", "Ada", null));
+    });
 });
 
 describe("session names", () => {

@@ -43,7 +43,10 @@ export class Companion {
   }
   async reconcile(note: MarkerNote) {
     this.requireNote(note);
+    const generation = this.generation;
     const result = await this.premiere.reconcile(note);
+    if (generation !== this.generation) throw new Error("The connection changed. Check the marker again after reconnecting.");
+    this.requireNote(note);
     await this.client.request({ type: "reconcile", noteId: note.id, binding: note.request.anchor.binding,
       outcome: result.outcome === "uncertain" ? "absent" : result.outcome,
       ...(result.outcome === "found" ? { markerGuid: result.markerGuid } : {}) });

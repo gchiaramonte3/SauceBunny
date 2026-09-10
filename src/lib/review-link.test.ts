@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { DOWNLOAD_URL, reviewInviteMessage, reviewLink } from "./review-link";
+import { DOWNLOAD_URL, parseReviewInvitation, reviewInviteMessage, reviewLink } from "./review-link";
 
 describe("review link", () => {
+  it("round-trips the complete copied invitation with its private grant", () => {
+    expect(parseReviewInvitation(reviewInviteMessage("SAUC-ABCDE", "secret"))).toEqual({ code: "SAUC-ABCDE", grant: "secret" });
+    expect(parseReviewInvitation("SAUC-ABCDE/secret")).toEqual({ code: "SAUC-ABCDE", grant: "secret" });
+    expect(parseReviewInvitation("  SAUC-ABCDE  ")).toEqual({ code: "SAUC-ABCDE", grant: null });
+  });
+  it.each(["", "https://example.com/SAUC/secret", "saucebunny://settings/no", "saucebunny://review/", "saucebunny://review/%zz", "a".repeat(8193)])
+    ("rejects malformed or unrelated invitations without exposing them", input => {
+      expect(parseReviewInvitation(input)).toBeNull();
+    });
   it("carries the code and nothing else", () => {
     expect(reviewLink("SAUC-ABCDE-FGHIJ")).toBe("saucebunny://review/SAUC-ABCDE-FGHIJ");
   });

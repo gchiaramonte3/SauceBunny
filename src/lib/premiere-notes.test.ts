@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capturePremiereAnchor, isPremiereAnchor, isPremiereBinding, isPremiereContext, premiereRequests, samePremiereBinding } from "./premiere-notes";
+import { capturePremiereAnchor, copyPremiereBinding, isPremiereAnchor, isPremiereBinding, isPremiereContext, premiereRequests, samePremiereBinding } from "./premiere-notes";
 import { buildComment, emptyDoc, sanitizeDocForWire } from "./review";
 import { isReviewOp } from "./review-delivery";
 import type { PremiereBinding } from "../bindings/PremiereBinding";
@@ -36,7 +36,21 @@ describe("Premiere note boundary", () => {
     const anchor = capturePremiereAnchor(binding, "ndi:pass", null);
     expect(isPremiereAnchor({ ...anchor, mediaSeconds: Infinity })).toBe(false);
     expect(isPremiereAnchor({ ...anchor, verification: "estimated" })).toBe(false);
-    expect(isPremiereContext({ t: "premiere-context", protocol: 1, sessionId: "room", reviewKey: "ndi:pass", sourceId: "ndi:pass", binding })).toBe(true);
+  });
+  it("requires the native source identity and presenter generation on a room context", () => {
+    const context = { t: "premiere-context", protocol: 1, sessionId: "room", reviewKey: "ndi:pass", sourceId: "ndi:pass",
+      programId: "a".repeat(32), presenterEpoch: 1, revision: 1, binding };
+    expect(isPremiereContext(context)).toBe(true);
+    expect(isPremiereContext({ ...context, binding: null })).toBe(true);
+    for (const programId of [undefined, "stream", "g".repeat(32), "a".repeat(31), 123])
+      expect(isPremiereContext({ ...context, programId })).toBe(false);
+    for (const presenterEpoch of [undefined, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])
+      expect(isPremiereContext({ ...context, presenterEpoch })).toBe(false);
+  });
+  it("copies only public binding fields, never private paths or future credentials", () => {
+    const privateBinding = { ...binding, projectPath: "/private/editor-only.prproj", pairingSecret: "private-test-value" };
+    expect(copyPremiereBinding(privateBinding)).toEqual(binding);
+    expect(capturePremiereAnchor(privateBinding, "ndi:pass", null).binding).toEqual(binding);
   });
   it("does not turn general notes, manual timecodes, file notes or replies into markers", () => {
     const doc = emptyDoc("ndi:pass");
@@ -49,16 +63,19 @@ describe("Premiere note boundary", () => {
     expect(isReviewOp({ t: "add", comment: marker })).toBe(true);
     expect(isReviewOp({ t: "add", comment: { ...marker, premiere: { ...marker.premiere, sourceId: "other" } } })).toBe(false);
   });
-  it("keeps local anchors intact while withholding sequence details from room snapshots", () => {
+  it("shares approved names/IDs while withholding private extension fields from snapshots", () => {
     const doc = emptyDoc("ndi:pass");
-    const anchor = capturePremiereAnchor(binding, "ndi:pass", null);
+    const anchor = { ...capturePremiereAnchor(binding, "ndi:pass", null), pairingCode: "secret-test-code",
+      binding: { ...binding, projectPath: "/private/project.prproj" } };
     const comment = buildComment({ versionId: "v", timeStart: 0, body: "Saved note", author: "Editor" });
     doc.comments = [{ ...comment, premiere: anchor }];
     const wire = sanitizeDocForWire(doc, "ndi:pass");
-    expect(wire.comments[0].premiere).toBeUndefined();
+    expect(wire.comments[0].premiere?.binding).toEqual(binding);
     expect(wire.comments[0].body).toBe("Saved note");
     expect(doc.comments[0].premiere).toBe(anchor);
-    expect(JSON.stringify(wire)).not.toContain(binding.projectId);
-    expect(JSON.stringify(wire)).not.toContain(binding.sequenceId);
+    expect(JSON.stringify(wire)).toContain(binding.projectId);
+    expect(JSON.stringify(wire)).toContain(binding.sequenceId);
+    expect(JSON.stringify(wire)).not.toContain("secret-test-code");
+    expect(JSON.stringify(wire)).not.toContain("/private/project.prproj");
   });
 });

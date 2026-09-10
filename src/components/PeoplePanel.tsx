@@ -207,8 +207,8 @@ function PersonTile({ p, stream, state, sharing, recording, handUp, flash, isPre
    *   · muting flips `t.enabled` on that same track in place, so neither the
    *     event nor the `[stream]` effect re-runs.
    * Join muted then unmute and the glyph stayed red for the whole session.
-   * For yourself the intent flag IS the truth; for a peer the track is the
-   * only signal there is.
+   * For yourself App combines intent with actual live/enabled capture;
+   * for a peer the track is the only signal there is.
    */
   const micMuted = p.isSelf ? !!selfMicMuted : trackMicMuted;
   /** Details keep the real per-person actions, outside the picture mask. */

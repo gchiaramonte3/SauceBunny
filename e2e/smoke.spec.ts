@@ -614,12 +614,12 @@ test("Review setup: identity and explicit device choices beside one selected for
   await lobby.getByRole("textbox", { name: "Session name" }).fill("First review pass");
   await lobby.getByRole("tab", { name: "Join a session" }).click();
   await expect(lobby.getByRole("textbox", { name: "Session name" })).toBeHidden();
-  await expect(lobby.getByPlaceholder("Paste a join code")).toBeVisible();
-  await lobby.getByPlaceholder("Paste a join code").fill("SAUC-PENDING");
+  await expect(lobby.getByRole("textbox", { name: "Join code" })).toBeVisible();
+  await lobby.getByRole("textbox", { name: "Join code" }).fill("SAUC-PENDING");
   await lobby.getByRole("tab", { name: "Host a session" }).click();
   await expect(lobby.getByRole("textbox", { name: "Session name" })).toHaveValue("First review pass");
   await lobby.getByRole("tab", { name: "Join a session" }).click();
-  await expect(lobby.getByPlaceholder("Paste a join code")).toHaveValue("SAUC-PENDING");
+  await expect(lobby.getByRole("textbox", { name: "Join code" })).toHaveValue("SAUC-PENDING");
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
@@ -652,11 +652,12 @@ test("Review setup: returning user keeps access policy without onboarding review
   await expect(lobby.locator(".cp-setup-summary")).toContainText("Nika");
   await expect(lobby.locator(".cp-setup-summary")).toContainText("Camera off · Microphone off");
   await expect(lobby.getByRole("heading", { name: "Review links" })).toBeHidden();
-  await expect(lobby.locator(".cp-setup-access")).toBeHidden();
+  const access = page.locator(".cp-room-access-backdrop");
+  await expect(access).toBeHidden();
   // Preserve the loaded policy/records without exposing active-host controls
   // during setup. CoReviewLobby's component tests exercise those host actions.
-  await expect(lobby.locator(".cp-setup-access input[type=checkbox]")).toBeChecked();
-  await expect(lobby.locator(".cp-setup-access")).toContainText("Dana");
+  await expect(access.locator("input[type=checkbox]")).toBeChecked();
+  await expect(access).toContainText("Dana");
   // StrictMode may replay initial reads. Tab switches must not remount access
   // management or fetch new credentials; compare against the loaded baseline.
   const initialGrantReads = await page.evaluate(() =>
@@ -664,9 +665,9 @@ test("Review setup: returning user keeps access policy without onboarding review
       .filter(command => command === "list_review_grants").length);
   expect(initialGrantReads).toBeGreaterThan(0);
   await lobby.getByRole("tab", { name: "Join a session" }).click();
-  await expect(lobby.locator(".cp-setup-access")).toBeHidden();
+  await expect(access).toBeHidden();
   await lobby.getByRole("tab", { name: "Host a session" }).click();
-  await expect(lobby.locator(".cp-setup-access")).toBeHidden();
+  await expect(access).toBeHidden();
   const observed = await page.evaluate(() => {
     const w = window as unknown as { __setupCommands: string[]; __setupCaptureCalls: number };
     return { commands: w.__setupCommands, captureCalls: w.__setupCaptureCalls };

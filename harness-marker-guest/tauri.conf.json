@@ -1,0 +1,10 @@
+{
+  "productName": "Sauce Marker Guest Test",
+  "identifier": "com.saucebunny.marker-guest-test",
+  "build": {
+    "beforeBuildCommand": "npx vite build --config harness-marker-guest/vite.config.mjs",
+    "frontendDist": "/private/tmp/sauce-marker-guest-harness-dist"
+  },
+  "app": { "windows": [{ "label": "main", "title": "Sauce Marker Guest Test", "width": 1280, "height": 800, "resizable": true }] },
+  "bundle": { "targets": ["app"], "macOS": { "infoPlist": "../harness-marker-guest/Info.plist" } }
+}

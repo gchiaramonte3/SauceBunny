@@ -36,9 +36,10 @@ UXP may use the host font in text fields or when Nunito Sans is unavailable.
 
 ## Important limits
 
-- **Live-room note-to-marker delivery is disabled** pending permission to share
-  project/sequence identifiers with reviewers and completion of that wiring.
-  You should not expect ordinary room comments to populate the plugin yet.
+- **Live-room receiving is wired, with native acceptance in progress.** Share
+  the explicitly bound live input, then select Send this note to Premiere.
+  Only selected project/sequence names and IDs are shared; paths and pairing
+  codes stay private. Ordinary general comments do not become markers.
 - **Automatic frame placement is disabled.** NDI frame timing is not verified
   Premiere sequence timecode. Pending marker records, when present, require
   the editor to capture a parked position and confirm placement.
