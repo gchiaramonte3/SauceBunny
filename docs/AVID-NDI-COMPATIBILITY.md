@@ -17,19 +17,25 @@ anamorphic sources require separate visual verification.
 
 ## Installed environment and open gate
 
-- Media Composer application version: `24.12.0.58720`.
+- Initial Media Composer application version: `24.12.0.58720`.
 - OpenIO_NDI exists under `/Library/Application Support/Avid/AVX2_Plug-ins/`;
   its executable contains arm64 and x86_64 architectures. Presence does not
   establish licensing, output enablement, or a working signal.
 - The shared receiver loads NDI SDK runtime `6.3.2.0` and discovers the installed
   Premiere transmitter. No Avid source was discovered.
-- Avid stops at **“Login required for Media Composer | First. Please quit and
+- The initial Avid launch stopped at **“Login required for Media Composer | First. Please quit and
   login to Avid Link and relaunch Media Composer | First.”** No license, trial,
-  account, project or timeline was changed.
+  account, project or timeline was changed by this test.
+- During the follow-up, an already-running Media Composer 2026.8 installer
+  completed successfully. The installed version is now `26.8.0.58987` and
+  Media Composer First opens the existing `Test` project. The launch gate is
+  cleared; use of that project for the generated fixture is awaiting confirmation.
+  No Avid source is yet advertised. Discovery outside the filesystem/network
+  sandbox and in the packaged app both find the Premiere source only.
 
 Actual Avid picture, continuous audio, cadence, reconnects and raw timing are
-therefore **pending**, not passed. Avid sign-in/licensing and a disposable test
-sequence are needed. Synthetic NDI tests cannot substitute for this gate.
+therefore **pending**, not passed. A disposable test sequence with enabled NDI
+output is still needed. Synthetic NDI tests cannot substitute for this gate.
 
 ## Setup and privacy
 
@@ -67,7 +73,7 @@ Clocks remain decimal strings and `timingVerified` is always false. Raw metadata
 may contain private sender text. Keep diagnostics local and redact before
 sharing; do not commit captured editorial media to GitHub.
 
-## Actual Avid acceptance matrix (pending activation)
+## Actual Avid acceptance matrix (pending test source)
 
 ### Completed non-Avid evidence
 
@@ -92,6 +98,22 @@ sharing; do not commit captured editorial media to GitHub.
   600-observation retention bound. Negative checks passed for an absent exact
   source (no fallback capture of Premiere), invalid duration, missing runtime
   and existing-output protection.
+- A fresh Apple Development-signed internal app was built from `2fe2311` in
+  an isolated temporary `CARGO_TARGET_DIR`. The old release cache referenced
+  the repository's previous location, so it was preserved rather than reused.
+  Both `verify-bundle.sh` and `verify-packaged.sh` passed against the new app.
+  Executable SHA-256:
+  `986dd3edab8fee9d94c88d6d0e110607856554e11eaf163d914c5ec10c8b8787`.
+  This is an internal test app, not a notarized release or DMG.
+- In that actual packaged WKWebView, the gear opens the shared NDI dialog;
+  Avid help expands there, the exact Premiere source is discovered, and no
+  capture or room starts just by opening setup. The displayed guidance keeps
+  room privacy, LAN broadcast and unverified Avid timing/markers separate.
+  This verifies packaged setup, not Avid playback or audio.
+- A temporary 90-second 1920×1080/24 DNxHR LB fixture was generated with a
+  visible frame counter, start TC `01:00:00:00` and independent 440/660-Hz
+  stereo PCM tones. It contains no editorial media and has not been imported
+  into an Avid project yet.
 
 Use a disposable sequence with moving frame counter, independent L/R tones and
 known start TC. Record Avid version, project raster/rate, runtime and app revision.
