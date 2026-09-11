@@ -343,6 +343,8 @@ export function useCoReview({
   // log through a ref or it captures the first render's closure forever.
   const appendLogRef = useRef(appendLog);
   appendLogRef.current = appendLog;
+  const pushNotificationRef = useRef(pushNotification);
+  pushNotificationRef.current = pushNotification;
   /** One line in the pipeline log, on the "session" channel. */
   const slog = useCallback((tag: LogTag, line: string) => {
     appendLogRef.current(tag, "session", line);
@@ -1302,7 +1304,12 @@ export function useCoReview({
     const unLog = listen<{ tag: string; line: string }>("session:log", (e) => {
       appendLogRef.current(asLogTag(e.payload.tag), "session", e.payload.line);
     });
-    return () => { disposed = true; unState.then((f) => f()); unMsg.then((f) => f()); unLog.then((f) => f()); };
+    const unAdmissionError = listen<string>("session:admission-error", (e) => {
+      if (!disposed && coSessionRef.current.role === "host") {
+        pushNotificationRef.current("error", "New review joins are blocked", e.payload);
+      }
+    });
+    return () => { disposed = true; unState.then((f) => f()); unMsg.then((f) => f()); unLog.then((f) => f()); unAdmissionError.then((f) => f()); };
   }, [slog, setSessionDoc]);
   /** Write a doc back to ITS OWN source's file. The sourceKey on the doc is
    *  the authority - never the key of whatever source is on screen now. */

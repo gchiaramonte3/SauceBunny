@@ -44,6 +44,12 @@ describe("review grants", () => {
     expect(arm!, "the granted arm takes the peer's claimed name").not.toContain("raw_name");
   });
 
+  it("failed policy reads close the connection before registration and notify the host", () => {
+    const handler = SESSION.slice(SESSION.indexOf("let admission = match"), SESSION.indexOf("let (name, grant_id) = match admission"));
+    expect(handler).toContain("review_grant::admit");
+    expect(handler).toMatch(/Err\(error\) => \{[\s\S]*conn\.close[\s\S]*session:admission-error[\s\S]*return;/);
+  });
+
   it("a revoked or unknown grant is refused, not downgraded", () => {
     // Falling back to an ungranted join would make revocation cosmetic:
     // withdraw a link, and its holder simply rejoins without it.

@@ -110,6 +110,17 @@ beforeEach(() => {
 });
 afterEach(async () => { cleanup(); setScrubbing(false); await Promise.resolve(); vi.useRealTimers(); });
 
+it("shows native invitation-policy failures to the host without ending the room", async () => {
+  const h = await mount("host");
+  const message = "Review invitation settings are damaged. Restore the backup.";
+  await emit("session:admission-error", message);
+  expect(h.args.pushNotification).toHaveBeenCalledWith("error", "New review joins are blocked", message);
+  expect(h.result.current.coSession.role).toBe("host");
+  h.unmount();
+  await emit("session:admission-error", message);
+  expect(h.args.pushNotification).toHaveBeenCalledTimes(1);
+});
+
 describe("mounted live-session Premiere receiving", () => {
   let stop: (() => void) | undefined;
   afterEach(() => { stop?.(); stop = undefined; });

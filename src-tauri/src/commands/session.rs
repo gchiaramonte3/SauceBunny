@@ -716,6 +716,8 @@ pub async fn session_start(
     name: Option<String>,
     title: Option<String>,
 ) -> Result<String, crate::AppError> {
+    // Refuse to open a room whose invitation policy cannot be established.
+    crate::commands::review_grant::review_invited_only(app.clone())?;
     // BEFORE the lock, deliberately. Reading the Keychain can raise a macOS
     // prompt and sit on it indefinitely; doing that while holding `inner`
     // would queue every other session command behind a modal dialog. It is
@@ -1272,7 +1274,16 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     // in a call with, and refusing them by default would break live co-review
     // for everyone who has never issued a link. A host who wants the stricter
     // rule turns on invited-only.
-    let (name, grant_id) = match crate::commands::review_grant::admit(&app, grant.as_deref()) {
+    let admission = match crate::commands::review_grant::admit(&app, grant.as_deref()) {
+        Ok(admission) => admission,
+        Err(error) => {
+            conn.close(1u32.into(), b"review invitation settings unavailable");
+            session_log(&app, "err", error.to_string());
+            let _ = app.emit("session:admission-error", error.to_string());
+            return;
+        }
+    };
+    let (name, grant_id) = match admission {
         crate::commands::review_grant::Admission::Refused(why) => {
             conn.close(1u32.into(), why.as_bytes());
             return;
@@ -2220,6 +2231,7 @@ fn admission_refusal_message(reason: &[u8]) -> Option<&'static str> {
         b"this session is invite only" => Some("This session is invitation-only. Ask the host for your review link, then paste it into Join."),
         b"that link is not valid" => Some("This review link is not valid. Ask the host for a new invitation."),
         b"that link was withdrawn" => Some("The host withdrew this review link. Ask for a new invitation."),
+        b"review invitation settings unavailable" => Some("The host cannot read the room's invitation settings. Ask the host to restore them before joining."),
         _ => None,
     }
 }
@@ -2229,7 +2241,7 @@ mod admission_message_tests {
     use super::admission_refusal_message;
     #[test]
     fn exposes_only_known_refusals_not_untrusted_close_text() {
-        for reason in ["this session is invite only", "that link is not valid", "that link was withdrawn"] {
+        for reason in ["this session is invite only", "that link is not valid", "that link was withdrawn", "review invitation settings unavailable"] {
             assert!(admission_refusal_message(reason.as_bytes()).is_some());
         }
         assert!(admission_refusal_message(b"private arbitrary text").is_none());

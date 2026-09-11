@@ -40,7 +40,8 @@
 
 use crate::AppError;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
 /// One issued link.
@@ -93,15 +94,17 @@ pub struct NewGrant {
 
 #[derive(Default, Serialize, Deserialize)]
 struct GrantFile {
-    #[serde(default)]
     grants: Vec<ReviewGrant>,
     /// When true, a connection with no grant is refused. Off by default: the
     /// lobby's join code is a different door, for people you are already in a
     /// call with, and turning this on by default would break live co-review
     /// for everyone who has never issued a link.
-    #[serde(default)]
     invited_only: bool,
 }
+
+// Serialize read-modify-write transactions, including admission timestamps.
+// Otherwise an arrival can overwrite a withdrawal with its older snapshot.
+static GRANT_WRITES: Mutex<()> = Mutex::new(());
 
 fn path(app: &AppHandle) -> Result<PathBuf, AppError> {
     let dir = app
@@ -113,27 +116,38 @@ fn path(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(dir.join("review-grants.json"))
 }
 
-fn read(app: &AppHandle) -> GrantFile {
-    // A file we cannot read is treated as absent rather than as an error: the
-    // alternative is refusing to host because a grant list is corrupt, and a
-    // host with no grants is a working host.
-    path(app)
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str::<GrantFile>(&s).ok())
-        .unwrap_or_default()
+fn read(p: &Path) -> Result<GrantFile, AppError> {
+    let body = match std::fs::read_to_string(p) {
+        Ok(body) => body,
+        // Only an absent store is first-time setup. A dangling link is not.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && !p.is_symlink() => {
+            return Ok(GrantFile::default());
+        }
+        Err(e) => return Err(AppError::Io(format!(
+            "Cannot read review invitation settings. New joins are blocked until access is restored: {e}"
+        ))),
+    };
+    serde_json::from_str(&body).map_err(|_| AppError::invalid(
+        "Review invitation settings are damaged. New joins are blocked. Restore review-grants.json from a backup; the file has not been changed."
+    ))
 }
 
-fn write(app: &AppHandle, file: &GrantFile) -> Result<(), AppError> {
-    let p = path(app)?;
+fn write(p: &Path, file: &GrantFile) -> Result<(), AppError> {
     let body = serde_json::to_string_pretty(file)
         .map_err(|e| AppError::internal(format!("serialise grants: {e}")))?;
     // Atomic: a truncated grant file is a host that refuses everyone, and a
     // partial write during quit is exactly when that would happen.
     let tmp = p.with_extension("json.tmp");
     std::fs::write(&tmp, body).map_err(|e| AppError::internal(format!("write grants: {e}")))?;
-    std::fs::rename(&tmp, &p).map_err(|e| AppError::internal(format!("commit grants: {e}")))?;
+    std::fs::rename(&tmp, p).map_err(|e| AppError::internal(format!("commit grants: {e}")))?;
     Ok(())
+}
+
+fn update(p: &Path, change: impl FnOnce(&mut GrantFile) -> Result<(), AppError>) -> Result<(), AppError> {
+    let _guard = GRANT_WRITES.lock().map_err(|_| AppError::internal("Review invitation storage lock failed"))?;
+    let mut file = read(p)?;
+    change(&mut file)?;
+    write(p, &file)
 }
 
 fn now_ms() -> u64 {
@@ -149,6 +163,7 @@ fn hash(secret: &str) -> String {
 }
 
 /// What the host decided about an incoming connection.
+#[derive(Debug, PartialEq)]
 pub enum Admission {
     /// No grant presented. Today's behaviour, unless invited-only is on.
     Ungranted,
@@ -165,8 +180,24 @@ pub enum Admission {
 /// from a timing difference is which of the host's own grant hashes matched
 /// first — not the secret, which they would already have to possess to be
 /// here. Guessing it is the 2^256 problem, which timing does not help.
-pub fn admit(app: &AppHandle, presented: Option<&str>) -> Admission {
-    let mut file = read(app);
+pub fn admit(app: &AppHandle, presented: Option<&str>) -> Result<Admission, AppError> {
+    admit_at(&path(app)?, presented)
+}
+
+fn admit_at(p: &Path, presented: Option<&str>) -> Result<Admission, AppError> {
+    let _guard = GRANT_WRITES.lock().map_err(|_| AppError::internal("Review invitation storage lock failed"))?;
+    let mut file = read(p)?;
+    let admission = decide(&mut file, presented);
+    if matches!(admission, Admission::Granted { .. }) {
+        // Timestamp persistence is best-effort, not admission policy.
+        if let Err(e) = write(p, &file) {
+            log::warn!("Could not record review invitation arrival: {e}");
+        }
+    }
+    Ok(admission)
+}
+
+fn decide(file: &mut GrantFile, presented: Option<&str>) -> Admission {
     let Some(secret) = presented.map(str::trim).filter(|s| !s.is_empty()) else {
         return if file.invited_only {
             Admission::Refused("this session is invite only")
@@ -183,8 +214,6 @@ pub fn admit(app: &AppHandle, presented: Option<&str>) -> Admission {
     }
     g.last_seen_at = Some(now_ms());
     let (id, label) = (g.id.clone(), g.label.clone());
-    // Best-effort: failing to record a timestamp must not refuse someone.
-    let _ = write(app, &file);
     Admission::Granted { id, label }
 }
 
@@ -201,23 +230,24 @@ pub fn create_review_grant(app: AppHandle, label: String) -> Result<NewGrant, Ap
     let secret = hex::encode(raw);
     let id = hex::encode(&raw[..8]);
 
-    let mut file = read(&app);
-    file.grants.push(ReviewGrant {
-        id: id.clone(),
-        label: label.clone(),
-        secret_hash: hash(&secret),
-        created_at: now_ms(),
-        last_seen_at: None,
-        revoked: false,
-    });
-    write(&app, &file)?;
+    update(&path(&app)?, |file| {
+        file.grants.push(ReviewGrant {
+            id: id.clone(),
+            label: label.clone(),
+            secret_hash: hash(&secret),
+            created_at: now_ms(),
+            last_seen_at: None,
+            revoked: false,
+        });
+        Ok(())
+    })?;
     Ok(NewGrant { id, label, secret })
 }
 
 /// Every link issued, without the secrets.
 #[tauri::command]
 pub fn list_review_grants(app: AppHandle) -> Result<Vec<GrantSummary>, AppError> {
-    Ok(read(&app)
+    Ok(read(&path(&app)?)?
         .grants
         .into_iter()
         .map(|g| GrantSummary {
@@ -240,14 +270,13 @@ pub async fn revoke_review_grant(
     state: tauri::State<'_, crate::commands::SessionManager>,
     id: String,
 ) -> Result<usize, AppError> {
-    {
-        let mut file = read(&app);
+    update(&path(&app)?, |file| {
         let Some(g) = file.grants.iter_mut().find(|g| g.id == id) else {
             return Err(AppError::not_found("That link is already gone."));
         };
         g.revoked = true;
-        write(&app, &file)?;
-    }
+        Ok(())
+    })?;
     // AND disconnect anyone holding it, right now. Marking alone made
     // revocation take effect at the NEXT join, so the person you had just
     // removed kept reading and commenting until they happened to leave. Doing
@@ -259,20 +288,108 @@ pub async fn revoke_review_grant(
 /// Whether a connection with no grant is turned away.
 #[tauri::command]
 pub fn review_invited_only(app: AppHandle) -> Result<bool, AppError> {
-    Ok(read(&app).invited_only)
+    Ok(read(&path(&app)?)?.invited_only)
 }
 
 /// Refuse anyone without a link. Off by default; see `GrantFile`.
 #[tauri::command]
 pub fn set_review_invited_only(app: AppHandle, on: bool) -> Result<(), AppError> {
-    let mut file = read(&app);
-    file.invited_only = on;
-    write(&app, &file)
+    update(&path(&app)?, |file| {
+        file.invited_only = on;
+        Ok(())
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct StoreFixture(PathBuf);
+    impl StoreFixture {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!("review-grant-test-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&dir).unwrap();
+            Self(dir)
+        }
+        fn path(&self) -> PathBuf { self.0.join("review-grants.json") }
+    }
+    impl Drop for StoreFixture {
+        fn drop(&mut self) { std::fs::remove_dir_all(&self.0).unwrap(); }
+    }
+
+    #[test]
+    fn only_an_absent_store_uses_first_time_defaults() {
+        let store = StoreFixture::new();
+        assert_eq!(admit_at(&store.path(), None).unwrap(), Admission::Ungranted);
+        assert!(!store.path().exists(), "admission must not initialize storage");
+        for invalid in ["{broken", "{}", r#"{"grants":[]}"#, r#"{"invited_only":false}"#] {
+            std::fs::write(store.path(), invalid).unwrap();
+            assert!(read(&store.path()).is_err());
+            assert!(admit_at(&store.path(), None).is_err());
+            assert!(admit_at(&store.path(), Some("known-or-unknown")).is_err());
+            assert!(update(&store.path(), |f| { f.invited_only = false; Ok(()) }).is_err());
+            assert_eq!(std::fs::read_to_string(store.path()).unwrap(), invalid);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn denied_permissions_and_dangling_links_are_not_first_time_setup() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let store = StoreFixture::new();
+        let body = r#"{"grants":[],"invited_only":true}"#;
+        std::fs::write(store.path(), body).unwrap();
+        std::fs::set_permissions(store.path(), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let admission = admit_at(&store.path(), None);
+        let mutation = update(&store.path(), |f| { f.invited_only = false; Ok(()) });
+        std::fs::set_permissions(store.path(), std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(matches!(admission, Err(AppError::Io(_))));
+        assert!(mutation.is_err());
+        assert_eq!(std::fs::read_to_string(store.path()).unwrap(), body);
+        let link = store.0.join("dangling.json");
+        symlink(store.0.join("missing.json"), &link).unwrap();
+        assert!(admit_at(&link, None).is_err());
+    }
+
+    #[test]
+    fn admission_reads_current_policy_and_revocation_every_time() {
+        let store = StoreFixture::new();
+        update(&store.path(), |f| {
+            f.grants.push(ReviewGrant {
+                id: "grant".into(), label: "Host-chosen name".into(), secret_hash: hash("secret"),
+                created_at: 1, last_seen_at: None, revoked: false,
+            });
+            Ok(())
+        }).unwrap();
+        assert_eq!(admit_at(&store.path(), None).unwrap(), Admission::Ungranted);
+        update(&store.path(), |f| { f.invited_only = true; Ok(()) }).unwrap();
+        assert_eq!(admit_at(&store.path(), None).unwrap(), Admission::Refused("this session is invite only"));
+        assert_eq!(admit_at(&store.path(), Some("secret")).unwrap(), Admission::Granted {
+            id: "grant".into(), label: "Host-chosen name".into(),
+        });
+        assert!(read(&store.path()).unwrap().grants[0].last_seen_at.is_some());
+        update(&store.path(), |f| { f.grants[0].revoked = true; Ok(()) }).unwrap();
+        assert_eq!(admit_at(&store.path(), Some("secret")).unwrap(), Admission::Refused("that link was withdrawn"));
+        assert_eq!(admit_at(&store.path(), Some("unknown")).unwrap(), Admission::Refused("that link is not valid"));
+    }
+
+    #[test]
+    fn simultaneous_updates_preserve_every_issued_grant() {
+        let store = StoreFixture::new();
+        std::thread::scope(|scope| {
+            for id in 0..16 {
+                let p = store.path();
+                scope.spawn(move || update(&p, |f| {
+                    f.grants.push(ReviewGrant {
+                        id: id.to_string(), label: "Test".into(), secret_hash: hash(&id.to_string()),
+                        created_at: 1, last_seen_at: None, revoked: false,
+                    });
+                    Ok(())
+                }).unwrap());
+            }
+        });
+        assert_eq!(read(&store.path()).unwrap().grants.len(), 16);
+    }
 
     #[test]
     fn a_secret_hashes_the_same_way_twice() {
