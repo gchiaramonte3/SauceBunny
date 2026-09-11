@@ -361,6 +361,11 @@ topology: star — host + up to MAX_PEERS(3) guests, host relays everything
   Insertion and snapshot filtering share the private `commentDeletedAt` rule
   in `review.ts`: a reply inherits the newest deletion of itself or its
   parent, and only a later explicit restoration can survive that deletion.
+  The private `mergeComment` keeps per-comment reconciliation separate from
+  the document merge: host revision takes priority, then restoration time,
+  then edit time; exact ties retain the incoming comment. Reactions merge
+  independently of the winning text. Both helpers remain in the domain
+  module, with no new public API or persistence format.
 - **Screening mode** is a pure CSS reflow of the existing body (participant
   rail replaces the sidebar; the player is never remounted). The rail reads
   real roster data; the host is identified by roster position 0 — the name

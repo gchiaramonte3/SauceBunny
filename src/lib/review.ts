@@ -821,13 +821,6 @@ export function restampReviewOp(op: ReviewOp, at: number): ReviewOp {
   }
 }
 
-/** Merge an incoming (authoritative) snapshot with the local doc so a local op
- *  that hasn't been echoed back yet survives a snapshot re-adopt (the host
- *  re-broadcasts a full doc on every join; without this an existing peer's
- *  in-flight comment/edit would silently vanish). Starts from `incoming`;
- *  re-folds any local-only comment (idempotent add), keeps the newer of a
- *  shared comment by updatedAt, and UNIONs likes (which don't bump updatedAt)
- *  so a not-yet-echoed like isn't dropped. */
 /**
  * Reconcile two copies of one comment's reactions.
  *
@@ -881,6 +874,31 @@ function mergeReactions(
   };
 }
 
+/** Reconcile one shared comment independently of document metadata/deletions.
+ *  Priority: host revision, explicit restoration, then edit time. Exact ties
+ *  keep the incoming copy; reactions retain their separate merge history. */
+function mergeComment(ic: ReviewComment, lc: ReviewComment): ReviewComment {
+  const base = (lc.revision ?? 0) > (ic.revision ?? 0)
+    || ((lc.revision ?? 0) === (ic.revision ?? 0) && ((lc.restoredAt ?? 0) > (ic.restoredAt ?? 0)
+    || ((lc.restoredAt ?? 0) === (ic.restoredAt ?? 0) && lc.updatedAt > ic.updatedAt)))
+    ? { ...lc } : { ...ic };
+  const { reactions, reactedAt } = mergeReactions(ic, lc);
+  // `likes` is the pre-emoji thumbs-up field, and reactionsOf folds it back
+  // in as 👍 - so unioning it blindly puts a removal straight back through
+  // the OLD representation, which is the exact bug reactedAt was added to
+  // fix. A doc written before per-emoji reactions existed carries no
+  // history of its own, so it is the recorded 👍 op that decides.
+  const thumbs = reactedAt?.["👍"] ?? {};
+  const likes = Array.from(new Set([...(ic.likes ?? []), ...(lc.likes ?? [])]))
+    .filter((who) => thumbs[who]?.on !== false);
+  base.likes = likes.length ? likes : undefined;
+  if (reactions || reactedAt) {
+    base.reactions = reactions;
+    base.reactedAt = reactedAt;
+  }
+  return base;
+}
+
 /**
  * Adopt a snapshot from the host: merge it over what we have, then replay any
  * ops we posted before we had a doc to put them in.
@@ -907,6 +925,9 @@ export function adoptSnapshot(
   return next;
 }
 
+/** Merge a host snapshot without discarding local in-flight changes.
+ *  Reconcile comments, statuses, deletion records and sync coordinates;
+ *  all other document metadata stays authoritative from `incoming`. */
 export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc {
   // NEVER fold across sources. Without this, ending a session after the room
   // had switched sources called mergeReviewDoc(loadReview(A), docForB), which
@@ -923,25 +944,7 @@ export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc
   for (const lc of local.comments) {
     const ic = byId.get(lc.id);
     if (!ic) { byId.set(lc.id, lc); continue; } // local-only → keep it
-    const base = (lc.revision ?? 0) > (ic.revision ?? 0)
-      || ((lc.revision ?? 0) === (ic.revision ?? 0) && ((lc.restoredAt ?? 0) > (ic.restoredAt ?? 0)
-      || ((lc.restoredAt ?? 0) === (ic.restoredAt ?? 0) && lc.updatedAt > ic.updatedAt)))
-      ? { ...lc } : { ...ic };
-    const { reactions, reactedAt } = mergeReactions(ic, lc);
-    // `likes` is the pre-emoji thumbs-up field, and reactionsOf folds it back
-    // in as 👍 - so unioning it blindly puts a removal straight back through
-    // the OLD representation, which is the exact bug reactedAt was added to
-    // fix. A doc written before per-emoji reactions existed carries no
-    // history of its own, so it is the recorded 👍 op that decides.
-    const thumbs = reactedAt?.["👍"] ?? {};
-    const likes = Array.from(new Set([...(ic.likes ?? []), ...(lc.likes ?? [])]))
-      .filter((who) => thumbs[who]?.on !== false);
-    base.likes = likes.length ? likes : undefined;
-    if (reactions || reactedAt) {
-      base.reactions = reactions;
-      base.reactedAt = reactedAt;
-    }
-    byId.set(lc.id, base);
+    byId.set(lc.id, mergeComment(ic, lc));
   }
   const status: Record<string, ReviewStatus> = { ...incoming.status };
   for (const [vid, st] of Object.entries(local.status)) {
