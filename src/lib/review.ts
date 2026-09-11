@@ -524,12 +524,17 @@ export function buildComment(c: NewComment, now = Date.now()): ReviewComment {
   };
 }
 
+/** A reply inherits its parent's deletion until explicitly restored later. */
+function commentDeletedAt(comment: ReviewComment, deletedComments: ReviewDoc["deletedComments"]): number {
+  return Math.max(deletedComments?.[comment.id] ?? 0,
+    comment.parentId ? deletedComments?.[comment.parentId] ?? 0 : 0);
+}
+
 /** Append a pre-built comment; a no-op if its id is already present (so
  *  replaying/echoing an op can't duplicate it — the co-review convergence
  *  guarantee for add-ops). */
 export function insertComment(doc: ReviewDoc, comment: ReviewComment): ReviewDoc {
-  const deletedAt = Math.max(doc.deletedComments?.[comment.id] ?? 0,
-    comment.parentId ? doc.deletedComments?.[comment.parentId] ?? 0 : 0);
+  const deletedAt = commentDeletedAt(comment, doc.deletedComments);
   if (deletedAt && (comment.restoredAt ?? 0) <= deletedAt) return doc;
   if (doc.comments.some((c) => c.id === comment.id)) return doc;
   return { ...doc, comments: [...doc.comments, comment] };
@@ -944,8 +949,7 @@ export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc
     if (!other || st.updatedAt > other.updatedAt) status[vid] = st;
   }
   const comments = Array.from(byId.values()).filter((c) => {
-    const deletedAt = Math.max(deletedComments[c.id] ?? 0,
-      c.parentId ? deletedComments[c.parentId] ?? 0 : 0);
+    const deletedAt = commentDeletedAt(c, deletedComments);
     return !deletedAt || (c.restoredAt ?? 0) > deletedAt;
   });
   const sync = local.sync || incoming.sync ? {

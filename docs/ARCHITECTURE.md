@@ -358,6 +358,9 @@ topology: star — host + up to MAX_PEERS(3) guests, host relays everything
   a reaction but never its removal, and every un-react was resurrected by the
   next merge. Adds still union — two people reacting at once must both land —
   and names with no recorded op (docs predating `reactedAt`) still union too.
+  Insertion and snapshot filtering share the private `commentDeletedAt` rule
+  in `review.ts`: a reply inherits the newest deletion of itself or its
+  parent, and only a later explicit restoration can survive that deletion.
 - **Screening mode** is a pure CSS reflow of the existing body (participant
   rail replaces the sidebar; the player is never remounted). The rail reads
   real roster data; the host is identified by roster position 0 — the name
