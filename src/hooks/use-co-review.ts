@@ -34,6 +34,7 @@ import {
 } from "../lib/ghost-store";
 import { clearReactions, pushReaction } from "../lib/reaction-store";
 import { useStreamKeep } from "./use-stream-keep";
+import { usePremierePublication } from "./use-premiere-publication";
 import { acceptTransport, createClockEstimator, expectedPosition } from "../lib/session-clock";
 import { loadReview, saveReview, ensureVersion, applyReviewOp, attributeReviewOp, mergeReviewDoc, adoptSnapshot, resolveByFingerprint, linkFingerprint, sanitizeDocForWire, commentMarkers as reviewMarkersOf, annotationsOf, loadReviewer, reviewerColorFor, initialsOf, type AnnotationStrokes, type ReviewDoc, type ReviewOp, rememberReceivedAs } from "../lib/review";
 import type { PlayerHandle, SeekResult } from "../components/player-handle";
@@ -59,7 +60,7 @@ import { acknowledgeEnvelope, clearDelivered, enqueueEnvelope, pendingEnvelopes,
 import { applyCommit, createReviewDelivery, createReviewEnvelope, isReviewAck, isReviewEnvelope, isReviewOp, sanitizeReviewOpForWire, type ReviewEnvelope } from "../lib/review-delivery";
 import { persistReviewDoc } from "../lib/review-store";
 import { acceptPremiereContext, acceptPremiereReceipts, authorizePremiereEnvelope, currentPremiereRoomContext,
-  premiereRoomReceipts, scopePremiereEnvelope, setPremiereRoom, setPremiereRoomSource, subscribePremiereLink } from "../lib/premiere-link";
+  premiereRoomReceipts, scopePremiereEnvelope, setPremiereRoom, setPremiereRoomSource } from "../lib/premiere-link";
 import { isPremiereContext, isPremiereReceipts } from "../lib/premiere-notes";
 import { PREMIERE_ROOM_MARKERS_ENABLED } from "../lib/premiere-permissions";
 import { splitReviewCode } from "../lib/review-link";
@@ -1465,44 +1466,7 @@ export function useCoReview({
   // Host scope comes only from the published native room source, not from a
   // private candidate or a received metadata packet. Guests scope on the
   // host-stamped loadSource event above, before receiving a context.
-  useEffect(() => {
-    if (coSession.role !== "host") return;
-    setPremiereRoomSource(coSession.presenter === "m0" && sessionSource.kind === "ndi" && sessionSource.liveState !== "stopped" && sessionSource.url
-      && /^[a-f0-9]{32}$/i.test(sessionSource.url)
-      ? { reviewKey: sessionSource.reviewKey, programId: sessionSource.url, presenterEpoch: coSession.presenterEpoch } : null);
-  }, [coSession.role, coSession.code, coSession.presenter, coSession.presenterEpoch,
-    sessionSource.kind, sessionSource.url, sessionSource.reviewKey, sessionSource.liveState]);
-  useEffect(() => {
-    let disposed = false, scheduled = false, last = "";
-    const publish = () => {
-      if (scheduled || disposed) return;
-      scheduled = true;
-      queueMicrotask(() => {
-        scheduled = false;
-        if (disposed || coRoleRef.current !== "host") return;
-        const context = currentPremiereRoomContext(), doc = sessionDocRef.current;
-        if (!context || !doc || doc.sourceKey !== context.reviewKey) { last = ""; return; }
-        const messages = [context, ...premiereRoomReceipts(doc)];
-        const key = JSON.stringify(messages);
-        if (last === key) return;
-        last = key;
-        void (async () => {
-          try {
-            for (const message of messages) {
-              if (disposed || coRoleRef.current !== "host" || context.sessionId !== coSessionIdRef.current
-                || currentPremiereRoomContext()?.revision !== context.revision) return;
-              await invoke("session_broadcast", { msg: { kind: "reviewOp", from: "", op: JSON.stringify(message) } });
-            }
-          } catch { last = ""; }
-        })();
-      });
-    };
-    const unsubscribe = subscribePremiereLink(publish);
-    publish();
-    // Recovery for a missed status packet; unchanged metadata is not resent.
-    const timer = window.setInterval(publish, 2000);
-    return () => { disposed = true; unsubscribe(); window.clearInterval(timer); };
-  }, [coSession.role, coSession.code, sessionDoc]);
+  usePremierePublication({ coSession, sessionSource, sessionDoc, coRoleRef, sessionDocRef, coSessionIdRef });
   const sendLoadSource = useCallback((src: SessionSource) => {
     // Native NDI publication atomically grants access AND announces the
     // source. A render/effect must never repeat or undo that commit.

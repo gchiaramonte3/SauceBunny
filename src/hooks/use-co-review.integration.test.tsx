@@ -164,6 +164,40 @@ describe("mounted live-session Premiere receiving", () => {
       premiereContext: { programId, presenterEpoch: h.context.presenterEpoch, revision: h.context.revision } };
   }
   const submit = (envelope: unknown) => emit("session:msg", { kind: "reviewOp", from: "m1", op: JSON.stringify(envelope) });
+  it("deduplicates unchanged Premiere publication and stops after unmount", async () => {
+    const h = await editor(); mocks.invoke.mockClear();
+    await act(async () => { await refreshPremiereLink(); await refreshPremiereLink(); vi.advanceTimersByTime(6000); });
+    const publications = () => mocks.invoke.mock.calls.filter(([cmd, args]) => cmd === "session_broadcast"
+      && args?.msg?.kind === "reviewOp" && JSON.parse(args.msg.op).t.startsWith("premiere-"));
+    expect(publications()).toHaveLength(0);
+    h.unmount();
+    await act(async () => { vi.advanceTimersByTime(6000); await refreshPremiereLink(); });
+    expect(publications()).toHaveLength(0);
+  });
+  it("does not publish stale receipt batches after a source changes during an awaited broadcast", async () => {
+    const h = await editor();
+    await submit(submission(h));
+    let finish!: () => void;
+    const original = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((command, args) => {
+      if (command === "session_broadcast" && args?.msg?.kind === "reviewOp"
+        && JSON.parse(args.msg.op).t === "premiere-context") {
+        return new Promise<void>(resolve => { finish = resolve; });
+      }
+      return original(command, args);
+    });
+    mocks.invoke.mockClear();
+    // A document change creates a fresh publication with context before receipts.
+    const note = buildComment({ versionId: h.result.current.sessionDoc!.activeVersionId!, timeStart: 0, body: "General", author: "Host" });
+    await act(async () => { h.result.current.postSessionOp({ t: "add", comment: note }); });
+    expect(finish).toBeTypeOf("function");
+    h.args.sessionSource = { ...h.args.sessionSource, liveState: "stopped" };
+    await act(async () => { h.rerender(); });
+    mocks.invoke.mockClear();
+    await act(async () => { finish(); });
+    expect(mocks.invoke.mock.calls.some(([cmd, args]) => cmd === "session_broadcast"
+      && args?.msg?.kind === "reviewOp" && JSON.parse(args.msg.op).t === "premiere-receipts")).toBe(false);
+  });
   it("receives a guest note only after durable host acceptance, once, and returns sanitized receipts", async () => {
     const h = await editor();
     const envelope = submission(h);
