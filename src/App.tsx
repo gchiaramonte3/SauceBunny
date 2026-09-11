@@ -1,4 +1,5 @@
 import { RoomAccessDialog } from "./components/RoomAccessDialog";
+import type { ComponentProps } from "react";
 import {
   useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"; import { invoke } from "@tauri-apps/api/core"; import { notifyFramesChanged } from "./lib/frames"; import { getVersion } from "@tauri-apps/api/app"; import { listen } from "@tauri-apps/api/event"; import { save as saveDialog } from "@tauri-apps/plugin-dialog"; import {   isPermissionGranted, requestPermission, sendNotification, } from "@tauri-apps/plugin-notification"; import { Toolbar } from "./components/Toolbar"; import { NavRail } from "./components/NavRail";  import { LibraryView } from "./components/LibraryView"; import { LibraryBrowser } from "./components/LibraryBrowser"; import { useTranscriptListeners } from "./hooks/use-transcript-listeners"; import { useDiarizerPrepare } from "./hooks/use-diarizer-prepare"; import { useLibraryScan } from "./hooks/use-library-scan"; import { Sidebar } from "./components/Sidebar"; import { PeoplePanel } from "./components/PeoplePanel"; import { ReactionLayer } from "./components/ReactionLayer";
 import { PeerStageVideo } from "./components/PeerStageVideo"; import { MediaSpikePanel } from "./components/MediaSpikePanel"; import { PeerStreamSpike } from "./components/PeerStreamSpike"; import { CoReviewLobby } from "./components/CoReviewLobby"; import { Monitor, type AspectId } from "./components/Monitor"; import type { Notif } from "./components/NotificationBell"; import type { ToastKind } from "./components/CanvasToast"; import { playSuccess, playError, playInfo } from "./lib/sound"; import { Transport } from "./components/Transport"; import { Timeline } from "./components/Timeline"; import { ViewOptions } from "./components/ViewOptions"; import { LogsPanel } from "./components/LogsPanel"; import { RoomControlBar } from "./components/RoomControlBar"; import { ReviewStatusChip } from "./components/ReviewStatusChip"; import { useMediaCapture, subscribeCaptureError, setCaptureLogSink } from "./hooks/use-media-capture"; import { SettingsModal, type Defaults } from "./components/SettingsModal"; import { YouTubeAuthModal } from "./components/YouTubeAuthModal"; import type { PlayerHandle } from "./components/player-handle"; import type {   AppStatus, ClientLog, ExportOpts, LocalFileMeta, Metadata, QueuedClip, RecentClip, SourceKind, WhisperModel, ReviewRangeDraft, } from "./types"; import { isQueuedClip } from "./types"; import { asLogTag } from "./types"; import { formatError } from "./lib/error-format"; import { fmtElapsed, stageLabel } from "./lib/elapsed"; import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase"; import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek } from "./lib/playhead-store"; import { usePanelBus } from "./hooks/use-panel-bus"; import { useStreamRung } from "./hooks/use-stream-rung"; import type { YtdlpStatus } from "./bindings/YtdlpStatus"; import { clipTranscriptPath, type ActiveTranscript } from "./lib/transcript-owner"; import { useTransport } from "./hooks/use-transport"; import { useSourceMarks } from "./hooks/use-source-marks"; import { useTranscriptJobs } from "./hooks/use-transcript-jobs"; import { useFetchSource } from "./hooks/use-fetch-source"; import { useLocalSource } from "./hooks/use-local-source"; import { useWebPlayback } from "./hooks/use-web-playback"; import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type SessionSource } from "./hooks/use-co-review"; import { QueueDrawer } from "./components/QueueDrawer"; import { TranscriptReader } from "./components/TranscriptReader"; import { TranscriptViewer } from "./components/TranscriptViewer"; import { ReaderPlayerStage, type ReaderSource } from "./components/ReaderPlayerStage"; import { useReaderMarkers } from "./hooks/use-reader-markers"; import { ReaderAnalysis } from "./components/ReaderAnalysis"; import { CommandPalette } from "./components/CommandPalette"; import { ShortcutSheet } from "./components/ShortcutSheet"; import { DropTarget } from "./components/DropTarget"; import { WelcomeScreen } from "./components/WelcomeScreen"; import { PermissionsOnboarding } from "./components/PermissionsOnboarding"; import { RoomSourceBar } from "./components/RoomSourceBar"; import { LiveDrawLayer } from "./components/LiveDrawLayer"; import { AnnotationOverlay } from "./components/AnnotationOverlay";
@@ -4540,6 +4541,29 @@ export default function App() {
     );
   })();
 
+  // Both layouts expose the same people/device truth. Keep their mount sites
+  // and layout-only flags separate so theater never changes player lifetime.
+  const participantPanelProps: Omit<ComponentProps<typeof PeoplePanel>, "active" | "strip"> = {
+    onRemovePerson: coSession.role === "host" ? removePerson : undefined,
+    participants: theaterParticipants,
+    remoteStreams: meshStreams,
+    peerStates: meshStates,
+    mutedForMe: meshMutedForMe,
+    onToggleMuteForMe: toggleMuteForMe,
+    sharingMembers,
+    recordingMembers,
+    selfRecording: stageRecording,
+    shareStream,
+    raisedHands,
+    presenter: coSession.presenter,
+    canGrantPresenter: coSession.role === "host",
+    onMakePresenter: makePresenter,
+    selfCamOff: !capture.cameraOn,
+    selfMicMuted: !capture.micOn,
+    onToggleCam: () => capture.setEnabled("video", !capture.cameraOn),
+    onToggleMic: () => capture.setEnabled("audio", !capture.micOn),
+  };
+
   return (
     <div className="cp-window">
       {buildBanner}
@@ -4766,27 +4790,8 @@ export default function App() {
                   sibling of <main> so entering the room never remounts the
                   player; renders nothing outside the room. */}
               <PeoplePanel
-                onRemovePerson={coSession.role === "host" ? removePerson : undefined}
+                {...participantPanelProps}
                 active={roomActive && !theater}
-                participants={theaterParticipants}
-                remoteStreams={meshStreams}
-                peerStates={meshStates}
-                mutedForMe={meshMutedForMe}
-                onToggleMuteForMe={toggleMuteForMe}
-                sharingMembers={sharingMembers}
-                recordingMembers={recordingMembers}
-                selfRecording={stageRecording}
-                shareStream={shareStream}
-                raisedHands={raisedHands}
-                presenter={coSession.presenter}
-                canGrantPresenter={coSession.role === "host"}
-                onMakePresenter={makePresenter}
-                /* Your own tile is also your device control - same capture
-                   singleton the room bar drives, so the two stay in step. */
-                selfCamOff={!capture.cameraOn}
-                selfMicMuted={!capture.micOn}
-                onToggleCam={() => capture.setEnabled("video", !capture.cameraOn)}
-                onToggleMic={() => capture.setEnabled("audio", !capture.micOn)}
               />
               <Sidebar
                 reviewStatus={reviewStatus}
@@ -5461,26 +5466,9 @@ export default function App() {
                       Partial-mark guidance stays (it completes the gesture). */}
                   {roomActive && theater && (
                     <PeoplePanel
-                      onRemovePerson={coSession.role === "host" ? removePerson : undefined}
+                      {...participantPanelProps}
                       active
                       strip
-                      participants={theaterParticipants}
-                      presenter={coSession.presenter}
-                      canGrantPresenter={coSession.role === "host"}
-                      onMakePresenter={makePresenter}
-                      selfCamOff={!capture.cameraOn}
-                      selfMicMuted={!capture.micOn}
-                      onToggleCam={() => capture.setEnabled("video", !capture.cameraOn)}
-                      onToggleMic={() => capture.setEnabled("audio", !capture.micOn)}
-                      remoteStreams={meshStreams}
-                      peerStates={meshStates}
-                      mutedForMe={meshMutedForMe}
-                      onToggleMuteForMe={toggleMuteForMe}
-                      sharingMembers={sharingMembers}
-                recordingMembers={recordingMembers}
-                selfRecording={stageRecording}
-                      shareStream={shareStream}
-                      raisedHands={raisedHands}
                     />
                   )}
                   {!roomActive && !ndiPictureVisible && (() => {
