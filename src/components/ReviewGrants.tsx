@@ -33,42 +33,45 @@ function when(ms: bigint | null): string {
 }
 
 export function ReviewGrants({ sessionCode }: {
-  /** The LIVE session's code, or null when nothing is running. Used only to
-   *  say whether the link is reachable right now - the link itself no longer
-   *  depends on it. */
+  /** The authoritative LIVE address, or null for offline invitation creation. */
   sessionCode: string | null;
 }) {
-  /* The code is a pure function of this Mac's persisted key, so it can be
-     minted without starting anything. Until review_code existed, a host could
-     not copy a link without first opening a session for nobody - which is the
-     wrong shape for a feature whose whole point is reaching someone who is not
-     in the room yet. */
-  const [code, setCode] = useState<string | null>(null);
-  useEffect(() => {
-    void invoke<string>("review_code").then(setCode).catch(() => setCode(null));
-  }, []);
+  // Offline identities are read on Copy, not cached across Settings resets.
+  const copyGeneration = useRef(0);
+  const copyTimer = useRef<number | undefined>(undefined);
   const [grants, setGrants] = useState<GrantSummary[] | null>(null);
   const [label, setLabel] = useState("");
   const [invitedOnly, setInvitedOnly] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const [justMade, setJustMade] = useState<{ label: string; secret: string } | null>(null);
+  const [justMade, setJustMade] = useState<NewGrant | null>(null);
+  const justMadeRef = useRef(justMade);
+  justMadeRef.current = justMade;
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const invalidateCopy = useCallback(() => {
+    copyGeneration.current++;
+    window.clearTimeout(copyTimer.current);
+  }, []);
+  const clearCopy = useCallback(() => {
+    invalidateCopy();
+    setCopied(false);
+  }, [invalidateCopy]);
+  useEffect(() => {
+    clearCopy();
+    return invalidateCopy;
+  }, [sessionCode, clearCopy, invalidateCopy]);
 
   const refresh = useCallback(async () => {
     try {
-      /* Checked, not trusted. `invoke<T>` is an assertion about what the
-         backend returns, not a guarantee, and this panel is mounted inside the
-         lobby: a command answering with an unexpected shape took the whole
-         lobby down with "(grants ?? []).filter is not a function", which is a
-         blank screen for a feature the user was not even using. An empty list
-         is the right answer to a reply we cannot read. */
+      // The bridge is a trust boundary. Unknown policy is not an open room.
       const list = await invoke<GrantSummary[]>("list_review_grants");
-      setGrants(Array.isArray(list) ? list : []);
+      if (!Array.isArray(list)) throw new Error("Could not read the invitation list. Check that this app build is up to date.");
       const only = await invoke<boolean>("review_invited_only");
-      setInvitedOnly(only === true);
-    } catch (e) { setError(formatError(e)); }
+      if (typeof only !== "boolean") throw new Error("Could not read the invitation policy. Check that this app build is up to date.");
+      setGrants(list);
+      setInvitedOnly(only);
+    } catch (e) { setInvitedOnly(null); setError(formatError(e)); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -78,7 +81,9 @@ export function ReviewGrants({ sessionCode }: {
     setError(null);
     try {
       const made = await invoke<NewGrant>("create_review_grant", { label });
-      setJustMade({ label: made.label, secret: made.secret });
+      clearCopy();
+      setJustMade(made);
+      justMadeRef.current = made;
       setLabel("");
       await refresh();
     } catch (e) { setError(formatError(e)); }
@@ -92,6 +97,11 @@ export function ReviewGrants({ sessionCode }: {
       // Returns how many live connections it closed, so the confirmation can
       // say what actually happened rather than "done".
       const closed = await invoke<number>("revoke_review_grant", { id });
+      if (justMadeRef.current?.id === id) {
+        clearCopy();
+        justMadeRef.current = null;
+        setJustMade(null);
+      }
       setRemoved(closed > 0
         ? `${label} was disconnected and the link no longer works.`
         : `${label}'s link no longer works.`);
@@ -100,12 +110,19 @@ export function ReviewGrants({ sessionCode }: {
   };
 
   const copyLink = async (secret?: string) => {
-    if (!code) return;
+    clearCopy();
+    const generation = copyGeneration.current;
+    setError(null);
     try {
+      const code = sessionCode ?? await invoke<string>("review_code");
+      if (generation !== copyGeneration.current) return;
       await navigator.clipboard.writeText(reviewInviteMessage(code, secret));
+      if (generation !== copyGeneration.current) return;
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch { /* clipboard unavailable */ }
+      copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
+    } catch (e) {
+      if (generation === copyGeneration.current) setError(`Could not copy the invitation. Try Copy again. ${formatError(e)}`);
+    }
   };
 
   const live = (grants ?? []).filter((g) => !g.revoked);
@@ -141,7 +158,7 @@ export function ReviewGrants({ sessionCode }: {
           <p className="cp-grants-made-line">
             Link for <strong>{justMade.label}</strong>. This is the only time it can be copied.
           </p>
-          <button type="button" className="btn btn-ghost" disabled={!code} onClick={() => void copyLink(justMade.secret)}>
+          <button type="button" className="btn btn-ghost" onClick={() => void copyLink(justMade.secret)}>
             {copied ? "Copied" : "Copy link"}
           </button>
           {/* Having a link and being reachable are different things, and the
@@ -159,7 +176,7 @@ export function ReviewGrants({ sessionCode }: {
       {error && <p className="cp-grants-error" role="alert">{error}</p>}
       {removed && <p className="cp-grants-made-line" role="status">{removed}</p>}
       {invitedOnly === false && sessionCode && <button type="button" className="btn btn-ghost"
-        disabled={!code} onClick={() => void copyLink()}>Copy open join link</button>}
+        onClick={() => void copyLink()}>Copy open join link</button>}
 
       {grants && grants.length > 0 && (
         <ul className="cp-grants-list">

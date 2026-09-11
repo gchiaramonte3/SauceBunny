@@ -10,7 +10,7 @@ beforeEach(() => {
     if (command === "review_code") return "SAUC-HOST";
     if (command === "list_review_grants") return [];
     if (command === "review_invited_only") return true;
-    if (command === "create_review_grant") return { label: "Test reviewer", secret: "fixture-secret" };
+    if (command === "create_review_grant") return { id: "grant", label: "Test reviewer", secret: "fixture-secret" };
     if (command === "set_review_invited_only") throw new Error("Policy write failed");
     return null;
   });
@@ -39,7 +39,8 @@ it("is reachable outside a hidden setup rail and retains its one-time invitation
   rerender(<div hidden><RoomAccessDialog {...props} open /></div>);
   expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
   expect(vi.mocked(invoke).mock.calls.filter(([c]) => c === "create_review_grant")).toHaveLength(1);
-  expect(vi.mocked(invoke).mock.calls.filter(([c]) => c === "review_code")).toHaveLength(1);
+  // Copy resolves offline identity only on demand; opening the dialog needs no key read.
+  expect(vi.mocked(invoke).mock.calls.filter(([c]) => c === "review_code")).toHaveLength(0);
   expect(vi.mocked(invoke).mock.calls.some(([c]) => c === "set_review_invited_only")).toBe(false);
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   expect(props.onClose).toHaveBeenCalledOnce();
