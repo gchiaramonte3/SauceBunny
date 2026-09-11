@@ -60,3 +60,9 @@
 }
 .cp-ndi-input-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s-2); margin: var(--s-3) 0 var(--s-4); }
 .cp-ndi-input-settings { white-space: normal; max-width: 100%; }
+.cp-ndi-sender-setup { margin-bottom: var(--s-3); }
+.cp-ndi-sender-setup > .cp-section { border-bottom: 0; }
+.cp-ndi-sender-setup > .cp-section.collapsible > .cp-section-head,
+.cp-ndi-sender-setup > .cp-section.collapsible > .cp-section-body { padding-left: 0; padding-right: 0; }
+.cp-ndi-sender-setup ol { padding-left: var(--s-4); margin: 0; color: var(--fg-3); }
+.cp-ndi-sender-setup li + li { margin-top: var(--s-2); }

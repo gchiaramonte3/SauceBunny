@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { IconChevronDown } from "../src/components/Icons";
 import { VolumeControl } from "../src/components/VolumeControl";
 import { NdiPreviewHeader } from "../src/components/NdiPreviewHeader";
+import { AvidNdiSetup } from "../src/components/AvidNdiSetup";
 import { StatusBadge } from "./StatusBadge";
 import "./participants.css";
 import "../src/styles/ndi-input.css";
@@ -59,6 +60,11 @@ export function PreviewExamples() {
       <div className="cp-ds-inline"><button type="button" className="btn cp-toolbar-disclosure cp-ndi-share-action" disabled={shared} onClick={() => setShared(true)}>Share with room</button><div className="cp-review-composer"><button type="button" className="btn btn-primary btn-compact cp-review-post" disabled={posted} onClick={() => setPosted(true)}>Post</button></div></div>
       <p className="cp-ds-fixture-caption" role="status">{shared ? "Sharing simulated. " : "Private fixture. "}{posted ? "Post simulated. " : "No note posted. "}Green identifies these explicitly approved actions, not connection health. No session or storage is accessed.</p>
       <div className="cp-ds-preview-specimens">{(["disabled", "focus", "expanded", "narrow"] as const).map(state => <SourceSpecimen key={state} state={state} />)}</div>
+    </section>
+    <section className="cp-ndi-input" aria-label="Avid NDI help specimen">
+      <h3 className="cp-ds-fixture-title">Production component · Avid sender setup</h3>
+      <p className="cp-ds-fixture-caption">The production gear dialog uses this passive disclosure. No discovery, installation, media, or room is started by this example.</p>
+      <AvidNdiSetup />
     </section>
     <details className="cp-ds-before-fix" data-testid="preview-before-fix">
       <summary>Before the fix</summary>

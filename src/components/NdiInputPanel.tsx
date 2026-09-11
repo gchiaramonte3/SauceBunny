@@ -6,6 +6,7 @@ import { loadJson, saveJson } from "../lib/storage";
 import { formatError } from "../lib/error-format";
 import type { NdiDiscovery, NdiInput } from "../hooks/use-ndi-input";
 import { PremiereConnectionStatus } from "./PremiereConnectionStatus";
+import { AvidNdiSetup } from "./AvidNdiSetup";
 import type { NdiPlaybackRecovery } from "./NdiProgramMonitor";
 import "../styles/ndi-input.css";
 
@@ -82,7 +83,7 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
     : state.connectionCount === 0 && currentProgram ? "Input disconnected · Last picture retained"
     : state.phase === "stale" ? state.connectionCount ? "Connected · Picture parked" : "No recent picture · Checking input"
     : inspectingPreview ? ready ? "Preview ready · Not shared" : "Connecting picture…"
-    : input.program ? "Shared with room" : input.snapshot.busy === "starting" ? "Connecting to Premiere…" : "Choose a source to preview";
+    : input.program ? "Shared with room" : input.snapshot.busy === "starting" ? "Connecting to NDI…" : "Choose a source to preview";
   const selectedAvailable = !!discovery?.sources.some(source => source.name === selected);
   const canPreview = !!(selectedAvailable && discovery?.bridgeCompiled && discovery.runtime === "ready"
     && !discovering && !acting && !input.snapshot.busy);
@@ -100,7 +101,7 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
       <button className="cp-modal-close" type="button" onClick={onClose} aria-label="Close NDI settings">✕</button>
     </header>
     <div className="cp-ndi-input-body">
-      <p className="cp-ndi-input-intro">Preview your sequence here. Premiere controls playback.</p>
+      <p className="cp-ndi-input-intro">Preview picture and audio from Avid, Premiere, or another NDI sender. Playback stays at the source.</p>
       {canManageSource && <>
         <div className="cp-ndi-input-source-label">
           <label htmlFor="ndi-input-source">NDI source</label>
@@ -114,18 +115,18 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
           {selected && !selectedAvailable && <option value={selected} disabled>{selected} · Not currently found</option>}
           {discovery?.sources.map(source => <option key={source.name} value={source.name}>{source.name}</option>)}
         </select>
-        {discovery && !discovery.bridgeCompiled && <p role="alert">This Sauce Bunny build does not include the native NDI bridge. Install a build with Premiere input support.</p>}
+        {discovery && !discovery.bridgeCompiled && <p role="alert">This Sauce Bunny build does not include the native NDI bridge. Install a build with NDI input support.</p>}
         {discovery?.bridgeCompiled && discovery.runtime === "missing" && <p role="alert">{discovery.error || "The included NDI runtime is missing. Reinstall Sauce Bunny."}</p>}
         {discovery?.bridgeCompiled && discovery.runtime === "incompatible" && <p role="alert">{discovery.error || "The included NDI runtime is incompatible. Reinstall Sauce Bunny."}</p>}
         <p role="status" aria-label="Source discovery">{discovering ? "Looking for sources…" : discovery ? `Sources refreshed · ${discovery.sources.length} available` : "Sources not checked"}</p>
-        {discovery?.runtime === "ready" && discovery.sources.length === 0 && <p>No Premiere source found. Open a sequence, enable Mercury Transmit, then refresh. Use Premiere settings for setup help.</p>}
+        {discovery?.runtime === "ready" && discovery.sources.length === 0 && <p>No NDI source found. Enable output in the source application, then refresh. Setup help is below.</p>}
         {discovery?.error && discovery.runtime === "ready" && <p role="alert">{discovery.error}</p>}
         <button type="button" className="btn cp-ndi-input-preview" disabled={!canPreview}
           onClick={() => { onPreviewRequested?.(); void run(() => input.start(selected)); }}>Preview source</button>
       </>}
         <div className="cp-ndi-input-connection">
           {currentProgram && <strong title={currentProgram.name}>{currentProgram.name}</strong>}
-          <p role="status" aria-label="NDI connection">{status}{state.inputWidth ? <span className="cp-ndi-input-format">{state.inputWidth} × {state.inputHeight} · {state.outputFps.toFixed(1)} fps</span> : null}</p>
+          <p role="status" aria-label="NDI connection">{status}{state.inputWidth ? <span className="cp-ndi-input-format">{state.inputWidth} × {state.inputHeight}{state.inputFps != null ? ` · Source ${state.inputFps.toFixed(2)} fps` : " · Source rate unavailable"}{` · Preview ${state.outputFps.toFixed(1)} fps`}</span> : null}</p>
           {currentProgram && <p>Use the Preview speaker control for program audio. Camera and microphone stay separate.</p>}
           {recovery && !recovery.error && <div className="cp-ndi-input-recovery">
             <p>Program playback needs a click to resume on this device.</p>
@@ -143,15 +144,19 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
         {canManageSource && inspectingPreview && input.snapshot.room?.presenting && <button type="button" className="btn cp-ndi-input-share"
           disabled={acting || !input.canShare} onClick={() => void run(async () => {
             await input.share(); onShared?.(); onClose();
-          })}>Share Premiere with room</button>}
+          })}>Share NDI with room</button>}
+        <p>Not shared refers to the Sauce Bunny room, not the sender’s NDI broadcast on your network.</p>
         <div className="cp-ndi-input-actions">
           {canManageSource && input.previewProgram && <button type="button" className="btn btn-ghost"
             disabled={acting || input.snapshot.busy === "publishing" || input.snapshot.busy === "stopping"}
             onClick={() => void run(input.cancelPreview)}>Cancel preview</button>}
           <button type="button" className="btn" onClick={onClose}>Done</button>
         </div>
-      {canManageSource && <button type="button" className="cp-toolbar-disclosure cp-ndi-input-settings" onClick={onCompanionSetup}
-        disabled={!onCompanionSetup}>Install or set up Premiere…</button>}
+      {canManageSource && <>
+        <AvidNdiSetup />
+        <button type="button" className="cp-toolbar-disclosure cp-ndi-input-settings" onClick={onCompanionSetup}
+          disabled={!onCompanionSetup}>Install or set up Premiere…</button>
+      </>}
     </div>
   </section></div>, document.body);
 }

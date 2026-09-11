@@ -106,7 +106,7 @@ export function PremiereSetup({ telemetry }: { telemetry?: NdiTelemetry }) {
         <li>Leave “Disable video output when in the background” off.</li>
         <li>Allow Local Network access for Premiere and Sauce Bunny in macOS System Settings → Privacy &amp; Security.</li>
       </ol>
-      <p>Return to the monitor, choose Connect Premiere, select your source, and preview it before sharing.</p>
+      <p>Return to the monitor, open NDI settings beside volume, select your source, and preview it before sharing.</p>
     </CollapsibleSection>
     <CollapsibleSection {...disclosure("troubleshoot", "Troubleshoot a missing source")}>
       <p>Open a sequence in Premiere and check Mercury Transmit. If the source still does not appear, check Local Network permission and try Refresh. An empty source list does not prove permission was denied.</p>

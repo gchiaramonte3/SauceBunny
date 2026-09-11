@@ -33,6 +33,44 @@ async function mount(result: NdiDiscoveryResult, state = emptyNdiState()) {
 }
 
 describe("NDI preflight states", () => {
+  it("uses the same receiver for Avid, Premiere and unknown senders without guessing capabilities", async () => {
+    const names = ["EDIT-SUITE (Avid Media Composer)", "EDIT-SUITE (Adobe Premiere Pro)", "Camera 1"];
+    mocks.invoke.mockResolvedValue(discovery({ sources: names.map(name => ({ name })) }));
+    const i = input(), setup = vi.fn();
+    render(<NdiInputPanel input={i} onClose={vi.fn()} onCompanionSetup={setup}/>);
+    await screen.findByRole("option", { name: names[0] });
+    const help = screen.getByRole("button", { name: "Avid Media Composer setup" });
+    expect(help.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(help);
+    expect(help.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText(/Avid sequence timecode and live marker delivery are not connected/)).toBeTruthy();
+    expect(screen.getByText(/other NDI receivers may view or record/)).toBeTruthy();
+    expect(screen.getByText(/Avid 2026.8 fixes NDI stopping/)).toBeTruthy();
+    expect(setup).not.toHaveBeenCalled();
+    for (const name of names) {
+      fireEvent.change(screen.getByRole("combobox", { name: "NDI source" }), { target: { value: name } });
+      expect(i.start).toHaveBeenCalledTimes(names.indexOf(name));
+      fireEvent.click(screen.getByRole("button", { name: "Preview source" }));
+      await waitFor(() => expect((screen.getByRole("button", { name: "Preview source" }) as HTMLButtonElement).disabled).toBe(false));
+    }
+    expect(vi.mocked(i.start).mock.calls).toEqual(names.map(name => [name]));
+    expect(mocks.invoke.mock.calls.map(([command]) => command)).toEqual(["ndi_discover"]);
+    expect(i.share).not.toHaveBeenCalled();
+    expect(i.cancelPreview).not.toHaveBeenCalled();
+  });
+
+  it("labels incoming and preview rates independently for fractional-rate Avid picture", async () => {
+    mocks.invoke.mockResolvedValue(discovery({ sources: [] }));
+    const i = input();
+    i.previewProgram = { id: "avid", name: "Avid Media Composer", url: "/preview", reviewKey: "ndi:avid", local: true, ownerId: "m0" };
+    i.previewState = { ...emptyNdiState(), inputWidth: 1920, inputHeight: 1080, inputFps: 24000 / 1001, outputFps: 30 };
+    render(<NdiInputPanel input={i} onClose={vi.fn()}/>);
+    expect(screen.getByRole("status", { name: "NDI connection" }).textContent).toContain("Source 23.98 fps · Preview 30.0 fps");
+    expect(screen.queryByText(/Editor-confirmed timing/)).toBeNull();
+    expect(screen.getByText(/Not shared refers to the Sauce Bunny room/)).toBeTruthy();
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("ndi_discover", {}));
+  });
+
   it("keeps guest recovery in settings without offering source or room mutations", () => {
     const i=input(),close=vi.fn(),resume=vi.fn(),retry=vi.fn();
     i.program={id:"room",name:"Editor's Premiere",url:"/room",reviewKey:"ndi:room",local:false,ownerId:"host"};
@@ -45,8 +83,9 @@ describe("NDI preflight states", () => {
     fireEvent.click(screen.getByRole("button",{name:"Reconnect picture"}));expect(retry).toHaveBeenCalledOnce();
     fireEvent.focus(window);
     expect(mocks.invoke).not.toHaveBeenCalled();
-    for(const name of ["Refresh sources","Preview source","Cancel preview","Share Premiere with room","Marker setup…"])expect(screen.queryByRole("button",{name})).toBeNull();
+    for(const name of ["Refresh sources","Preview source","Cancel preview","Share NDI with room","Premiere marker setup…"])expect(screen.queryByRole("button",{name})).toBeNull();
     expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Avid Media Composer setup" })).toBeNull();
     h.rerender(<NdiInputPanel {...props} open={false}/>);
     expect(screen.queryByRole("button",{name:"Enable program audio"})).toBeNull();
     h.rerender(<NdiInputPanel {...props}/>);
@@ -99,8 +138,8 @@ describe("NDI preflight states", () => {
     i.canShare=true;
     let resolve!:()=>void;i.share=vi.fn(()=>new Promise<void>(done=>{resolve=done;}));
     const close=vi.fn(),shared=vi.fn();render(<NdiInputPanel input={i} onClose={close} onShared={shared}/>);
-    await waitFor(()=>expect((screen.getByRole("button",{name:"Share Premiere with room"}) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button",{name:"Share Premiere with room"}));
+    await waitFor(()=>expect((screen.getByRole("button",{name:"Share NDI with room"}) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button",{name:"Share NDI with room"}));
     expect(shared).not.toHaveBeenCalled();expect(close).not.toHaveBeenCalled();
     resolve();await waitFor(()=>expect(shared).toHaveBeenCalledOnce());expect(close).toHaveBeenCalledOnce();
   });
@@ -110,8 +149,8 @@ describe("NDI preflight states", () => {
     i.snapshot.room={generation:1,presenterEpoch:0,presenting:true,publishedId:null,publicationRevision:null,source:null};
     i.canShare=true;i.share=vi.fn(async()=>{throw new Error("Presentation changed");});
     const close=vi.fn(),shared=vi.fn();render(<NdiInputPanel input={i} onClose={close} onShared={shared}/>);
-    await waitFor(()=>expect((screen.getByRole("button",{name:"Share Premiere with room"}) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button",{name:"Share Premiere with room"}));
+    await waitFor(()=>expect((screen.getByRole("button",{name:"Share NDI with room"}) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button",{name:"Share NDI with room"}));
     expect((await screen.findByRole("alert")).textContent).toContain("Presentation changed");
     expect(shared).not.toHaveBeenCalled();expect(close).not.toHaveBeenCalled();
   });
@@ -152,8 +191,8 @@ describe("NDI preflight states", () => {
 
   it("explains zero discovery results without auto-selecting a source", async () => {
     await mount(discovery({sources:[]}));
-    expect((await screen.findByText(/No Premiere source found/)).textContent).toContain("enable Mercury Transmit");
-    expect(screen.getByText(/Use Premiere settings for setup help/)).toBeTruthy();
+    expect((await screen.findByText(/No NDI source found/)).textContent).toContain("Enable output in the source application");
+    expect(screen.getByRole("button", { name: "Avid Media Composer setup" })).toBeTruthy();
     expect((screen.getByRole("combobox",{name:"NDI source"}) as HTMLSelectElement).disabled).toBe(true);
   });
 
@@ -176,7 +215,7 @@ describe("NDI preflight states", () => {
     expect(i.cancelPreview).not.toHaveBeenCalled();
   });
 
-  it("links to Settings instead of hiding setup and diagnostics in disclosures", async () => {
+  it("keeps Premiere installation in Settings alongside passive Avid setup", async () => {
     mocks.invoke.mockResolvedValue(discovery({}));
     const setup=vi.fn();
     render(<NdiInputPanel input={input()} onClose={vi.fn()} onCompanionSetup={setup}/>);
@@ -230,7 +269,7 @@ describe("NDI preflight states", () => {
     await waitFor(()=>expect((screen.getByRole("button",{name:"Refresh sources"}) as HTMLButtonElement).disabled).toBe(false));
     mocks.invoke.mockResolvedValue(discovery({sources:[]}));
     fireEvent.click(screen.getByRole("button",{name:"Refresh sources"}));
-    await screen.findByText(/No Premiere source found/);
+    await screen.findByText(/No NDI source found/);
     expect(screen.getByText("Premiere",{selector:"strong"})).toBeTruthy();
     expect(i.cancelPreview).not.toHaveBeenCalled();expect(i.start).not.toHaveBeenCalled();
   });
@@ -241,7 +280,7 @@ describe("NDI preflight states", () => {
       outputFps:30, receivedFrames:1800, ndiDroppedFrames:2, encoderDroppedFrames:3,
       lastInputAgeMs:14, encodedBitrateKbps:6192,
     });
-    expect((await screen.findByRole("status",{name:"NDI connection"})).textContent).toContain("1920 × 1080 · 30.0 fps");
+    expect((await screen.findByRole("status",{name:"NDI connection"})).textContent).toContain("1920 × 1080 · Source rate unavailable · Preview 30.0 fps");
     expect(screen.queryByText(/NDI drops/)).toBeNull();
   });
 

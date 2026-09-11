@@ -44,6 +44,9 @@ const allowedProduction = new Set([
   "src/components/ExpectedSpeakersMenu",
   // Passive status/readout only: React types and scoped CSS, no clock/store/controller.
   "src/components/NdiPreviewHeader",
+  // Passive Avid instructions: React local disclosure state + the already
+  // reviewed CollapsibleSection/Icons; no native, storage or media imports.
+  "src/components/AvidNdiSetup",
 ]);
 const pureHelpers = [...allowedProduction].flatMap(path => [".tsx", ".ts"].map(extension => resolve(root, path + extension)).filter(existsSync));
 

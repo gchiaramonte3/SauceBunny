@@ -63,3 +63,13 @@ it("keeps a presenter's live source passive without inventing Premiere control o
   expect(status.title).toBe("Alex's shared picture · Playback controlled by the presenter");
   expect(status.className).toBe("cp-source-status");
 });
+
+it.each(["Avid Media Composer", "Unknown NDI sender"])("leaves %s playback at the source without inventing timeline timing", name => {
+  const p = props();
+  const h = render(<Transport {...p} liveInput={name} liveController="ndi"/>);
+  expect(screen.getByText("Live").title).toBe(`${name} · Playback controlled at source`);
+  expect(screen.getByText("Timeline timecode unavailable").parentElement).toBe(screen.getByText("Playback controlled at source").parentElement);
+  expect(screen.queryByRole("button", { name: "Play" })).toBeNull();
+  expect(h.container.querySelectorAll(".cp-volume")).toHaveLength(1);
+  expect(p.onPlayToggle).not.toHaveBeenCalled();
+});

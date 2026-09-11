@@ -109,8 +109,43 @@ async function boot(page:Page,room=true,programUrl?:string,fileReview=false,file
   });});
   await expect(page.locator(".cp-room-head")).toBeVisible();
   await page.getByRole("button",{name:"Share",exact:true}).click();
-  await page.getByRole("menuitem",{name:/Premiere via NDI/}).click();
+  await page.getByRole("menuitem",{name:/NDI input/}).click();
 }
+
+for (const scale of [1, 1.25]) test(`Avid setup stays in the gear dialog at 1100px / ${scale * 100}% text`, async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await boot(page, false, undefined, false, undefined, { width: 1920, height: 1080 }, "EDIT-SUITE (Avid Media Composer)");
+  await page.evaluate(scale => {
+    const root = document.documentElement, css = getComputedStyle(root);
+    const values = ["--text-xs", "--text-sm", "--text-base", "--text-md", "--text-lg", "--text-xl", "--text-2xl"]
+      .map(token => [token, `${parseFloat(css.getPropertyValue(token)) * scale}px`]);
+    for (const [token, value] of values) root.style.setProperty(token, value);
+  }, scale);
+  const monitor = page.locator(".cp-view-clip .cp-monitor");
+  await monitor.evaluate(element => element.setAttribute("data-avid-stage", "retained"));
+  const trigger = page.getByRole("button", { name: "NDI settings", exact: true });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "NDI settings" });
+  await dialog.getByRole("button", { name: "Avid Media Composer setup" }).click();
+  await expect(dialog.getByText(/Avid sequence timecode and live marker delivery are not connected/)).toBeVisible();
+  await expect(dialog.getByText(/other NDI receivers may view or record/)).toBeVisible();
+  await expect(dialog.getByRole("option", { name: "EDIT-SUITE (Avid Media Composer)" })).toHaveCount(1);
+  await expect(page.locator(".cp-queue-drawer .cp-ndi-input")).toHaveCount(0);
+  const box = (await dialog.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0); expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(1100); expect(box.y + box.height).toBeLessThanOrEqual(700);
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const setup = dialog.getByRole("button", { name: "Avid Media Composer setup" });
+  await expect(setup).toHaveCSS("padding-left", "0px");
+  await dialog.getByText(/Avid sequence timecode and live marker delivery are not connected/).scrollIntoViewIfNeeded();
+  await expect(dialog.getByText(/Avid sequence timecode and live marker delivery are not connected/)).toBeInViewport();
+  await page.screenshot({ path: test.info().outputPath("avid-ndi-setup.png") });
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0); await expect(trigger).toBeFocused();
+  await expect(monitor).toHaveAttribute("data-avid-stage", "retained");
+  const calls = await page.evaluate(() => (window as unknown as { __ndiCalls: string[] }).__ndiCalls);
+  expect(calls).not.toContain("ndi_start"); expect(calls).not.toContain("ndi_publish"); expect(calls).not.toContain("ndi_stop");
+});
 
 test("the Preview transport opens private Premiere controls without opening a room",async({page})=>{
   await boot(page,false);
@@ -228,7 +263,7 @@ test("private Premiere keeps the real review tabs, saved notes, refresh, and Set
   await comment.evaluate(element=>element.setAttribute("data-draft-identity","same"));
   const drawer=page.locator(".cp-queue-drawer.room"),drawerBounds=await drawer.boundingBox();
   await trigger.click();
-  const marker=(await inspector.getByRole("button",{name:"Marker setup…"}).boundingBox())!;
+  const marker=(await inspector.getByRole("button",{name:"Premiere marker setup…"}).boundingBox())!;
   const reconnect=(await inspector.getByRole("button",{name:"Reconnect picture"}).boundingBox())!;
   expect(reconnect.y-(marker.y+marker.height)).toBeGreaterThanOrEqual(12);
   await inspector.getByRole("button",{name:"Done",exact:true}).click();
@@ -302,7 +337,7 @@ for(const size of [{width:1100,height:700},{width:1680,height:1020}]){
     await page.screenshot({path:test.info().outputPath(`review-before-private-${size.width}.png`)});
     const comment=page.getByRole("textbox",{name:"Comment",exact:true});
     await expect(comment).toBeEnabled();await comment.fill("Keep this file note");
-    await page.getByRole("button",{name:"Share",exact:true}).click();await page.getByRole("menuitem",{name:/Premiere via NDI/}).click();
+    await page.getByRole("button",{name:"Share",exact:true}).click();await page.getByRole("menuitem",{name:/NDI input/}).click();
     await page.getByRole("combobox",{name:"NDI source"}).selectOption("Synthetic Premiere");
     await page.getByRole("button",{name:"Preview source"}).click();
     await page.getByRole("button",{name:"Done",exact:true}).click();
@@ -356,7 +391,7 @@ for(const viewport of [{width:1100,height:700},{width:1680,height:1020}]) for(co
     const sourceLabel=(await dialog.getByText("NDI source",{exact:true}).boundingBox())!;
     const refresh=(await dialog.getByRole("button",{name:"Refresh sources"}).boundingBox())!;
     expect(refresh.x-sourceLabel.x-sourceLabel.width).toBeGreaterThanOrEqual(12);
-    const marker=(await dialog.getByRole("button",{name:"Marker setup…"}).boundingBox())!;
+    const marker=(await dialog.getByRole("button",{name:"Premiere marker setup…"}).boundingBox())!;
     const retry=(await dialog.getByRole("button",{name:"Reconnect picture"}).boundingBox())!;
     expect(retry.y-marker.y-marker.height).toBeGreaterThanOrEqual(12);
     await page.screenshot({path:test.info().outputPath("ndi-settings-popup.png")});
@@ -382,7 +417,7 @@ for(const viewport of [{width:1100,height:700},{width:1680,height:1020}]) for(co
     expect(tc.y+tc.height).toBeLessThanOrEqual(pictureBox.y);
     expect(Math.abs(tc.x+tc.width/2-pictureBox.x-pictureBox.width/2)).toBeLessThanOrEqual(1);
     const timing=(await page.getByText("Timeline timecode unavailable",{exact:true}).boundingBox())!;
-    const playback=(await page.getByText("Playback controlled in Premiere",{exact:true}).boundingBox())!;
+    const playback=(await page.getByText("Playback controlled at source",{exact:true}).boundingBox())!;
     expect(Math.abs(timing.y-playback.y)).toBeLessThanOrEqual(1);
     expect(playback.x+playback.width).toBeLessThanOrEqual(stage.x+stage.width);
     await expect(page.locator(".cp-timeline-hint")).toHaveCount(0);
@@ -413,7 +448,7 @@ test("private NDI uses the Preview monitor and preserves its prepared decoder on
   await expectPassiveLiveStatus(page);
   const video=page.locator(".cp-peerstage-video");await expect(video).toBeAttached();
   await expect(page.locator(".cp-monitor .cp-empty")).toHaveAttribute("inert", "");
-  await expect(page.getByRole("button",{name:"Share Premiere with room"})).toBeDisabled();
+  await expect(page.getByRole("button",{name:"Share NDI with room"})).toBeDisabled();
   await expect(page.locator(".cp-monitor .cp-ndi-monitor")).toHaveCount(1);
   await expect(page.locator(".cp-ndi-input video,.cp-ndi-input canvas,.cp-ndi-input input[type=range]")).toHaveCount(0);
   await expect(page.locator(".cp-monitor-source-bar")).toHaveCount(0);
@@ -426,7 +461,7 @@ test("private NDI uses the Preview monitor and preserves its prepared decoder on
   await page.locator(".cp-nav-item").filter({hasText:"Review"}).first().click();
   await expect(video).toHaveAttribute("data-mount-canary","same");
   await page.getByRole("button",{name:"Share",exact:true}).click();
-  await page.getByRole("menuitem",{name:/Premiere via NDI/}).click();
+  await page.getByRole("menuitem",{name:/NDI input/}).click();
   await expect(page.getByRole("dialog",{name:"NDI settings"})).toBeVisible();
   await expect(video).toHaveAttribute("data-mount-canary","same");
   expect(await video.evaluate(el=>(el as HTMLVideoElement).muted)).toBe(true);
@@ -505,7 +540,7 @@ test("opt-in: a playing MediaBunny file keeps decoding while Premiere is preview
     await page.getByRole("button",{name:"Play",exact:true}).click();
     await expect.poll(picture).not.toBe(initial);
     await page.getByRole("button",{name:"Share",exact:true}).click();
-    await page.getByRole("menuitem",{name:/Premiere via NDI/}).click();
+    await page.getByRole("menuitem",{name:/NDI input/}).click();
     await page.getByRole("combobox",{name:"NDI source"}).selectOption("Synthetic Premiere");
     await page.getByRole("button",{name:"Preview source"}).click();
     await expectNativePicture(page);
@@ -544,11 +579,11 @@ test("opt-in: returning from Premiere restores file marks, captions, and control
     await expect(page.locator(".cp-track.has-filmstrip")).toBeVisible();
     const timelineHeight=(await page.getByRole("region",{name:"Timeline",exact:true}).boundingBox())!.height;
     await page.getByRole("button",{name:"Share",exact:true}).click();
-    await page.getByRole("menuitem",{name:/Premiere via NDI/}).click();
+    await page.getByRole("menuitem",{name:/NDI input/}).click();
     await page.getByRole("combobox",{name:"NDI source"}).selectOption("Synthetic Premiere");
     await page.getByRole("button",{name:"Preview source"}).click();
     await expectNativePicture(page);
-    await page.getByRole("button",{name:"Share Premiere with room"}).click();
+    await page.getByRole("button",{name:"Share NDI with room"}).click();
     await expect(page.getByRole("region",{name:"Live timeline"})).toBeVisible();
     await expectPassiveLiveStatus(page);
     expect((await page.getByRole("region",{name:"Live timeline"}).boundingBox())!.height).toBe(timelineHeight);
@@ -561,12 +596,12 @@ test("opt-in: returning from Premiere restores file marks, captions, and control
     const beforeCancel=await page.evaluate(()=>(window as unknown as {__ndiCalls:string[]}).__ndiCalls.length);
     await page.evaluate(()=>localStorage.setItem("e2e.cancelNextFile","1"));
     await page.getByRole("button",{name:"File",exact:true}).click();
-    await expect(page.getByRole("button",{name:"Premiere live",exact:true})).toBeVisible();
+    await expect(page.getByRole("button",{name:"NDI live",exact:true})).toBeVisible();
     const cancelledCalls=await page.evaluate(start=>(window as unknown as {__ndiCalls:string[]}).__ndiCalls.slice(start),beforeCancel);
     expect(cancelledCalls).not.toContain("ndi_unpublish");
     expect(cancelledCalls).not.toContain("ndi_stop");
-    await page.getByRole("button",{name:"Premiere live",exact:true}).click();
-    await page.getByRole("menuitem",{name:/Stop sharing Premiere/}).click();
+    await page.getByRole("button",{name:"NDI live",exact:true}).click();
+    await page.getByRole("menuitem",{name:/Stop sharing NDI/}).click();
     await expect(page.getByRole("region",{name:"Live timeline"})).toBeVisible();
     await expect(page.locator(".cp-caption-cue")).toHaveCount(0);
     // Explicit file selection, not Stop sharing, returns the room to a file.
@@ -672,19 +707,19 @@ test("opt-in: browser decodes the real native NDI H.264/AAC capture",async({page
   await page.getByRole("combobox",{name:"NDI source"}).selectOption("Synthetic Premiere");
   await page.getByRole("button",{name:"Preview source"}).click();
   await expectNativePicture(page);
-  await expect(page.getByRole("button",{name:"Share Premiere with room"})).toBeEnabled();
+  await expect(page.getByRole("button",{name:"Share NDI with room"})).toBeEnabled();
   expect(await page.evaluate(()=>(window as unknown as {__ndiCalls:string[]}).__ndiCalls.includes("ndi_publish"))).toBe(false);
   const oldVideo=page.locator(".cp-peerstage-video");
   await oldVideo.evaluate(el=>el.setAttribute("data-last-good-picture","yes"));
   stream.disconnect();
   await expect(page.getByRole("alert").filter({hasText:"disconnected"}).first()).toBeVisible();
-  await expect(page.getByRole("button",{name:"Share Premiere with room"})).toBeDisabled();
+  await expect(page.getByRole("button",{name:"Share NDI with room"})).toBeDisabled();
   await expect(oldVideo).toHaveAttribute("data-last-good-picture","yes");
   await oldVideo.dispatchEvent("loadeddata");
-  await expect(page.getByRole("button",{name:"Share Premiere with room"})).toBeDisabled();
+  await expect(page.getByRole("button",{name:"Share NDI with room"})).toBeDisabled();
   await page.getByRole("dialog",{name:"NDI settings",exact:true}).getByRole("button",{name:"Reconnect picture"}).click();
   await expectNativePicture(page);
-  await expect(page.getByRole("button",{name:"Share Premiere with room"})).toBeEnabled();
+  await expect(page.getByRole("button",{name:"Share NDI with room"})).toBeEnabled();
   await expect(page.locator('[data-last-good-picture="yes"]')).toHaveCount(0);
   await page.screenshot({path:test.info().outputPath("ndi-native-picture.png")});
   for (const size of [{width:1680,height:1020},{width:1100,height:700}]) {
@@ -742,7 +777,7 @@ test("opt-in: browser decodes the real native NDI H.264/AAC capture",async({page
   await expect.poll(()=>promotedVideo.evaluate(el=>(el as HTMLVideoElement).muted)).toBe(true);
   await page.locator(".cp-transport .cp-volume > button").click();
   await page.locator(".cp-connect-premiere").click();
-  await page.getByRole("button",{name:"Share Premiere with room"}).click();
+  await page.getByRole("button",{name:"Share NDI with room"}).click();
   await expect(page.getByRole("dialog",{name:"NDI settings"})).not.toBeVisible();
   await expect(page.locator(".cp-monitor [data-promoted-picture=same]")).toBeVisible();
   await expectNativePicture(page);

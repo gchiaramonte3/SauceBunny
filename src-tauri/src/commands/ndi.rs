@@ -422,7 +422,7 @@ async fn ndi_query(discover: bool) -> Result<NdiDiscoveryResult, AppError> {
     #[cfg(not(sauce_ndi))]
     { let _ = discover; Ok(NdiDiscoveryResult { bridge_compiled:false, runtime:NdiRuntimeState::Missing,
         runtime_version:None, sources:Vec::new(),
-        error:Some("This Sauce Bunny build does not include Premiere input. Install a build with NDI support.".into()) }) }
+        error:Some("This Sauce Bunny build does not include NDI input. Install a build with NDI support.".into()) }) }
     #[cfg(sauce_ndi)] {
         let Some(path) = runtime_path() else { return Ok(NdiDiscoveryResult { bridge_compiled:true,
             runtime:NdiRuntimeState::Missing, runtime_version:None, sources:Vec::new(),

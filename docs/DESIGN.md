@@ -4,6 +4,18 @@ The current application rulebook. Source contracts enforce many of these
 rules, but cannot prove rendered geometry, dynamic names or complete keyboard
 behavior. Use the catalog and browser checks alongside those contracts.
 
+### Avid NDI compatibility candidate · 2026-09-11
+
+NDI source controls are sender-neutral: Avid, Premiere and other senders use the
+same gear dialog beside volume, decoder and normal commenting sidebar. Passive
+`AvidNdiSetup` help belongs inside that dialog; it never starts discovery,
+installation, capture or sharing. Premiere companion actions remain explicitly
+Premiere-labeled. Do not infer timeline/marker capability from a source name.
+Show source and preview FPS separately. “Not shared” describes room publication,
+not the sender's LAN broadcast. Keep that distinction visible in settings.
+Actual Avid compatibility remains gated by the evidence in
+[AVID-NDI-COMPATIBILITY.md](AVID-NDI-COMPATIBILITY.md).
+
 Tokens live in `src/styles/tokens.css`. Component styles live in
 `src/styles/<area>.css`. There is no CSS framework and no component library,
 on purpose — see CLAUDE.md.

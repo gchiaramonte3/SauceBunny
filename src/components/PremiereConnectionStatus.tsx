@@ -8,6 +8,6 @@ export function PremiereConnectionStatus({ sourceId, onSetup }: { sourceId: stri
   return <div className="cp-premiere-connection-status">
     <p role="status">{binding ? `Notes → ${binding.sequenceName} · Editor-confirmed timing`
       : "Timeline markers are not connected. NDI picture and audio are separate."}</p>
-    {onSetup && <button type="button" className="cp-toolbar-disclosure" aria-haspopup="dialog" onClick={onSetup}>Marker setup…</button>}
+    {onSetup && <button type="button" className="cp-toolbar-disclosure" aria-haspopup="dialog" onClick={onSetup}>Premiere marker setup…</button>}
   </div>;
 }

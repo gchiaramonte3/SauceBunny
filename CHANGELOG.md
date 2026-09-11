@@ -5,6 +5,14 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- Avid Media Composer setup guidance in the existing NDI settings gear, with
+  sender-neutral NDI controls, separate source/preview frame-rate reporting and
+  a receive-only compatibility probe. The shared picture/audio engine and
+  commenting sidebar are unchanged. Actual Avid compatibility is still pending
+  sign-in and live-source testing; automatic Avid timecode and live markers are
+  not enabled. “Not shared” describes room publication, not LAN broadcasting.
+
 ### Fixed
 - **Scrubbing a web source tells you what it is doing, and the preview can no
   longer switch itself off.** The frame-accurate overlay is what makes

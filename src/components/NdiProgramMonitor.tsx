@@ -51,7 +51,7 @@ export const NdiProgramMonitor = forwardRef<NdiProgramMonitorHandle,Props>(funct
       onRecoveryChange={onRecoveryChange}
       stopped={!!program.stopped} onDecoded={decoded} onFailed={failed} onRetry={restart}/>)}
     {chrome && painted!==requested.current && <span className="cp-peerstage-badge" role="status">
-      {program.name} · {program.stopped?"Sharing stopped":waitingForPicture?"Waiting for a Premiere picture. Park inside the sequence.":"Connecting to Premiere…"}{last?` · Last picture: ${last.program.name}`:""}
+      {program.name} · {program.stopped?"Sharing stopped":waitingForPicture?"Waiting for an NDI picture. Park inside the sequence.":"Connecting to NDI…"}{last?` · Last picture: ${last.program.name}`:""}
     </span>}
   </div>;
 });

@@ -656,8 +656,8 @@ export default function App() {
     setNdiRefreshRequest(n => n + 1);
   }, []);
   const [sessionsRequestTick,setSessionsRequestTick] = useState(0);
-  const previewStatus = ndiInput.previewState.phase === "error" ? "Premiere needs attention · Not shared"
-    : ndiInput.snapshot.candidate?.decodedReady && ndiInput.snapshot.candidate.encodedReady ? "Premiere ready · Not shared" : "Premiere connecting · Not shared";
+  const previewStatus = ndiInput.previewState.phase === "error" ? "NDI needs attention · Not shared"
+    : ndiInput.snapshot.candidate?.decodedReady && ndiInput.snapshot.candidate.encodedReady ? "NDI ready · Not shared" : "NDI connecting · Not shared";
   const ndiMonitorRef = useRef<ReviewProgramSurfacesHandle>(null);
   const connectPremiereRef = useRef<HTMLButtonElement>(null);
   const sourceShareButtonRef = useRef<HTMLButtonElement>(null);
@@ -3874,7 +3874,7 @@ export default function App() {
   };
   useEffect(() => {
     reviewSession.setInspectionBlock(privateInspectionVisible && coSessionActive
-      ? "Private Premiere preview. Return to the room picture or share Premiere before adding notes. Your draft is kept." : null);
+      ? "Private NDI preview. Return to the room picture or share NDI before adding notes. Your draft is kept." : null);
   }, [privateInspectionVisible, coSessionActive, reviewSession]);
   useEffect(() => { if (activeView !== "coreview") setNdiPanelOpen(false); }, [activeView]);
   // Display name of whoever is driving, for the waiting affordance.
@@ -4083,7 +4083,7 @@ export default function App() {
   const sendingPct = transfer && transfer.total > 0
     ? Math.floor((transfer.received / transfer.total) * 100)
     : 0;
-  const shareButtonLabel = ndiRoomSource ? ndiRoomSource.state === "stopped" ? "Sharing stopped" : "Premiere live"
+  const shareButtonLabel = ndiRoomSource ? ndiRoomSource.state === "stopped" ? "Sharing stopped" : "NDI live"
     : offerError ? "Share failed"
     : transfer?.phase === "hashing" ? "Preparing…"
     : transfer?.phase === "sending" ? `Sending ${sendingPct}%`
@@ -4103,13 +4103,13 @@ export default function App() {
   const shareOptions = useMemo(() => {
     const out: ShareOption[] = [];
     if(coSession.role === "host") {
-      out.push({key:"ndi",label:"Premiere via NDI…",detail:ndiInput.previewProgram ? previewStatus : "Beta · private preview first",onSelect:openPremiere});
-      if(ndiInput.canShare) out.push({key:"ndi-publish",label:"Share Premiere with room",detail:"Publish the prepared picture",onSelect:()=>{
-        void publishPremiere().then(()=>{setProgramMuted(previewMuted);setProgramVolume(previewVolume);setPreviewSelected(false);setNdiPanelOpen(false);stopShare();stopViewerShare();}).catch(error=>pushNotification("error","Couldn't share Premiere",formatError(error)));
+      out.push({key:"ndi",label:"NDI input…",detail:ndiInput.previewProgram ? previewStatus : "Avid, Premiere, and other senders · Beta",onSelect:openPremiere});
+      if(ndiInput.canShare) out.push({key:"ndi-publish",label:"Share NDI with room",detail:"Publish the prepared picture",onSelect:()=>{
+        void publishPremiere().then(()=>{setProgramMuted(previewMuted);setProgramVolume(previewVolume);setPreviewSelected(false);setNdiPanelOpen(false);stopShare();stopViewerShare();}).catch(error=>pushNotification("error","Couldn't share NDI",formatError(error)));
       }});
       if(ndiProgram && !ndiProgram.stopped) {
-        out.push({key:"ndi-retry",label:"Reconnect Premiere picture",detail:"Keep the last picture while reconnecting",onSelect:()=>ndiMonitorRef.current?.retryVisible()});
-        out.push({key:"ndi-stop",label:"Stop sharing Premiere",detail:"Keep the last picture",onSelect:()=>{void stopPremiereSharing().catch(error=>pushNotification("error","Couldn't stop Premiere",formatError(error)));}});
+        out.push({key:"ndi-retry",label:"Reconnect NDI picture",detail:"Keep the last picture while reconnecting",onSelect:()=>ndiMonitorRef.current?.retryVisible()});
+        out.push({key:"ndi-stop",label:"Stop sharing NDI",detail:"Keep the last picture",onSelect:()=>{void stopPremiereSharing().catch(error=>pushNotification("error","Couldn't stop NDI",formatError(error)));}});
       }
     }
     if(ndiProgram || ndiRoomSource) return out;
@@ -4167,7 +4167,7 @@ export default function App() {
       id:privateReviewProgram.reviewKey,ownerId:privateReviewProgram.ownerId,kind:"ndi",label:privateReviewProgram.name,
     } : ndiProgram ? {
       id:ndiProgram.reviewKey,ownerId:ndiProgram.ownerId,kind:"ndi",label:ndiProgram.name,
-      notesBlocked:activeView!=="coreview"?"Open Review to add Premiere notes.":ndiInput.reviewBlocked?"Waiting for the room picture. Notes continue syncing; you can post when the new picture appears.":undefined,
+      notesBlocked:activeView!=="coreview"?"Open Review to add live-input notes.":ndiInput.reviewBlocked?"Waiting for the room picture. Notes continue syncing; you can post when the new picture appears.":undefined,
     } : ndiRoomSource ? {
       id:ndiRoomSource.reviewKey,ownerId:"m0",kind:"ndi",label:ndiRoomSource.name,
     } : programOwner ? {
@@ -4861,7 +4861,7 @@ export default function App() {
                       <span className="cp-room-name" title={coSession.title || ndiProgram?.name || metadata?.title || undefined}>
                         {coSession.title || ndiProgram?.name || metadata?.title || "Review session"}
                       </span>
-                      {ndiProgram && <span className="cp-room-source" title={ndiProgram.name}>Premiere · {ndiProgram.stopped ? "Sharing stopped" : ndiInput.state.phase === "error" ? "Disconnected" : ndiInput.state.phase === "stale" ? "Picture parked" : "Live"}</span>}
+                      {ndiProgram && <span className="cp-room-source" title={ndiProgram.name}>NDI · {ndiProgram.stopped ? "Sharing stopped" : ndiInput.state.phase === "error" ? "Disconnected" : ndiInput.state.phase === "stale" ? "Picture parked" : "Live"}</span>}
                       {!ndiProgram && metadata?.title && coSession.title && metadata.title !== coSession.title && (
                         <span className="cp-room-source" title={metadata.title}>{metadata.title}</span>
                       )}
@@ -5060,7 +5060,7 @@ export default function App() {
                     pictureCovered={ndiPictureVisible || !!peerLiveStream}
                     displayAspect={ndiPictureVisible && visibleNdiState.inputWidth >= 16 && visibleNdiState.inputHeight >= 16
                       ? visibleNdiState.inputWidth / visibleNdiState.inputHeight : undefined}
-                    emptyActions={reviewStageActive && (coSession.role === "off" || (coSession.role === "host" && isPresenter)) ? <button type="button" className="btn btn-ghost" onClick={openPremiere}>Connect Premiere</button> : undefined}
+                    emptyActions={reviewStageActive && (coSession.role === "off" || (coSession.role === "host" && isPresenter)) ? <button type="button" className="btn btn-ghost" onClick={openPremiere}>Connect NDI</button> : undefined}
                     status={status}
                     metadata={metadata}
                     errorDetail={errorDetail}
@@ -5353,7 +5353,7 @@ export default function App() {
                     ) : null}
                   />
                   <Transport
-                    liveController={ndiPictureVisible?"premiere":"presenter"}
+                    liveController={ndiPictureVisible?"ndi":"presenter"}
                     liveInput={(ndiPictureVisible ? visibleNdiName : undefined) ?? (peerLiveStream ? `${peerLiveStream.who}'s shared picture` : undefined)}
                     sourceControls={reviewStageActive && (canManageNdiSource || ndiPictureVisible) ? <button ref={connectPremiereRef} type="button" className="cp-icon-btn cp-connect-premiere" title="NDI settings" aria-label="NDI settings" aria-haspopup="dialog" aria-expanded={ndiPanelOpen} aria-controls={NDI_INPUT_PANEL_ID} onKeyDown={event => { if (event.key === " ") event.stopPropagation(); }} onClick={() => { if (ndiPictureVisible) { setNdiPanelOpen(true); setNdiRefreshRequest(n => n + 1); } else openPremiere(); }}><IconSettings size={16} /></button> : undefined}
                     status={status}

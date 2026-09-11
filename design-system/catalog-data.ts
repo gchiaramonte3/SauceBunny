@@ -407,6 +407,7 @@ export const catalogEntries: CatalogEntry[] = [
       { path: "src/components/Monitor.tsx", note: "Shared mounted picture surface." },
       { path: "src/components/Transport.tsx", note: "Playback/readout/utility responsibilities." },
       { path: "src/components/NdiPreviewHeader.tsx", note: "Production component: sharing and unavailable sequence timecode outside the picture." },
+      { path: "src/components/AvidNdiSetup.tsx", note: "Production passive Avid setup disclosure in the shared NDI gear dialog; compatibility is separately verified." },
       { path: "src/styles/ndi-preview-header.css", note: "Flow layout keeps the timecode centered without picture overlays." },
       { path: "src/styles/transport.css", note: "Adopted content-sized passive source-status recipe, separate from numeric timecode." },
       { path: "src/styles/buttons.css", note: "Adopted 26px neutral toolbar disclosure; no .btn-compact uppercase treatment." },

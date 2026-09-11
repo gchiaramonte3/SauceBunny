@@ -297,7 +297,7 @@ extern "C" void sauce_ndi_run_with_timing(const char* path, const char* selected
             if (!name.empty()) break;
         }
         if (stop(context)) return;
-        if (name.empty()) throw std::runtime_error("Selected NDI source is no longer discoverable. Check Premiere Mercury Transmit and Local Network permission.");
+        if (name.empty()) throw std::runtime_error("Selected NDI source is no longer discoverable. Check the sender's NDI output and Local Network permission.");
         NDIlib_recv_create_v3_t config;
         config.source_to_connect_to.p_ndi_name = name.c_str(); config.source_to_connect_to.p_url_address = address.c_str();
         config.color_format = NDIlib_recv_color_format_BGRX_BGRA;

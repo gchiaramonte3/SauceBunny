@@ -129,7 +129,7 @@ export function useNdiInput() {
       if (m.sourceKind !== "ndi" || !m.url || !/^[a-f0-9]{32}$/i.test(m.url)) {
         currentRemote.current = noRemote(); setRemote(noRemote()); return;
       }
-      const id = m.url, name = m.title || "Premiere NDI", reviewKey = m.reviewKey || `ndi:${id}`;
+      const id = m.url, name = m.title || "NDI source", reviewKey = m.reviewKey || `ndi:${id}`;
       const stopped = m.liveState === "stopped";
       const source: NdiRoomProgram = { id, name, reviewKey, state: stopped ? "stopped" : "live" };
       const previous = currentRemote.current;

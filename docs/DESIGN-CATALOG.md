@@ -28,6 +28,15 @@ the normal `dist/`, stamp a release, or build a DMG.
 
 ## Catalog verification
 
+### Avid NDI help candidate (2026-09-11)
+
+The Preview entry renders the pure production `AvidNdiSetup` disclosure. It
+performs no native call, discovery, capture or publication. Production places it
+in the existing gear dialog, never the commenting sidebar. Actual-App browser
+tests cover its minimum window at normal/125% text. This is UI verification,
+not proof that the installed Avid broadcasts a usable signal; see
+[AVID-NDI-COMPATIBILITY.md](AVID-NDI-COMPATIBILITY.md).
+
 ### Premiere workflow follow-up (2026-09-07)
 
 The Preview example now reflects the separately approved live-input behavior:

@@ -86,7 +86,7 @@ export class NdiProgramCoordinator {
   }
   private valid(turn: number) { return !this.disposed && turn === this.intent; }
   private ensureMutable() {
-    if (this.disposed) throw new Error("Premiere connection is closed");
+    if (this.disposed) throw new Error("NDI connection is closed");
     if (this.value.busy === "publishing" || this.value.busy === "stopping") {
       throw new Error("Wait for the current sharing change to finish");
     }
@@ -143,7 +143,7 @@ export class NdiProgramCoordinator {
   }
   preview(name: string): Promise<void> {
     this.ensureMutable();
-    if (!name.trim()) return Promise.reject(new Error("Choose a Premiere source"));
+    if (!name.trim()) return Promise.reject(new Error("Choose an NDI source"));
     const turn = ++this.intent;
     this.update({ busy: "starting", error: null });
     return this.enqueue(async () => {
@@ -258,7 +258,7 @@ export class NdiProgramCoordinator {
   }
   /** Only an explicit switch back to file/web playback may clear this latch. */
   clearStoppedRoomSource() {
-    if (this.value.lease || this.value.published) throw new Error("Stop sharing Premiere first");
+    if (this.value.lease || this.value.published) throw new Error("Stop sharing NDI first");
     this.update({ roomSource: null });
   }
   /** App unload only. Closing the connection panel must not call this. */

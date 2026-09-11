@@ -19,7 +19,7 @@ function PlayheadTc({ fps }: { fps: number }) {
 
 type Props = {
   liveInput?: string;
-  liveController?: "premiere" | "presenter";
+  liveController?: "premiere" | "ndi" | "presenter";
   status: AppStatus;
   isPlaying: boolean;
   fps: number;
@@ -57,7 +57,8 @@ export function Transport({
   onVolumeChange, onMutedChange, onPlaybackRateChange, roomControls, sourceControls,
 }: Props) {
   const live = !!liveInput;
-  const liveReason = liveController === "premiere" ? "Playback controlled in Premiere" : "Playback controlled by the presenter";
+  const liveReason = liveController === "premiere" ? "Playback controlled in Premiere"
+    : liveController === "ndi" ? "Playback controlled at source" : "Playback controlled by the presenter";
   // In a room the row must stay interactive even with no source loaded
   // (a waiting guest still needs mic/cam/leave), so the dim gate lifts.
   const unavailable = status === "empty" || status === "fetching" || status === "error";
@@ -72,8 +73,8 @@ export function Transport({
       {/* LEFT — current playhead */}
       <div className="cp-transport-side left">
         {live ? <span className="cp-source-status" title={`${liveInput} · ${liveReason}`}>Live</span> : <PlayheadTc fps={fps} />}
-        {live && liveController === "premiere" && <div className="cp-source-timing">
-          <span title="NDI picture timing has not been verified as Premiere sequence timecode. Notes remain general or manually timecoded; the companion currently supports editor-confirmed marker placement.">Timeline timecode unavailable</span>
+        {live && liveController !== "presenter" && <div className="cp-source-timing">
+          <span title="NDI picture timing is not verified sequence timecode. Notes remain general or manually timecoded; live marker delivery requires a separate editor integration.">Timeline timecode unavailable</span>
           <span aria-hidden="true">·</span><span>{liveReason}</span>
         </div>}
       </div>

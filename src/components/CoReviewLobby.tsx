@@ -200,9 +200,9 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
             {(joinError || session.error) && <p className="cp-colobby-err" role="alert">{joinError || session.error}</p>}
           </section>
           {onConnectPremiere && <div className="cp-setup-premiere">
-            <button type="button" className="btn btn-ghost" onClick={onConnectPremiere}>Preview Premiere…</button>
+            <button type="button" className="btn btn-ghost" onClick={onConnectPremiere}>Preview NDI…</button>
             <span className="cp-setup-help" title={premierePreviewName ?? undefined}>
-              {premierePreviewName ? premierePreviewStatus ?? "Premiere ready · Not shared" : "Connect privately. Share when you’re ready."}
+              {premierePreviewName ? premierePreviewStatus ?? "NDI ready · Not shared" : "Preview locally. Share with the room when ready."}
             </span>
           </div>}
           <div className="cp-setup-identity">
