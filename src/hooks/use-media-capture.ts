@@ -21,6 +21,9 @@ const listeners = new Set<(s: MediaStream | null) => void>();
 // Generation guard: release() invalidates any acquire still awaiting
 // getUserMedia, so a slow grant can't relight the camera after leave.
 let captureGen = 0;
+// Only an explicit acquire/on action establishes pending session intent.
+// Persisted preferences alone must never authorize opening another device.
+let pendingChoice: DeviceChoice | null = null;
 
 let currentChoice: DeviceChoice = loadDeviceChoice();
 const choiceListeners = new Set<(c: DeviceChoice) => void>();
@@ -116,7 +119,11 @@ export function subscribeSessionCapture(cb: (s: MediaStream | null) => void): ()
 
 // App quit: WKWebView fires pagehide on window close; stop the hardware.
 if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", () => stopStream(activeStream));
+  window.addEventListener("pagehide", () => {
+    captureGen++;
+    pendingChoice = null;
+    setActive(null);
+  });
 }
 
 export function useMediaCapture() {
@@ -189,6 +196,7 @@ export function useMediaCapture() {
     publishError(null);
     commitChoice(c);
     const gen = ++captureGen;
+    pendingChoice = c;
     clog("info",
       `Opening capture: camera=${c.cameraOff ? "off" : (c.cameraId ?? "default")} `
       + `mic=${c.micMuted ? "muted" : (c.micId ?? "default")}`);
@@ -200,12 +208,14 @@ export function useMediaCapture() {
         stopStream(s);
         return false;
       }
+      pendingChoice = null;
       setActive(s);
       publishPermission("granted");
       await refreshDevices(); // labels populate post-grant
       return true;
     } catch (err) {
       if (gen !== captureGen) return false;
+      pendingChoice = null;
       const name = err instanceof DOMException ? err.name : "";
       if (name === "NotAllowedError" || name === "SecurityError") {
         publishPermission("denied");
@@ -226,6 +236,7 @@ export function useMediaCapture() {
   /** Stop the capture and release the hardware (leave/end). */
   const release = useCallback(() => {
     captureGen++;
+    pendingChoice = null;
     setActive(null);
   }, []);
 
@@ -241,29 +252,39 @@ export function useMediaCapture() {
     const s = activeStream;
     const tracks = (s ? (kind === "audio" ? s.getAudioTracks() : s.getVideoTracks()) : [])
       .filter(t => t.readyState === "live");
-    // Even an off click with no track must cancel a pending getUserMedia.
+    const pending = pendingChoice;
+    if (pending && (kind === "audio" ? !pending.micMuted : !pending.cameraOff) === enabled) return;
+    // Even an off click with no track invalidates the superseded request.
     captureGen++;
+    pendingChoice = null;
     const actual = captureDeviceState(s, prev);
-    const next = { ...prev, ...(kind === "audio" ? { micMuted: !enabled } : { cameraOff: !enabled }) };
-    if (enabled && tracks.length === 0) {
-      // An explicit camera click does not authorize reviving a microphone
-      // merely because its saved preference was on (and vice versa).
-      if (kind === "audio") next.cameraOff = !actual.cameraOn;
-      else next.micMuted = !actual.micOn;
-    }
+    const next = { ...prev,
+      cameraOff: pending?.cameraOff ?? !actual.cameraOn,
+      micMuted: pending?.micMuted ?? !actual.micOn,
+    };
+    if (kind === "audio") next.micMuted = !enabled;
+    else next.cameraOff = !enabled;
+    // Apply off immediately, even when the other requested device is opening.
+    for (const t of s?.getVideoTracks() ?? []) t.enabled = !next.cameraOff;
+    for (const t of s?.getAudioTracks() ?? []) t.enabled = !next.micMuted;
+    const needsOpen = (!next.cameraOff && !s?.getVideoTracks().some(t => t.readyState === "live"))
+      || (!next.micMuted && !s?.getAudioTracks().some(t => t.readyState === "live"));
     commitChoice(next);
     clog("info",
       `${kind} ${enabled ? "on" : "off"} (${tracks.length} track${tracks.length === 1 ? "" : "s"}`
-      + `${s ? "" : ", no capture"}) -> ${enabled && tracks.length === 0 ? "reopening" : "toggling"}`);
-    if (enabled && tracks.length === 0) {
+      + `${s ? "" : ", no capture"}) -> ${needsOpen ? "reopening" : "toggling"}`);
+    if (needsOpen) {
       // Roll the choice back if the device never opened, so the control bar
       // can't advertise a camera that isn't running. acquire() has already
       // surfaced the reason via `permission` or `error`.
       const attempt = captureGen + 1;
-      void acquire(next).then((ok) => { if (!ok && captureGen === attempt) commitChoice(prev); });
-      return;
+      void acquire(next).then((ok) => {
+        if (!ok && captureGen === attempt) {
+          const retained = captureDeviceState(activeStream, next);
+          commitChoice({ ...currentChoice, cameraOff: !retained.cameraOn, micMuted: !retained.micOn });
+        }
+      });
     }
-    for (const t of tracks) t.enabled = enabled;
   }, [acquire]);
 
   /** Persist a choice change that needs no reopen (e.g. the speaker output).
