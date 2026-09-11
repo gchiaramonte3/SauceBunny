@@ -5,11 +5,12 @@ import type { PremiereMarkerRecord } from "../bindings/PremiereMarkerRecord";
 import type { PremiereBinding } from "../bindings/PremiereBinding";
 import type { ReviewDoc } from "./review";
 import { persistedReviews, subscribePersistedReviews } from "./review-store";
-import { copyPremiereAnchor, copyPremiereBinding, isPremiereContext, isPremiereReceipts, premiereRequests, samePremiereBinding,
+import { copyPremiereAnchor, copyPremiereBinding, isPremiereContext, isPremiereReceipts, premiereRequests, MAX_PREMIERE_RECEIPTS_PER_MESSAGE,
   type PremiereContext, type PremiereReceipt, type PremiereReceipts } from "./premiere-notes";
 import type { ReviewEnvelope } from "./review-delivery";
 import { formatError } from "./error-format";
 import { PREMIERE_ROOM_MARKERS_ENABLED } from "./premiere-permissions";
+import { samePremiereBinding } from "./premiere-binding";
 
 type VisibleInput = { sourceId: string; streamId: string; name: string };
 type Association = { sourceId: string; streamId: string; binding: PremiereBinding };
@@ -145,9 +146,9 @@ export function premiereRoomReceipts(doc: ReviewDoc): PremiereReceipts[] {
       ? [{ commentId: request.commentId, versionId: request.versionId, bindingId: context.binding!.bindingId, status: record.status }] : [];
   });
   const batches: PremiereReceipts[] = [];
-  for (let offset = 0; offset < items.length; offset += 100) batches.push({ t: "premiere-receipts", protocol: 1,
+  for (let offset = 0; offset < items.length; offset += MAX_PREMIERE_RECEIPTS_PER_MESSAGE) batches.push({ t: "premiere-receipts", protocol: 1,
     sessionId, reviewKey: context.reviewKey, programId: context.programId, presenterEpoch: context.presenterEpoch,
-    revision: context.revision, ledgerRevision: value.bridge?.ledgerRevision ?? 0, items: items.slice(offset, offset + 100) });
+    revision: context.revision, ledgerRevision: value.bridge?.ledgerRevision ?? 0, items: items.slice(offset, offset + MAX_PREMIERE_RECEIPTS_PER_MESSAGE) });
   return batches;
 }
 export function acceptPremiereReceipts(message: unknown, from: string, doc: ReviewDoc | null): void {

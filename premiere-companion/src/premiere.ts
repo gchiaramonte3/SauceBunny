@@ -1,6 +1,7 @@
 import type { premierepro, Project, Sequence, Markers, Marker } from "@adobe/premierepro";
 import { MarkerLedger } from "./ledger";
-import { sameBinding, type Binding, type MarkerNote } from "./protocol";
+import type { Binding, MarkerNote } from "./protocol";
+import { samePremiereBinding as sameBinding } from "../../src/lib/premiere-binding";
 
 export type AdobeApi = Pick<premierepro, "Project" | "Guid" | "Markers" | "TickTime">;
 export type MarkerResult = { outcome: "found"; markerGuid: string } | { outcome: "undone" | "absent" | "uncertain" };

@@ -4,6 +4,7 @@ import { waitFor } from "@testing-library/react";
 import type { ReviewDoc } from "./review";
 import type { PremiereBridgeSnapshot } from "../bindings/PremiereBridgeSnapshot";
 import type { PremiereMarkerRecord } from "../bindings/PremiereMarkerRecord";
+import { isPremiereReceipts, MAX_PREMIERE_RECEIPTS_PER_MESSAGE } from "./premiere-notes";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), saved: null as ((doc: ReviewDoc) => void) | null,
   docs: [] as ReviewDoc[], listen: vi.fn(async () => () => {}), roomEnabled: false }));
 vi.mock("./premiere-permissions", () => ({ get PREMIERE_ROOM_MARKERS_ENABLED() { return mocks.roomEnabled; } }));
@@ -102,6 +103,29 @@ describe("room context isolation (in-memory only, no room transport)", () => {
 });
 afterEach(() => { stop?.(); stop = undefined; });
 describe("native Premiere handoff", () => {
+  it("batches all eligible receipts with the same limit used by the receiver", async () => {
+    mocks.roomEnabled = true;
+    const link = await import("./premiere-link"); link.setPremiereRoom("host", "room");
+    await link.refreshPremiereLink();
+    const scope = { reviewKey: "ndi:pass", programId: "a".repeat(32), presenterEpoch: 1 };
+    link.setPremiereRoomSource(scope); link.setPremiereVisibleInput({ sourceId: "ndi:pass", streamId: scope.programId, name: "Premiere" });
+    link.associatePremiereInput();
+    const doc = document(), seed = doc.comments[0];
+    doc.sync = { sessionId: "room", revision: 1, clock: 1, operations: {} };
+    doc.comments = Array.from({ length: MAX_PREMIERE_RECEIPTS_PER_MESSAGE * 2 + 1 }, (_, id) => ({ ...seed, id: `note-${id}` }));
+    const records: PremiereMarkerRecord[] = doc.comments.map(comment => ({ id: comment.id,
+      request: { reviewKey: doc.sourceKey, versionId: "v", commentId: comment.id, sessionId: "room",
+        author: comment.author, body: comment.body, anchor: comment.premiere! },
+      status: "added", sequenceTicks: null, markerGuid: null, error: null }));
+    mocks.invoke.mockImplementation(async command => command === "premiere_bridge_status" ? { ...connected(), ledgerRevision: 2 }
+      : command === "premiere_marker_notes" ? records : null);
+    await link.refreshPremiereLink();
+    const batches = link.premiereRoomReceipts(doc);
+    expect(batches.map(b => b.items.length)).toEqual([MAX_PREMIERE_RECEIPTS_PER_MESSAGE, MAX_PREMIERE_RECEIPTS_PER_MESSAGE, 1]);
+    expect(batches.every(isPremiereReceipts)).toBe(true);
+    expect(batches.flatMap(b => b.items.map(i => i.commentId))).toEqual(doc.comments.map(c => c.id));
+    expect(isPremiereReceipts({ ...batches[0], items: [...batches[0].items, batches[2].items[0]] })).toBe(false);
+  });
   it("does not enqueue an optimistic room save or a peer snapshot after leaving the room", async () => {
     mocks.roomEnabled = true;
     const link = await import("./premiere-link"); link.setPremiereRoom("host", "room"); stop = link.observePremiereLink();

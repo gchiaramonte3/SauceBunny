@@ -3,6 +3,10 @@ import type { PremiereBinding } from "../bindings/PremiereBinding";
 import type { PremiereMarkerRequest } from "../bindings/PremiereMarkerRequest";
 import type { PremiereMarkerState } from "../bindings/PremiereMarkerState";
 import type { ReviewDoc } from "./review";
+import { isPremiereBinding } from "./premiere-binding";
+
+/** Bound each room receipt envelope identically at sending and validation. */
+export const MAX_PREMIERE_RECEIPTS_PER_MESSAGE = 100;
 
 /** A binding is a user's explicit choice, not a claim about the NDI picture. */
 export type PremiereContext = {
@@ -24,17 +28,6 @@ const record = (value: unknown): Record<string, unknown> | null =>
 const text = (value: unknown, max = 512): value is string => typeof value === "string" && value.length > 0 && value.length <= max;
 const ticks = (value: unknown) => typeof value === "string" && /^-?\d{1,24}$/.test(value);
 
-export function isPremiereBinding(value: unknown): value is PremiereBinding {
-  const v = record(value);
-  return !!v && text(v.bindingId) && text(v.projectId) && text(v.sequenceId)
-    && text(v.projectName) && text(v.sequenceName) && text(v.displayFormat, 128)
-    && ticks(v.zeroPointTicks) && ticks(v.timebaseTicks) && BigInt(v.timebaseTicks as string) > 0n;
-}
-export function samePremiereBinding(a: PremiereBinding | null, b: PremiereBinding | null): boolean {
-  return !!a && !!b && a.bindingId === b.bindingId && a.projectId === b.projectId
-    && a.sequenceId === b.sequenceId && a.timebaseTicks === b.timebaseTicks
-    && a.zeroPointTicks === b.zeroPointTicks && a.displayFormat === b.displayFormat;
-}
 /** Project paths and future private fields must never hitchhike on room data. */
 export function copyPremiereBinding(binding: PremiereBinding): PremiereBinding {
   const { bindingId, projectId, sequenceId, projectName, sequenceName, timebaseTicks, displayFormat, zeroPointTicks } = binding;
@@ -56,7 +49,7 @@ export function isPremiereReceipts(value: unknown): value is PremiereReceipts {
   return !!v && v.t === "premiere-receipts" && v.protocol === 1
     && text(v.sessionId) && text(v.reviewKey, 4096)
     && Number.isSafeInteger(v.ledgerRevision) && (v.ledgerRevision as number) >= 0
-    && Array.isArray(v.items) && v.items.length <= 100 && v.items.every(item => {
+    && Array.isArray(v.items) && v.items.length <= MAX_PREMIERE_RECEIPTS_PER_MESSAGE && v.items.every(item => {
       const r = record(item);
       return !!r && text(r.commentId) && text(r.versionId) && text(r.bindingId)
         && ["needs_confirmation", "dispatching", "uncertain", "added", "removed_in_premiere"].includes(String(r.status));

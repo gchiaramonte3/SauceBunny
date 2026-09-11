@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { capturePremiereAnchor, copyPremiereBinding, isPremiereAnchor, isPremiereBinding, isPremiereContext, premiereRequests, samePremiereBinding } from "./premiere-notes";
+import { capturePremiereAnchor, copyPremiereBinding, isPremiereAnchor, isPremiereContext, premiereRequests } from "./premiere-notes";
+import { isPremiereBinding, samePremiereBinding } from "./premiere-binding";
 import { buildComment, emptyDoc, sanitizeDocForWire } from "./review";
 import { isReviewOp } from "./review-delivery";
 import type { PremiereBinding } from "../bindings/PremiereBinding";

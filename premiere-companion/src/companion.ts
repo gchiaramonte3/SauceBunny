@@ -1,6 +1,7 @@
 import { BridgeClient } from "./bridge-client";
 import { PremiereAdapter, type Placement } from "./premiere";
-import { sameBinding, type BridgeStatus, type MarkerNote, type NotePage } from "./protocol";
+import type { BridgeStatus, MarkerNote, NotePage } from "./protocol";
+import { samePremiereBinding as sameBinding } from "../../src/lib/premiere-binding";
 
 export type CompanionSnapshot = { connected: boolean; status: BridgeStatus | null; notes: MarkerNote[]; message: string; page: NotePage };
 

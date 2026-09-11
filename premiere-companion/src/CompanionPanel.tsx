@@ -1,7 +1,7 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { Companion } from "./companion";
 import { PendingNote } from "./PendingNote";
-import { sameBinding } from "./protocol";
+import { samePremiereBinding as sameBinding } from "../../src/lib/premiere-binding";
 import { parsePremierePairingCode } from "../../src/lib/premiere-pairing-code";
 
 export function CompanionPanel({ companion }: { companion: Companion }) {

@@ -1,6 +1,7 @@
 import type { PremiereBinding } from "../../src/bindings/PremiereBinding";
 import type { PremiereBridgeSnapshot } from "../../src/bindings/PremiereBridgeSnapshot";
 import type { PremiereMarkerRecord } from "../../src/bindings/PremiereMarkerRecord";
+import { isPremiereBinding as isBinding } from "../../src/lib/premiere-binding";
 
 export type Binding = PremiereBinding;
 export type MarkerNote = PremiereMarkerRecord;
@@ -19,12 +20,6 @@ export type Command =
   | { type: "ack"; noteId: string; binding: Binding; markerGuid: string }
   | { type: "reconcile"; noteId: string; binding: Binding; outcome: "found" | "absent" | "undone"; markerGuid?: string };
 
-export function sameBinding(a: Binding | null, b: Binding): boolean {
-  return !!a && a.bindingId === b.bindingId && a.projectId === b.projectId
-    && a.sequenceId === b.sequenceId && a.timebaseTicks === b.timebaseTicks
-    && a.displayFormat === b.displayFormat && a.zeroPointTicks === b.zeroPointTicks;
-}
-
 export function validateEndpoint(value: string): string {
   // No hostnames, credentials, redirects or external endpoints. The pairing
   // token goes in the authenticated message, never the URL or a log.
@@ -38,12 +33,6 @@ export function validateEndpoint(value: string): string {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-export function isBinding(value: unknown): value is Binding {
-  return isRecord(value) && ["bindingId", "projectId", "sequenceId", "projectName", "sequenceName", "displayFormat"]
-    .every(key => typeof value[key] === "string" && (value[key] as string).length > 0)
-    && typeof value.timebaseTicks === "string" && /^[1-9][0-9]*$/.test(value.timebaseTicks)
-    && typeof value.zeroPointTicks === "string" && /^-?[0-9]+$/.test(value.zeroPointTicks);
 }
 function isNote(value: unknown): value is MarkerNote {
   if (!isRecord(value) || typeof value.id !== "string" || !/^[a-f0-9]{64}$/.test(value.id)

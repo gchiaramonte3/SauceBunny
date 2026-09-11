@@ -1,4 +1,5 @@
-import { isBinding, isRecord, type Binding } from "./protocol";
+import { isRecord, type Binding } from "./protocol";
+import { isPremiereBinding as isBinding } from "../../src/lib/premiere-binding";
 
 type BindingEntry = { binding: Binding; projectPath: string };
 type Delivery = { bindingId: string; state: "attempted" | "added"; markerGuid: string | null };
