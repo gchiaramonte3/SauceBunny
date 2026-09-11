@@ -123,24 +123,38 @@ fetch_metadata    OR    probe_local_file    (Rust)
    COMPLETED WEB REVIEW COPY (Clip and Preview)
       ProxyPresentationPlayer / presentation-playback.ts
          ├─ local MediaBunny: authoritative scrub/seek and immediate Play
-         └─ paused candidate: MSE split A/V, or native HLS/progressive
-              resolve → confirm parked frame → observe contiguous A/V buffer
-              → promote ONLY while paused
+         └─ hidden, muted candidate: MSE split A/V, or native HLS/progressive
+              resolve → prepare bounded buffer → confirm decoded frames
+              → promote at the parked frame OR synchronized forward 1× playback
 
    Play never resolves URLs or seeks the candidate. It synchronously checks
    the confirmed source frame, current generation, seek/error state and >=2s
-   contiguous playable media (or the remaining duration). Otherwise it starts
-   the local copy. No late preparation callback can promote during playback.
-   Native waiting/fatal errors fall back to local at the confirmed position;
-   the run stays local until another pause. Only the selected engine publishes
-   time/playing state or plays audio. Native rate preference is retained, but
-   the proxy reports its actual 1× capability.
+   contiguous playable media (or the remaining duration) for an already
+   qualified candidate. Otherwise it starts the local copy immediately.
+   Automatic promotion during forward 1× playback uses the stricter
+   presentationCanSwitch check: current-generation advancing decoded frames,
+   a fresh sample within one source frame of local playback, required tracks,
+   no seeking/error, and >=5s contiguous playable A/V (or remaining duration).
+   A resolved URL or successful play() alone is never readiness. Standby audio
+   remains muted independently of the user's preference; picture, audible
+   output and authoritative clock change together. Inactive events cannot
+   update captions, transcripts or transport.
+
+   Native waiting/fatal errors and lost synchronization fall back to the
+   matching local position. Failed preparation/recovery stays local for that
+   run, with another attempt permitted at pause or settled seek. Only the
+   selected engine publishes time/playing state or plays audio. Native rate
+   preference is retained, but the proxy reports its actual 1× capability.
 
    beginScrub disposes the candidate's fetch/decoder; endScrub resolves on the
-   local frame without waiting for high quality. Paused preparation is one
-   operation per source/settled frame. Matching pending requests reuse it;
-   changed targets supersede it. Source epochs and transport command IDs gate
-   callbacks. Signed-URL refresh holds the working source until a safe pause.
+   local frame without waiting for high quality. Preparation is one operation
+   per settled target/generation. Matching pending requests reuse it; changed
+   targets supersede it. A running candidate can align within its existing
+   buffer, never rebuild repeatedly to chase the playhead. Scrubbing, shuttle
+   and non-1× playback disable automatic promotion. Paused promotion preserves
+   the exact source frame. Source epochs and transport command IDs gate
+   callbacks. Signed-URL refresh never remounts a working active high-quality
+   source; the replacement is held for safe preparation.
    MSE retains its ~30s ahead cap; native candidates use metadata preload and
    actual buffer observations (preload is only a browser hint).
 
@@ -404,7 +418,7 @@ The one deliberate exception to "state lives in App" is the playhead. It ticks u
 
 ### What is left to extract, and what only looks extractable
 
-`App.tsx` is ~5,100 lines. The roadmap direction is one cohesive subsystem at a
+`App.tsx` remains the application composition root. The roadmap direction is one cohesive subsystem at a
 time into `src/hooks/use-*.ts` (done: `use-panel-bus`, `use-web-playback`,
 `use-co-review`, `use-library-scan`, `use-media-capture`, `use-transport`,
 `use-keyboard-shortcuts`, `use-clip-export`, `use-clip-queue`,
@@ -501,6 +515,44 @@ test file. App.tsx registers almost nothing directly any more. The paragraph
 above describes the step that made this possible, not the current state — an
 extraction that owns an event now lifts a whole hook rather than carving a
 listener out of a shared effect.
+
+**Premiere context/receipt publication (2026-09-10).** The host publication
+effects now live in `use-premiere-publication.ts`. The effect bodies moved
+unchanged; only stable ref dependencies were added at the hook boundary.
+Native source ownership, session ID and context revision remain the gates for
+each awaited broadcast. Microtask coalescing, unchanged-message deduplication,
+the existing recovery cadence and cleanup are preserved. Mounted tests cover
+unchanged heartbeats, source changes during broadcast, late joins, receipt
+sanitization and unmount cancellation. This does not move playback ownership.
+
+`premiere-binding.ts` is the dependency-free identity/validation home shared by
+the desktop client and Premiere companion. Both now require the former desktop
+field/tick bounds and the companion's canonical positive timebase; neither
+accepts a value the other previously rejected. Native validation still applies
+its own final field/byte checks. Transport-specific envelope validation remains
+in `premiere-notes.ts` and companion `protocol.ts`. Receipt sending and receiving
+share `MAX_PREMIERE_RECEIPTS_PER_MESSAGE`; batching does not drop excess notes.
+
+The two `PeoplePanel` mount sites share one typed props object in `App.tsx`.
+Only `active` and `strip` stay local to each layout. Participant/device truth,
+host actions and capture callbacks cannot drift by layout, and neither the
+panel positions nor the media player mounts move.
+
+**Review and capture correctness (2026-09-10).** Invitation storage defaults
+apply only to an absent store, not denied access, malformed/incomplete JSON or
+a dangling link. Read failures preserve the file and block new admissions;
+native session startup and the host notification surface report the error.
+Read-modify-write transactions are serialized so arrival timestamps cannot
+overwrite a concurrent withdrawal. Copy uses the live room's identity, or
+reads the current offline identity on demand, without losing a still-valid
+one-time grant when the dialog closes. Matching withdrawal invalidates copy
+feedback; clipboard failures are visible.
+
+Session capture keeps pending explicit device intent separately from saved
+preferences and confirmed tracks. Camera/Mic on actions combine while capture
+is pending; off, release and pagehide invalidate obsolete results. Duplicate
+pending on requests reuse the current acquisition. A failed request cannot
+revive a device, and a still-working stream survives a failed replacement.
 
 ## Build-ID handshake
 
