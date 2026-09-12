@@ -103,8 +103,14 @@ or packaged WKWebView certification.
 - Earlier verification exposed a missing contract-register row/count and the
   catalog scroll-order fixture defect. Both were corrected before the final
   passing gates; no assertions were removed and no retries were added.
+- A separate nonpersistent AppKit/WKWebView fixture rendered the current Home
+  frontend at 1100×700 and 1680×1020 with 100%/125% text. All four states filled
+  the bottom edge without overflow; both actions were visible and hit-testable.
+  No errors or capture calls were recorded. The wrapper/server were stopped.
+  This is frontend-only WK rendering, not production Tauri or real-media testing.
 
 Final integrated log: `/private/tmp/sauce-delivery-verify.KR92mJ/verify-final.log`.
+Welcome WK measurements/screenshots: `/private/tmp/sauce-home-wk.9XMtEy/`.
 
 ## Delivery boundary
 
@@ -114,6 +120,28 @@ The available Apple Development identity supports consistent internal signing,
 not Developer ID notarization. Retain internalOnly/distributionReady metadata
 and the third-party source/provenance records. The app uses production identity
 and data paths when launched; a separate output directory is not a data sandbox.
+
+### Test DMG produced
+
+- Built from source commit `c832bb7b0ec18d7a5edd671929d21b7ff338d5d3`:
+  Sauce Bunny **0.5.0 (2026091201)**, arm64, Apple Development signed.
+- `Sauce-Bunny-0.5.0-2026091201-Internal-Test.dmg` (197,747,211 bytes), stored
+  locally under `Developer/Sauce Bunny Builds/2026091201/`; not uploaded as a
+  public GitHub release.
+- SHA-256: `1ff067bede13d34e07b780bb0d51ea7ebbeaaa6d530acbca5f5957111fade9bb`.
+- Exact staged-app and mounted-copy checks passed: OBS/sender provenance and
+  signatures, app bundle contents/signature, packaged implementation checks,
+  and `hdiutil verify`. Both app copies have executable SHA-256
+  `ff1e32c7ea08abe0b78c81dce17e7ff4b3f22f28cfe49ba85ac4ab8fb2822e74`.
+- Runtime metadata remains `internalOnly: true`, `distributionReady: false`;
+  the application profile contains 19 components plus the separate NDI sender.
+- The verification mount was ejected. No installed application was replaced
+  or launched. Live Avid/Premiere audio/video, room transport, paste permission
+  and first MP3 export remain hands-on acceptance checks, not inferred passes.
+
+The dated build folder includes the final test/build logs and four Welcome WK
+screenshots. Subsequent documentation-only commits record this evidence without
+changing the code packaged in the image.
 
 Code-co-review was used to prioritize concrete bugs and remove exact duplication.
 The existing Review layout, native media cadence and explicit sharing consent
