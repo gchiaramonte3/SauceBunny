@@ -6,6 +6,55 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- Preview now exposes application/window/crop capture in its existing source
+  settings, plus explicit source-bound NDI Broadcast and Stop controls. Room
+  sharing and network broadcasting are separate. These controls require the
+  OBS-enabled internal build; regular release packaging still excludes OBS.
+- Home's empty-library welcome now fills its available viewport, with a compact
+  brand mark and the existing folder/URL actions. Populated shelves, search and
+  the kept-alive Clip player retain their layout and behavior.
+- In-development NDI broadcasting now has a native start/stop supervisor:
+  raw capture waits for SDK readiness, cleanup proves child exit, helper stop
+  and pipe EOF separately, and blocked SDK calls cannot take down Preview.
+  Ordinary app exit drains active senders; a parent-loss watchdog covers forced
+  exits. The supervisor underpins the explicit internal-build controls above;
+  it does not start broadcasting automatically.
+- Internal OBS app builds now stage a separately signed NDI sender bundle with
+  frozen MIT source, rebuild instructions and integrity records. Final internal
+  verification checks its signatures and the reused NDI runtime; release
+  packaging remains separate from this internal path.
+- In-development NDI sender is isolated in its own process with strict raw-feed
+  validation, synchronous buffer ownership and fake-SDK regression tests. It is
+  now used by explicit Preview broadcast actions in internal builds, not
+  ordinary releases; automatic capture and broadcasting remain disabled.
+- In-development application capture has an explicit raw picture/stereo-audio
+  output branch for the separate broadcast path. It preserves source timestamps,
+  rejects Preview pipe aliases and bounds slow-consumer failure without stopping
+  Preview. Fresh attempts use independent pipes. Merely preparing this branch
+  never starts NDI transmission.
+- Internal OBS source-material staging now freezes helper build inputs and
+  associates them with recorded core/helper builds. Staging rejects source drift
+  and marks prebuilt dependency sources incomplete; this is not release clearance.
+- In-development OBS application discovery lists running applications by name,
+  bundle ID and process without reading windows or requesting capture permission.
+  Window selection remains a separate permission-checked step in the Preview
+  chooser; no application capture starts automatically.
+- Embedded OBS 32.2.2 capture groundwork: real Avid picture/crop/audio probes,
+  GPL licensing records, a supervised helper and a bounded adapter into the
+  existing live-program buffer. Private native tests cover owner loss, blocked
+  output, late readers and cancellation. The Preview picker and separate NDI
+  sender are integrated for internal testing; public runtime redistribution
+  remains uncleared and the ordinary DMG build does not include the helper.
+  The private runtime now builds its OBS engine/output plugin from pinned
+  source without an installed OBS app, removes unused global-input listening,
+  and has dependency-boundary and internal signing checks.
+  Application capture now uses one shared helper with independently cancelled,
+  generation-scoped outputs. Native generated-window tests cover stopping and
+  replacing one source while the other retains continuous isolated A/V.
+- Internal-only OBS app staging with an application-specific dependency profile,
+  resource-only helper bundle, sealed provenance and same-team signature checks.
+  Staging refuses to overwrite or install apps and clears notarization credentials.
+  This does not make the runtime ready for public redistribution.
 - Avid Media Composer setup guidance in the existing NDI settings gear, with
   sender-neutral NDI controls, separate source/preview frame-rate reporting and
   a receive-only compatibility probe. The shared picture/audio engine and
@@ -14,6 +63,40 @@ All notable changes to Sauce Bunny. Format loosely follows
   not enabled. “Not shared” describes room publication, not LAN broadcasting.
 
 ### Fixed
+- Removed the unused single-source broadcast-hook wrapper; reused the existing
+  capture-selection snapshot helper and native started-source descriptor.
+  Targeted tests preserve action ownership and mutation isolation.
+- Retired broadcast observations now keep incomplete cleanup proof visible
+  instead of turning a pruned entry into a false confirmed-stop status.
+- Capture-helper shutdown now requires a successful child reap before reporting
+  completion. Interrupted waits retry; unknown ownership retains capacity and
+  requires an app restart instead of risking a signal to a reused process ID.
+- Release sidecar preflight now requires Deno, with a contract against Tauri's
+  declared executables and missing/empty/invalid-file regression cases.
+- Internal sender packaging now recognizes macOS temporary-folder aliases when
+  invoked as a command. It cannot silently skip manifest creation through
+  `/var`/`/private/var` aliases; regression tests also preserve inert imports.
+- In-development raw capture now creates macOS pipe endpoints atomically
+  close-on-exec, preventing concurrently launched processes from retaining a
+  writer after broadcast cleanup. Temporary FIFO metadata is removed before
+  use; media remains in kernel memory. Preview and renderer controls are unchanged.
+- In-development application-capture Stop now waits for the native encoder slot
+  to close before a replacement can start; the last capture also waits for its
+  helper to exit. Existing NDI stop behavior is unchanged. Exact capture
+  selections survive local status reads without entering peer messages.
+- The in-development embedded OBS module no longer treats an idle frame's
+  missing geometry as a zero-sized source. Native regression coverage preserves
+  parked pictures while keeping real resize and source-loss checks active.
+- The in-development embedded OBS mixer now starts with a bounded 128 ms audio
+  reserve. A generated delivery-jitter regression reproduces the previous
+  1024-sample silent block and verifies uninterrupted samples with the reserve.
+  Native flash/tone checks additionally verify A/V alignment; packaged Avid
+  monitoring remains unverified; the helper requires the OBS-enabled internal
+  test build and is not included in ordinary release packaging.
+- Nightly sidecar smoke now provisions pinned Deno before Cargo runs. CI
+  placeholder preparation uses Tauri's declared sidecar list, preserves real
+  binaries and rejects missing required executables instead of masking them
+  with empty stubs. Regression tests cover the September 11 setup failure.
 - **Scrubbing a web source tells you what it is doing, and the preview can no
   longer switch itself off.** The frame-accurate overlay is what makes
   scrubbing feel instant, and one slow open could wedge it silently for the
