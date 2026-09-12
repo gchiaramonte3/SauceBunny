@@ -49,7 +49,7 @@ type Props = {
  * posters), lazily via the intersection hook so a hidden Home costs nothing.
  * Web sources walk a candidate list (YouTube maxres → hqdefault) with onError
  * chaining; when every candidate fails the shade over bg-0 carries the band.
- * With no recents yet it flips to the empty invitation on the brand wash.
+ * With no recents yet it shows the quiet, action-led welcome state.
  */
 export function LibraryHero({ recent, webPoster, onOpen, onAddFolder, onPasteUrl, montageActive }: Props) {
   const ref = useRef<HTMLElement>(null);
@@ -70,23 +70,11 @@ export function LibraryHero({ recent, webPoster, onOpen, onAddFolder, onPasteUrl
   if (!recent) {
     return (
       <section className="cp-lib-hero empty" aria-label="Get started">
-        {/* The mark, big and nearly invisible, behind the words. A fresh
-            install had a short band, a rule across the screen and a large
-            emptiness under it, which is a lot of nothing for the first thing
-            anyone sees - and the first thing they see when somebody presents
-            this app to a room. aria-hidden: the heading below already says
-            the name, and a screen reader does not need it twice. */}
-        <img
-          className="cp-lib-hero-mark"
-          src={logoUrl}
-          alt=""
-          aria-hidden="true"
-          draggable={false}
-        />
         <div className="cp-lib-hero-content">
+          <img className="cp-lib-hero-mark" src={logoUrl} alt="" aria-hidden="true" draggable={false} />
           <h2 className="cp-lib-hero-title">Welcome to Sauce Bunny</h2>
           <p className="cp-lib-hero-sub">
-            Add a folder of footage, or paste a URL, to get started.
+            Add a folder of footage or a video link.
           </p>
           <div className="cp-lib-hero-actions">
             <button type="button" className="btn btn-primary" onClick={onAddFolder}>
@@ -96,6 +84,7 @@ export function LibraryHero({ recent, webPoster, onOpen, onAddFolder, onPasteUrl
               Paste a URL
             </button>
           </div>
+          <p className="cp-lib-hero-note">Your original files stay where they are.</p>
         </div>
       </section>
     );

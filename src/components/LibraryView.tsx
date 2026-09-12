@@ -202,6 +202,7 @@ export function LibraryView({
   // Continue shelf — the 8 most recent (the featured row stays a row, not an
   // archive; recents themselves are capped at 12 upstream).
   const continueRow = recentSources.slice(0, 8);
+  const welcomeOnly = !searching && recentSources.length === 0 && roots.length === 0 && transcripts.length === 0;
   // Slug index of recent sources, so a source-less transcript card can borrow a
   // poster from the source it was named after (KT-#776 transcript → KT-#776 web).
   const recentIndex = useMemo(() => buildRecentIndex(recentSources), [recentSources]);
@@ -440,7 +441,7 @@ export function LibraryView({
         }
       }}
     >
-      <div className="cp-lib-scroll">
+      <div className={"cp-lib-scroll" + (welcomeOnly ? " cp-lib-start" : "")}>
       {/* Home's header is just the search field, right-aligned. Add Folder
           and rescan live in the Library browser (its tree footer). The hero
           pull-up only applies when the hero is actually rendered — the search
@@ -500,7 +501,7 @@ export function LibraryView({
             montageActive={homeVisible}
           />
           {depthNote && <p className="cp-lib-note">{depthNote}</p>}
-          <div className="cp-lib-rows">
+          {!welcomeOnly && <div className="cp-lib-rows">
             {/* Ambient montage of already-cached posters — beneath the SHELVES
                 only, never behind the hero (the hero owns its art and must
                 dissolve into flat bg-0). aria-hidden + pointer-events none;
@@ -525,7 +526,7 @@ export function LibraryView({
                 {transcripts.map(transcriptCard)}
               </LibraryRow>
             )}
-          </div>
+          </div>}
         </>
       )}
       </div>
