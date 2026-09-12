@@ -31,12 +31,20 @@ export function PreviewExamples() {
   const [muted, setMuted] = useState(true);
   const [volume, setVolume] = useState(.65);
   const [shared, setShared] = useState(false);
+  const [broadcasting, setBroadcasting] = useState(true);
   const [posted, setPosted] = useState(false);
   return <div className="cp-ds-preview-examples">
     <section className="cp-ds-preview-proposed" data-testid="preview-proposed" data-ds-example="proposed">
       <h3 className="cp-ds-fixture-title">Corrected · Preview source controls</h3>
       <p className="cp-ds-fixture-caption">Source-markup fixture using the production status and disclosure recipes. Audio uses the existing VolumeControl with local state.</p>
-      <NdiPreviewHeader sharing={shared ? "shared" : "private"} />
+      <NdiPreviewHeader sharing={shared ? "shared" : "private"} broadcasts={[{
+        sourceName: "Composer (simulation)",
+        broadcast: {
+          sourceId: "catalog-capture", active: broadcasting, error: null,
+          status: { sourceId: "catalog-capture", attempt: 1, phase: broadcasting ? "live" : "off", error: null },
+          start: async () => undefined, stop: async () => { setBroadcasting(false); },
+        },
+      }]} />
       <div className="cp-ds-preview-monitor" aria-label="Static Preview monitor, no live media">
         <div className="cp-ds-preview-slate"><span>Premiere sequence</span><strong>Picture stays in Preview</strong><span>Static catalog fixture · not a live connection</span></div>
       </div>
@@ -56,7 +64,7 @@ export function PreviewExamples() {
         <p>Local audio: {muted ? "Muted" : `Enabled · ${Math.round(volume * 100)}%`} · simulation only</p>
         <p>Installation and connection diagnostics live in Settings → Integrations. The application offers a shortcut here; this fixture opens no settings or connections.</p>
       </div>
-      <p className="cp-ds-fixture-caption">The header above is the production NdiPreviewHeader: sharing status and centered, explicitly unavailable sequence timecode outside the picture. In the application, source and audio-recovery details open in NDI settings from the gear beside volume; the text disclosure here only demonstrates the earlier control recipe. Play and step controls belong to file playback.</p>
+      <p className="cp-ds-fixture-caption">The production header distinguishes room sharing from network broadcasting, with timecode and a direct Stop action outside the picture. Stop here changes local fixture state only. In the application, source and audio-recovery details open in Source settings from the gear beside volume; the text disclosure here only demonstrates the earlier control recipe. Play and step controls belong to file playback.</p>
       <div className="cp-ds-inline"><button type="button" className="btn cp-toolbar-disclosure cp-ndi-share-action" disabled={shared} onClick={() => setShared(true)}>Share with room</button><div className="cp-review-composer"><button type="button" className="btn btn-primary btn-compact cp-review-post" disabled={posted} onClick={() => setPosted(true)}>Post</button></div></div>
       <p className="cp-ds-fixture-caption" role="status">{shared ? "Sharing simulated. " : "Private fixture. "}{posted ? "Post simulated. " : "No note posted. "}Green identifies these explicitly approved actions, not connection health. No session or storage is accessed.</p>
       <div className="cp-ds-preview-specimens">{(["disabled", "focus", "expanded", "narrow"] as const).map(state => <SourceSpecimen key={state} state={state} />)}</div>
@@ -65,6 +73,19 @@ export function PreviewExamples() {
       <h3 className="cp-ds-fixture-title">Production component · Avid sender setup</h3>
       <p className="cp-ds-fixture-caption">The production gear dialog uses this passive disclosure. No discovery, installation, media, or room is started by this example.</p>
       <AvidNdiSetup />
+    </section>
+    <section className="cp-ndi-input" aria-label="Application capture control recipes">
+      <h3 className="cp-ds-fixture-title">Source-markup fixture · Application capture</h3>
+      <p className="cp-ds-fixture-caption">Existing gear-dialog controls, not a new Preview layout. This static specimen does not discover windows, start capture, or broadcast. Actual-App tests cover those handlers.</p>
+      <div className="cp-ndi-input-source-label"><label htmlFor="catalog-capture-input">Input</label></div>
+      <select id="catalog-capture-input" className="cp-select" defaultValue="capture"><option value="ndi">NDI</option><option value="capture">Application window</option></select>
+      <div className="cp-ndi-input-source-label"><label htmlFor="catalog-capture-app">Application</label><button type="button" className="cp-toolbar-disclosure" disabled>Refresh applications</button></div>
+      <select id="catalog-capture-app" className="cp-select" defaultValue="editor"><option value="editor">Avid Media Composer</option></select>
+      <div className="cp-ndi-input-source-label"><label htmlFor="catalog-capture-window">Window</label><button type="button" className="cp-toolbar-disclosure" disabled>Refresh windows</button></div>
+      <select id="catalog-capture-window" className="cp-select" defaultValue="composer"><option value="composer">Composer · 1200 × 704</option></select>
+      <p>Only the selected window is captured. Other application windows are excluded from the picture.</p>
+      <button type="button" className="btn cp-ndi-input-preview" disabled>Preview source</button>
+      <div className="cp-obs-broadcast"><p>Not broadcasting</p><p>Broadcasting to NDI is a separate explicit action. Closing settings preserves the existing Preview and notes.</p><button type="button" className="cp-toolbar-disclosure" disabled>Broadcast to NDI</button></div>
     </section>
     <details className="cp-ds-before-fix" data-testid="preview-before-fix">
       <summary>Before the fix</summary>

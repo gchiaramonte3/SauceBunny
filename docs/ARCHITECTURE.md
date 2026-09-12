@@ -280,6 +280,113 @@ Eight executables ship in `src-tauri/binaries/`, using the platform-tuple naming
 | `saucebunny-dictate` | Live dictation for review comments — Apple Speech, partial transcripts while you speak | Built locally via `npm run build:dictate`. We own this code (`swift-sidecar/`). |
 | `saucebunny-capture` | ScreenCaptureKit capture engine for co-review screen sharing | Built locally via `npm run build:capture`. We own this code (`swift-sidecar/`). |
 
+### Embedded OBS capture (not shipped)
+
+The in-development GPL helper lives in `obs-sidecar/`, outside the MIT Tauri
+binary. Its `Engine` owns libobs and pinned modules. `ProgramOutput` gives
+each capture its own OBS canvas, stereo mix and inherited output descriptor;
+slots 0 and 1 are reserved until their outputs finish teardown. Picture and
+audio are still encoded as the same bounded, independently decodable fMP4
+used by the existing live-program ring. No OBS UI, user plugins or new network
+transport are involved.
+
+The Rust supervisor now owns one `capture-service` process, with two separately
+cancellable slots. A bounded owner-only command pipe carries exact selections;
+stdout chunks carry slot/generation identities before entering independent MP4
+framers and the existing Program rings. Old-generation records cannot affect a
+replacement. A slot's capacity is held until native source teardown is
+acknowledged; the last slot closes the helper, which is reaped before another
+engine may start. Consumer backpressure does not control native capture.
+This replaces the per-program process path that could interrupt another
+ScreenCaptureKit stream when one process exited. The old single-worker runner
+remains test-only for historical media/owner regression gates.
+The existing explicit stop command now waits outside the session lock for the
+OBS slot's teardown acknowledgement and released worker permit; the final slot
+also waits for the helper to be reaped. A scoped completion signal prevents an
+immediate source replacement from racing native capacity release. Exact
+application/PID/window/crop provenance is retained only in local status
+snapshots. It is not added to room announcements, program URLs or peer telemetry;
+the current NDI-only session restore still excludes application captures.
+Renderer commands and release packaging remain disabled.
+The optional raw-output branch reads the same private canvas and exact stereo
+mix. Preallocated callback buffers feed a separate nonblocking pipe writer;
+encoded Preview never waits for that consumer. A fixed 64-byte header carries
+only capture/broadcast generations, original media timestamps and format sizes.
+No selected application names, window titles or paths enter this stream.
+Each explicit attempt receives a new unlinked FIFO through a separate inherited
+Unix datagram control channel. On macOS, its endpoints are opened atomically
+close-on-exec instead of creating a pipe and setting flags afterward, which
+allowed concurrent child processes to retain a writer and prevent EOF. A private
+temporary directory anchors creation and type/identity checks; FIFO metadata and
+the directory are removed before returning the endpoints. Media stays in kernel
+memory. Allocation failures affect only the optional raw branch. The helper
+closes callbacks and joins its writer
+before acknowledging stop; failed partial streams are retired rather than reused.
+Raw-control failure is scoped to this branch, not the encoded Program. This is
+native groundwork, not an NDI sender or an enabled renderer feature. A final
+consumer must also drain EOF and confirm its own shutdown before reporting that
+broadcasting has stopped.
+The separate in-development `src-tauri/native/ndi_sender*` executable consumes
+that raw pipe through the pure MIT framing header. It does not link libobs.
+Strict generation/raster/sample validation precedes synchronous NDI submission;
+borrowed buffers remain owned until each SDK call returns. Tests replace only
+the SDK factory, without starting a network source. The native supervisor reserves
+an immutable capture/attempt tuple without transferring media, starts the sender,
+and arms the raw producer only after SDK readiness. Live requires both the raw
+start acknowledgement and successful sender submissions from both tracks.
+Cancellation owns the sender through reap, then independently confirms the helper
+stop acknowledgement and drains the retained pipe reader to EOF. A blocked SDK
+is terminated in its own process without stopping Preview. Lost PID ownership
+is quarantined, never treated as permission to signal a potentially reused PID.
+Ordinary app exit closes broadcast admission and awaits bounded cleanup; forced
+exit/restart relies on the sender's independent parent-loss watchdog. That
+watchdog remains active during SDK calls and destruction. Neither a timeout nor
+an unconfirmed acknowledgement is reported as a successful stop.
+Renderer controls and production acceptance remain unfinished; this native API
+is not an enabled renderer feature or a registered release sidecar.
+A separate internal-only app stager copies a clean built app to a new location
+and nests a resource-only `Contents/Helpers/OBS.bundle`. Its `Contents` directory
+is the fixed packaged runtime root; an environment override cannot replace it.
+The application profile excludes diagnostic executables and seals its license,
+source and inventory resources separately from helper/library code. The stage
+verifier checks dependency closure, component hashes and strict same-team
+signatures without launching, installing, notarizing or publishing the app.
+Complete source materials and packaged playback acceptance remain separate gates.
+The internal app builder also stages a separately signed `NDISender.bundle`.
+Its frozen MIT sources, SDK-header hashes, build recipe, target/linkage checks
+and signed inventory are sealed independently. The sender reuses the existing
+app NDI runtime, and final internal verification runs the NDI package verifier
+as well as the OBS/sender checks. OBS-only staging remains supported through an
+explicitly absent sender option; an unrecorded sender bundle is rejected.
+This does not add the sender to the release resource list or enable UI controls.
+The generated-window service verifier has an explicit application mode. It
+validates the enclosing app before executing only its packaged capture helper
+under the Rust test supervisor. Evidence records that boundary; it is not a
+packaged-main/WKWebView or NDI network acceptance test. The smaller application
+runtime must pass its own profile rather than borrowing diagnostic binaries.
+Core/helper builders now freeze their own inputs before compiling and associate
+source hashes with compiled UUIDs. The separate source-material stager checks the
+runtime and copies those frozen inputs, supplied notices and pinned archives with
+an exact output manifest. It refuses old unrecorded builds and detects source
+drift; it does not establish reproducible binaries or complete dependency sources.
+These materials remain explicitly internal-only and not distribution-ready.
+The manual shared-service lifecycle gate includes decoded PCM continuity, not
+only packet timestamps. Stage traces localized a 1024-sample dropout to the
+OBS mixer despite continuous captured samples. The private engine now reserves
+six mixer blocks (128 ms at 48 kHz) at startup instead of growing its reserve
+during playback. A generated arrival-jitter negative control reproduces the
+old fault; the fixed configuration passes that input without silent blocks.
+Native flash/tone tests separately guard picture/audio alignment. This does not
+replace sustained real-editor/WKWebView acceptance. Native-test diagnostics are
+local and test-only; production discards stderr. Source-stop diagnostics contain
+only bounded reason codes, slot/generation and numeric raster dimensions, never
+titles, paths or PIDs. The capture module consumes geometry only from complete
+ScreenCaptureKit frames. Idle/started notifications retain the confirmed raster;
+blank/suspended/stopped states latch source loss. A generated IOSurface regression
+fails against the earlier module, which reset a valid raster to zero on idle.
+See [the implementation and acceptance record](EMBEDDED-OBS-CAPTURE.md)
+for the remaining UI, real-editor, room/NDI and distribution gates.
+
 ## Diarizer architecture
 
 Two backends behind one CLI:

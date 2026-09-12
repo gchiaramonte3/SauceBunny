@@ -1,0 +1,38 @@
+--- a/libobs/obs-cocoa.m
++++ b/libobs/obs-cocoa.m
+@@ -592,6 +592,9 @@
+ 
+     obs_hotkeys_platform_t *platform = bzalloc(sizeof(obs_hotkeys_platform_t));
+ 
++    // Sauce Bunny's media-only helper has no global hotkeys. Never install
++    // an input listener, even when its signing identity has existing access.
++#ifndef SAUCE_OBS_NO_GLOBAL_INPUT
+     const bool has_event_access = CGPreflightListenEventAccess();
+     if (has_event_access) {
+         platform->eventTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionListenOnly,
+@@ -612,6 +615,7 @@
+     } else {
+         blog(LOG_WARNING, "[hotkeys-cocoa]: No event permissions, could not add global hotkeys.");
+     }
++#endif
+ 
+     platform->tis = TISCopyCurrentKeyboardLayoutInputSource();
+     platform->layout_data = (CFDataRef) TISGetInputSourceProperty(platform->tis, kTISPropertyUnicodeKeyLayoutData);
+@@ -687,6 +691,9 @@
+ 
+ bool obs_hotkeys_platform_is_pressed(obs_hotkeys_platform_t *platform, obs_key_t key)
+ {
++#ifdef SAUCE_OBS_NO_GLOBAL_INPUT
++    return false;
++#else
+     if (key >= OBS_KEY_MOUSE1 && key <= OBS_KEY_MOUSE29) {
+         int button = key - 1;
+ 
+@@ -710,6 +717,7 @@
+     }
+ 
+     return platform->is_key_down[key];
++#endif
+ }
+ 
+ static void unichar_to_utf8(const UniChar *character, char *buffer)

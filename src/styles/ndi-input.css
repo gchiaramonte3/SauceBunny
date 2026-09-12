@@ -12,6 +12,9 @@
   font-size: var(--text-base);
   line-height: var(--leading-normal);
 }
+/* The initial focus target is the dialog itself. WebKit otherwise draws its
+   platform-accent ring around the whole popup; use the shared focus recipe. */
+.cp-modal.cp-ndi-input:focus { outline: 1px solid var(--focus-ring); outline-offset: 2px; }
 .cp-ndi-input-header {
   position: sticky;
   top: 0;
@@ -60,6 +63,13 @@
 }
 .cp-ndi-input-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s-2); margin: var(--s-3) 0 var(--s-4); }
 .cp-ndi-input-settings { white-space: normal; max-width: 100%; }
+.cp-obs-crop { margin-top: var(--s-3); }
+.cp-obs-crop summary { cursor: pointer; min-height: 26px; display: list-item; }
+.cp-obs-crop-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-2); }
+.cp-obs-crop-fields label { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
+.cp-obs-crop-fields input { width: 100%; min-width: 0; }
+.cp-obs-broadcast { margin-top: var(--s-4); }
+.cp-obs-broadcast > button { margin-top: var(--s-2); }
 .cp-ndi-sender-setup { margin-bottom: var(--s-3); }
 .cp-ndi-sender-setup > .cp-section { border-bottom: 0; }
 .cp-ndi-sender-setup > .cp-section.collapsible > .cp-section-head,

@@ -137,11 +137,15 @@ test("an NDI preview keeps detached file actions visibly unavailable without cli
     transcriptPlayhead: null, transcriptPath: null, hasSource: false });
   await expect(page.getByRole("status")).toContainText("File seeks and ranges are unavailable");
   await expect(page.getByRole("tab", { name: "Transcript" })).toBeVisible();
-  const drawer = await page.locator(".cp-queue-drawer").boundingBox();
-  const notice = await page.locator(".cp-panel-source-notice").boundingBox();
-  expect(drawer!.y).toBeGreaterThanOrEqual(notice!.y + notice!.height - 1);
-  expect(drawer!.x + drawer!.width).toBeLessThanOrEqual(480);
-  expect(drawer!.y + drawer!.height).toBeLessThanOrEqual(700);
+  // Read both siblings in one rendering turn. Separate awaited bounding boxes
+  // can straddle a font reflow and compare positions from different layouts.
+  const { drawer, notice } = await page.evaluate(() => ({
+    drawer: document.querySelector(".cp-queue-drawer")!.getBoundingClientRect().toJSON(),
+    notice: document.querySelector(".cp-panel-source-notice")!.getBoundingClientRect().toJSON(),
+  }));
+  expect(drawer.y).toBeGreaterThanOrEqual(notice.y + notice.height - 1);
+  expect(drawer.x + drawer.width).toBeLessThanOrEqual(480);
+  expect(drawer.y + drawer.height).toBeLessThanOrEqual(700);
   expect(noise).toEqual([]);
 });
 

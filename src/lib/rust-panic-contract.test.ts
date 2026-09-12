@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 /**
  * No production Rust panics, because a panic here is not an error message.
@@ -47,22 +47,39 @@ function rustFiles(dir: string): string[] {
   return out;
 }
 
-/** Modules gated at their declaration: `#[cfg(test)] mod foo;` in any file. */
-function declarationGatedModules(files: string[]): Set<string> {
+// Visibility and attribute order do not change whether a module is test-only.
+// Resolve declarations to actual files, not stems: a test module called
+// `tests` must never exempt an unrelated production tests.rs elsewhere.
+const MODULE = /((?:#\[[^\]]+\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*([;{])/g;
+const TEST_ATTRIBUTE = /#\[cfg\(test\)\]/;
+
+/** Modules gated at their declaration, including explicit #[path] files. */
+function declarationGatedFiles(sources: ReadonlyMap<string, string>): Set<string> {
   const gated = new Set<string>();
-  for (const f of files) {
-    const s = readFileSync(f, "utf8");
-    for (const m of s.matchAll(/#\[cfg\(test\)\]\s*(?:pub\s+)?mod\s+(\w+)\s*;/g)) {
-      gated.add(m[1]);
+  const production = new Set<string>();
+  for (const [file, source] of sources) {
+    for (const m of source.matchAll(MODULE)) {
+      if (m[3] !== ";") continue;
+      const explicitPath = m[1].match(/#\[path\s*=\s*"([^"]+)"\]/)?.[1];
+      const stem = basename(file, ".rs");
+      const directory = ["lib", "main", "mod"].includes(stem) ? dirname(file) : join(dirname(file), stem);
+      const candidates = explicitPath ? [resolve(dirname(file), explicitPath)]
+        : [join(directory, `${m[2]}.rs`), join(directory, m[2], "mod.rs")];
+      const targets = TEST_ATTRIBUTE.test(m[1]) ? gated : production;
+      for (const candidate of candidates) if (sources.has(candidate)) targets.add(candidate);
     }
   }
+  // A file may have two #[path] aliases. A test-only alias cannot exempt
+  // the same source when it is also compiled by a production declaration.
+  for (const file of production) gated.delete(file);
   return gated;
 }
 
 /** Byte spans of inline `#[cfg(test)] mod name { .. }` blocks. */
 function inlineTestSpans(s: string): Array<[number, number]> {
   const spans: Array<[number, number]> = [];
-  for (const m of s.matchAll(/#\[cfg\(test\)\]\s*(?:pub\s+)?mod\s+\w+\s*\{/g)) {
+  for (const m of s.matchAll(MODULE)) {
+    if (m[3] !== "{" || !TEST_ATTRIBUTE.test(m[1])) continue;
     let i = m.index! + m[0].length - 1;
     let depth = 0;
     for (; i < s.length; i++) {
@@ -92,15 +109,15 @@ const ALLOWED: Array<{ file: string; why: string }> = [
 ];
 
 const files = rustFiles(SRC);
-const gatedMods = declarationGatedModules(files);
+const sources = new Map(files.map(file => [file, readFileSync(file, "utf8")]));
+const gatedFiles = declarationGatedFiles(sources);
 
-function productionPanics(): Array<{ file: string; line: number; text: string }> {
+function productionPanics(input: ReadonlyMap<string, string> = sources): Array<{ file: string; line: number; text: string }> {
   const hits: Array<{ file: string; line: number; text: string }> = [];
-  for (const f of files) {
+  const gated = declarationGatedFiles(input);
+  for (const [f, s] of input) {
     const rel = relative(ROOT, f);
-    const stem = f.split("/").pop()!.replace(/\.rs$/, "");
-    if (gatedMods.has(stem)) continue;           // whole file is test-only
-    const s = readFileSync(f, "utf8");
+    if (gated.has(f)) continue;                // whole file is test-only
     const spans = inlineTestSpans(s);
     const lines = s.split("\n");
     for (const m of s.matchAll(PANIC)) {
@@ -131,11 +148,50 @@ describe("production Rust cannot panic", () => {
     // Rule 1 caught nothing and rule 2 over-caught, in the two earlier
     // versions of this measurement. If either scoping rule stops matching,
     // the scan goes quiet in the direction that passes.
-    expect(gatedMods, "no `#[cfg(test)] mod x;` declaration found - rule 2 broke")
-      .toContain("nightly");
+    expect(gatedFiles, "no `#[cfg(test)] mod x;` declaration found - rule 2 broke")
+      .toContain(join(SRC, "nightly.rs"));
     const withInline = files.filter((f) => inlineTestSpans(readFileSync(f, "utf8")).length > 0);
     expect(withInline.length, "no inline `#[cfg(test)] mod tests { }` block found - rule 1 broke")
       .toBeGreaterThan(5);
+  });
+
+  it("scopes explicit test paths in either attribute order without exempting same-named production files", () => {
+    const input = new Map([
+      ["/fixture/src/lib.rs", '#[cfg(test)] #[path = "first_cases.rs"] pub(crate) mod tests;\n#[path = "second_cases.rs"] #[cfg(test)] mod other;'],
+      ["/fixture/src/first_cases.rs", "fn test() { panic!(); }"],
+      ["/fixture/src/second_cases.rs", "fn test() { panic!(); }"],
+      ["/fixture/src/live/first_cases.rs", "fn production() { panic!(); }"],
+    ]);
+    expect([...declarationGatedFiles(input)]).toEqual(["/fixture/src/first_cases.rs", "/fixture/src/second_cases.rs"]);
+    expect(productionPanics(input).map(hit => hit.text)).toEqual(["fn production() { panic!(); }"]);
+  });
+
+  it("resolves ordinary file and mod.rs declarations without ignoring the declaring file", () => {
+    const input = new Map([
+      ["/fixture/src/engine.rs", "#[cfg(test)] mod cases;\nfn production() { panic!(); }"],
+      ["/fixture/src/engine/cases.rs", "fn test() { panic!(); }"],
+      ["/fixture/src/other/mod.rs", "#[cfg(test)] pub mod cases;"],
+      ["/fixture/src/other/cases/mod.rs", "fn test() { panic!(); }"],
+    ]);
+    expect(declarationGatedFiles(input).size).toBe(2);
+    expect(productionPanics(input).map(hit => hit.text)).toEqual(["fn production() { panic!(); }"]);
+  });
+
+  it("does not exempt a shared path also included by a production module", () => {
+    const input = new Map([
+      ["/fixture/src/lib.rs", '#[cfg(test)] #[path = "shared.rs"] mod test_alias;\n#[path = "shared.rs"] mod production_alias;'],
+      ["/fixture/src/shared.rs", "fn production() { panic!(); }"],
+    ]);
+    expect(declarationGatedFiles(input).size).toBe(0);
+    expect(productionPanics(input).map(hit => hit.text)).toEqual(["fn production() { panic!(); }"]);
+  });
+
+  it("ignores restricted-visibility test blocks but still catches a production panic after them", () => {
+    for (const visibility of ["", "pub ", "pub(crate) ", "pub(super) ", "pub(in crate::commands::obs) "]) {
+      const source = `#[cfg(test)] ${visibility}mod tests { fn test() { panic!(); } }\nfn production() { unreachable!(); }`;
+      expect(productionPanics(new Map([["/fixture/src/lib.rs", source]])).map(hit => hit.text))
+        .toEqual(["fn production() { unreachable!(); }"]);
+    }
   });
 
   it("has no panic outside the two allowed sites", () => {

@@ -742,7 +742,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and eight rules in this file are checked by a test rather than remembered. If you
+One hundred and ten rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -797,6 +797,8 @@ written after finding the rule already broken somewhere.
 | `ipc-surface-contract` | Every registered command is called, and every invoked command is registered |
 | `event-surface-contract` | Every event Rust emits has a listener, every listened event is emitted (`panel:*` is the frontend-only bus), and each handler is named after its event so a mis-wire is visible |
 | `sidecar-surface-contract` | Everything `externalBin` ships is spawnable, documented in the table above AND in SIDECAR-VERSIONS.md, and (for ours) has a build script |
+| `ci-sidecars-contract` | CI derives placeholders from `externalBin`, preserves real binaries, and nightly provisions/requires real Deno before running smoke tests |
+| `release-sidecars-contract` | Release preflight requires every Tauri sidecar, including Deno; missing, empty and invalid executables fail before signing |
 | `docs-contract` | `npm run verify` runs every gate CI runs; the bundled ffmpeg's licence is stated the same way in CLAUDE.md, README and THIRD-PARTY-LICENSES |
 | `bundle-signature-contract` | The packaged verifier recognizes macOS certificate authority output without mistaking it for ad-hoc or unsigned code, retains strict deep signature verification, and distinguishes local signing from distribution readiness |
 | `menu-surface-contract` | Every native menu item has a handler (React binding or a native arm), and no binding points at an item that does not exist |

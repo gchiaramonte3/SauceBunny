@@ -938,7 +938,6 @@ pub async fn session_state(
     Ok(snapshot_state(&inner).await)
 }
 
-#[cfg(sauce_ndi)]
 pub(crate) async fn ndi_room_generation(app:&AppHandle) -> Option<u64> {
     let manager=app.state::<SessionManager>();
     let inner=manager.inner.lock().await;

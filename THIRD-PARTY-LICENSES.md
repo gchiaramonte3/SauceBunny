@@ -1,7 +1,8 @@
 # Third-Party Licenses & Acknowledgements
 
-Sauce Bunny itself is licensed under the [MIT License](LICENSE). It links no
-STRONG copyleft (no GPL or AGPL reaches the app). It does link weak copyleft:
+Original Sauce Bunny application code is licensed under the [MIT License](LICENSE).
+The current Tauri application does not link libobs; the developer-only GPL
+helper exception is documented below. The app does link weak copyleft:
 mediabunny, `@mediabunny/prores` and turbores are MPL-2.0, and LAME inside
 `@mediabunny/mp3-encoder` is LGPL — all bundled into the JS by Vite, and all
 listed below. Redistributors therefore carry MPL source-availability and LGPL
@@ -15,6 +16,39 @@ disclosed below.
 The sidecar binaries are **not** checked into this repository; they are fetched
 or built locally by `npm run setup` (see `scripts/`). This notice covers what
 ships inside a released `.dmg`.
+
+---
+
+## Embedded OBS development helper (not shipped)
+
+OBS-linked source in `obs-sidecar/` is GPL-2.0-or-later. The independent
+`raw-frame.hpp` wire-format header explicitly carries MIT instead. The GPL v2 text is in
+[`obs-sidecar/COPYING`](obs-sidecar/COPYING); the “or later” grant appears in
+the source notices. It embeds OBS Studio 32.2.2/libobs and uses SIMDe 0.8.2
+headers (MIT). Original application files retain their existing MIT notices.
+The current engine, OpenGL backend and OBS FFmpeg plugin are built from pinned
+OBS source, with recorded capture-privacy/global-input patches. Runtime libraries
+and SIMDe headers come from the hash-pinned OBS dependency archive; its supplied
+license collection is retained in the private runtime. A generated Mach-O
+inventory records actual dynamic linkage, not complete static source coverage.
+
+These private probes/workers are **not** registered as release sidecars or included
+in current DMGs. An internal-only app stager can embed the two application
+helpers and their dependency closure in `Contents/Helpers/OBS.bundle`, retaining
+the supplied license/source materials beneath its `Contents/Resources`.
+Its inventory remains explicitly non-distributable. These temporary bundles contain OBS's FFmpeg dependencies
+and must not be redistributed as a finished licensing package. Before any
+release including OBS, complete the corresponding-source/build-materials and
+dependency-notice inventory and review the final combination, including the
+separate NDI SDK terms. A subprocess boundary alone is not a blanket exemption.
+See [the implementation and verification record](docs/EMBEDDED-OBS-CAPTURE.md).
+
+The separate development sender in `src-tauri/native/ndi_sender*` is original
+MIT code. It shares only that MIT wire header, not libobs or OBS-derived code.
+It compiles against NDI SDK headers and dynamically loads the NDI runtime only
+for an explicit broadcast invocation. This architectural separation does not
+itself clear the combined distribution; the review and source-material gates
+above still apply. It is not included in current DMGs.
 
 ---
 

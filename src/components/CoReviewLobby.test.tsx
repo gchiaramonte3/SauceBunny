@@ -67,7 +67,7 @@ describe("compact Review setup", () => {
     const { props } = mount({ onConnectPremiere: connect }, false);
     expect(screen.getByRole("region", { name: "Session setup" })).toBeTruthy();
     expect(screen.queryByRole("main")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Preview NDI…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose live source…" }));
     expect(connect).toHaveBeenCalledOnce();
     expect(props.onStart).not.toHaveBeenCalled(); expect(props.onJoin).not.toHaveBeenCalled();
     expect(mocks.cap.acquire).not.toHaveBeenCalled(); expect(mocks.devices).not.toHaveBeenCalled();
@@ -77,7 +77,7 @@ describe("compact Review setup", () => {
     const connect = vi.fn();
     mount({ onConnectPremiere: connect, premierePreviewName: "Editor Premiere" });
     expect(screen.getByText("NDI ready · Not shared").title).toBe("Editor Premiere");
-    fireEvent.click(screen.getByRole("button", { name: "Preview NDI…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose live source…" }));
     expect(connect).toHaveBeenCalledOnce();
   });
   it("shows actual inactive devices and mounts their editor only on Change", () => {

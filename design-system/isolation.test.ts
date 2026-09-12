@@ -42,8 +42,10 @@ const allowedProduction = new Set([
   "src/components/ClipTagIndicator", "src/lib/finder-tags",
   // Controlled count only; dependencies are Icons and shared menu/dismiss hooks.
   "src/components/ExpectedSpeakersMenu",
-  // Passive status/readout only: React types and scoped CSS, no clock/store/controller.
+  // Passive status/readout only: scoped CSS and type-only controller interfaces.
+  // The callback-backed indicator never observes or starts a native sender.
   "src/components/NdiPreviewHeader",
+  "src/components/ObsBroadcastIndicator",
   // Passive Avid instructions: React local disclosure state + the already
   // reviewed CollapsibleSection/Icons; no native, storage or media imports.
   "src/components/AvidNdiSetup",

@@ -26,7 +26,9 @@ echo
 # that exist, so a missing sidecar sailed through silently. ffprobe going
 # missing would quietly degrade every seek to keyframe precision (the RC7
 # epoch probe falls back to the rebased timeline with no hard failure).
-REQUIRED_SIDECARS="yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate saucebunny-capture llama-server"
+# Pin verification permits absent files on fresh clones; release presence must
+# also require Deno, the bundled yt-dlp challenge runtime.
+REQUIRED_SIDECARS="yt-dlp deno ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate saucebunny-capture llama-server"
 for req in $REQUIRED_SIDECARS; do
   bin="${ROOT_DIR}/src-tauri/binaries/${req}-aarch64-apple-darwin"
   if [ ! -f "$bin" ]; then

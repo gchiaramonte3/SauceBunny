@@ -40,6 +40,9 @@ jobs:
       # Include native-runtime packaging and profiling regressions as well
       # as the frontend/stream-continuity suite; no SDK or runtime is needed.
       - run: npm test
+      - run: npm run test:obs-capture
+      - run: npm run test:obs-packaging
+      - run: npm run test:ndi-sender
       # CLAUDE.md's dependency rule allows permissive and weak copyleft and
       # rules out GPL/AGPL, because strong copyleft would reach the app's own
       # MIT source. That rule was written down and nothing checked it: a
@@ -52,20 +55,15 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
       # The Tauri build script validates that every externalBin entry
       # in tauri.conf.json exists on disk. Sidecar binaries are not in
       # git (devs run `npm run setup`), so stub them as zero-byte files
       # just to get past the resource-path check.
       - name: Stub sidecars so cargo check passes
-        run: |
-          mkdir -p src-tauri/binaries
-          for name in yt-dlp deno ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate saucebunny-capture llama-server; do
-            touch "src-tauri/binaries/${name}-aarch64-apple-darwin"
-            chmod +x "src-tauri/binaries/${name}-aarch64-apple-darwin"
-          done
-      - uses: actions/setup-node@v5
-        with:
-          node-version: "20"
+        run: node scripts/prepare-ci-sidecars.mjs .
       # This job compiles the whole Tauri dependency graph THREE times (check,
       # test, clippy) and had no cache, while the bundle job below it does.
       # Swatinem's cache is per-job, so the bundle job's copy never reached
@@ -80,6 +78,8 @@ jobs:
       # Unit tests (proxy parsing, error truncation) + the ts-rs binding
       # exports, which double as a stale-bindings check.
       - run: cargo test --lib
+        working-directory: src-tauri
+      - run: cargo test --test obs_service
         working-directory: src-tauri
       # Record the toolchain. "clippy-clean" is a claim about a specific
       # clippy: lints get added, and existing ones get smarter about MSRV, so
@@ -163,13 +163,7 @@ jobs:
       - run: npm ci
       # Same stubbing the cargo job uses: real binaries are gitignored.
       - name: Stub sidecars
-        run: |
-          mkdir -p src-tauri/binaries
-          for n in yt-dlp deno ffmpeg ffprobe whisper-cli llama-server \
-                   saucebunny-diarize saucebunny-dictate saucebunny-capture; do
-            : > "src-tauri/binaries/${n}-aarch64-apple-darwin"
-            chmod +x "src-tauri/binaries/${n}-aarch64-apple-darwin"
-          done
+        run: node scripts/prepare-ci-sidecars.mjs .
       - name: Build the bundle
         run: npm run tauri build -- --bundles app
       - name: Verify the bundle

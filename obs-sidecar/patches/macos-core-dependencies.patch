@@ -1,0 +1,16 @@
+--- a/cmake/macos/buildspec.cmake
++++ b/cmake/macos/buildspec.cmake
+@@ -2,6 +2,13 @@
+ 
+ include_guard(GLOBAL)
+ 
++# The private helper build stages a checksum-verified dependency archive and
++# supplies CMAKE_PREFIX_PATH explicitly. Do not fetch anything (including UI
++# runtimes) or change quarantine attributes in this source-only build.
++if(SAUCE_OBS_CAPTURE_HELPER)
++  return()
++endif()
++
+ include(buildspec_common)
+ 
+ # _check_dependencies_macos: Set up macOS slice for _check_dependencies

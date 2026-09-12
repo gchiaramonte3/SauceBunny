@@ -1,0 +1,16 @@
+--- a/plugins/CMakeLists.txt
++++ b/plugins/CMakeLists.txt
+@@ -2,6 +2,13 @@
+ 
+ option(ENABLE_PLUGINS "Enable building OBS plugins" ON)
+ 
++# The capture helper needs this one output module, not the OBS UI, arbitrary
++# user plugins, browser sources, virtual camera, microphone or other devices.
++if(SAUCE_OBS_CAPTURE_HELPER)
++  add_subdirectory(obs-ffmpeg)
++  return()
++endif()
++
+ if(NOT ENABLE_PLUGINS)
+   set_property(GLOBAL APPEND PROPERTY OBS_FEATURES_DISABLED "Plugin Support")
+   return()

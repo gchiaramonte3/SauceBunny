@@ -1,0 +1,50 @@
+--- a/mac-sck-common.h
++++ b/mac-sck-common.h
+@@ -56,6 +56,9 @@
+     os_sem_t *shareable_content_available;
+     IOSurfaceRef current, prev;
+     bool capture_failed;
++    // Latched for this exact source lifetime, independent of OBS UI retry.
++    // Queried across the SCStream callback and helper threads atomically.
++    volatile bool sauce_capture_terminated;
+ 
+     pthread_mutex_t mutex;
+ 
+--- a/mac-sck-common.m
++++ b/mac-sck-common.m
+@@ -28,6 +28,9 @@
+ 
+ - (void)stream:(SCStream *)stream didStopWithError:(NSError *)error
+ {
++    if (self.sc == NULL)
++        return;
++    os_atomic_set_bool(&self.sc->sauce_capture_terminated, true);
+     NSString *errorMessage;
+     switch (error.code) {
+         case SCStreamErrorUserStopped:
+--- a/mac-sck-video-capture.m
++++ b/mac-sck-video-capture.m
+@@ -272,6 +272,14 @@
+     return did_stream_start;
+ }
+ 
++// Passive, versioned source health. A stopped SCStream can leave a renderable
++// texture behind; encoded output alone does not prove that capture is live.
++void sauce_capture_health(void *data, calldata_t *result)
++{
++    struct screen_capture *sc = data;
++    calldata_set_int(result, "version", 1);
++    calldata_set_bool(result, "healthy", !os_atomic_load_bool(&sc->sauce_capture_terminated));
++}
+ API_AVAILABLE(macos(12.5)) static void *sck_video_capture_create(obs_data_t *settings, obs_source_t *source)
+ {
+     struct screen_capture *sc = bzalloc(sizeof(struct screen_capture));
+@@ -310,6 +318,8 @@
+     if (!init_screen_stream(sc))
+         goto fail;
+ 
++    proc_handler_add(obs_source_get_proc_handler(source),
++                     "void sauce_capture_health(out int version, out bool healthy)", sauce_capture_health, sc);
+     return sc;
+ 
+ fail:

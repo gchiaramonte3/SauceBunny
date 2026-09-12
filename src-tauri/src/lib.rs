@@ -1,4 +1,7 @@
 mod commands;
+// Native service API for the capture integration harness. This does not grant
+// renderer IPC access; register commands only with their real UI consumers.
+pub use commands::obs;
 mod error;
 // Support for the nightly real-sidecar smoke tests (`cargo test --lib
 // nightly_ -- --ignored`) — compiled only under cfg(test), never shipped.
@@ -178,6 +181,9 @@ pub fn run() {
     // Best effort: a second call (tests, a plugin that got there first) is a
     // no-op rather than a panic.
     let _ = log::set_logger(&STDERR_LOG).map(|()| log::set_max_level(log::LevelFilter::Warn));
+    // 0: accepting exit, 1: one broadcast drain in flight, 2: drain finished.
+    // The event loop remains responsive while the owned sender processes stop.
+    let broadcast_exit_phase = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -207,6 +213,13 @@ pub fn run() {
             commands::session::ndi_publish,
             commands::session::ndi_unpublish,
             commands::ndi::ndi_remote_source,
+            commands::obs::obs_preflight,
+            commands::obs::obs_applications,
+            commands::obs::obs_windows,
+            commands::obs::obs_start,
+            commands::obs::obs_broadcast_start,
+            commands::obs::obs_broadcast_status,
+            commands::obs::obs_broadcast_stop,
             commands::fetch_metadata,
             commands::create_clip,
             commands::download_captions,
@@ -448,7 +461,7 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
+        .run(move |app, event| {
             // A clicked saucebunny://review/<code> link. Buffered AND emitted:
             // the emit serves a link opened while the app is already running,
             // the buffer serves a cold launch, where the URL arrives before any
@@ -457,6 +470,38 @@ pub fn run() {
             if let tauri::RunEvent::Opened { urls } = &event {
                 let strings: Vec<String> = urls.iter().map(|u| u.to_string()).collect();
                 commands::remember_and_announce(app, &strings);
+            }
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
+                // Tauri cannot prevent restart; a main-thread restart can
+                // bypass even Exit. The sender's parent-loss watchdog covers
+                // those paths. Ordinary Quit awaits owned cleanup.
+                if *code != Some(tauri::RESTART_EXIT_CODE) {
+                    use std::sync::atomic::Ordering;
+                    match broadcast_exit_phase.load(Ordering::Acquire) {
+                        0 => {
+                            let pending = commands::obs::begin_broadcast_shutdown();
+                            if !pending.is_empty() {
+                                api.prevent_exit();
+                                broadcast_exit_phase.store(1, Ordering::Release);
+                                let phase = broadcast_exit_phase.clone();
+                                let app = app.clone();
+                                let exit_code = code.unwrap_or(0);
+                                tauri::async_runtime::spawn(async move {
+                                    let confirmed = commands::obs::wait_broadcast_shutdown(
+                                        pending, std::time::Duration::from_secs(10),
+                                    ).await;
+                                    if !confirmed {
+                                        eprintln!("[shutdown] NDI sender cleanup was not fully confirmed before the exit deadline");
+                                    }
+                                    phase.store(2, Ordering::Release);
+                                    app.exit(exit_code);
+                                });
+                            }
+                        },
+                        1 => api.prevent_exit(),
+                        _ => {},
+                    }
+                }
             }
             // Kill the resident llama-server on quit — it holds a multi-GB
             // model in memory and would otherwise survive as an orphan.

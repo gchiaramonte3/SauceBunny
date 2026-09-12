@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "inputs": [
+    {
+      "id": "obs",
+      "file": "obs-source.tar.gz",
+      "version": "32.2.2",
+      "role": "upstream-source",
+      "sha256": "9a33756d87ce6831c6ddae8b6ea92c86b6cf61c693c9511a716673ba3a3caa5b"
+    },
+    {
+      "id": "dependencies",
+      "file": "obs-deps-2026-07-15-universal.tar.xz",
+      "version": "2026-07-15",
+      "role": "prebuilt-dependency-inputs-not-complete-source",
+      "sha256": "4ecb4c598dfa853168df6c2a0c4e0ffec8495a81fbd1ba051ef88ecd5e0f7e53"
+    }
+  ]
+}

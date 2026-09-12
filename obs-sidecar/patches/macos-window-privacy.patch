@@ -1,0 +1,11 @@
+--- a/mac-sck-video-capture.m
++++ b/mac-sck-video-capture.m
+@@ -157,7 +157,7 @@
+                 [sc->stream_properties setHeight:(size_t) target_window.frame.size.height];
+ 
+                 if (@available(macOS 14.2, *)) {
+-                    [sc->stream_properties setIncludeChildWindows:YES];
++                    [sc->stream_properties setIncludeChildWindows:NO];
+                 }
+             }
+         } break;

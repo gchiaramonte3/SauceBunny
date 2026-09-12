@@ -184,6 +184,78 @@ describe("typing", () => {
   });
 });
 
+describe("focused controls own their keys", () => {
+  it.each(["button", "a", "summary"])("leaves Space and Enter activation to a native %s, including its child", (tag) => {
+    const dc = deps({ comboToAction: new Map([["space", "play.toggle"], ["enter", "play.toggle"]]) });
+    renderHook(() => useKeyboardShortcuts(dc));
+    const control = document.createElement(tag);
+    if (tag === "a") control.setAttribute("href", "#test-only");
+    const child = document.createElement("span");
+    control.appendChild(child); document.body.appendChild(control);
+    try {
+      for (const key of [" ", "Enter"]) {
+        expect(press(key, {}, control).defaultPrevented).toBe(false);
+        expect(press(key, {}, child).defaultPrevented).toBe(false);
+      }
+      expect(dc.onPlayToggle).not.toHaveBeenCalled();
+      expect(press(" ").defaultPrevented).toBe(true);
+      expect(dc.onPlayToggle).toHaveBeenCalledExactlyOnceWith();
+    } finally { control.remove(); }
+  });
+
+  it.each(["select", "input", "textarea"])("preserves native %s navigation, type-ahead and digits", (tag) => {
+    const dc = deps({ comboToAction: new Map([
+      ["space", "play.toggle"], ["left", "play.frameBack"], ["right", "play.frameFwd"],
+      ["home", "play.toStart"], ["end", "play.toEnd"], ["j", "play.back5"],
+    ]) });
+    renderHook(() => useKeyboardShortcuts(dc));
+    const control = document.createElement(tag); document.body.appendChild(control);
+    try {
+      for (const key of [" ", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "j", "1"]) {
+        expect(press(key, {}, control).defaultPrevented, key).toBe(false);
+      }
+      expect(dc.onPlayToggle).not.toHaveBeenCalled(); expect(dc.onStep).not.toHaveBeenCalled();
+      expect(dc.onSeek).not.toHaveBeenCalled(); expect(dc.shuttleStep).not.toHaveBeenCalled();
+      expect(dc.setTcEntry).not.toHaveBeenCalled();
+    } finally { control.remove(); }
+  });
+
+  it("never redispatches a key already handled by a focused widget", () => {
+    renderHook(() => useKeyboardShortcuts(d));
+    const control = document.createElement("div"); document.body.appendChild(control);
+    control.addEventListener("keydown", e => e.preventDefault());
+    try {
+      press(" ", {}, control); press("k", { metaKey: true }, control); press("1", {}, control);
+      expect(d.onPlayToggle).not.toHaveBeenCalled(); expect(d.setPaletteOpen).not.toHaveBeenCalled();
+      expect(d.setTcEntry).not.toHaveBeenCalled(); expect(d.kHeldRef.current).toBe(false);
+    } finally { control.remove(); }
+  });
+
+  it("keeps modified app navigation and fetch available from native controls and text fields", () => {
+    const dc = deps({ comboToAction: new Map([["mod+1", "view.home"], ["mod+enter", "src.fetch"]]) });
+    renderHook(() => useKeyboardShortcuts(dc));
+    for (const tag of ["button", "select", "input", "textarea"]) {
+      const control = document.createElement(tag); document.body.appendChild(control);
+      try {
+        expect(press("1", { metaKey: true, code: "Digit1" }, control).defaultPrevented).toBe(true);
+        expect(press("Enter", { metaKey: true }, control).defaultPrevented).toBe(true);
+      } finally { control.remove(); }
+    }
+    expect(dc.navigateView).toHaveBeenCalledTimes(4); expect(dc.navigateView).toHaveBeenCalledWith("home");
+    expect(dc.handleFetch).toHaveBeenCalledTimes(4); expect(dc.setTcEntry).not.toHaveBeenCalled();
+  });
+
+  it("retains the explicit timecode HUD's Enter ownership until it closes", () => {
+    const dc = deps({ tcEntryRef: { current: "00000100" } });
+    renderHook(() => useKeyboardShortcuts(dc));
+    const button = document.createElement("button"); document.body.appendChild(button);
+    try {
+      expect(press("Enter", {}, button).defaultPrevented).toBe(true);
+      expect(dc.onSeek).toHaveBeenCalledWith(25); expect(dc.setTcEntry).toHaveBeenCalledWith(null);
+    } finally { button.remove(); }
+  });
+});
+
 describe("the palette dismisses covered popovers", () => {
   it("fires the dismiss event before opening", () => {
     // ⌘K is neither an outside mousedown nor Escape, so useDismiss cannot see

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ROOT = resolve(__dirname, "../..");
@@ -37,9 +37,13 @@ describe("npm run verify covers every gate CI runs", () => {
     ["swift test", "swift test --package-path swift-sidecar"],
     ["npx tsc --noEmit", "npx tsc --noEmit"],
     ["npm test", "npm test"],
+    ["npm run test:obs-capture", "npm run test:obs-capture"],
+    ["npm run test:obs-packaging", "npm run test:obs-packaging"],
+    ["npm run test:ndi-sender", "npm run test:ndi-sender"],
     ["npm run lint", "npm run lint"],
     ["cargo check", "cargo check"],
     ["cargo test --lib", "cargo test --lib"],
+    ["cargo test --test obs_service", "cargo test --test obs_service"],
     // The local spelling must carry --all-targets too. Mapping CI's flagged
     // command to a bare "cargo clippy" let the local gate run a SUBSET: no
     // test targets, so a lint inside a #[test] passed here and failed there.
@@ -52,6 +56,21 @@ describe("npm run verify covers every gate CI runs", () => {
   it("reads both files", () => {
     expect(ci.length).toBeGreaterThan(500);
     expect(verify).toContain("verify");
+  });
+
+  it("keeps Node-only native suites out of Vitest collection", () => {
+    const config = read("vite.config.ts");
+    const nativeSuites = readdirSync(resolve(ROOT, "scripts"))
+      .filter((name) => name.endsWith(".test.mjs"))
+      .map((name) => `scripts/${name}`)
+      .filter((path) => /^import\s[^;]*\bfrom\s*["']node:test["']/m.test(read(path)));
+    expect(nativeSuites.length).toBeGreaterThan(0);
+    for (const path of nativeSuites) {
+      expect(config, `${path} must run in its Node gate, not Vitest`).toContain(JSON.stringify(path));
+    }
+    // Exclusion must not silently remove the sender's test coverage.
+    expect(read("scripts/test-ndi-sender.sh")).toContain('node --test "$project_root/scripts/ndi-sender-process.test.mjs"');
+    expect(read("package.json")).toContain("scripts/ndi-sender-artifact.test.mjs");
   });
 
   it.each(GATES)("CI's %s is also run locally", (ciStep, localCommand) => {
@@ -69,6 +88,9 @@ describe("npm run verify covers every gate CI runs", () => {
     const SETUP = /npm ci|actions\/|playwright install|rustc --version|Stub|mkdir|chmod|printf|echo|cp |bash scripts\/verify-bundle|npm run tauri build/;
     const steps = [...ci.matchAll(/^\s*(?:- )?run: (.+)$/gm)]
       .map((m) => m[1].trim())
+      // CI-only resource setup replaces the former inline mkdir/touch loops.
+      // Its behavior and workflow wiring are tested by ci-sidecars-contract.
+      .filter((s) => s !== "node scripts/prepare-ci-sidecars.mjs .")
       .filter((s) => !SETUP.test(s) && !s.startsWith("|"));
     const unmapped = steps.filter((s) => !GATES.some(([ciStep]) => s.includes(ciStep)));
     expect(unmapped, "CI runs these and the GATES mapping does not mention them").toEqual([]);

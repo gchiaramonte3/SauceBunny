@@ -87,6 +87,10 @@ jobs:
       - name: Fetch latest yt-dlp
         run: npm run refresh:sidecars
         env: { SB_PIN_ACCEPT_NEW: "1" }
+      # This runtime is a required externalBin entry and yt-dlp's explicit
+      # JavaScript engine. Use the existing verified pin, not a runner install.
+      - name: Fetch pinned Deno runtime
+        run: bash scripts/fetch-deno.sh
       - name: Fetch latest static ffmpeg
         run: npm run refresh:ffmpeg
         env: { SB_PIN_ACCEPT_NEW: "1" }
@@ -100,27 +104,21 @@ jobs:
       - name: Report sidecar pin drift
         run: |
           if ! git diff --quiet -- sidecars.lock.json; then
-            echo "::notice title=Sidecar pin drifted::Upstream published new binaries. Smoke ran against them; the repo pin is unchanged. Run 'npm run refresh:ffmpeg -- --accept-new' locally to adopt."
+            echo "::notice title=Sidecar pin drifted::Upstream published new binaries. The following smoke step will test them; the repo pin is unchanged. Run 'npm run refresh:ffmpeg -- --accept-new' locally to adopt."
             git --no-pager diff --stat -- sidecars.lock.json
           else
             echo "sidecar pins unchanged"
           fi
 
-      # Sidecars the smoke doesn't exercise (Swift diarizer/dictate, llama):
-      # stub them zero-byte, same as ci.yml, purely so tauri-build's
-      # externalBin existence check passes. `-s` keeps any real binary.
-      - name: Stub non-exercised sidecars
-        run: |
-          for name in yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate saucebunny-capture llama-server; do
-            f="src-tauri/binaries/${name}-aarch64-apple-darwin"
-            if [ ! -s "$f" ]; then
-              touch "$f" && chmod +x "$f"
-            fi
-          done
+      # Derive stubs from externalBin so new declarations cannot be omitted.
+      # A missing real binary is a provisioning failure, never an empty stub.
+      - name: Validate real sidecars and stub unexercised resources
+        run: node scripts/prepare-ci-sidecars.mjs . --require-real yt-dlp deno ffmpeg ffprobe whisper-cli
 
       - name: Print sidecar versions under test
         run: |
           echo "yt-dlp:  $(./src-tauri/binaries/yt-dlp-aarch64-apple-darwin --version)"
+          ./src-tauri/binaries/deno-aarch64-apple-darwin --version
           ./src-tauri/binaries/ffmpeg-aarch64-apple-darwin -version | head -1
           ./src-tauri/binaries/ffprobe-aarch64-apple-darwin -version | head -1
           cat SIDECAR-VERSIONS.md || true
@@ -176,7 +174,7 @@ jobs:
           run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           body="The nightly real-sidecar smoke failed on $(date -u +%Y-%m-%d): ${run_url}
 
-          Likely causes: a new yt-dlp/ffmpeg release or whisper.cpp master change broke an arg surface, a fetch source was unreachable, or a real regression in the arg-builders. The test log names the exact invariant that failed."
+          Inspect the failing step first. A provisioning or build failure means the smoke tests did not run. If tests ran, their log names the failed invariant; possible causes include upstream CLI changes or a regression in our argument builders."
           existing="$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number' 2>/dev/null || true)"
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body "$body"

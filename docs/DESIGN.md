@@ -4,6 +4,52 @@ The current application rulebook. Source contracts enforce many of these
 rules, but cannot prove rendered geometry, dynamic names or complete keyboard
 behavior. Use the catalog and browser checks alongside those contracts.
 
+### Review usability corrections · 2026-09-12
+
+The user approved the Review-page audit fixes, not a new theme or global
+control migration. Keep the existing type, colors, monitor, volume and gear.
+
+- **Source settings** is the shared gear/entry name for NDI and application
+  capture. Inside the popup, retain the specific input names. Opening settings
+  does not switch the visible picture, start capture, or change the notes tab.
+- Loaded file/web sources and live sources offer the same notes/setup switch.
+  Private notes do not require starting a room or opening live-source settings.
+- **Not shared with room** describes room publication only. A locally owned
+  NDI broadcast has a separate compact indicator and source-bound Stop action
+  outside the picture, even after settings closes or the user returns to a file.
+  Reading status never starts or stops the native sender.
+- Keep covered file-only notices out of the live picture without unmounting
+  the retained file player or cancelling its work. Private Preview uses the
+  same responsive control treatment as the room; wrap secondary controls
+  before clipping Play, volume, gear or text. Do not shrink typography to fit.
+- Search remains active while using results. Multiline edits preserve breaks;
+  reply drafts survive thread switching and Escape within their document and
+  version. Focused native controls own their activation keys. The shared tab
+  strip has one tab stop and follows its visual order with arrow/Home/End keys.
+- Live-note source identity stays visible. Optional pass/manual timecode lives
+  in a compact disclosure; commands needing an unavailable playhead are omitted.
+  Raw process/window IDs are only visible when needed to distinguish choices.
+
+This supersedes earlier NDI-only entry labels and settings-dependent notes
+visibility below. It does not authorize publishing, native capture changes,
+new timing claims, or catalog-wide styling adoption.
+
+### Application capture · 2026-09-12
+
+Application capture reuses the existing Preview gear dialog, controls, type,
+spacing, player and comments. There is no new sidebar or picture overlay.
+The Input select chooses NDI or Application window; passive discovery does not
+capture. Preview requires an explicit application, process, window and valid
+crop. Missing windows stay missing, with no desktop or same-title fallback.
+Crop is an optional disclosure using the existing compact numeric fields.
+
+Private preview, room sharing and Broadcast to NDI are separate actions. The
+single Preview volume control owns monitoring; the settings popup adds no
+player or second volume. Closing it retains the selected source, draft and
+native broadcast. Stop remains available while a broadcast is starting.
+Application capture is not a Premiere companion connection and cannot imply
+sequence timecode or marker support. Preserve existing NDI input behavior.
+
 ### Avid NDI compatibility candidate · 2026-09-11
 
 NDI source controls are sender-neutral: Avid, Premiere and other senders use the
@@ -498,6 +544,23 @@ The native UXP companion keeps its host-painted form controls without adding
 a second CSS border/bevel. Align labels left, use the existing type scale and
 space between sections instead of decorative divider boxes. Empty sequence
 and note controls stay out of the disconnected setup; queued notes survive it.
+
+---
+
+## Home welcome amendment · 2026-09-12
+
+The approved Home empty-state redesign is scoped to `LibraryHero` and the empty
+`LibraryView` container, not the first-launch permission screen or populated
+shelves. When there are no recents, folders or transcripts, fill the available
+scroll viewport rather than a capped `72vh` band. Do not render an empty shelf
+floor below it. Search results and populated shelves keep their existing layout.
+
+Use a small, opaque canonical bunny mark above the welcome heading, the existing
+28px welcome type token, a short supporting line and the existing Add a folder /
+Paste a URL controls. The background is one uninterrupted neutral surface, not
+an oversized watermark or brand gradient. Controls wrap when needed; ordinary
+keyboard focus and the keep-alive Clip player remain unchanged. Verify normal
+and enlarged text at narrow and wide desktop sizes before adoption.
 
 ---
 

@@ -110,11 +110,11 @@ function timeAgo(ms: number, now: number): string {
   return new Date(ms).toLocaleDateString();
 }
 
-/** Insert an emoji at a single-line input's caret (replacing any selection),
+/** Insert an emoji at a text field's caret (replacing any selection),
  *  then restore focus + caret — the input-flavoured twin of the composer's
  *  textarea insertEmoji. Used by the reply input and the reply edit field. */
 function insertAtCaret(
-  ref: React.RefObject<HTMLInputElement>, value: string, setValue: (s: string) => void, emoji: string,
+  ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement>, value: string, setValue: (s: string) => void, emoji: string,
 ) {
   const el = ref.current;
   if (!el) { setValue(value + emoji); return; }
@@ -366,7 +366,9 @@ export function ReviewPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- latch on the EDGE
   }, [drawActive]);
   const [replyTo, setReplyTo] = useState<string | null>(null);
-  const [replyDraft, setReplyDraft] = useState("");
+  // Draft identity includes the document and version, not just a row id.
+  // Closing a reply is navigation; only posting or Discard clears its text.
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [exportOpen, setExportOpen] = useState(false);
   /** The paste-producer-notes modal. */
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -453,11 +455,11 @@ export function ReviewPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rangeIn, rangeOut, rangeArmed, authorColor]);
   useEffect(() => () => onRangeDraft?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
-  // Hotkey registration — App dispatches ⇧I/⇧O here, gated on the Review tab
-  // being active in the docked drawer. No deps: re-registers every render so
-  // the handlers never close over stale range state; unmount registers null.
+  // Hotkey registration — only the visible Review tab with a real file
+  // playhead can accept ⇧I/⇧O. No deps: re-registers every render so handlers
+  // never close over stale range state; hidden/live panels register null.
   useEffect(() => {
-    onRegisterRangeHotkeys?.({ markIn: markRangeIn, markOut: markRangeOut });
+    onRegisterRangeHotkeys?.(playheadActive ? { markIn: markRangeIn, markOut: markRangeOut } : null);
     return () => onRegisterRangeHotkeys?.(null);
   });
   // Collapsed reply threads (Reddit-style) — per-comment UI state, deliberately
@@ -508,8 +510,11 @@ export function ReviewPanel({
   // Popover containers — used by the unified outside-click/Escape dismissal.
   const exportWrapRef = useRef<HTMLDivElement>(null);
   const historyWrapRef = useRef<HTMLDivElement>(null);
-  const searchRowRef = useRef<HTMLDivElement>(null);
   const searchBtnRef = useRef<HTMLButtonElement>(null);
+  const closeSearch = () => {
+    setSearch(""); setSearchOpen(false);
+    requestAnimationFrame(() => searchBtnRef.current?.focus());
+  };
   // Clock for the relative timestamps ("just now", "12m ago") on every
   // comment, reply and history card.
   //
@@ -602,10 +607,8 @@ export function ReviewPanel({
     if (j) invoke("cancel_job", { jobId: j }).catch(() => { /* best-effort */ });
   }, []);
 
-  // One robust dismissal for all three popovers (export / history / search):
-  // outside-click + Escape, only wired while something is open. Replaces the
-  // brittle per-button onBlur+setTimeout (which never closed on a click into the
-  // non-focusable comment list, and gave search no outside-click at all).
+  // Export/history are transient popovers. Search is a persistent list filter:
+  // using a result, sort or export must not clear it and move the clicked row.
   useEffect(() => {
     if (!exportOpen && !historyOpen && !searchOpen) return;
     const outside = (ref: React.RefObject<HTMLElement>, t: Node) => !ref.current || !ref.current.contains(t);
@@ -613,12 +616,11 @@ export function ReviewPanel({
       const t = e.target as Node;
       if (exportOpen && outside(exportWrapRef, t)) setExportOpen(false);
       if (historyOpen && outside(historyWrapRef, t)) setHistoryOpen(false);
-      if (searchOpen && outside(searchRowRef, t) && outside(searchBtnRef, t)) { setSearch(""); setSearchOpen(false); }
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       setExportOpen(false); setHistoryOpen(false);
-      if (searchOpen) { setSearch(""); setSearchOpen(false); }
+      if (searchOpen) { setSearch(""); setSearchOpen(false); searchBtnRef.current?.focus(); }
     };
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
@@ -975,6 +977,15 @@ export function ReviewPanel({
   }, [inSession, sourceKey]);
 
   const versionId = viewDoc?.activeVersionId ?? null;
+  const replyKey = (commentId: string) => JSON.stringify([inSession, viewDoc?.sourceKey, versionId, commentId]);
+  const setReplyDraft = (commentId: string, value: string) => {
+    const key = replyKey(commentId);
+    setReplyDrafts(previous => {
+      const next = { ...previous };
+      if (value) next[key] = value; else delete next[key];
+      return next;
+    });
+  };
   const roots = useMemo(
     () => (viewDoc ? rootComments(viewDoc, versionId, sort) : []),
     [viewDoc, versionId, sort],
@@ -1103,10 +1114,10 @@ export function ReviewPanel({
   const rowRenderRef = useRef<(comment: ReviewComment) => React.ReactNode>(() => null);
   const rowInputs = useMemo(() => ({
     viewDoc, now, fps, author, authorColor, repliesByParent, collapsedThreads,
-    replyTo, replyDraft, onSeek, onMarkRange, onQueueRange, onShowAnnotation,
+    replyTo, replyDrafts, onSeek, onMarkRange, onQueueRange, onShowAnnotation,
     inSession, onSessionOp, sourceKey, versionId, program,
   }), [viewDoc, now, fps, author, authorColor, repliesByParent, collapsedThreads,
-    replyTo, replyDraft, onSeek, onMarkRange, onQueueRange, onShowAnnotation,
+    replyTo, replyDrafts, onSeek, onMarkRange, onQueueRange, onShowAnnotation,
     inSession, onSessionOp, sourceKey, versionId, program]);
 
   if (connecting) {
@@ -1192,7 +1203,7 @@ export function ReviewPanel({
   };
   const submitReply = (parentId: string, atTime: number) => {
     if (noteBlock) { setPostError(`${noteBlock} Your draft is still here.`); return; }
-    const body = replyDraft.trim();
+    const body = (replyDrafts[replyKey(parentId)] ?? "").trim();
     if (!body) return;
     if (!ensureNamed()) return; // gate like submit() — no empty-author replies
     const reply = buildComment({ versionId, timeStart: atTime, body, author, parentId });
@@ -1207,7 +1218,7 @@ export function ReviewPanel({
     // A reply is attached to a root the current lens is already showing, so
     // the lens is left alone here - unlike a new note, nothing can vanish.
     
-    setReplyDraft("");
+    setReplyDraft(parentId, "");
     setReplyTo(null);
   };
 
@@ -1241,7 +1252,7 @@ export function ReviewPanel({
 
   rowRenderRef.current = (c) => (
           <CommentRow
-            key={c.id}
+            key={replyKey(c.id)}
             c={c}
             liveProgram={!!program}
             now={now}
@@ -1262,10 +1273,11 @@ export function ReviewPanel({
             onLikeReply={(replyId, emoji) => { if (!ensureNamed()) return; const r = viewDoc.comments.find((x) => x.id === replyId); if (!r) return; const liked = !(reactionsOf(r)[emoji] ?? []).includes(author); dispatch({ t: "like", id: replyId, name: author, liked, emoji }, (d) => setLike(d, replyId, author, liked, emoji)); }}
             collapsed={collapsedThreads.has(c.id)}
             onToggleCollapse={() => toggleThread(c.id)}
-            replyOpen={replyTo === c.id}
-            onToggleReply={() => { setReplyTo(replyTo === c.id ? null : c.id); setReplyDraft(""); }}
-            replyDraft={replyTo === c.id ? replyDraft : ""}
-            setReplyDraft={setReplyDraft}
+            replyOpen={replyTo === replyKey(c.id)}
+            onToggleReply={() => setReplyTo(replyTo === replyKey(c.id) ? null : replyKey(c.id))}
+            replyDraft={replyDrafts[replyKey(c.id)] ?? ""}
+            setReplyDraft={value => setReplyDraft(c.id, value)}
+            onDiscardReply={() => { setReplyDraft(c.id, ""); setReplyTo(null); }}
             onSubmitReply={() => submitReply(c.id, c.timeStart)}
           />
   );
@@ -1287,14 +1299,15 @@ export function ReviewPanel({
         author={author} authorColor={authorColor} openRename={openRename}
       />
       {searchOpen && (
-        <div className="cp-review-search" ref={searchRowRef}>
+        <div className="cp-review-search">
           <SearchGlyph />
           <input
             autoFocus
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Escape") { setSearch(""); setSearchOpen(false); } }}
+            onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); closeSearch(); } }}
             placeholder="Search comments…"
+            aria-label="Search comments"
           />
           {search && <button className="cp-review-search-clear" onClick={() => setSearch("")} title="Clear">✕</button>}
         </div>
@@ -1453,6 +1466,9 @@ export function ReviewPanel({
       {program && (
         <fieldset className="cp-live-note-context" disabled={!!noteBlock}>
           <legend>Live input · {program.label}</legend>
+          <details className="cp-review-live-timing" key={program.id}>
+          <summary>Sequence and timing (optional){manualTc.trim() ? ` · ${manualTc.trim()}` : ""}</summary>
+          <div className="cp-review-live-fields">
           <label>Sequence / pass
             <input value={livePass} maxLength={120} onChange={(e) => setLivePass(e.target.value)} />
           </label>
@@ -1460,7 +1476,9 @@ export function ReviewPanel({
             <input value={manualTc} placeholder="HH:MM:SS:FF" maxLength={11}
               onChange={(e) => setManualTc(e.target.value)} />
           </label>
-          <p>Timing is unverified. The presenter controls playback; the hidden file is not used for note timing.</p>
+          <p>Manual timing is unverified. Playback stays in the source application.</p>
+          </div>
+          </details>
           {program.kind === "ndi" && (boundPremiere || premiereDraft.current) && <>
             <label><input type="checkbox" checked={sendToPremiere} onChange={event => setPremiereModeSource(event.target.checked ? program.id : null)} /> Send this note to Premiere</label>
             {sendToPremiere && <p role="status">{premiereDraft.current?.binding.sequenceName ?? boundPremiere?.sequenceName} · Needs timeline position.
@@ -2113,7 +2131,7 @@ function ReviewComposer({
         >
           <NotesGlyph />
         </button>
-        <button
+        {playheadActive && <button
           className={"cp-review-tool" + (rangeIn != null || rangeOut != null ? " active" : "")}
           onClick={() => { if (ensureNamed()) onRangeTap(); }}
           title={rangeIn == null && rangeOut == null
@@ -2124,7 +2142,7 @@ function ReviewComposer({
           aria-label="Set comment time range"
         >
           <IconRange size={16} className="cp-review-glyph" />
-        </button>
+        </button>}
         {/* Tidy up the note. Sits last in the tool row, next to Post, because
             it acts on what you have written rather than on the frame. */}
         <Tooltip label={enhancing ? "Tidying up…" : "Tidy up this note with AI"}>
@@ -2222,7 +2240,7 @@ const ReviewThreadList = memo(function ReviewThreadList({ rows, renderRowRef }: 
 const MemoCommentRow = memo(function CommentRow({
   c, now, fps, myName, myColor, replies, onSeek, onMarkRange, onQueueRange, onShowAnnotation, onResolve, onDelete, onEdit, onLike,
   onEditReply, onDeleteReply, onLikeReply, collapsed, onToggleCollapse,
-  replyOpen, onToggleReply, replyDraft, setReplyDraft, onSubmitReply, liveProgram,
+  replyOpen, onToggleReply, replyDraft, setReplyDraft, onSubmitReply, onDiscardReply, liveProgram,
 }: {
   c: ReviewComment;
   liveProgram: boolean;
@@ -2250,6 +2268,7 @@ const MemoCommentRow = memo(function CommentRow({
   replyDraft: string;
   setReplyDraft: (s: string) => void;
   onSubmitReply: () => void;
+  onDiscardReply: () => void;
 }) {
   const hasDrawing = annotationHasContent(c.annotation);
   /** A real span, not a point. The same test the timecode chip already makes
@@ -2259,8 +2278,11 @@ const MemoCommentRow = memo(function CommentRow({
   // same resolution the Avatar uses (my chosen colour for me, hash otherwise).
   const authorTint = c.author === myName ? myColor : avatarColor(c.author);
   const [editing, setEditing] = useState(false);
-  const [editDraft, setEditDraft] = useState(c.body);
-  const replyInputRef = useRef<HTMLInputElement>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const replyButtonRef = useRef<HTMLButtonElement>(null);
+  const replyInputRef = useRef<HTMLTextAreaElement>(null);
+  const finishEdit = () => { setEditing(false); requestAnimationFrame(() => editButtonRef.current?.focus()); };
+  const closeReply = () => { onToggleReply(); requestAnimationFrame(() => replyButtonRef.current?.focus()); };
   return (
     <div className={"cp-review-comment" + (c.resolved ? " resolved" : "")}>
       {/* Header: avatar · name · relative time · actions (Frame.io card). */}
@@ -2274,7 +2296,7 @@ const MemoCommentRow = memo(function CommentRow({
         <div className="cp-review-actions">
           <ReactionBar c={c} myName={myName} onReact={onLike} />
           <button onClick={onResolve} title={c.resolved ? "Reopen" : "Resolve"}>{c.resolved ? "Reopen" : "Resolve"}</button>
-          <button onClick={() => { setEditing(true); setEditDraft(c.body); }} title="Edit">Edit</button>
+          <button ref={editButtonRef} onClick={() => setEditing(true)} title="Edit">Edit</button>
           <button onClick={onDelete} title="Delete" aria-label="Delete comment">✕</button>
         </div>
       </div>
@@ -2334,11 +2356,7 @@ const MemoCommentRow = memo(function CommentRow({
       </div>
 
       {editing ? (
-        <div className="cp-review-edit">
-          <input value={editDraft} onChange={(e) => setEditDraft(e.target.value)} autoFocus
-            onKeyDown={(e) => { if (e.key === "Enter") { onEdit(editDraft.trim() || c.body); setEditing(false); } if (e.key === "Escape") setEditing(false); }} />
-          <button className="btn btn-ghost btn-compact" onClick={() => { onEdit(editDraft.trim() || c.body); setEditing(false); }}>Save</button>
-        </div>
+        <CommentEditor body={c.body} label="Edit comment" onSave={body => { onEdit(body); finishEdit(); }} onCancel={finishEdit} />
       ) : (
         <div className="cp-review-body">{c.body}</div>
       )}
@@ -2377,14 +2395,25 @@ const MemoCommentRow = memo(function CommentRow({
 
       {replyOpen ? (
         <div className="cp-review-reply-input">
-          <input ref={replyInputRef} value={replyDraft} onChange={(e) => setReplyDraft(e.target.value)} autoFocus
+          <textarea ref={replyInputRef} value={replyDraft} onChange={(e) => setReplyDraft(e.target.value)} autoFocus rows={2}
             placeholder="Reply…"
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onSubmitReply(); } if (e.key === "Escape") onToggleReply(); }} />
+            aria-label={`Reply to ${c.author}`}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return;
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSubmitReply(); }
+              if (e.key === "Escape") { e.stopPropagation(); closeReply(); }
+            }} />
+          <div className="cp-review-writing-actions">
           <EmojiPicker onPick={(em) => insertAtCaret(replyInputRef, replyDraft, setReplyDraft, em)} />
+          {replyDraft && <button type="button" className="btn btn-ghost btn-compact" onClick={() => {
+            onDiscardReply(); requestAnimationFrame(() => replyButtonRef.current?.focus());
+          }}>Discard draft</button>}
+          <button type="button" className="btn btn-ghost btn-compact" onClick={closeReply}>Close</button>
           <button className="btn btn-primary btn-compact cp-review-post" onClick={onSubmitReply} disabled={!replyDraft.trim()}>Post</button>
+          </div>
         </div>
       ) : (
-        <button className="cp-review-replylink" onClick={onToggleReply}>Reply</button>
+        <button ref={replyButtonRef} className="cp-review-replylink" onClick={onToggleReply}>{replyDraft ? "Resume reply" : "Reply"}</button>
       )}
     </div>
   );
@@ -2411,11 +2440,39 @@ function CommentRow(props: ComponentProps<typeof MemoCommentRow>) {
     onToggleReply: () => latest.current.onToggleReply(),
     setReplyDraft: (text: string) => latest.current.setReplyDraft(text),
     onSubmitReply: () => latest.current.onSubmitReply(),
+    onDiscardReply: () => latest.current.onDiscardReply(),
   }), []);
   return <MemoCommentRow {...props} {...stable}
     onMarkRange={props.onMarkRange ? stable.onMarkRange : undefined}
     onQueueRange={props.onQueueRange ? stable.onQueueRange : undefined}
     onShowAnnotation={props.onShowAnnotation ? stable.onShowAnnotation : undefined} />;
+}
+
+/** Paragraph-safe editor shared by comments and replies. */
+function CommentEditor({ body, label, onSave, onCancel }: {
+  body: string; label: string; onSave: (body: string) => void; onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(body);
+  const fieldId = useId();
+  const hintId = useId();
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const save = () => { if (draft.trim()) onSave(draft.trim()); };
+  return <div className="cp-review-edit">
+    <label htmlFor={fieldId}>{label}</label>
+    <textarea ref={inputRef} id={fieldId} value={draft} rows={3} autoFocus
+      onChange={event => setDraft(event.target.value)} aria-describedby={hintId}
+      onKeyDown={event => {
+        if (event.nativeEvent.isComposing) return;
+        if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); save(); }
+        if (event.key === "Escape") { event.stopPropagation(); onCancel(); }
+      }} />
+    <span id={hintId} className="cp-review-writing-hint">Enter to save · Shift+Enter for a new line</span>
+    <div className="cp-review-writing-actions">
+      <EmojiPicker onPick={emoji => insertAtCaret(inputRef, draft, setDraft, emoji)} />
+      <button type="button" className="btn btn-ghost btn-compact" onClick={onCancel}>Cancel</button>
+      <button type="button" className="btn btn-ghost btn-compact" onClick={save} disabled={!draft.trim()}>Save</button>
+    </div>
+  </div>;
 }
 
 /** One reply under a comment's thread-line — same avatar+name+time header as
@@ -2434,9 +2491,8 @@ function ReplyRow({
   onLike: (emoji: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(r.body);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const save = () => { onEdit(draft.trim() || r.body); setEditing(false); };
+  const editButtonRef = useRef<HTMLButtonElement>(null);
+  const finishEdit = () => { setEditing(false); requestAnimationFrame(() => editButtonRef.current?.focus()); };
   return (
     <div className="cp-review-reply">
       <Avatar name={r.author} size={20} color={r.author === myName ? myColor : undefined} />
@@ -2448,17 +2504,12 @@ function ReplyRow({
           </div>
           <div className="cp-review-actions">
             <ReactionBar c={r} myName={myName} onReact={onLike} />
-            <button onClick={() => { setDraft(r.body); setEditing(true); }} title="Edit">Edit</button>
+            <button ref={editButtonRef} onClick={() => setEditing(true)} title="Edit">Edit</button>
             <button onClick={onDelete} title="Delete" aria-label="Delete comment">✕</button>
           </div>
         </div>
         {editing ? (
-          <div className="cp-review-edit">
-            <input ref={inputRef} value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus
-              onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }} />
-            <EmojiPicker onPick={(em) => insertAtCaret(inputRef, draft, setDraft, em)} />
-            <button className="btn btn-ghost btn-compact" onClick={save}>Save</button>
-          </div>
+          <CommentEditor body={r.body} label="Edit reply" onSave={body => { onEdit(body); finishEdit(); }} onCancel={finishEdit} />
         ) : (
           <div className="cp-review-body">{r.body}</div>
         )}

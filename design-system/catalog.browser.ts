@@ -58,8 +58,13 @@ for (const width of [1100, 1680]) for (const enlarged of [false, true]) {
 async function selectFamily(page: Page, id: string) {
   await page.getByRole("navigation", { name: "Component families" }).locator(`a[href="#${id}"]`).click();
   await entry(page, id).scrollIntoViewIfNeeded();
+  await settleCatalogScroll(page);
+}
+
+async function settleCatalogScroll(page: Page) {
   // The normal-motion catalog scrolls smoothly; opening a dismiss-on-scroll
-  // menu while navigation is still moving would test an unfinished gesture.
+  // menu before movement and queued scroll delivery finish tests an unfinished
+  // gesture. Observe the real surface for both navigation and edge positioning.
   await page.evaluate(() => new Promise<void>(resolve => {
     const main = document.querySelector(".cp-ds-main")!;
     let previous = main.scrollTop, stable = 0;
@@ -432,6 +437,15 @@ test("Preview preserves one volume control and only discloses source details", a
   const tc=(await readout.boundingBox())!, picture=(await monitor.boundingBox())!;
   expect(tc.y+tc.height).toBeLessThanOrEqual(picture.y);
   expect(Math.abs(tc.x+tc.width/2-picture.x-picture.width/2)).toBeLessThanOrEqual(1);
+  await expect(preview.locator(".cp-ndi-publication")).toHaveText("Not shared with room");
+  const broadcast = preview.getByRole("status", { name: "Network broadcast" });
+  await expect(broadcast).toContainText("Broadcasting to NDI");
+  const stop = preview.getByRole("button", { name: "Stop NDI broadcast from Composer (simulation)" });
+  const stopBox = (await stop.boundingBox())!;
+  expect(stopBox.y + stopBox.height).toBeLessThanOrEqual(picture.y);
+  await stop.click();
+  await expect(broadcast).toHaveCount(0);
+  await expect(preview.locator(".cp-ndi-publication")).toHaveText("Not shared with room");
   await monitor.evaluate(node => node.setAttribute("data-monitor-identity", "original"));
   await expect(preview.locator(".cp-volume")).toHaveCount(1);
   await expect(preview.locator("video, audio, canvas")).toHaveCount(0);
@@ -749,6 +763,7 @@ for (const viewport of [{ width: 1100, height: 700 }, { width: 1680, height: 102
         main.scrollTop += node.getBoundingClientRect().bottom - (window.innerHeight - 16);
       });
       await trigger.focus();
+      await settleCatalogScroll(page);
       await trigger.press("Shift+F10");
       await expect(menu).toBeVisible();
       await expectInsideViewport(menu, page);

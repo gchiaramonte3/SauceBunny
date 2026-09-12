@@ -394,8 +394,8 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
      (empty / fetching / error) have a toast but no source chips. `chips` is
      always a fragment, so the emptiness test is on the members. */
   const statusStack = (chips?: ReactNode) =>
-    (toastEl || chips) ? (
-      <div className="cp-monitor-stack">{chips && <div className="cp-monitor-file-layer" {...fileInteraction}>{chips}</div>}{toastEl}</div>
+    (toastEl || (!pictureCovered && chips)) ? (
+      <div className="cp-monitor-stack">{!pictureCovered && chips && <div className="cp-monitor-file-layer" {...fileInteraction}>{chips}</div>}{toastEl}</div>
     ) : null;
 
   if (status === "empty") {
@@ -812,7 +812,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
         {/* Type-a-timecode HUD — appears the moment the user types a digit
             over the player; Return snaps the playhead, Esc cancels. Driven
             entirely by App's keyboard handler + state. */}
-        {tcOverlay && (
+        {!pictureCovered && tcOverlay && (
           <div className="cp-tc-hud" {...fileInteraction}>
             <div className="cp-tc-hud-label">Go to timecode</div>
             <div className="cp-tc-hud-value">{tcOverlay}</div>
@@ -826,7 +826,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             Covers the ~8s yt-dlp resolve + MSE buffer window with a dimmed
             poster, a spinner, and a phase message so the wait reads as
             intentional, not frozen. Cleared once the player reports ready. */}
-        {streamLoadingPhase && (
+        {!pictureCovered && streamLoadingPhase && (
           <div className="cp-stream-loading" {...fileInteraction}>
             {metadata?.thumbnail && (
               <img

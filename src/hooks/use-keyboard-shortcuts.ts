@@ -271,8 +271,12 @@ export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
     }
 
     function onKey(e: KeyboardEvent) {
-      const target = e.target as HTMLElement;
-      const inField = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+      // A focused widget gets first refusal (tabs, resize handles, menus).
+      // Its React/native handler runs before this window bubble listener.
+      if (e.defaultPrevented) return;
+      const target = e.target instanceof Element ? e.target : null;
+      const inField = !!target?.closest("input, textarea, select") ||
+        (target instanceof HTMLElement && target.isContentEditable);
 
       // Physical-K tracking for K+J/K+L frame-stepping. Tracked by e.code so
       // layout/Shift can't alias it; cleared on keyup + window blur below.
@@ -294,6 +298,14 @@ export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
         }
         return;
       }
+
+      // Space/Return must still activate the focused control. Calling
+      // preventDefault here cancels the browser's click (even with no media
+      // loaded). Select navigation/type-ahead is covered by inField above;
+      // modified app chords remain available, as they are in text fields.
+      if (!e.metaKey && !e.ctrlKey && !e.altKey &&
+          (e.key === " " || e.key === "Enter") &&
+          target?.closest("button, a[href], summary, [role='button'], [role='tab']")) return;
 
       // ── Esc inside Settings belongs to SettingsModal, not here ──
       // This used to be a second, independent closer: `if (Escape &&

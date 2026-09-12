@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NdiDiscoveryResult } from "../bindings/NdiDiscoveryResult";
 import { emptyNdiState } from "../hooks/use-ndi-input";
 import { NDI_INPUT_PANEL_ID, NdiInputPanel, type NdiPreviewInput } from "./NdiInputPanel";
+import type { ObsBroadcast } from "../hooks/use-obs-broadcast";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -67,7 +68,7 @@ describe("NDI preflight states", () => {
     render(<NdiInputPanel input={i} onClose={vi.fn()}/>);
     expect(screen.getByRole("status", { name: "NDI connection" }).textContent).toContain("Source 23.98 fps · Preview 30.0 fps");
     expect(screen.queryByText(/Editor-confirmed timing/)).toBeNull();
-    expect(screen.getByText(/Not shared refers to the Sauce Bunny room/)).toBeTruthy();
+    expect(screen.getByText(/Not shared with room refers to the Sauce Bunny session/)).toBeTruthy();
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("ndi_discover", {}));
   });
 
@@ -310,5 +311,25 @@ describe("NDI preflight states", () => {
     }
     expect(vi.mocked(i.start).mock.calls).toEqual([["A"],["B"],["A"]]);
     expect(preview).toHaveBeenCalledTimes(3);expect(i.share).not.toHaveBeenCalled();expect(close).not.toHaveBeenCalled();
+  });
+
+  it("uses only the matching app-owned capture broadcast without taking native ownership", async () => {
+    mocks.invoke.mockResolvedValue(discovery({}));
+    const i = input();
+    i.previewProgram = { id: "capture-a", name: "Generated editor", url: "/preview", reviewKey: "ndi:capture-a", local: true, ownerId: "m0",
+      capture: { application: "generated.app", process: 10, window: 20, crop: { x: 0, y: 0, width: 1, height: 1 } } };
+    const state: ObsBroadcast = { sourceId: "capture-a", status: { sourceId: "capture-a", phase: "live", attempt: 2, error: null },
+      error: null, active: true, start: vi.fn(), stop: vi.fn() };
+    const h = render(<NdiInputPanel input={i} onClose={vi.fn()} broadcast={state}/>);
+    await screen.findByRole("dialog", { name: "Application capture settings" });
+    expect(screen.getByRole("status", { name: "Application capture connection" })).toBeTruthy();
+    expect(screen.getByRole("status", { name: "NDI broadcast" }).textContent).toContain("Broadcasting on your local network");
+    expect(screen.queryByText(/source application’s NDI broadcast/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stop broadcast" }));
+    expect(state.stop).toHaveBeenCalledOnce();
+    expect(state.start).not.toHaveBeenCalled();
+    expect(mocks.invoke.mock.calls.some(([command]) => command.startsWith("obs_broadcast"))).toBe(false);
+    h.rerender(<NdiInputPanel input={i} onClose={vi.fn()} broadcast={{ ...state, sourceId: "capture-b" }}/>);
+    expect(screen.queryByRole("button", { name: "Stop broadcast" })).toBeNull();
   });
 });

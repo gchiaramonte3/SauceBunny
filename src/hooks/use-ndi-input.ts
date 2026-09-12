@@ -9,29 +9,41 @@ import type { NdiStatusResult } from "../bindings/NdiStatusResult";
 import type { NdiTelemetry } from "../bindings/NdiTelemetry";
 import type { NdiSessionsResult } from "../bindings/NdiSessionsResult";
 import type { NdiRoomProgram } from "../bindings/NdiRoomProgram";
+import type { ObsSelection } from "../bindings/ObsSelection";
+import type { ObsStarted } from "../bindings/ObsStarted";
 import { canPublishNdi, emptyNdiTelemetry, NdiProgramCoordinator, type NdiLocalProgram } from "../lib/ndi-program-coordinator";
+import { captureSourceIdentity, copyCaptureSelection } from "../lib/ndi-program-source";
 import { loadJson, saveJson } from "../lib/storage";
 import { formatError } from "../lib/error-format";
 
-export type NdiProgram = NdiStarted & { local: boolean; ownerId: string; reviewKey: string; stopped?: boolean };
+export type NdiProgram = NdiStarted & { local: boolean; ownerId: string; reviewKey: string; stopped?: boolean; capture?: ObsSelection };
 export type NdiState = NdiTelemetry;
 export type NdiDiscovery = NdiDiscoveryResult;
 export const emptyNdiState = emptyNdiTelemetry;
 
 /** Reconnects reuse the same local pass. Capture ids are deliberately excluded. */
 function programReviewKey(name: string) {
-  const saved = loadJson<unknown>("saucebunny.ndiReviewPasses", {});
+  return reviewPass("saucebunny.ndiReviewPasses", name);
+}
+function captureReviewKey(selection: ObsSelection) {
+  // A separate local map prevents borrowing an NDI pass with the same title.
+  // Its private selection keys never cross IPC; publication receives only the opaque value.
+  return reviewPass("saucebunny.captureReviewPasses", captureSourceIdentity(selection));
+}
+function reviewPass(storageKey: string, identity: string) {
+  const saved = loadJson<unknown>(storageKey, {});
   const passes: Record<string, string> = Object.create(null);
   if (saved && typeof saved === "object" && !Array.isArray(saved)) {
     for (const [source, key] of Object.entries(saved)) {
       if (typeof key === "string" && /^ndi:[a-z0-9-]+$/i.test(key)) passes[source] = key;
     }
   }
-  if (!passes[name]) { passes[name] = `ndi:${crypto.randomUUID()}`; saveJson("saucebunny.ndiReviewPasses", passes); }
-  return passes[name];
+  if (!passes[identity]) { passes[identity] = `ndi:${crypto.randomUUID()}`; saveJson(storageKey, passes); }
+  return passes[identity];
 }
-const asLocalProgram = (program: NdiStarted & { reviewKey: string }): NdiProgram => ({
+const asLocalProgram = (program: NdiStarted & { reviewKey: string; capture?: ObsSelection }): NdiProgram => ({
   id: program.id, name: program.name, url: program.url, reviewKey: program.reviewKey, local: true, ownerId: "m0",
+  ...(program.capture ? { capture: copyCaptureSelection(program.capture) } : {}),
 });
 type RemoteProgram = { program: NdiProgram | null; source: NdiRoomProgram | null; ready: boolean; error: string | null };
 const noRemote = (): RemoteProgram => ({ program: null, source: null, ready: false, error: null });
@@ -39,12 +51,14 @@ const noRemote = (): RemoteProgram => ({ program: null, source: null, ready: fal
 export function useNdiInput() {
   const [controller] = useState(() => new NdiProgramCoordinator({
     start: name => invoke<NdiStarted>("ndi_start", { name }),
+    startCapture: selection => invoke<ObsStarted>("obs_start", { selection }),
     status: id => invoke<NdiStatusResult>("ndi_status", { id }),
     stop: id => invoke("ndi_stop", { id }),
     publish: (source, room) => invoke<number>("ndi_publish", { id: source.id, reviewKey: source.reviewKey,
       generation: room.generation, epoch: room.presenterEpoch }),
     unpublish: lease => invoke("ndi_unpublish", lease),
     reviewKey: programReviewKey,
+    captureReviewKey,
   }));
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
   const [remote, setRemote] = useState<RemoteProgram>(noRemote);
@@ -103,6 +117,10 @@ export function useNdiInput() {
   const start = useCallback(async (name: string) => {
     ++syncTurn.current;
     await controller.preview(name);
+  }, [controller]);
+  const startCapture = useCallback(async (selection: ObsSelection) => {
+    ++syncTurn.current;
+    await controller.previewCapture(selection);
   }, [controller]);
   const cancelPreview = useCallback(async () => { ++syncTurn.current; await controller.cancelPreview(); }, [controller]);
   const share = useCallback(async () => { ++syncTurn.current; await controller.publish(); }, [controller]);
@@ -194,7 +212,7 @@ export function useNdiInput() {
     snapshot, roomSource, published: snapshot.published ? asLocalProgram(snapshot.published) : null,
     privatePreview: !!snapshot.candidate, canShare: canPublishNdi(snapshot),
     reviewBlocked,
-    start, stop, cancelPreview, share, stopSharing, frameDecoded, pictureFailed,
+    start, startCapture, stop, cancelPreview, share, stopSharing, frameDecoded, pictureFailed,
     previewFrameDecoded, previewPictureFailed,
   };
 }

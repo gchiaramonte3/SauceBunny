@@ -507,8 +507,11 @@
 .cp-review-tc:hover { background: color-mix(in srgb, var(--ella-green) 24%, transparent); }
 
 .cp-review-body { margin-top: 7px; font-family: var(--font-ui); font-size: var(--text-lg); color: var(--fg-1); line-height: var(--leading-normal); white-space: pre-wrap; }
-.cp-review-edit { margin-top: 7px; display: flex; gap: 6px; }
-.cp-review-edit input { flex: 1; }
+.cp-review-edit { margin-top: 7px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cp-review-edit label { font-size: var(--text-base); color: var(--fg-3); }
+.cp-review-writing-hint { font-size: var(--text-sm); color: var(--fg-4); }
+.cp-review-writing-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s-2); }
+.cp-review-writing-actions > .cp-review-tool { margin-right: auto; }
 
 /* Inline "Reply" affordance under a comment. */
 .cp-review-replylink {
@@ -576,8 +579,7 @@
 .cp-review-reply:hover .cp-review-actions button,
 .cp-review-reply:focus-within .cp-review-actions button,
 .cp-review-reply .cp-review-actions .cp-review-like.has-likes { opacity: 1; }
-.cp-review-reply-input { margin: 8px 0 0 28px; display: flex; gap: 6px; }
-.cp-review-reply-input input { flex: 1; }
+.cp-review-reply-input { margin: 8px 0 0 28px; display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; }
 /* The emoji tool inside the reply input / reply edit rows shrinks to the
    28px input height (the composer's 34px square would overpower the row). */
 .cp-review-reply-input .cp-review-tool,
@@ -647,21 +649,45 @@
   margin: 2px 0 4px;
 }
 
-/* Shared text inputs in the panel */
-/* Shared single-line text inputs (edit + reply). */
-.cp-review-edit input, .cp-review-reply-input input {
-  height: 28px;
-  padding: 0 10px;
+/* Editing and replying preserve the same paragraphs as the main composer. */
+.cp-review-edit textarea, .cp-review-reply-input textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 54px;
+  max-height: 220px;
+  resize: vertical;
+  padding: var(--s-2);
   background: var(--bg-0);
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: var(--text-md);
+  line-height: var(--leading-normal);
 }
-.cp-review-edit input:focus, .cp-review-reply-input input:focus {
+.cp-review-edit textarea:focus, .cp-review-reply-input textarea:focus {
   outline: none; border-color: var(--focus-ring);
 }
+
+/* Source identity stays visible; optional live-note metadata yields room to
+   the comments and the existing composer instead of adding a permanent box. */
+.cp-review .cp-live-note-context {
+  flex-shrink: 0;
+  margin: var(--s-1) var(--s-3);
+  padding: 0;
+  border: 0;
+}
+.cp-review .cp-live-note-context legend { padding: 0; font-size: var(--text-base); }
+.cp-review-live-timing summary {
+  min-height: 24px;
+  padding: var(--s-1) 0;
+  color: var(--fg-3);
+  cursor: pointer;
+  font-size: var(--text-base);
+  overflow-wrap: anywhere;
+}
+.cp-review-live-timing summary:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--r-xs); }
+.cp-review-live-fields { padding-top: var(--s-2); }
 
 /* Composer — tool buttons sit at the bottom so they stay aligned as the
    textarea grows. Single row (no wrap): the input takes the slack and the

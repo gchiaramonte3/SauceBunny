@@ -12,3 +12,6 @@
 .cp-ndi-timecode { grid-column: 2; color: var(--fg-3); }
 .cp-ndi-preview-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s-2); }
 .cp-ndi-preview-actions:empty { display: none; }
+.cp-ndi-broadcast-notice { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); min-width: 0; margin-bottom: var(--s-2); color: var(--fg-2); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.cp-ndi-broadcast-notice > span { min-width: 0; overflow-wrap: anywhere; }
+.cp-ndi-broadcast-notice > button { flex: none; }

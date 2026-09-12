@@ -20,6 +20,8 @@ import { createReviewSession } from "./lib/review-session";
 import { useNdiInput } from "./hooks/use-ndi-input";
 import { NDI_INPUT_PANEL_ID, NdiInputPanel } from "./components/NdiInputPanel";
 import { NdiPreviewHeader } from "./components/NdiPreviewHeader";
+import { ObsBroadcastIndicator } from "./components/ObsBroadcastIndicator";
+import { useObsBroadcasts } from "./hooks/use-obs-broadcast";
 import type { NdiPlaybackRecovery } from "./components/NdiProgramMonitor";
 import { observePremiereLink, setPremiereVisibleInput } from "./lib/premiere-link";
 import { IconSettings } from "./components/Icons";
@@ -644,6 +646,11 @@ export default function App() {
   const ndiInput = useNdiInput();
   const ndiProgram = ndiInput.program;
   const ndiRoomSource = ndiInput.roomSource;
+  // Native owns the senders. Observations outlive settings and capture
+  // selection until shutdown is confirmed, including a replaced source.
+  const broadcastState = useObsBroadcasts([ndiInput.previewProgram, ndiProgram].flatMap(source =>
+    source?.local && source.capture ? [{ sourceId: source.id, sourceName: source.name }] : []));
+  const broadcasts = broadcastState.notices;
   const [ndiPanelOpen,setNdiPanelOpen] = useState(false);
   const [ndiRecovery,setNdiRecovery] = useState<NdiPlaybackRecovery|null>(null);
   const [ndiRefreshRequest,setNdiRefreshRequest] = useState(0);
@@ -651,13 +658,12 @@ export default function App() {
   const [reviewLobbyOpen,setReviewLobbyOpen] = useState(false);
   const [roomAccessOpen,setRoomAccessOpen] = useState(false);
   const openPremiere = useCallback(() => {
-    setReviewLobbyOpen(false);
-    setPreviewSelected(true); setNdiPanelOpen(true);
+    setNdiPanelOpen(true);
     setNdiRefreshRequest(n => n + 1);
   }, []);
   const [sessionsRequestTick,setSessionsRequestTick] = useState(0);
-  const previewStatus = ndiInput.previewState.phase === "error" ? "NDI needs attention · Not shared"
-    : ndiInput.snapshot.candidate?.decodedReady && ndiInput.snapshot.candidate.encodedReady ? "NDI ready · Not shared" : "NDI connecting · Not shared";
+  const previewStatus = ndiInput.previewState.phase === "error" ? "Preview needs attention · Not shared with room"
+    : ndiInput.snapshot.candidate?.decodedReady && ndiInput.snapshot.candidate.encodedReady ? "Preview ready · Not shared with room" : "Preview connecting · Not shared with room";
   const ndiMonitorRef = useRef<ReviewProgramSurfacesHandle>(null);
   const connectPremiereRef = useRef<HTMLButtonElement>(null);
   const sourceShareButtonRef = useRef<HTMLButtonElement>(null);
@@ -3716,7 +3722,18 @@ export default function App() {
   // `live` = an end still follows the playhead (pulsing); false = locked.
   const [reviewRangeDraft, setReviewRangeDraft] = useState<ReviewRangeDraft | null>(null);
   // Latest-value mirror for the keyboard effect's ⇧I/⇧O review-range gate.
-  useEffect(() => { reviewRangeGateRef.current = { panelDetached, queueOpen, roomActive, reviewSourceKey, hasSource, clipVisible: activeView === "clip" || roomActive }; });
+  useEffect(() => {
+    const reviewRailVisible = roomActive || (reviewToolsVisible && !reviewLobbyOpen);
+    reviewRangeGateRef.current = {
+      panelDetached, queueOpen, reviewSourceKey,
+      // The same forced-open rail serves private Review and live rooms. Its
+      // visibility overrides Clip's persisted drawer/tab preferences. The
+      // panel registers commands only for its active Review tab/playhead.
+      roomActive: reviewRailVisible,
+      hasSource: hasSource && !ndiPictureVisible,
+      clipVisible: activeView === "clip" || reviewRailVisible,
+    };
+  });
 
   // ── Co-review session (P2P watch party — r100 transport, r101 live review) ──
   // The whole subsystem — session lifecycle, host transport heartbeat + peer
@@ -3862,7 +3879,8 @@ export default function App() {
   const reviewSetupMode = reviewStageActive && !coSessionActive;
   const ndiPictureVisible = privateInspectionVisible || (roomActive && (!!ndiProgram || !!ndiRoomSource));
   const canManageNdiSource = coSession.role === "off" || (coSession.role === "host" && isPresenter);
-  const premiereToolsVisible = reviewStageActive && (previewSelected || ndiPanelOpen || ndiPictureVisible);
+  // Notes follow the represented source, not whether its settings were opened.
+  const reviewToolsVisible = reviewStageActive && (hasSource || ndiPictureVisible);
   const privateReviewProgram = privateInspectionVisible && !coSessionActive ? ndiInput.previewProgram : null;
   const visibleNdiState = privateInspectionVisible ? ndiInput.previewState : ndiInput.state;
   const visibleNdiName = privateInspectionVisible ? ndiInput.previewProgram?.name : ndiProgram?.name ?? ndiRoomSource?.name;
@@ -3874,7 +3892,7 @@ export default function App() {
   };
   useEffect(() => {
     reviewSession.setInspectionBlock(privateInspectionVisible && coSessionActive
-      ? "Private NDI preview. Return to the room picture or share NDI before adding notes. Your draft is kept." : null);
+      ? "Private preview. Return to the room picture or share this source before adding notes. Your draft is kept." : null);
   }, [privateInspectionVisible, coSessionActive, reviewSession]);
   useEffect(() => { if (activeView !== "coreview") setNdiPanelOpen(false); }, [activeView]);
   // Display name of whoever is driving, for the waiting affordance.
@@ -4083,7 +4101,7 @@ export default function App() {
   const sendingPct = transfer && transfer.total > 0
     ? Math.floor((transfer.received / transfer.total) * 100)
     : 0;
-  const shareButtonLabel = ndiRoomSource ? ndiRoomSource.state === "stopped" ? "Sharing stopped" : "NDI live"
+  const shareButtonLabel = ndiRoomSource ? ndiRoomSource.state === "stopped" ? "Sharing stopped" : "Shared with room"
     : offerError ? "Share failed"
     : transfer?.phase === "hashing" ? "Preparing…"
     : transfer?.phase === "sending" ? `Sending ${sendingPct}%`
@@ -4103,13 +4121,13 @@ export default function App() {
   const shareOptions = useMemo(() => {
     const out: ShareOption[] = [];
     if(coSession.role === "host") {
-      out.push({key:"ndi",label:"NDI input…",detail:ndiInput.previewProgram ? previewStatus : "Avid, Premiere, and other senders · Beta",onSelect:openPremiere});
-      if(ndiInput.canShare) out.push({key:"ndi-publish",label:"Share NDI with room",detail:"Publish the prepared picture",onSelect:()=>{
-        void publishPremiere().then(()=>{setProgramMuted(previewMuted);setProgramVolume(previewVolume);setPreviewSelected(false);setNdiPanelOpen(false);stopShare();stopViewerShare();}).catch(error=>pushNotification("error","Couldn't share NDI",formatError(error)));
+      out.push({key:"ndi",label:"Source settings…",detail:ndiInput.previewProgram ? previewStatus : "NDI or application window · Beta",onSelect:openPremiere});
+      if(ndiInput.canShare) out.push({key:"ndi-publish",label:"Share preview with room",detail:"Publish the prepared picture",onSelect:()=>{
+        void publishPremiere().then(()=>{setProgramMuted(previewMuted);setProgramVolume(previewVolume);setPreviewSelected(false);setNdiPanelOpen(false);stopShare();stopViewerShare();}).catch(error=>pushNotification("error","Couldn't share preview",formatError(error)));
       }});
       if(ndiProgram && !ndiProgram.stopped) {
-        out.push({key:"ndi-retry",label:"Reconnect NDI picture",detail:"Keep the last picture while reconnecting",onSelect:()=>ndiMonitorRef.current?.retryVisible()});
-        out.push({key:"ndi-stop",label:"Stop sharing NDI",detail:"Keep the last picture",onSelect:()=>{void stopPremiereSharing().catch(error=>pushNotification("error","Couldn't stop NDI",formatError(error)));}});
+        out.push({key:"ndi-retry",label:"Reconnect picture",detail:"Keep the last picture while reconnecting",onSelect:()=>ndiMonitorRef.current?.retryVisible()});
+        out.push({key:"ndi-stop",label:"Stop sharing with room",detail:"Keep the last picture",onSelect:()=>{void stopPremiereSharing().catch(error=>pushNotification("error","Couldn't stop sharing",formatError(error)));}});
       }
     }
     if(ndiProgram || ndiRoomSource) return out;
@@ -4161,7 +4179,7 @@ export default function App() {
   useEffect(observePremiereLink, []);
   useEffect(() => {
     const visiblePremiere = privateInspectionVisible ? ndiInput.previewProgram : ndiProgram;
-    setPremiereVisibleInput(visiblePremiere ? { sourceId: visiblePremiere.reviewKey,
+    setPremiereVisibleInput(visiblePremiere && !visiblePremiere.capture ? { sourceId: visiblePremiere.reviewKey,
       streamId: visiblePremiere.id, name: visiblePremiere.name } : null);
     reviewSession.setProgramSource(privateReviewProgram ? {
       id:privateReviewProgram.reviewKey,ownerId:privateReviewProgram.ownerId,kind:"ndi",label:privateReviewProgram.name,
@@ -4841,15 +4859,15 @@ export default function App() {
                 {reviewSetupMode && <div className="cp-room-head cp-preview-head">
                   <div className="cp-room-title"><span className="cp-room-name">Preview</span></div>
                   <RoomSourceBar hasSource={hasSource}
-                    onLoadUrl={u => { setPreviewSelected(false); setUrl(u); void handleFetch(u); }}
+                    onLoadUrl={u => { setPreviewSelected(false); setReviewLobbyOpen(false); setUrl(u); void handleFetch(u); }}
                     onImportFile={() => { void (async () => {
                       const picked = await pickLocalFile();
                       if (typeof picked !== "string") return;
-                      setPreviewSelected(false);
+                      setPreviewSelected(false); setReviewLobbyOpen(false);
                       if (!(hasSource && sourceKind === "file" && localFilePath === picked)) await loadLocalPath(picked);
                     })().catch(e => pushNotification("error", "Couldn't open file", formatError(e))); }}
                     onClear={() => { setPreviewSelected(false); handleClear(); }} />
-                  {premiereToolsVisible && <button type="button" className="cp-toolbar-disclosure"
+                  {reviewToolsVisible && <button type="button" className="cp-toolbar-disclosure"
                     onClick={() => setReviewLobbyOpen(value => !value)}>
                     {reviewLobbyOpen ? "Review notes" : "Session setup…"}
                   </button>}
@@ -4861,7 +4879,7 @@ export default function App() {
                       <span className="cp-room-name" title={coSession.title || ndiProgram?.name || metadata?.title || undefined}>
                         {coSession.title || ndiProgram?.name || metadata?.title || "Review session"}
                       </span>
-                      {ndiProgram && <span className="cp-room-source" title={ndiProgram.name}>NDI · {ndiProgram.stopped ? "Sharing stopped" : ndiInput.state.phase === "error" ? "Disconnected" : ndiInput.state.phase === "stale" ? "Picture parked" : "Live"}</span>}
+                      {ndiProgram && <span className="cp-room-source" title={ndiProgram.name}>{ndiProgram.capture ? "Application window" : "NDI"} · {ndiProgram.stopped ? "Sharing stopped" : ndiInput.state.phase === "error" ? "Disconnected" : ndiInput.state.phase === "stale" ? "Picture parked" : "Live"}</span>}
                       {!ndiProgram && metadata?.title && coSession.title && metadata.title !== coSession.title && (
                         <span className="cp-room-source" title={metadata.title}>{metadata.title}</span>
                       )}
@@ -5047,7 +5065,8 @@ export default function App() {
                       onShowMediaInfo={sourceKind === "file" && localFilePath ? () => setMediaInfoOpen(true) : undefined}
                     />
                   </div>
-                  {ndiPictureVisible && <NdiPreviewHeader sharing={privateInspectionVisible ? "private" : ndiProgram?.stopped || !ndiProgram ? "stopped" : "shared"}>
+                  {reviewStageActive && !ndiPictureVisible && broadcasts.map(notice => <ObsBroadcastIndicator key={notice.broadcast.sourceId} {...notice}/>)}
+                  {ndiPictureVisible && <NdiPreviewHeader broadcasts={broadcasts} sharing={privateInspectionVisible ? "private" : ndiProgram?.stopped || !ndiProgram ? "stopped" : "shared"}>
                     {privateInspectionVisible && roomActive && ndiInput.snapshot.room?.presenting && <button type="button"
                       className="btn cp-toolbar-disclosure cp-ndi-share-action" disabled={!ndiInput.canShare}
                       aria-busy={ndiInput.snapshot.busy === "publishing"}
@@ -5060,7 +5079,7 @@ export default function App() {
                     pictureCovered={ndiPictureVisible || !!peerLiveStream}
                     displayAspect={ndiPictureVisible && visibleNdiState.inputWidth >= 16 && visibleNdiState.inputHeight >= 16
                       ? visibleNdiState.inputWidth / visibleNdiState.inputHeight : undefined}
-                    emptyActions={reviewStageActive && (coSession.role === "off" || (coSession.role === "host" && isPresenter)) ? <button type="button" className="btn btn-ghost" onClick={openPremiere}>Connect NDI</button> : undefined}
+                    emptyActions={reviewStageActive && (coSession.role === "off" || (coSession.role === "host" && isPresenter)) ? <button type="button" className="btn btn-ghost" onClick={openPremiere}>Choose live source…</button> : undefined}
                     status={status}
                     metadata={metadata}
                     errorDetail={errorDetail}
@@ -5355,7 +5374,7 @@ export default function App() {
                   <Transport
                     liveController={ndiPictureVisible?"ndi":"presenter"}
                     liveInput={(ndiPictureVisible ? visibleNdiName : undefined) ?? (peerLiveStream ? `${peerLiveStream.who}'s shared picture` : undefined)}
-                    sourceControls={reviewStageActive && (canManageNdiSource || ndiPictureVisible) ? <button ref={connectPremiereRef} type="button" className="cp-icon-btn cp-connect-premiere" title="NDI settings" aria-label="NDI settings" aria-haspopup="dialog" aria-expanded={ndiPanelOpen} aria-controls={NDI_INPUT_PANEL_ID} onKeyDown={event => { if (event.key === " ") event.stopPropagation(); }} onClick={() => { if (ndiPictureVisible) { setNdiPanelOpen(true); setNdiRefreshRequest(n => n + 1); } else openPremiere(); }}><IconSettings size={16} /></button> : undefined}
+                    sourceControls={reviewStageActive && (canManageNdiSource || ndiPictureVisible) ? <button ref={connectPremiereRef} type="button" className="cp-icon-btn cp-connect-premiere" title="Source settings" aria-label="Source settings" aria-haspopup="dialog" aria-expanded={ndiPanelOpen} aria-controls={NDI_INPUT_PANEL_ID} onClick={openPremiere}><IconSettings size={16} /></button> : undefined}
                     status={status}
                     isPlaying={isPlaying}
                     fps={fps}
@@ -5539,26 +5558,27 @@ export default function App() {
               {/* The room's review rail overrides detachment - a session
                   with no review panel is a session you can't comment in. */}
               <NdiInputPanel input={ndiInput} open={reviewStageActive && ndiPanelOpen} onClose={closePremiere} refreshRequest={ndiRefreshRequest}
+                broadcast={broadcastState.forSource((privateInspectionVisible ? ndiInput.previewProgram?.id : ndiProgram?.id) ?? null)}
                 returnFocus={connectPremiereRef}
                 recovery={ndiRecovery} canManageSource={canManageNdiSource} previewVisible={privateInspectionVisible}
-                onPreviewRequested={() => { setPreviewSelected(true); setPreviewMuted(false); if (previewVolume === 0) setPreviewVolume(1); }}
+                onPreviewRequested={() => { setReviewLobbyOpen(false); setPreviewSelected(true); setPreviewMuted(false); if (previewVolume === 0) setPreviewVolume(1); }}
                 onCompanionSetup={() => { closePremiere(); setSettingsInitialTab("integrations"); setSettingsOpen(true); }}
                 onReconnectPicture={() => ndiMonitorRef.current?.retryVisible()}
                 onShared={() => { setProgramMuted(previewMuted); setProgramVolume(previewVolume); setPreviewSelected(false); stopShare(); stopViewerShare(); }} />
-              <div className="cp-review-notes-shell" hidden={reviewSetupMode && (!premiereToolsVisible || reviewLobbyOpen)}>
+              <div className="cp-review-notes-shell" hidden={reviewSetupMode && (!reviewToolsVisible || reviewLobbyOpen)}>
               {(reviewStageActive || !panelDetached) && <QueueDrawer
             outboxDepth={outboxDepth}
                 onUndo={performUndo}
                 onRedo={performRedo}
                 onGrabFace={grabFaceFromFrame}
-                open={roomActive || premiereToolsVisible ? true : queueOpen}
+                open={roomActive || reviewToolsVisible ? true : queueOpen}
                 /* Clip is keep-alive, so this subtree stays mounted on Home /
                    Library. The shared stage is explicitly visible in a room,
                    and its review rail is genuinely active there. */
-                viewActive={activeView === "clip" || roomActive || (premiereToolsVisible && !reviewLobbyOpen)}
-                roomFace={roomActive || premiereToolsVisible}
+                viewActive={activeView === "clip" || roomActive || (reviewToolsVisible && !reviewLobbyOpen)}
+                roomFace={roomActive || reviewToolsVisible}
                 focusItem={queueFocusItem}
-                onClose={() => { if (premiereToolsVisible && !roomActive) setReviewLobbyOpen(true); else setQueueOpenChoice(false); }}
+                onClose={() => { if (reviewToolsVisible && !roomActive) setReviewLobbyOpen(true); else setQueueOpenChoice(false); }}
                 onPopOut={handlePopOutPanel}
                 queue={clipQueue}
                 fps={fps}
@@ -5677,7 +5697,7 @@ export default function App() {
                 onReviewSessionOp={postSessionOp}
               />}
               </div>
-              <aside className="cp-review-tools" hidden={!reviewStageActive || roomActive || (premiereToolsVisible && !reviewLobbyOpen)}>
+              <aside className="cp-review-tools" hidden={!reviewStageActive || roomActive || (reviewToolsVisible && !reviewLobbyOpen)}>
                 <div ref={coreviewViewRef} tabIndex={-1} className="cp-view-coreview" hidden={roomActive}>
                   <CoReviewLobby session={coSession} localSource={coLocalSourceLoaded} participants={theaterParticipants}
                     onStart={title => { void startCoReview(title); }} onJoin={joinCoReview} onLeave={leaveCoReview}

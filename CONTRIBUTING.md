@@ -106,6 +106,13 @@ the nine — a contributor could follow it, pass, and still be rejected by CI on
 lint or clippy. If you find `npm run verify` and CI disagreeing, that is a bug
 in `scripts/verify-all.sh` worth reporting on its own.
 
+The in-development separate NDI sender has a focused, SDK-free gate:
+`npm run test:ndi-sender`. It is included in `verify` and CI and uses generated
+records, private pipes and fake SDK processes only. With NDI SDK headers
+available, `bash scripts/verify-ndi-sender-sdk.sh <SDK-include-directory>` also
+checks the real adapter against a generated fake library. Neither test starts
+an NDI network source or captures an application.
+
 **None of it launches the app.** The units cover pure logic (SRT/VTT parsing,
 timecode math, proxy request parsing), and the Playwright suite is a *shell*
 smoke — it boots the frontend with the Tauri IPC layer mocked, because
@@ -218,6 +225,13 @@ with the fetched ffmpeg:
 - **yt-dlp**: the latest release must run, and every `--long-flag` we pass
   anywhere in `commands/download.rs` must still be listed in `--help`
   (the flag list is scraped from our own source, so it can't go stale).
+
+The job also fetches pinned, checksum-verified Deno using `scripts/fetch-deno.sh`.
+Before Cargo runs, `scripts/prepare-ci-sidecars.mjs` validates the required real
+binaries and derives placeholders for unexercised sidecars from Tauri's
+`externalBin` list. Missing or empty required binaries fail setup; they are not
+silently stubbed. Regular CI uses the same script with no real-binary requirement.
+The script is CI-only and never overwrites an existing nonempty binary.
 
 Run it locally (needs `npm run setup` first; downloads the tiny.en + Silero
 VAD models to `~/.cache/sauce-bunny/nightly/` on first run, ~78 MB total —

@@ -523,6 +523,25 @@ export function QueueDrawer({
   const orderedTabs: TabDef[] = tabOrder
     .map((id) => TABS.find((t) => t.id === id))
     .filter((t): t is TabDef => !!t);
+  const enabledTabs = orderedTabs.filter((t) => !t.disabled);
+  const tabStop = enabledTabs.find((t) => t.id === shownTab)?.id ?? enabledTabs[0]?.id;
+  function selectTab(id: TabId) {
+    if (roomFace) setReviewTab(id); else setActiveTab(id);
+  }
+  function onTabKeyDown(e: React.KeyboardEvent<HTMLButtonElement>, id: TabId) {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    const at = enabledTabs.findIndex((t) => t.id === id);
+    if (at < 0) return;
+    const next = e.key === "ArrowRight" ? (at + 1) % enabledTabs.length
+      : e.key === "ArrowLeft" ? (at + enabledTabs.length - 1) % enabledTabs.length
+      : e.key === "Home" ? 0 : e.key === "End" ? enabledTabs.length - 1 : null;
+    if (next == null) return;
+    e.preventDefault();
+    const nextId = enabledTabs[next].id;
+    selectTab(nextId);
+    // Keep focus inside this drawer, including the detached-window instance.
+    tabStripRef.current?.querySelector<HTMLButtonElement>(`#cp-tab-${nextId}`)?.focus();
+  }
 
   // ── Pointer-based drag with FLIP-style live shift (r44.A) ───────
   // Replaces the HTML5 drag-and-drop implementation, which only updated
@@ -713,6 +732,8 @@ export function QueueDrawer({
               aria-selected={isActive}
               aria-controls={"cp-tabpanel-" + t.id}
               aria-disabled={t.disabled}
+              disabled={t.disabled}
+              tabIndex={t.id === tabStop ? 0 : -1}
               className={
                 "cp-tab" +
                 (isActive ? " active" : "") +
@@ -727,8 +748,9 @@ export function QueueDrawer({
                  release as a click and any cross-tab release as a reorder
                  (handled in pointerup). */
               onClick={() => { if (!t.disabled && (!drag || drag.srcIdx === drag.dropIdx)) {
-                if (roomFace) setReviewTab(t.id); else setActiveTab(t.id);
+                selectTab(t.id);
               } }}
+              onKeyDown={(e) => onTabKeyDown(e, t.id)}
               title={t.disabled ? `${t.label} (coming soon)` : `${t.label} · drag to reorder`}
               /* The visible label is hidden when the panel is narrow (see
                  queue-drawer.css), so the name has to live somewhere that does

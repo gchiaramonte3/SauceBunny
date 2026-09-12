@@ -1,0 +1,38 @@
+--- a/mac-sck-common.m
++++ b/mac-sck-common.m
+@@ -202,5 +202,8 @@
+ API_AVAILABLE(macos(12.5)) void screen_stream_video_update(struct screen_capture *sc, CMSampleBufferRef sample_buffer)
+ {
++    if (!sample_buffer || !CMSampleBufferIsValid(sample_buffer))
++        return;
++
+     bool frame_detail_errored = false;
+     float scale_factor = 1.0f;
+     CGRect window_rect = {};
+@@ -209,4 +212,26 @@
+     CFArrayRef attachments_array = CMSampleBufferGetSampleAttachmentsArray(sample_buffer, false);
++    // Idle/started notifications do not carry a newly generated picture and
++    // can omit geometry. Never let them reset a confirmed raster to zero.
++    if (!attachments_array || CFArrayGetCount(attachments_array) == 0)
++        return;
++    CFDictionaryRef status_details = CFArrayGetValueAtIndex(attachments_array, 0);
++    CFTypeRef status_value = status_details ? CFDictionaryGetValue(status_details, SCStreamFrameInfoStatus) : NULL;
++    long frame_status = -1;
++    if (!status_value || CFGetTypeID(status_value) != CFNumberGetTypeID() ||
++        !CFNumberGetValue(status_value, kCFNumberLongType, &frame_status))
++        return;
++    if (frame_status != SCFrameStatusComplete) {
++        // A stopped/suspended/blank source must not keep publishing its last
++        // texture as live. Recovery remains an explicit new source lifetime.
++        if (frame_status != SCFrameStatusIdle && frame_status != SCFrameStatusStarted)
++            os_atomic_set_bool(&sc->sauce_capture_terminated, true);
++        return;
++    }
++    if (!CMSampleBufferGetImageBuffer(sample_buffer)) {
++        os_atomic_set_bool(&sc->sauce_capture_terminated, true);
++        return;
++    }
++
+     if (sc->capture_type == ScreenCaptureWindowStream && attachments_array != NULL &&
+         CFArrayGetCount(attachments_array) > 0) {
+         CFDictionaryRef attachments_dict = CFArrayGetValueAtIndex(attachments_array, 0);

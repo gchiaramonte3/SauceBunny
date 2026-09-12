@@ -1,5 +1,12 @@
 # Design catalog: source inventory and review candidates
 
+September 12 Review follow-up: the approved usability corrections are recorded
+in DESIGN.md. The production preview header now distinguishes room sharing from
+locally owned NDI broadcasts. Source settings is the common gear entry; NDI and
+Application window remain distinct inputs. The shared drawer now supports
+arrow-key/roving focus. Other tab families and catalog proposals remain separate.
+These production changes require actual-app regressions, not catalog-only proof.
+
 Evening follow-up: see `REVIEW-CORRECTIONS-2026-09-07.md` and the evening rules
 in `DESIGN.md`. Compact People now hides camera/mic icons and controls, keeping
 device truth in details and actions in details/the room toolbar. Post and Share
@@ -27,6 +34,14 @@ checks for catalog code/styles/HTML, and prints that location. It does not touch
 the normal `dist/`, stamp a release, or build a DMG.
 
 ## Catalog verification
+
+### Application capture controls (2026-09-12)
+
+The Preview entry includes a clearly labeled static source-markup specimen of
+the existing input, application and window controls. It is not a native capture
+demo and imports no native controller. The production popup uses these recipes
+without changing the viewport or notes rail. Source selection, asynchronous
+restoration and explicit broadcast are verified in application tests separately.
 
 ### Avid NDI help candidate (2026-09-11)
 

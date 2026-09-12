@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { NdiRoomState } from "../bindings/NdiRoomState";
 import type { NdiStarted } from "../bindings/NdiStarted";
 import type { NdiStatusResult } from "../bindings/NdiStatusResult";
+import type { ObsSelection } from "../bindings/ObsSelection";
+import type { ObsStarted } from "../bindings/ObsStarted";
 import { canPublishNdi, emptyNdiTelemetry, NdiProgramCoordinator, type NdiProgramPorts } from "./ndi-program-coordinator";
+import { captureSourceIdentity, copyCaptureSelection } from "./ndi-program-source";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -18,19 +21,32 @@ const ready = (p: NdiStarted, roomGeneration: number | null = 1): NdiStatusResul
   telemetry: { ...emptyNdiTelemetry(), sourceId: p.id, phase: "live", connectionCount: 1,
     receivedFrames: 30, inputWidth: 1920, inputHeight: 1080, outputFps: 30 },
 });
+const selection = (): ObsSelection => ({ application: "com.apple.FinalCut", process: 240, window: 91,
+  crop: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 } });
 function harness(inRoom = true) {
   let next = 0, revision = 10;
   const native = new Map<string, NdiStatusResult>();
+  const capturePasses = new Map<string, string>();
   const ports: NdiProgramPorts = {
     start: vi.fn(async name => {
       const p = { id: String(++next).padStart(32, "0"), name, url: `/program/${next}` };
       native.set(p.id, ready(p, inRoom ? 1 : null)); return p;
+    }),
+    startCapture: vi.fn(async capture => {
+      const program = { id: String(++next).padStart(32, "0"), name: "Premiere A", url: `/program/${next}` };
+      native.set(program.id, { ...ready(program, inRoom ? 1 : null), capture: copyCaptureSelection(capture) });
+      return { program, selection: copyCaptureSelection(capture) };
     }),
     status: vi.fn(async id => native.get(id)!),
     stop: vi.fn(async () => {}),
     publish: vi.fn(async () => ++revision),
     unpublish: vi.fn(async () => {}),
     reviewKey: vi.fn(name => `review:${name}`),
+    captureReviewKey: vi.fn(capture => {
+      const identity = captureSourceIdentity(capture);
+      if (!capturePasses.has(identity)) capturePasses.set(identity, `ndi:capture-${capturePasses.size + 1}`);
+      return capturePasses.get(identity)!;
+    }),
   };
   const ctl = new NdiProgramCoordinator(ports);
   if (inRoom) ctl.setRoom(room());
@@ -166,7 +182,146 @@ describe("independent Premiere preview and publication", () => {
   });
 });
 
+describe("typed application capture preview sources", () => {
+  it("reuses only the same exact application, process, window and crop", async () => {
+    const h = harness(); const capture = selection();
+    await h.ctl.previewCapture(capture); const first = h.ctl.getSnapshot().candidate!;
+    await h.ctl.previewCapture(copyCaptureSelection(capture));
+    expect(h.ports.startCapture).toHaveBeenCalledTimes(1);
+    expect(h.ports.start).not.toHaveBeenCalled();
+    expect(h.ctl.getSnapshot().candidate).toMatchObject({ id: first.id, capture, source: { kind: "capture", selection: capture } });
+    expect(h.ports.reviewKey).not.toHaveBeenCalled();
+    expect(h.ports.publish).not.toHaveBeenCalled();
+    expect(canPublishNdi(h.ctl.getSnapshot())).toBe(false);
+    h.ctl.frameDecoded(first.id);
+    expect(canPublishNdi(h.ctl.getSnapshot())).toBe(true);
+  });
+  it.each(["application", "process", "window", "x", "y", "width", "height"] as const)(
+    "replaces same-title capture when %s changes, with a separate review pass", async field => {
+      const h = harness(); const first = selection(), next = selection();
+      if (field === "application") next.application = "com.adobe.PremierePro";
+      else if (field === "process" || field === "window") next[field] += 1;
+      else next.crop[field] += 0.01;
+      await h.ctl.previewCapture(first); const old = h.ctl.getSnapshot().candidate!;
+      await h.ctl.previewCapture(next); const current = h.ctl.getSnapshot().candidate!;
+      expect(current.name).toBe(old.name);
+      expect(current.id).not.toBe(old.id);
+      expect(current.reviewKey).not.toBe(old.reviewKey);
+      expect(current.capture).toEqual(next);
+      expect(h.ports.stop).toHaveBeenCalledExactlyOnceWith(old.id);
+      expect(h.ports.startCapture).toHaveBeenCalledTimes(2);
+    });
+  it("distinguishes NDI and capture with identical titles while preserving NDI passes", async () => {
+    const h = harness(); const ndi = await h.preview();
+    await h.ctl.previewCapture(selection()); const capture = h.ctl.getSnapshot().candidate!;
+    expect(capture.name).toBe(ndi.name);
+    expect(capture.reviewKey).not.toBe(ndi.reviewKey);
+    expect(capture.source.kind).toBe("capture");
+    await h.ctl.preview(ndi.name); const returned = h.ctl.getSnapshot().candidate!;
+    expect(returned.source).toEqual({ kind: "ndi", name: ndi.name });
+    expect(returned.capture).toBeUndefined();
+    expect(returned.reviewKey).toBe(ndi.reviewKey);
+    expect(h.ports.start).toHaveBeenCalledTimes(2);
+    expect(h.ports.startCapture).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(h.ports.stop).mock.calls).toEqual([[ndi.id], [capture.id]]);
+  });
+  it("keeps a same-title NDI publication untouched while capture remains private", async () => {
+    const h = harness(); const published = await h.publish();
+    await h.ctl.previewCapture(selection()); const capture = h.ctl.getSnapshot().candidate!;
+    expect(capture.name).toBe(published.name);
+    expect(h.ctl.getSnapshot().published?.id).toBe(published.id);
+    expect(h.ports.stop).not.toHaveBeenCalled();
+    expect(h.ports.unpublish).not.toHaveBeenCalled();
+    await h.ctl.cancelPreview();
+    expect(h.ports.stop).toHaveBeenCalledExactlyOnceWith(capture.id);
+  });
+  it("restores capture metadata and the same exact selection pass, never a title-only NDI pass", async () => {
+    const h = harness(); const capture = selection();
+    await h.ctl.previewCapture(capture); const first = h.ctl.getSnapshot().candidate!;
+    const restored = new NdiProgramCoordinator(h.ports);
+    restored.restore({ programs: [h.native.get(first.id)!], room: room() });
+    expect(restored.getSnapshot().candidate).toMatchObject({ capture, reviewKey: first.reviewKey, decodedReady: false });
+    await restored.previewCapture(copyCaptureSelection(capture));
+    expect(h.ports.startCapture).toHaveBeenCalledTimes(1);
+    expect(h.ports.reviewKey).not.toHaveBeenCalled();
+    const newerId = { id: "new-native-id", name: first.name, url: "/restored" };
+    restored.restore({ programs: [{ ...ready(newerId), capture }], room: room() });
+    expect(restored.getSnapshot().candidate?.reviewKey).toBe(first.reviewKey);
+  });
+  it("publishes only opaque identity and reuses an exactly matching published capture", async () => {
+    const h = harness(); await h.ctl.previewCapture(selection()); const first = h.ctl.getSnapshot().candidate!;
+    h.ctl.frameDecoded(first.id); await h.ctl.publish();
+    expect(h.ctl.getSnapshot().roomSource).toEqual({ id: first.id, name: first.name, reviewKey: first.reviewKey, state: "live" });
+    expect(JSON.stringify(h.ctl.getSnapshot().roomSource)).not.toContain(selection().application);
+    await h.ctl.previewCapture(selection());
+    expect(h.ctl.getSnapshot().candidate).toBeNull();
+    expect(h.ports.startCapture).toHaveBeenCalledTimes(1);
+    const different = selection(); different.window += 1;
+    await h.ctl.previewCapture(different);
+    expect(h.ctl.getSnapshot().candidate?.capture).toEqual(different);
+    expect(h.ctl.getSnapshot().published?.id).toBe(first.id);
+  });
+  it("drains a cancelled pending capture start by its returned id", async () => {
+    const h = harness(); const pending = deferred<ObsStarted>();
+    vi.mocked(h.ports.startCapture).mockReturnValueOnce(pending.promise);
+    const starting = h.ctl.previewCapture(selection()); await Promise.resolve();
+    const cancel = h.ctl.cancelPreview();
+    pending.resolve({ program: { id: "cancelled-capture", name: "Premiere A", url: "/old" }, selection: selection() });
+    await starting; await cancel;
+    expect(h.ports.stop).toHaveBeenCalledExactlyOnceWith("cancelled-capture");
+    expect(h.ctl.getSnapshot().candidate).toBeNull();
+    await h.ctl.previewCapture(selection()); const latest = h.ctl.getSnapshot().candidate!;
+    h.ctl.frameDecoded("cancelled-capture");
+    h.ctl.telemetry({ ...latest.telemetry, sourceId: "cancelled-capture", phase: "error", error: "Obsolete" });
+    expect(h.ctl.getSnapshot().candidate).toMatchObject({ id: latest.id, decodedReady: false, telemetry: { error: null } });
+  });
+  it("coalesces across source kinds and copies capture intent before caller mutation", async () => {
+    const h = harness(); const pending = deferred<NdiStarted>();
+    vi.mocked(h.ports.start).mockReturnValueOnce(pending.promise);
+    const old = h.ctl.preview("old NDI"); await Promise.resolve();
+    const skipped = h.ctl.previewCapture(selection());
+    const requested = selection(); requested.window += 1;
+    const expected = copyCaptureSelection(requested);
+    const latest = h.ctl.previewCapture(requested);
+    requested.window += 1; requested.crop.width = 0.25;
+    pending.resolve({ id: "cancelled-NDI", name: "old NDI", url: "/old" });
+    await Promise.all([old, skipped, latest]);
+    expect(h.ports.startCapture).toHaveBeenCalledExactlyOnceWith(expected);
+    expect(h.ctl.getSnapshot().candidate?.capture).toEqual(expected);
+    expect(h.ports.stop).toHaveBeenCalledExactlyOnceWith("cancelled-NDI");
+  });
+  it("rejects absent/invalid selections and mismatched native captures without falling back to NDI", async () => {
+    const h = harness();
+    await expect(h.ctl.previewCapture(undefined as unknown as ObsSelection)).rejects.toThrow(/valid application/);
+    const invalid = selection(); invalid.crop.x = NaN;
+    await expect(h.ctl.previewCapture(invalid)).rejects.toThrow(/valid application/);
+    expect(h.ports.startCapture).not.toHaveBeenCalled();
+    const wrong = selection(); wrong.window += 1;
+    vi.mocked(h.ports.startCapture).mockResolvedValueOnce({ program: { id: "wrong", name: "Premiere A", url: "/wrong" }, selection: wrong });
+    await expect(h.ctl.previewCapture(selection())).rejects.toThrow(/captured window changed/);
+    expect(h.ports.stop).toHaveBeenCalledExactlyOnceWith("wrong");
+    expect(h.ctl.getSnapshot().candidate).toBeNull();
+    expect(h.ports.start).not.toHaveBeenCalled();
+  });
+});
+
 describe("Premiere source generations and cancellation", () => {
+  it("waits for private teardown before starting a replacement without stopping the shared source", async () => {
+    const h = harness(); const shared = await h.publish(); const privateSource = await h.preview("B");
+    const stopping = deferred<void>(), released = deferred<void>();
+    vi.mocked(h.ports.stop).mockImplementationOnce(async id => {
+      expect(id).toBe(privateSource.id); stopping.resolve(); await released.promise;
+    });
+    const replacement = h.ctl.preview("C"); await stopping.promise;
+    expect(h.ports.start).toHaveBeenCalledTimes(2);
+    expect(h.ctl.getSnapshot().published?.id).toBe(shared.id);
+    expect(h.ports.unpublish).not.toHaveBeenCalled();
+    released.resolve(); await replacement;
+    expect(h.ports.start).toHaveBeenCalledTimes(3);
+    expect(h.ctl.getSnapshot().candidate?.name).toBe("C");
+    expect(h.ctl.getSnapshot().published?.id).toBe(shared.id);
+    expect(h.ports.stop).toHaveBeenCalledExactlyOnceWith(privateSource.id);
+  });
   it("drains a cancelled pending start before admitting its replacement", async () => {
     const h = harness(); const pending = deferred<NdiStarted>();
     vi.mocked(h.ports.start).mockReturnValueOnce(pending.promise);

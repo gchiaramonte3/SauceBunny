@@ -39,3 +39,24 @@ it("keeps the same published file player mounted when a private picture covers i
   expect(screen.getByTestId("file-player")).toBe(player);
   expect(player.closest("[inert]")).toBeNull();
 });
+
+it("removes file-only notices from the covered picture without cancelling or replacing its player", () => {
+  const props = { ...base, status: "loaded" as const, localFilePath: "/published.mp4",
+    playbackPrepBusy: true, onCancelPlaybackPrep: vi.fn(), streamRungBadge: "480p",
+    tcOverlay: "00:00:01:00", streamLoadingPhase: "Buffering…" };
+  const view = render(<Monitor {...props} />);
+  const file = screen.getByTestId("file-player");
+  for (const selector of [".cp-prep-banner", ".cp-stream-rung", ".cp-tc-hud", ".cp-stream-loading"]) {
+    expect(view.container.querySelector(selector)).not.toBeNull();
+  }
+  view.rerender(<Monitor {...props} pictureCovered stageOverlay={<div>Active program</div>} />);
+  for (const selector of [".cp-prep-banner", ".cp-stream-rung", ".cp-tc-hud", ".cp-stream-loading"]) {
+    expect(view.container.querySelector(selector)).toBeNull();
+  }
+  expect(screen.getByTestId("file-player")).toBe(file);
+  expect(screen.getByText("Active program")).toBeTruthy();
+  expect(props.onCancelPlaybackPrep).not.toHaveBeenCalled();
+  view.rerender(<Monitor {...props} />);
+  expect(view.container.querySelector(".cp-prep-banner")).not.toBeNull();
+  expect(screen.getByTestId("file-player")).toBe(file);
+});

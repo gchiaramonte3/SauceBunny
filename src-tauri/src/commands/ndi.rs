@@ -5,17 +5,15 @@ use std::{collections::{HashMap, VecDeque}, io::{self, Read}, path::PathBuf,
     sync::{Arc, Condvar, Mutex, OnceLock, atomic::{AtomicBool, AtomicU64, Ordering}}, time::Duration};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
-#[cfg(any(sauce_ndi, test))]
 use tauri::Emitter;
 use crate::AppError;
+use super::obs::ObsSelection;
 
 #[path = "ndi_timing.rs"]
 mod timing;
 pub use timing::NdiTimingProbeResult;
 
-#[cfg(any(sauce_ndi, test))]
 const MAX_SEGMENT: usize = 2 * 1024 * 1024;
-#[cfg(any(sauce_ndi, test))]
 // Match the decoder's eight-fragment queue: nominally 800 ms, at most 16 MiB
 // plus the init. Ordinary delivery/append jitter must not become missing AAC.
 const RETAINED_SEGMENTS: usize = 8;
@@ -100,6 +98,10 @@ pub struct NdiStatusResult {
     pub encoded_ready: bool,
     #[ts(type = "number | null")]
     pub room_generation: Option<u64>,
+    // Local provenance only; never part of room announcements or media records.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub capture: Option<ObsSelection>,
 }
 
 #[derive(Clone, Debug, Serialize, ts_rs::TS)]
@@ -155,8 +157,7 @@ struct NativeDiscoveryResult {
 struct Buffer {
     init: Option<Arc<[u8]>>,
     segments: VecDeque<(u64, Arc<[u8]>)>,
-    // Only the SDK receiver (or its test publisher) allocates segment ids.
-    #[cfg(any(sauce_ndi, test))]
+    // Only an encoded program producer allocates segment ids.
     next: u64,
     status: NdiTelemetry,
     telemetry: Option<Arc<[u8]>>,
@@ -165,6 +166,7 @@ struct Buffer {
 pub struct Program {
     pub id: String,
     pub name: String,
+    capture: Option<ObsSelection>,
     stopped: AtomicBool,
     // Zero is standalone preview. Session generations are stored plus one.
     room: AtomicU64,
@@ -173,19 +175,21 @@ pub struct Program {
     // Diagnostic-only: never included in ProgramReader's peer media records.
     timing: Mutex<Option<timing::Probe>>,
     changed: Condvar,
-    #[cfg(any(sauce_ndi, test))]
     app: Option<AppHandle>,
 }
 impl Program {
     #[cfg(any(sauce_ndi, test))]
     pub(super) fn new(id: String, name: String, app: Option<AppHandle>) -> Arc<Self> {
-        let status = NdiTelemetry { source_id: id.clone(), phase: NdiPhase::Connecting, ..NdiTelemetry::default() };
-        Arc::new(Self { id, name, stopped: AtomicBool::new(false), room: AtomicU64::new(0), publication_revision:AtomicU64::new(0), buffer: Mutex::new(Buffer { status, ..Buffer::default() }), timing: Mutex::new(None), changed: Condvar::new(), app })
+        Self::with_origin(id, name, app, None)
     }
-    #[cfg(any(sauce_ndi, test))]
+    fn with_origin(id: String, name: String, app: Option<AppHandle>, capture: Option<ObsSelection>) -> Arc<Self> {
+        let status = NdiTelemetry { source_id: id.clone(), phase: NdiPhase::Connecting, ..NdiTelemetry::default() };
+        Arc::new(Self { id, name, capture, stopped: AtomicBool::new(false), room: AtomicU64::new(0), publication_revision:AtomicU64::new(0), buffer: Mutex::new(Buffer { status, ..Buffer::default() }), timing: Mutex::new(None), changed: Condvar::new(), app })
+    }
     pub(super) fn publish(&self, kind: i32, data: &[u8]) {
         if self.stopped.load(Ordering::Relaxed) { return; }
         if kind == 4 {
+            #[cfg(any(sauce_ndi, test))]
             if let Ok(mut probe) = self.timing.lock() {
                 if let Some(probe) = probe.as_mut() { probe.accept(data, std::time::Instant::now()); }
             }
@@ -215,8 +219,7 @@ impl Program {
         }
         self.changed.notify_all();
     }
-    #[cfg(any(sauce_ndi, test))]
-    fn fail(&self, message: &str) {
+    pub(super) fn fail(&self, message: &str) {
         let state = NdiTelemetry { source_id:self.id.clone(), phase:NdiPhase::Error,
             error:Some(message.to_string()), ..NdiTelemetry::default() };
         if let Ok(mut b) = self.buffer.lock() {
@@ -226,12 +229,19 @@ impl Program {
         if let Some(app) = &self.app { let _ = app.emit("ndi:state", state); }
         self.stop();
     }
-    fn stop(&self) {
+    pub(super) fn stop(&self) {
         self.stopped.store(true, Ordering::Release);
         if let Ok(mut probe) = self.timing.lock() {
             if let Some(probe) = probe.as_mut() { probe.stop(true); }
         }
         self.changed.notify_all();
+    }
+    pub(super) fn is_stopped(&self) -> bool { self.stopped.load(Ordering::Acquire) }
+    pub(super) fn is_application_capture(&self) -> bool { self.capture.is_some() }
+    #[cfg(test)]
+    pub(super) fn retained_media_metrics(&self) -> (usize, usize, u64) {
+        let buffer = self.buffer.lock().unwrap_or_else(|poison|poison.into_inner());
+        (buffer.segments.len(), buffer.segments.iter().map(|(_, data)|data.len()).sum(), buffer.next)
     }
     #[cfg(any(sauce_ndi, test))]
     fn timing_token(&self) -> u64 {
@@ -243,13 +253,17 @@ impl Program {
             .map(|b| b.init.is_some() && !b.segments.is_empty()).unwrap_or(false)
     }
     pub(crate) fn bind_room(&self, generation: u64) { self.room.store(generation + 1, Ordering::Release); }
+    fn started(&self, base: &str) -> NdiStarted {
+        NdiStarted { id:self.id.clone(), name:self.name.clone(), url:format!("{base}/program/v1/{}", self.id) }
+    }
     fn snapshot(&self, base: &str) -> NdiStatusResult {
         let b = self.buffer.lock().unwrap_or_else(|e| e.into_inner());
         NdiStatusResult {
-            program: Some(NdiStarted { id:self.id.clone(), name:self.name.clone(), url:format!("{base}/program/v1/{}", self.id) }),
+            program: Some(self.started(base)),
             telemetry: b.status.clone(),
             encoded_ready: !self.stopped.load(Ordering::Acquire) && b.init.is_some() && !b.segments.is_empty(),
             room_generation: self.room.load(Ordering::Acquire).checked_sub(1),
+            capture: self.capture.clone(),
         }
     }
 }
@@ -259,7 +273,16 @@ impl Program {
 #[derive(Default)]
 struct Programs { entries: HashMap<String, Arc<Program>>, generation: u64 }
 impl Programs {
-    #[cfg(any(sauce_ndi, test))]
+    fn sessions(&self, base: &str) -> Vec<NdiStatusResult> {
+        self.entries.values().map(|program|program.snapshot(base)).collect()
+    }
+    fn snapshot(&self, id: Option<&str>, base: &str) -> Option<NdiStatusResult> {
+        // Compatibility with the previous single-program UI, without choosing
+        // an arbitrary session once a private preview and a feed coexist.
+        let program = id.and_then(|id|self.entries.get(id)).or_else(||
+            (id.is_none() && self.entries.len()==1).then(||self.entries.values().find(|p|p.capture.is_none())).flatten());
+        program.map(|program|program.snapshot(base))
+    }
     fn insert(&mut self, program: Arc<Program>, generation: u64) -> Result<(), AppError> {
         if self.generation != generation { return Err(AppError::invalid("NDI preview was cancelled")); }
         self.entries.retain(|_, p| !p.stopped.load(Ordering::Acquire));
@@ -283,19 +306,33 @@ impl Programs {
 }
 fn programs() -> &'static Mutex<Programs> { static VALUE: OnceLock<Mutex<Programs>> = OnceLock::new(); VALUE.get_or_init(|| Mutex::new(Programs::default())) }
 
-#[cfg(any(sauce_ndi, test))]
-struct WorkerPermit;
-#[cfg(any(sauce_ndi, test))]
+pub(super) struct WorkerPermit;
 static NATIVE_WORKERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-#[cfg(any(sauce_ndi, test))]
 impl WorkerPermit {
-    fn acquire() -> Result<Self, AppError> {
+    pub(super) fn acquire() -> Result<Self, AppError> {
         NATIVE_WORKERS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n|(n<2).then_some(n+1))
             .map(|_|Self).map_err(|_|AppError::invalid("An NDI receiver is still closing. Retry the preview in a moment. The shared feed is unchanged."))
     }
 }
-#[cfg(any(sauce_ndi, test))]
 impl Drop for WorkerPermit { fn drop(&mut self) { NATIVE_WORKERS.fetch_sub(1,Ordering::SeqCst); } }
+
+pub(super) fn producer_generation() -> Result<u64, AppError> {
+    Ok(programs().lock().map_err(|_|AppError::internal("Program state unavailable"))?.generation)
+}
+
+/// OBS joins the same bounded media registry and lifetime capacity as NDI,
+/// preserving exact capture provenance for the renderer's source-aware restore.
+pub(super) fn register_obs(name: String, selection: &ObsSelection, app: AppHandle, room: Option<u64>, generation: u64)
+    -> Result<(Arc<Program>, NdiStarted, WorkerPermit), AppError> {
+    let base = crate::stream_proxy::base_url().ok_or_else(||AppError::invalid("Program media proxy is not running"))?;
+    let mut id = [0u8;16]; getrandom::getrandom(&mut id).map_err(|_|AppError::internal("Cannot create source identity"))?;
+    let program = Program::with_origin(hex::encode(id), name, Some(app), Some(selection.clone()));
+    if let Some(room) = room { program.bind_room(room); }
+    let result = program.started(&base);
+    let permit = WorkerPermit::acquire()?;
+    programs().lock().map_err(|_|AppError::internal("Program state unavailable"))?.insert(program.clone(), generation)?;
+    Ok((program, result, permit))
+}
 
 /// A receiver existing is NOT permission to fetch it. Each publication has a
 /// revocable lease owned by exactly one host room and presenter epoch.
@@ -332,7 +369,7 @@ impl ProgramPublication {
 }
 fn runtime_choice() -> &'static Mutex<Option<PathBuf>> { static VALUE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new(); VALUE.get_or_init(|| Mutex::new(None)) }
 #[cfg(sauce_ndi)]
-fn runtime_path() -> Option<PathBuf> {
+pub(super) fn runtime_path() -> Option<PathBuf> {
     let explicit = runtime_choice().lock().ok().and_then(|v| v.clone());
     runtime_candidates(bundled_runtime(),cfg!(debug_assertions),explicit, std::env::var_os("NDI_RUNTIME_DIR_V6"),
         cfg!(debug_assertions).then_some(option_env!("SAUCE_NDI_DEV_RUNTIME")).flatten())
@@ -365,6 +402,7 @@ fn runtime_candidates(bundled:Option<PathBuf>, developer_build:bool, explicit:Op
 pub fn find_program(id: &str) -> Option<Arc<Program>> { programs().lock().ok()?.entries.get(id).filter(|p| !p.stopped.load(Ordering::Acquire)).cloned() }
 pub(crate) fn stop_room(generation: u64) { if let Ok(mut all) = programs().lock() { all.stop_room(generation); } }
 pub fn stop_all() {
+    super::obs::cancel_broadcasts();
     if let Ok(mut all) = programs().lock() {
         all.generation += 1;
         for (_, p) in all.entries.drain() { p.stop(); }
@@ -501,7 +539,7 @@ pub async fn ndi_start(app: AppHandle, name: String) -> Result<NdiStarted, AppEr
         let mut id = [0u8; 16]; getrandom::getrandom(&mut id).map_err(|_| AppError::invalid("Cannot create source identity"))?;
         let program = Program::new(hex::encode(id), name, Some(app));
         if let Some(room) = room { program.bind_room(room); }
-        let result = NdiStarted{id:program.id.clone(),name:program.name.clone(),url:format!("{base}/program/v1/{}",program.id)};
+        let result = program.started(&base);
         // Retain capacity until the worker has actually drained, not just
         // until its cancelled entry disappears from the UI registry.
         let permit=WorkerPermit::acquire()?;
@@ -515,7 +553,8 @@ pub async fn ndi_start(app: AppHandle, name: String) -> Result<NdiStarted, AppEr
 }
 #[tauri::command]
 pub async fn ndi_stop(app: AppHandle, id: String) -> Result<(), AppError> {
-    super::session::ndi_stop_local(&app, &id).await
+    super::session::ndi_stop_local(&app, &id).await?;
+    super::obs::wait_stopped(&id).await
 }
 pub(super) fn stop_program(id: &str) -> Result<(), AppError> {
     programs().lock().map_err(|_|AppError::internal("Program state unavailable"))?.stop(id)
@@ -523,19 +562,14 @@ pub(super) fn stop_program(id: &str) -> Result<(), AppError> {
 #[tauri::command]
 pub fn ndi_status(id: Option<String>) -> NdiStatusResult {
     let base = crate::stream_proxy::base_url().unwrap_or_default();
-    programs().lock().ok().and_then(|all| {
-        // Compatibility with the previous single-program UI, without choosing
-        // an arbitrary session once a private preview and a feed coexist.
-        let p = id.as_ref().and_then(|id|all.entries.get(id)).or_else(||
-            (id.is_none() && all.entries.len()==1).then(||all.entries.values().next()).flatten());
-        p.map(|p|p.snapshot(&base))
-    }).unwrap_or(NdiStatusResult { program:None, telemetry:NdiTelemetry::default(), encoded_ready:false, room_generation:None })
+    programs().lock().ok().and_then(|all|all.snapshot(id.as_deref(), &base))
+        .unwrap_or(NdiStatusResult { program:None, telemetry:NdiTelemetry::default(), encoded_ready:false, room_generation:None, capture:None })
 }
 #[tauri::command]
 pub async fn ndi_sessions(app: AppHandle) -> NdiSessionsResult {
     let room = super::session::ndi_room_state(&app).await;
     let base = crate::stream_proxy::base_url().unwrap_or_default();
-    NdiSessionsResult { programs: programs().lock().map(|all|all.entries.values().map(|p|p.snapshot(&base)).collect()).unwrap_or_default(), room }
+    NdiSessionsResult { programs: programs().lock().map(|all|all.sessions(&base)).unwrap_or_default(), room }
 }
 
 /// Explicit local diagnostic capture. Does not connect a source, restart the
@@ -572,7 +606,7 @@ pub fn ndi_timing_probe_stop(id: String, probe_id: String) -> Result<NdiTimingPr
 fn timing_program(id: &str) -> Result<Arc<Program>, AppError> {
     if !cfg!(sauce_ndi) { return Err(AppError::invalid("This build does not include the native NDI timing probe")); }
     programs().lock().map_err(|_|AppError::internal("NDI input state unavailable"))?
-        .entries.get(id).cloned().ok_or_else(||AppError::invalid("Select a running local NDI input before capturing timing"))
+        .entries.get(id).filter(|p|p.capture.is_none()).cloned().ok_or_else(||AppError::invalid("Select a running local NDI input before capturing timing"))
 }
 
 fn matching_probe<'a>(state: &'a mut Option<timing::Probe>, probe_id: &str) -> Result<&'a mut timing::Probe, AppError> {
@@ -638,6 +672,81 @@ impl Read for ProgramReader {
 
 #[cfg(test)] mod tests {
     use super::*;
+    fn obs_selection() -> ObsSelection {
+        ObsSelection { application:"com.example.editor".into(), process:314, window:159265,
+            crop:super::super::obs::ObsCrop { x:0.125, y:0.25, width:0.5, height:0.625 } }
+    }
+    #[test] fn started_descriptor_preserves_identity_and_proxy_route_for_both_origins() {
+        let base="http://127.0.0.1:12345/private-capability";
+        for capture in [None, Some(obs_selection())] {
+            let program=Program::with_origin("0123456789abcdef0123456789abcdef".into(),"Editor — same title".into(),None,capture);
+            let expected=serde_json::json!({
+                "id":"0123456789abcdef0123456789abcdef",
+                "name":"Editor — same title",
+                "url":"http://127.0.0.1:12345/private-capability/program/v1/0123456789abcdef0123456789abcdef",
+            });
+            assert_eq!(serde_json::to_value(program.started(base)).unwrap(),expected);
+            assert_eq!(serde_json::to_value(program.snapshot(base).program).unwrap(),expected);
+        }
+    }
+    #[test] fn obs_provenance_survives_exact_status_without_default_ndi_adoption() {
+        let selection=obs_selection();
+        let mut other_selection=selection.clone();other_selection.window+=1;other_selection.crop.x=0.25;
+        let mut all=Programs::default();
+        let captured=Program::with_origin("captured".into(),"Same title".into(),None,Some(selection.clone()));
+        all.insert(captured,0).unwrap();
+        assert!(all.snapshot(None,"/local").is_none());
+        all.insert(Program::with_origin("other".into(),"Same title".into(),None,Some(other_selection.clone())),0).unwrap();
+        for (id, expected) in [("captured",selection),("other",other_selection)] {
+            let snapshot=all.snapshot(Some(id),"/local").unwrap();
+            assert_eq!(snapshot.program.as_ref().unwrap().id,id);
+            assert_eq!(serde_json::to_value(&snapshot.capture).unwrap(),serde_json::to_value(expected).unwrap());
+            assert!(serde_json::to_value(&snapshot.program).unwrap().get("capture").is_none());
+        }
+        assert!(all.snapshot(Some("missing"),"/local").is_none());
+        all.stop("captured").unwrap();all.stop("other").unwrap();
+        all.insert(Program::new("ndi".into(),"Same title".into(),None),0).unwrap();
+        let snapshot=all.snapshot(None,"/local").unwrap();
+        assert_eq!(snapshot.program.as_ref().unwrap().id,"ndi");
+        assert!(serde_json::to_value(snapshot).unwrap().get("capture").is_none());
+    }
+    #[test] fn obs_provenance_never_enters_peer_program_records() {
+        let selection=obs_selection();
+        let program=Program::with_origin("program".into(),"Viewer".into(),None,Some(selection.clone()));
+        // Even an upstream status carrying local-only fields is narrowed to the
+        // established telemetry schema before it can enter a peer record.
+        let input=serde_json::json!({"phase":"live","sourceId":"wrong","capture":selection,
+            "application":"com.example.editor","process":314,"window":159265});
+        program.publish(3,&serde_json::to_vec(&input).unwrap());
+        program.publish(1,b"init");program.publish(2,b"media");
+        let publication=ProgramPublication::new(program.clone(),7,0);
+        let mut reader=ProgramReader::remote(publication.clone());
+        let mut header=[0u8;5];reader.read_exact(&mut header).unwrap();assert_eq!(header[0],3);
+        let mut body=vec![0;u32::from_be_bytes(header[1..].try_into().unwrap()) as usize];
+        reader.read_exact(&mut body).unwrap();
+        let expected=NdiTelemetry { source_id:"program".into(),phase:NdiPhase::Live,..NdiTelemetry::default() };
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&body).unwrap(),serde_json::to_value(expected).unwrap());
+        for (kind, expected) in [(1,b"init".as_slice()),(2,b"media".as_slice())] {
+            reader.read_exact(&mut header).unwrap();assert_eq!(header[0],kind);
+            let mut body=vec![0;u32::from_be_bytes(header[1..].try_into().unwrap()) as usize];
+            reader.read_exact(&mut body).unwrap();assert_eq!(body,expected);
+        }
+        assert!(program.snapshot("/local").capture.is_some());
+        publication.revoke();program.stop();assert_eq!(reader.read(&mut header).unwrap(),0);
+    }
+    #[test] fn sessions_restore_application_identity_without_changing_ndi_entries() {
+        let mut all=Programs::default();
+        let selection=obs_selection();
+        all.insert(Program::with_origin("captured".into(),"Same title".into(),None,Some(selection.clone())),0).unwrap();
+        all.insert(Program::new("ndi".into(),"Same title".into(),None),0).unwrap();
+        let snapshots=all.sessions("/local");
+        assert_eq!(snapshots.len(),2);
+        let capture=snapshots.iter().find(|status|status.program.as_ref().unwrap().id=="captured").unwrap();
+        assert_eq!(serde_json::to_value(&capture.capture).unwrap(),serde_json::to_value(selection).unwrap());
+        let ndi=snapshots.iter().find(|status|status.program.as_ref().unwrap().id=="ndi").unwrap();
+        assert!(serde_json::to_value(ndi).unwrap().get("capture").is_none());
+        assert!(all.snapshot(None,"/local").is_none(),"legacy status must not choose an arbitrary source");
+    }
     struct InstallationFixture(PathBuf);
     impl InstallationFixture {
         fn new() -> Self {

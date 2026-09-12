@@ -4,7 +4,10 @@ import type { NdiRoomState } from "../bindings/NdiRoomState";
 import type { NdiSessionsResult } from "../bindings/NdiSessionsResult";
 import type { NdiRoomProgram } from "../bindings/NdiRoomProgram";
 import type { NdiTelemetry } from "../bindings/NdiTelemetry";
+import type { ObsSelection } from "../bindings/ObsSelection";
+import type { ObsStarted } from "../bindings/ObsStarted";
 import { formatError } from "./error-format";
+import { copyCaptureSelection, sameProgramSource, validCaptureSelection, type NdiProgramSource } from "./ndi-program-source";
 
 export const emptyNdiTelemetry = (): NdiTelemetry => ({
   sourceId: "", phase: "off", error: null, inputWidth: 0, inputHeight: 0,
@@ -15,6 +18,8 @@ export const emptyNdiTelemetry = (): NdiTelemetry => ({
 
 /** A capture id changes when a receiver restarts. A review/pass id does not. */
 export type NdiLocalProgram = NdiStarted & {
+  source: NdiProgramSource;
+  capture?: ObsSelection;
   reviewKey: string;
   telemetry: NdiTelemetry;
   encodedReady: boolean;
@@ -37,12 +42,14 @@ export type NdiProgramSnapshot = {
 };
 export type NdiProgramPorts = {
   start(name: string): Promise<NdiStarted>;
+  startCapture(selection: ObsSelection): Promise<ObsStarted>;
   status(id: string): Promise<NdiStatusResult>;
   stop(id: string): Promise<void>;
   publish(source: NdiLocalProgram, room: NdiRoomState): Promise<number>;
   unpublish(lease: NdiPublicationLease): Promise<void>;
   /** Persisted separately from the native capture so reconnect keeps notes. */
   reviewKey(name: string): string;
+  captureReviewKey(selection: ObsSelection): string;
 };
 
 const roomIdentity = (room: NdiRoomState | null) => room
@@ -91,8 +98,11 @@ export class NdiProgramCoordinator {
       throw new Error("Wait for the current sharing change to finish");
     }
   }
-  private local(started: NdiStarted, room: number | null): NdiLocalProgram {
-    return { ...started, reviewKey: this.ports.reviewKey(started.name), roomGeneration: room,
+  private local(started: NdiStarted, room: number | null, selection?: ObsSelection): NdiLocalProgram {
+    const capture = selection ? copyCaptureSelection(selection) : undefined;
+    const source: NdiProgramSource = capture ? { kind: "capture", selection: capture } : { kind: "ndi", name: started.name };
+    return { ...started, source, ...(capture ? { capture } : {}),
+      reviewKey: capture ? this.ports.captureReviewKey(capture) : this.ports.reviewKey(started.name), roomGeneration: room,
       telemetry: { ...emptyNdiTelemetry(), sourceId: started.id, phase: "connecting" },
       encodedReady: false, decodedReady: false, retired: false };
   }
@@ -123,7 +133,7 @@ export class NdiProgramCoordinator {
     this.setRoom(native.room);
     if (this.value.busy) return;
     const sources = native.programs.flatMap(status => status.program ? [{
-      ...this.local(status.program, status.roomGeneration), telemetry: status.telemetry,
+      ...this.local(status.program, status.roomGeneration, status.capture), telemetry: status.telemetry,
       ...(native.room?.source?.id === status.program.id ? { reviewKey: native.room.source.reviewKey } : {}),
       encodedReady: status.encodedReady,
       decodedReady: this.value.candidate?.id === status.program.id ? this.value.candidate.decodedReady
@@ -142,15 +152,25 @@ export class NdiProgramCoordinator {
     } : this.value.roomSource) });
   }
   preview(name: string): Promise<void> {
+    return this.previewSource({ kind: "ndi", name });
+  }
+  previewCapture(selection: ObsSelection): Promise<void> {
     this.ensureMutable();
-    if (!name.trim()) return Promise.reject(new Error("Choose an NDI source"));
+    if (!validCaptureSelection(selection)) return Promise.reject(new Error("Choose a valid application window and crop"));
+    // Freeze the requested window/crop before entering the serialized queue.
+    return this.previewSource({ kind: "capture", selection: copyCaptureSelection(selection) });
+  }
+  private previewSource(source: NdiProgramSource): Promise<void> {
+    this.ensureMutable();
+    if (source.kind === "ndi" && !source.name.trim()) return Promise.reject(new Error("Choose an NDI source"));
+    if (source.kind === "capture" && !validCaptureSelection(source.selection)) return Promise.reject(new Error("Choose a valid application window and crop"));
     const turn = ++this.intent;
     this.update({ busy: "starting", error: null });
     return this.enqueue(async () => {
       if (!this.valid(turn)) return;
       const old = this.value.candidate;
       try {
-        if (old?.name === name && !old.retired && old.telemetry.phase !== "error") return;
+        if (old && sameProgramSource(old.source, source) && !old.retired && old.telemetry.phase !== "error") return;
         if (old && old.id !== this.value.published?.id) {
           await this.ports.stop(old.id);
           if (!this.valid(turn)) return;
@@ -158,11 +178,17 @@ export class NdiProgramCoordinator {
           // it removes publication readiness, not the last visible picture.
           this.patchProgram(old.id, { retired: true, encodedReady: false });
         }
-        if (this.value.published?.name === name) { this.update({ candidate: null }); return; }
+        if (this.value.published && sameProgramSource(this.value.published.source, source)) { this.update({ candidate: null }); return; }
         const roomAtStart = this.value.room?.generation ?? null;
-        const started = await this.ports.start(name);
+        const result = source.kind === "ndi" ? { program: await this.ports.start(source.name), selection: undefined }
+          : await this.ports.startCapture(copyCaptureSelection(source.selection));
+        const started = result.program;
         if (!this.valid(turn)) { await this.ports.stop(started.id); return; }
-        this.update({ candidate: this.local(started, roomAtStart) });
+        if (source.kind === "capture" && (!result.selection || !sameProgramSource(source, { kind: "capture", selection: result.selection }))) {
+          await this.ports.stop(started.id);
+          throw new Error("The captured window changed. Choose the source again.");
+        }
+        this.update({ candidate: this.local(started, roomAtStart, result.selection) });
         await this.refreshStatus(started.id);
       } catch (cause) {
         if (this.valid(turn)) this.update({ error: formatError(cause) });

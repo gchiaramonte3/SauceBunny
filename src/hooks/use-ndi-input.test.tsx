@@ -2,6 +2,8 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionState } from "../bindings/SessionState";
+import type { ObsSelection } from "../bindings/ObsSelection";
+import type { NdiStatusResult } from "../bindings/NdiStatusResult";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listeners: new Map<string, (event: { payload: unknown }) => void>() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -183,5 +185,108 @@ describe("private preview is not the room presentation", () => {
     await act(async()=>{await h.result.current.cancelPreview();});
     expect(h.result.current.program).toMatchObject({id:published.id,url:published.url,stopped:true});
     expect(h.result.current.roomSource?.state).toBe("stopped");
+  });
+});
+
+describe("application capture uses the existing preview controller", () => {
+  const capture = (): ObsSelection => ({ application: "com.adobe.PremierePro", process: 123, window: 45,
+    crop: { x: 0, y: 0, width: 1, height: 1 } });
+  function native() {
+    let next = 0;
+    const programs = new Map<string, NdiStatusResult>();
+    const nativeRoom = { generation: 7, presenterEpoch: 0, presenting: true, publishedId: null,
+      publicationRevision: null, source: null };
+    mocks.invoke.mockImplementation(async (command: string, args?: { name?: string; selection?: ObsSelection; id?: string }) => {
+      if (command === "session_state") return { ...room, role: "host", selfId: "m0" };
+      if (command === "ndi_sessions") return { programs: [...programs.values()], room: nativeRoom };
+      if (command === "ndi_start" || command === "obs_start") {
+        const program = { id: String(++next).padStart(32, "0"), name: "Premiere", url: `/program/${next}` };
+        const selection = command === "obs_start" ? args?.selection : undefined;
+        programs.set(program.id, { program, encodedReady: true, roomGeneration: 7,
+          telemetry: { ...offStatus.telemetry, sourceId: program.id, phase: "live", connectionCount: 1 },
+          ...(selection ? { capture: selection } : {}) });
+        return command === "obs_start" ? { program, selection } : program;
+      }
+      if (command === "ndi_status") return programs.get(args?.id ?? "") ?? offStatus;
+      if (command === "ndi_stop") { programs.delete(args?.id ?? ""); return null; }
+      if (command === "ndi_publish") return 2;
+      return null;
+    });
+    return { programs, nativeRoom };
+  }
+  it("starts exact capture privately and retains metadata through explicit publication", async () => {
+    native(); const h = renderHook(useNdiInput); await act(async () => {});
+    const selection = capture();
+    await act(async () => { await h.result.current.startCapture(selection); });
+    const preview = h.result.current.previewProgram!;
+    expect(mocks.invoke).toHaveBeenCalledWith("obs_start", { selection });
+    expect(mocks.invoke.mock.calls.some(([name]) => name === "ndi_start" || name === "ndi_publish")).toBe(false);
+    expect(preview.capture).toEqual(selection);
+    expect(h.result.current.program).toBeNull();
+    expect(h.result.current.canShare).toBe(false);
+    act(() => h.result.current.previewFrameDecoded(preview.id));
+    expect(h.result.current.canShare).toBe(true);
+    await act(async () => { await h.result.current.share(); });
+    expect(h.result.current.program?.capture).toEqual(selection);
+    expect(h.result.current.published?.capture).toEqual(selection);
+    expect(mocks.invoke).toHaveBeenCalledWith("ndi_publish", { id: preview.id, reviewKey: preview.reviewKey, generation: 7, epoch: 0 });
+    const publishArguments = mocks.invoke.mock.calls.find(([name]) => name === "ndi_publish")?.[1];
+    expect(JSON.stringify(publishArguments)).not.toContain(selection.application);
+    expect(JSON.stringify(h.result.current.roomSource)).not.toContain("crop");
+    expect(preview.reviewKey).toMatch(/^ndi:[a-f0-9-]+$/i);
+    expect(h.result.current.reviewBlocked).toBe(true);
+  });
+  it("keeps existing NDI review passes unchanged and separates same-title windows and crops", async () => {
+    native(); localStorage.setItem("saucebunny.ndiReviewPasses", JSON.stringify({ Premiere: "ndi:existing-pass" }));
+    const h = renderHook(useNdiInput); await act(async () => {});
+    await act(async () => { await h.result.current.start("Premiere"); });
+    expect(h.result.current.previewProgram?.reviewKey).toBe("ndi:existing-pass");
+    expect(h.result.current.previewProgram?.capture).toBeUndefined();
+    await act(async () => { await h.result.current.startCapture(capture()); });
+    const first = h.result.current.previewProgram!;
+    expect(first.reviewKey).not.toBe("ndi:existing-pass");
+    const window = capture(); window.window += 1;
+    await act(async () => { await h.result.current.startCapture(window); });
+    const second = h.result.current.previewProgram!;
+    expect(second.name).toBe(first.name);
+    expect(second.reviewKey).not.toBe(first.reviewKey);
+    const cropped = { ...window, crop: { ...window.crop, width: 0.5 } };
+    await act(async () => { await h.result.current.startCapture(cropped); });
+    expect(h.result.current.previewProgram?.reviewKey).not.toBe(second.reviewKey);
+    await act(async () => { await h.result.current.start("Premiere"); });
+    expect(h.result.current.previewProgram?.reviewKey).toBe("ndi:existing-pass");
+    expect(JSON.parse(localStorage.getItem("saucebunny.ndiReviewPasses")!)).toEqual({ Premiere: "ndi:existing-pass" });
+  });
+  it("restores the same selection and opaque capture pass from native session metadata", async () => {
+    const service = native(); const h = renderHook(useNdiInput); await act(async () => {});
+    await act(async () => { await h.result.current.startCapture(capture()); });
+    const previous = h.result.current.previewProgram!;
+    const status = service.programs.get(previous.id)!;
+    h.unmount(); await act(async () => { await Promise.resolve(); });
+    // Model a still-open native session discovered by a new controller instance.
+    service.programs.set(previous.id, status);
+    mocks.invoke.mockClear();
+    const restored = renderHook(useNdiInput); await act(async () => {});
+    expect(restored.result.current.previewProgram).toMatchObject({ id: previous.id, reviewKey: previous.reviewKey, capture: capture() });
+    expect(restored.result.current.canShare).toBe(false);
+    await act(async () => { await restored.result.current.startCapture(capture()); });
+    expect(mocks.invoke.mock.calls.some(([name]) => name === "obs_start" || name === "ndi_start")).toBe(false);
+  });
+  it("rejects stale capture decode and telemetry after replacing the selected window", async () => {
+    native(); const h = renderHook(useNdiInput); await act(async () => {});
+    await act(async () => { await h.result.current.startCapture(capture()); });
+    const old = h.result.current.previewProgram!;
+    const next = capture(); next.window += 1;
+    await act(async () => { await h.result.current.startCapture(next); });
+    const current = h.result.current.previewProgram!;
+    act(() => h.result.current.previewFrameDecoded(old.id));
+    emit("ndi:state", { ...offStatus.telemetry, sourceId: old.id, phase: "error", error: "Stale capture error" });
+    expect(h.result.current.previewProgram?.id).toBe(current.id);
+    expect(h.result.current.previewState.error).toBeNull();
+    expect(h.result.current.canShare).toBe(false);
+    act(() => h.result.current.previewFrameDecoded(current.id));
+    expect(h.result.current.canShare).toBe(true);
+    expect(mocks.invoke).toHaveBeenCalledWith("ndi_stop", { id: old.id });
+    expect(mocks.invoke).not.toHaveBeenCalledWith("ndi_stop", { id: current.id });
   });
 });

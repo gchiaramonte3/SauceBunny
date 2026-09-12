@@ -23,7 +23,8 @@ export function RoomSourceBar({ hasSource, onLoadUrl, onImportFile, onClear }: {
   const submit = () => {
     const url = draft.trim();
     if (!url) return;
-    setDraft("");
+    // Keep the pasted address available for correction/retry. Accepting a
+    // command is not proof the source loaded successfully.
     onLoadUrl(url);
   };
   return (
@@ -44,6 +45,7 @@ export function RoomSourceBar({ hasSource, onLoadUrl, onImportFile, onClear }: {
           }}
         />
       </div>
+      {draft.trim() && <button type="button" className="cp-toolbar-disclosure" aria-label="Load source" onClick={submit}>Load</button>}
       {/* The labels are wrapped so they can be the NEXT thing to give way after
           the field, when the header runs out of room - see the container query
           in room.css. aria-label keeps both buttons named either way, so

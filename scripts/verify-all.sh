@@ -33,6 +33,7 @@ run "Unit tests"    npm test --silent
 run "Lint"          npm run lint --silent
 run "Rust compile"  cargo check --manifest-path src-tauri/Cargo.toml
 run "Rust tests"    cargo test --lib --manifest-path src-tauri/Cargo.toml
+run "OBS service API" cargo test --test obs_service --manifest-path src-tauri/Cargo.toml
 # CI runs this with -D warnings, and this script did not - so "all gates
 # passed" was reported for 98 commits while clippy was failing on two
 # pre-existing lints. A local gate that is a subset of the CI gate is a
@@ -46,6 +47,9 @@ run "Swift sidecar" swift build --package-path swift-sidecar
 # cue-breaking bug shipped through that gap twice. SrtCore is dependency-free
 # so this needs no models and runs in milliseconds.
 run "Swift tests" swift test --package-path swift-sidecar
+run "OBS capture configuration" npm run test:obs-capture --silent
+run "OBS internal packaging" npm run test:obs-packaging --silent
+run "NDI sender isolation" npm run test:ndi-sender --silent
 # CI runs this too, and this script did not - the same subset bug as clippy
 # below, found the same way. It takes a second and it is the check that stops
 # a strong-copyleft dependency being LINKED into an MIT app, which is the one

@@ -29,6 +29,13 @@
 .cp-preview-setup .cp-main { background: var(--bg-0); }
 .cp-preview-setup .cp-transport-side.right :is(.cp-icon-group, .cp-icon-divider) { display: none; }
 .cp-preview-setup .cp-preview-head { margin: var(--s-3) var(--s-3) var(--s-3); padding: var(--s-3); }
+.cp-preview-head { flex-wrap: wrap; }
+.cp-preview-head > .cp-room-title { flex: 0 0 auto; }
+.cp-preview-head > .cp-toolbar-disclosure { flex: 0 0 auto; margin-left: auto; }
+@container (max-width: 620px) {
+  .cp-preview-head > .cp-room-source-bar { order: 1; flex: 1 1 100%; width: auto; margin: 0; }
+  .cp-preview-head .cp-room-source-field { max-width: none; }
+}
 .cp-review-tools .cp-view-coreview { height: 100%; min-height: 0; outline: none; }
 .cp-connect-premiere { white-space: nowrap; min-width: 0; }
 .cp-room .cp-view-clip .cp-toolbar { display: none; }
@@ -48,13 +55,18 @@
 .cp-room .cp-transport-side.right .cp-icon-divider { display: none; }
 /* Keep every existing room/audio control reachable when the note rail takes
    width. Only the control cluster wraps; the room's panel widths do not move. */
-.cp-room .cp-monitor-wrap { container-type: inline-size; }
+:is(.cp-room, .cp-preview-setup) .cp-monitor-wrap { container-type: inline-size; }
 @container (max-width: 1050px) {
-  .cp-room .cp-transport { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); row-gap: var(--s-2); }
-  .cp-room .cp-transport-side.right { display: contents; }
-  .cp-room .cp-transport-media { grid-column: 3; grid-row: 1; justify-self: end; }
+  :is(.cp-room, .cp-preview-setup) .cp-transport { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); row-gap: var(--s-2); }
+  :is(.cp-room, .cp-preview-setup) .cp-transport-side.right { display: contents; }
+  :is(.cp-room, .cp-preview-setup) .cp-transport-media { grid-column: 3; grid-row: 1; justify-self: end; }
   .cp-room .cp-room-bar { grid-column: 1 / -1; grid-row: 2; justify-self: end; margin-left: 0; padding-left: 0; border-left: 0; }
-  .cp-room .cp-transport-media .cp-tc.duration { display: none; }
+  :is(.cp-room, .cp-preview-setup) .cp-transport-media .cp-tc.duration { display: none; }
+}
+/* Preserve hit targets and type when the notes rail leaves a genuinely narrow
+   file transport. Its utilities get their own row instead of covering Play. */
+@container (max-width: 620px) {
+  .cp-preview-setup .cp-transport:not(.cp-transport-live) .cp-transport-media { grid-column: 1 / -1; grid-row: 2; }
 }
 
 /* Live status uses the vacated play-control space; room controls may keep
@@ -969,7 +981,7 @@
   flex: 0 1 auto;
   width: 420px;
 }
-.cp-room-source-bar > .btn { flex: 0 0 auto; }
+.cp-room-source-bar > :is(.btn, .cp-toolbar-disclosure) { flex: 0 0 auto; }
 /* Last to give way, and only once everything else already has. Both buttons
    keep an aria-label, so this costs the icon's meaning to nobody. */
 @container (max-width: 480px) {

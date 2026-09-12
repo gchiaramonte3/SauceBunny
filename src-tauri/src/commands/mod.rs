@@ -54,6 +54,7 @@ pub use review_grant::*;
 // Tier B bridge (no invoke commands of its own; used by stream_proxy + session).
 pub mod peer_stream;
 pub mod ndi;
+pub mod obs;
 pub mod premiere;
 // Tier B quality ladder (host half of src/lib/stream-rung.ts).
 pub mod rung;
