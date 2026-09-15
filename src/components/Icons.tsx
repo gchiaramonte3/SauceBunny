@@ -64,6 +64,12 @@ export const IconSkipForward = (p: IconProps) => (
     <line x1="19" y1="4" x2="19" y2="20" />
   </Icon>
 );
+export const IconRewind = (p: IconProps) => (
+  <Icon {...p}><path d="M11 5L2 12l9 7V5zm11 0l-9 7 9 7V5z" fill="currentColor" stroke="none" /></Icon>
+);
+export const IconFastForward = (p: IconProps) => (
+  <Icon {...p}><path d="M2 5l9 7-9 7V5zm11 0l9 7-9 7V5z" fill="currentColor" stroke="none" /></Icon>
+);
 export const IconChevronDown = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="6 9 12 15 18 9" />

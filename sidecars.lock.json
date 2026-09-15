@@ -30,12 +30,21 @@
       "sha256": "436a155dd81bd692a192ab429fb3f2e463057f303ad0f47662390ab95994304a",
       "bytes": 20498240
     },
+    "saucebunny-aaf": {
+      "kind": "source",
+      "source": "aaf-sidecar/ in this repo, CPython 3.12.14, pyaaf2 1.7.1, PyInstaller 6.22.3",
+      "publisher_checksums": "n/a (compiled output is not reproducible)",
+      "sha256": "0c322f7ff941204ab3d39d7d53120e35c34773e97cc1804d007dfebef45ca6ce",
+      "bytes": 9728832,
+      "note": "2026-09-14: rebuilt current read-only PCM index helper for internal build 2026091401 using pinned CPython 3.12.14, pyaaf2 1.7.1 and PyInstaller 6.22.3 with stable Apple Development signing. Synthetic reader tests, collected Mach-O audit and clean-PATH version smoke passed. Python/pyaaf2 remain bundled; no upstream dependency update."
+    },
     "saucebunny-capture": {
       "kind": "source",
       "source": "swift-sidecar/ in this repo",
       "publisher_checksums": "n/a",
-      "sha256": "f05145863980ca64f76cd02e4469a205d2c666fdbc1370434043962c00a29e9c",
-      "bytes": 173392
+      "sha256": "80820eef6a5557011475aaeeb658ea29aeab5652bd7278ced61c1d161d197fd7",
+      "bytes": 304224,
+      "note": "Rebuilt first-party capture helper on 2026-09-13 with retained stream resources and owned async suspension; optimized no-capture post-metadata lifetime regression passes."
     },
     "saucebunny-diarize": {
       "kind": "source",

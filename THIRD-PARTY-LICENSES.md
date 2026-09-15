@@ -52,6 +52,19 @@ above still apply. It is not included in current DMGs.
 
 ---
 
+## AAF reader
+
+The `saucebunny-aaf` subprocess contains the first-party MIT reader, pyaaf2
+1.7.1, CPython 3.12.14, and the PyInstaller 6.22.3 bootloader/runtime. The
+component notices, including the PyInstaller bootloader exception and Python's
+incorporated notices, are retained in
+[`aaf-sidecar/THIRD-PARTY-LICENSES.txt`](aaf-sidecar/THIRD-PARTY-LICENSES.txt).
+That notice file is included both in the helper and in the app's resources.
+The build recipe and pinned build dependencies are in `scripts/build-aaf.sh`
+and `aaf-sidecar/requirements-build.txt`.
+
+---
+
 ## NDI runtime (proprietary, optional feature)
 
 NDI-enabled macOS builds include the standard NDI 6.3.2 runtime as

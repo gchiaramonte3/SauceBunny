@@ -14,6 +14,20 @@ const base = { status: "empty" as const, metadata: null, errorDetail: null, aspe
 beforeEach(() => vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+it("replaces only the empty content and keeps source choices inert under a shared picture", () => {
+  const props = { ...base, resumeTitle: "Saved edit", onResume: vi.fn(),
+    emptyContent: <button>Choose a screen</button> };
+  const view = render(<Monitor {...props} />);
+  expect(screen.queryByText("Paste a URL or drop a file.")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Resume Saved edit" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Choose a screen" })).toBeTruthy();
+  view.rerender(<Monitor {...props} pictureCovered />);
+  expect(screen.queryByRole("button", { name: "Choose a screen" })).toBeNull();
+  expect(view.container.querySelector(".cp-empty-custom")?.hasAttribute("inert")).toBe(true);
+  view.rerender(<Monitor {...props} emptyContent={undefined} />);
+  expect(screen.getByRole("button", { name: "Resume Saved edit" })).toBeTruthy();
+});
+
 it("removes covered file actions from accessibility without hiding program controls", () => {
   const props = { ...base, resumeTitle: "Saved edit", onResume: vi.fn(), stageOverlay: <button>Program audio</button> };
   const h = render(<Monitor {...props}/>);

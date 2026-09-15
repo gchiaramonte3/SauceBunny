@@ -236,12 +236,47 @@ impl Program {
         }
         self.changed.notify_all();
     }
+    /// Native overlay actions belong only to this still-owned producer. No
+    /// metadata beyond its opaque local ID reaches the frontend event.
+    pub(super) fn request_capture_edit(&self) {
+        if self.is_stopped() || !matches!(&self.capture, Some(ObsSelection::Display(_))) { return; }
+        if let Some(app) = &self.app {
+            let _ = app.emit("obs:edit-source", super::obs::ObsEditSource { source_id:self.id.clone() });
+        }
+    }
+    pub(super) fn capture_stopped(&self) {
+        if self.is_stopped() { return; }
+        // Revoke media and raw-output access immediately. Completion still
+        // waits for the service's source teardown / process-reap barrier.
+        self.stop();
+        let state = NdiTelemetry { source_id:self.id.clone(), phase:NdiPhase::Off, ..NdiTelemetry::default() };
+        if let Ok(mut b) = self.buffer.lock() {
+            b.status = state.clone(); b.status_seq += 1;
+            b.telemetry = serde_json::to_vec(&state).ok().map(Arc::from);
+        }
+        if let Some(app) = &self.app {
+            let _ = app.emit("ndi:state", state);
+            let app = app.clone(); let id = self.id.clone();
+            tauri::async_runtime::spawn(async move { let _ = super::session::ndi_source_stopped(&app, &id).await; });
+        }
+        self.changed.notify_all();
+    }
     pub(super) fn is_stopped(&self) -> bool { self.stopped.load(Ordering::Acquire) }
     pub(super) fn is_application_capture(&self) -> bool { self.capture.is_some() }
+    #[cfg(feature = "obs-audio-acceptance")]
+    pub(super) fn acceptance_display_audio(&self) -> Option<bool> {
+        if self.is_stopped() || self.room.load(Ordering::Acquire) != 0 ||
+            self.publication_revision.load(Ordering::Acquire) != 0 { return None; }
+        match &self.capture { Some(ObsSelection::Display(value)) => Some(value.audio), _ => None }
+    }
     #[cfg(test)]
     pub(super) fn retained_media_metrics(&self) -> (usize, usize, u64) {
         let buffer = self.buffer.lock().unwrap_or_else(|poison|poison.into_inner());
         (buffer.segments.len(), buffer.segments.iter().map(|(_, data)|data.len()).sum(), buffer.next)
+    }
+    #[cfg(test)]
+    pub(super) fn phase(&self) -> NdiPhase {
+        self.buffer.lock().unwrap_or_else(|poison|poison.into_inner()).status.phase
     }
     #[cfg(any(sauce_ndi, test))]
     fn timing_token(&self) -> u64 {
@@ -624,9 +659,21 @@ pub fn ndi_remote_source(id: String) -> Result<String, AppError> {
 
 /// Framed binary protocol: kind u8 (1 init, 2 complete media), length u32 BE,
 /// payload. Every media record begins at an independently decodable boundary.
-pub struct ProgramReader { program: Arc<Program>, publication: Option<Arc<ProgramPublication>>, initialized: bool, after: Option<u64>, bytes: Arc<[u8]>, offset: usize, status_seq:u64 }
+pub struct ProgramReader { program: Arc<Program>, publication: Option<Arc<ProgramPublication>>, initialized: bool, after: Option<u64>, bytes: Arc<[u8]>, offset: usize, status_seq:u64,
+    #[cfg(feature = "obs-audio-acceptance")]
+    acceptance_limit: Option<(Arc<AtomicBool>, std::time::Instant)>,
+}
 impl ProgramReader {
-    pub fn new(program: Arc<Program>) -> Self { Self { program, publication:None, initialized:false, after:None, bytes:Arc::from([]), offset:0, status_seq:0 } }
+    pub fn new(program: Arc<Program>) -> Self { Self { program, publication:None, initialized:false, after:None, bytes:Arc::from([]), offset:0, status_seq:0,
+        #[cfg(feature = "obs-audio-acceptance")]
+        acceptance_limit: None,
+    } }
+    /// Same production reader, with an internal observer's bounded cancellation.
+    /// No producer state, capture cadence or other reader is changed.
+    #[cfg(feature = "obs-audio-acceptance")]
+    pub(crate) fn acceptance(program: Arc<Program>, cancelled: Arc<AtomicBool>, deadline: std::time::Instant) -> Self {
+        Self { acceptance_limit: Some((cancelled, deadline)), ..Self::new(program) }
+    }
     pub(crate) fn remote(publication: Arc<ProgramPublication>) -> Self {
         Self { publication:Some(publication.clone()), ..Self::new(publication.program.clone()) }
     }
@@ -635,6 +682,13 @@ impl ProgramReader {
         let mut b = self.program.buffer.lock().map_err(|_| io::Error::other("Program lock unavailable"))?;
         let deadline=std::time::Instant::now()+Duration::from_secs(10);
         loop {
+            #[cfg(feature = "obs-audio-acceptance")]
+            if self.acceptance_limit.as_ref().is_some_and(|(cancelled, limit)|
+                cancelled.load(Ordering::Acquire) || std::time::Instant::now() >= *limit) {
+                // Read::read_exact retries Interrupted forever. This observer
+                // must terminate its blocking worker, not request another read.
+                return Err(io::Error::new(io::ErrorKind::ConnectionAborted, "Diagnostic observation ended"));
+            }
             if self.revoked() { return Ok(false); }
             if self.program.stopped.load(Ordering::Relaxed) && self.status_seq==b.status_seq { return Ok(false); }
             if std::time::Instant::now()>=deadline { return Err(io::Error::new(io::ErrorKind::TimedOut,"No encoded NDI frames arrived")); }
@@ -658,7 +712,10 @@ impl ProgramReader {
                 if let Some(seq) = seq { self.after = Some(seq); }
                 return Ok(true);
             }
-            b = self.program.changed.wait_timeout(b,Duration::from_secs(1)).map_err(|_|io::Error::other("Program wait failed"))?.0;
+            let wait = Duration::from_secs(1);
+            #[cfg(feature = "obs-audio-acceptance")]
+            let wait = if self.acceptance_limit.is_some() { Duration::from_millis(50) } else { wait };
+            b = self.program.changed.wait_timeout(b,wait).map_err(|_|io::Error::other("Program wait failed"))?.0;
         }
     }
 }
@@ -672,9 +729,70 @@ impl Read for ProgramReader {
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[cfg(feature = "obs-audio-acceptance")]
+    #[test]
+    fn audio_acceptance_observer_cancel_and_deadline_leave_the_producer_untouched() {
+        let program = Program::new("observer-fixture".into(), "Fixture".into(), None);
+        let cancel = Arc::new(AtomicBool::new(true));
+        let mut reader = ProgramReader::acceptance(program.clone(), cancel,
+            std::time::Instant::now() + Duration::from_secs(12));
+        assert_eq!(reader.read_exact(&mut [0; 1]).unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
+        let mut expired = ProgramReader::acceptance(program.clone(), Arc::new(AtomicBool::new(false)),
+            std::time::Instant::now());
+        assert_eq!(expired.read_exact(&mut [0; 1]).unwrap_err().kind(), io::ErrorKind::ConnectionAborted);
+        assert!(!program.is_stopped());
+        program.publish(1, b"init");
+        program.publish(2, b"media");
+        let mut ordinary = ProgramReader::new(program.clone());
+        let mut packet = [0; 9];
+        ordinary.read_exact(&mut packet).unwrap();
+        assert_eq!(&packet, b"\x01\0\0\0\x04init");
+        assert!(!program.is_stopped());
+        assert_eq!(program.retained_media_metrics(), (1, 5, 1));
+    }
+    #[cfg(feature = "obs-audio-acceptance")]
+    #[test]
+    fn audio_acceptance_observer_consumes_exact_production_records_without_mutation() {
+        let program = Program::new("observer-fixture".into(), "Fixture".into(), None);
+        program.publish(1, b"init"); program.publish(2, b"media");
+        let mut ordinary = ProgramReader::new(program.clone());
+        let mut observer = ProgramReader::acceptance(program.clone(), Arc::new(AtomicBool::new(false)),
+            std::time::Instant::now() + Duration::from_secs(12));
+        for length in [9, 10] {
+            let mut expected = vec![0; length]; let mut observed = vec![0; length];
+            ordinary.read_exact(&mut expected).unwrap(); observer.read_exact(&mut observed).unwrap();
+            assert_eq!(expected, observed);
+        }
+        assert!(!program.is_stopped());
+        assert_eq!(program.retained_media_metrics(), (1, 5, 1));
+    }
+    #[cfg(feature = "obs-audio-acceptance")]
+    #[test]
+    fn audio_acceptance_requires_private_never_published_display_origin() {
+        use super::super::obs::{ObsDisplaySelection, ObsDisplayKind, ObsDisplayGeometry, ObsCrop};
+        let display = |audio| Some(ObsSelection::Display(ObsDisplaySelection {
+            kind: ObsDisplayKind::Display, display_uuid: "00000000-0000-0000-0000-000000000001".into(), display_id: 1,
+            geometry: ObsDisplayGeometry { x:0.0, y:0.0, width:1920, height:1080, pixel_width:1920, pixel_height:1080 },
+            crop: ObsCrop { x:0.0, y:0.0, width:1.0, height:1.0 }, audio,
+        }));
+        for audio in [false, true] {
+            let program = Program::with_origin("fixture".into(), "Fixture".into(), None, display(audio));
+            assert_eq!(program.acceptance_display_audio(), Some(audio));
+            program.bind_room(1); assert_eq!(program.acceptance_display_audio(), None);
+            program.room.store(0, Ordering::Release);
+            program.publication_revision.store(1, Ordering::Release);
+            assert_eq!(program.acceptance_display_audio(), None);
+            program.publication_revision.store(0, Ordering::Release);
+            program.stop(); assert_eq!(program.acceptance_display_audio(), None);
+        }
+        for origin in [None, Some(obs_selection())] {
+            let program = Program::with_origin("fixture".into(), "Fixture".into(), None, origin);
+            assert_eq!(program.acceptance_display_audio(), None);
+        }
+    }
     fn obs_selection() -> ObsSelection {
-        ObsSelection { application:"com.example.editor".into(), process:314, window:159265,
-            crop:super::super::obs::ObsCrop { x:0.125, y:0.25, width:0.5, height:0.625 } }
+        ObsSelection::Window(super::super::obs::ObsWindowSelection { application:"com.example.editor".into(), process:314, window:159265, audio:None,
+            crop:super::super::obs::ObsCrop { x:0.125, y:0.25, width:0.5, height:0.625 } })
     }
     #[test] fn started_descriptor_preserves_identity_and_proxy_route_for_both_origins() {
         let base="http://127.0.0.1:12345/private-capability";
@@ -691,7 +809,9 @@ impl Read for ProgramReader {
     }
     #[test] fn obs_provenance_survives_exact_status_without_default_ndi_adoption() {
         let selection=obs_selection();
-        let mut other_selection=selection.clone();other_selection.window+=1;other_selection.crop.x=0.25;
+        let mut other_selection=selection.clone();
+        let ObsSelection::Window(other)=&mut other_selection else { panic!("window fixture"); };
+        other.window+=1;other.crop.x=0.25;
         let mut all=Programs::default();
         let captured=Program::with_origin("captured".into(),"Same title".into(),None,Some(selection.clone()));
         all.insert(captured,0).unwrap();

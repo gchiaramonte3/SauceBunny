@@ -2,15 +2,18 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { invoke } from "@tauri-apps/api/core";
 import { createPortal } from "react-dom";
 import { useModalFocus } from "../hooks/use-modal-focus";
+import { useCapturePreviewReveal } from "../hooks/use-capture-preview-reveal";
 import { loadJson, saveJson } from "../lib/storage";
 import { formatError } from "../lib/error-format";
 import type { NdiDiscovery, NdiInput } from "../hooks/use-ndi-input";
 import { PremiereConnectionStatus } from "./PremiereConnectionStatus";
 import { AvidNdiSetup } from "./AvidNdiSetup";
-import { ObsCaptureControls } from "./ObsCaptureControls";
+import { ObsCaptureControls, type CaptureMode } from "./ObsCaptureControls";
+import { CaptureSourceTabs } from "./CaptureSourcePicker";
 import { ObsBroadcastControls } from "./ObsBroadcastControls";
 import type { ObsBroadcast } from "../hooks/use-obs-broadcast";
 import type { ObsSelection } from "../bindings/ObsSelection";
+import { copyCaptureSelection, isDisplayCapture, sameProgramSource } from "../lib/ndi-program-source";
 import type { NdiPlaybackRecovery } from "./NdiProgramMonitor";
 import "../styles/ndi-input.css";
 
@@ -35,28 +38,89 @@ type Props = {
   canManageSource?: boolean;
   previewVisible?: boolean;
   broadcast?: ObsBroadcast;
+  /** Explicit desktop region Edit, scoped to a still-owned capture source. */
+  editRequest?: { sourceId: string; serial: number };
+  /** An explicit Review entry point chooses a category, never a capture. */
+  sourceRequest?: { kind: "ndi" | "screen" | "window" | "region"; serial: number };
+};
+
+type SourceTab = "ndi" | CaptureMode;
+const SOURCE_TABS: { id: SourceTab; label: string }[] = [
+  { id: "ndi", label: "NDI" }, { id: "screen", label: "Screen" },
+  { id: "window", label: "Window" }, { id: "region", label: "Region" },
+];
+const captureTab = (selection: ObsSelection): CaptureMode => {
+  if (!isDisplayCapture(selection)) return "window";
+  const { crop } = selection;
+  return crop.x === 0 && crop.y === 0 && crop.width === 1 && crop.height === 1 ? "screen" : "region";
 };
 
 /** Connection controls only. Picture and audio belong to the existing Preview
  * stage, so opening or closing this panel cannot replace its decoder. */
-export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0, onPreviewRequested, onShared, onReconnectPicture, onCompanionSetup, returnFocus, recovery, canManageSource = true, previewVisible = true, broadcast }: Props) {
+export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0, onPreviewRequested, onShared, onReconnectPicture, onCompanionSetup, returnFocus, recovery, canManageSource = true, previewVisible = true, broadcast, editRequest, sourceRequest }: Props) {
   const inspectingPreview = previewVisible && !!input.previewProgram;
   const state = inspectingPreview ? input.previewState : input.state;
   const currentProgram = inspectingPreview ? input.previewProgram : input.program;
-  const [sourceKind, setSourceKind] = useState<"ndi" | "capture">("ndi");
-  const [captureDraft, setCaptureDraft] = useState<{ sourceId: string | null; selection: ObsSelection }>();
+  const [sourceKind, setSourceKind] = useState<SourceTab>("ndi");
+  const [captureFooter, setCaptureFooter] = useState<HTMLDivElement | null>(null);
+  const [captureDrafts, setCaptureDrafts] = useState<Partial<Record<CaptureMode, ObsSelection>>>({});
+  const requestedCapture = useRef<{ selection: ObsSelection; tab: CaptureMode; restoreDraft: boolean } | null>(null);
+  const editingCaptureDraft = useRef(false);
+  useEffect(() => { if (!open) { requestedCapture.current = null; editingCaptureDraft.current = false; } }, [open]);
   const restoredSource = useRef<string | null>(null);
   useEffect(() => {
     if (!currentProgram || restoredSource.current === currentProgram.id) return;
     restoredSource.current = currentProgram.id;
-    setSourceKind(currentProgram.capture ? "capture" : "ndi");
-    if (currentProgram.capture) setCaptureDraft({ sourceId: currentProgram.id, selection: currentProgram.capture });
+    // Desktop Edit owns this draft until the user leaves or previews it. An
+    // earlier authorized startup may finish, but must not replace these edits.
+    if (editingCaptureDraft.current) return;
+    const capture = currentProgram.capture;
+    const requested = requestedCapture.current;
+    const matchesRequest = !!capture && !!requested && sameProgramSource(
+      { kind: "capture", selection: capture }, { kind: "capture", selection: requested.selection });
+    // Revealing the private stage can expose the previous candidate while
+    // native startup drains it. That intermediate picture is not a new draft.
+    if (requested && !matchesRequest) return;
+    const tab = capture ? matchesRequest ? requested!.tab : captureTab(capture) : "ndi";
+    // An explicitly started candidate must not pull the user back to a tab
+    // they left during startup. External source replacements still restore it.
+    if (!matchesRequest) setSourceKind(tab);
+    if (capture && tab !== "ndi" && (!matchesRequest || requested?.restoreDraft)) {
+      setCaptureDrafts(drafts => ({ ...drafts, [tab]: copyCaptureSelection(capture) }));
+    }
+    requestedCapture.current = null;
   }, [currentProgram]);
   const [discovery, setDiscovery] = useState<NdiDiscovery | null>(null);
   const [selected, setSelected] = useState(() => loadJson("saucebunny.ndiLastSource", ""));
   const [discovering, setDiscovering] = useState(false);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Preview may reuse an already-published source after draining the private
+  // candidate. Readiness still belongs to the exact explicitly requested source.
+  const previewReveal = useCapturePreviewReveal({ open, candidate: input.snapshot.candidate ?? input.snapshot.published,
+    busy: !!input.snapshot.busy, error: input.snapshot.error, onReveal: onClose });
+  const cancelReveal = previewReveal.cancel;
+  const appliedSourceRequest = useRef<number | null>(null);
+  useEffect(() => {
+    if (!open || !canManageSource || !sourceRequest || appliedSourceRequest.current === sourceRequest.serial) return;
+    appliedSourceRequest.current = sourceRequest.serial;
+    // Keep an already-started request's identity so its late completion cannot
+    // restore the old category over this explicit choice.
+    cancelReveal(); editingCaptureDraft.current = false;
+    setSourceKind(sourceRequest.kind);
+  }, [open, canManageSource, sourceRequest, cancelReveal]);
+  const appliedEdit = useRef<number | null>(null);
+  useEffect(() => {
+    if (!open || !canManageSource || !editRequest || appliedEdit.current === editRequest.serial) return;
+    appliedEdit.current = editRequest.serial;
+    const target = [input.snapshot.candidate, input.snapshot.published].find(source => source?.id === editRequest.sourceId && !source.retired);
+    const selection = target?.capture;
+    if (!selection || !isDisplayCapture(selection)) return;
+    cancelReveal(); requestedCapture.current = null; editingCaptureDraft.current = true;
+    setCaptureDrafts(drafts => ({ ...drafts, region: copyCaptureSelection(selection) }));
+    setSourceKind("region");
+  }, [open, canManageSource, editRequest, input.snapshot.candidate, input.snapshot.published, cancelReveal]);
+  const close = () => { previewReveal.cancel(); requestedCapture.current = null; editingCaptureDraft.current = false; onClose(); };
   const dialog = useRef<HTMLElement>(null);
   useModalFocus(open, dialog, returnFocus);
   const generation = useRef(0), actionPending = useRef(false);
@@ -90,7 +154,8 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
     finally { actionPending.current = false; setActing(false); }
   };
 
-  const ready = input.snapshot.candidate?.decodedReady && input.snapshot.candidate.encodedReady;
+  const observedProgram = [input.snapshot.candidate, input.snapshot.published].find(program => program?.id === currentProgram?.id);
+  const ready = observedProgram?.decodedReady && observedProgram.encodedReady;
   const pictureError = state.error || input.snapshot.error;
   const status = currentProgram?.stopped ? "Sharing stopped · Last picture retained"
     : pictureError ? "Picture needs attention"
@@ -101,33 +166,46 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
   const selectedAvailable = !!discovery?.sources.some(source => source.name === selected);
   const canPreview = !!(selectedAvailable && discovery?.bridgeCompiled && discovery.runtime === "ready"
     && !discovering && !acting && !input.snapshot.busy);
+  const captureMode = sourceKind === "ndi" ? null : sourceKind;
+  const tabsDisabled = acting || input.snapshot.busy === "publishing" || input.snapshot.busy === "stopping";
 
   // Keep discovery/selection state mounted, but only expose a dialog while open.
   // No media element lives in this portal; closing it cannot reset playback.
   if (!open) return null;
   return createPortal(<div className="cp-modal-backdrop"
-    onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section ref={dialog} tabIndex={-1} id={NDI_INPUT_PANEL_ID} className="cp-modal cp-ndi-input"
-      role="dialog" aria-modal="true" aria-label={sourceKind === "capture" ? "Application capture settings" : "NDI settings"}
-      onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onClose(); } }}>
+    onClick={event => { if (event.target === event.currentTarget) close(); }}>
+    <section ref={dialog} tabIndex={-1} id={NDI_INPUT_PANEL_ID} className={`cp-modal cp-ndi-input${captureMode ? " cp-ndi-input-capture" : ""}`}
+      role="dialog" aria-modal="true" aria-label="Source settings"
+      onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); close(); } }}>
     <header className="cp-ndi-input-header">
-      <h2>{sourceKind === "capture" ? "Application capture" : "NDI"}</h2><span className="cp-premiere-beta">Beta</span>
-      <button className="cp-modal-close" type="button" onClick={onClose} aria-label={sourceKind === "capture" ? "Close application capture settings" : "Close NDI settings"}>✕</button>
+      <h2>Source</h2><span className="cp-premiere-beta">Beta</span>
+      <button className="cp-modal-close" type="button" onClick={close} aria-label="Close source settings">✕</button>
     </header>
-    <div className="cp-ndi-input-body">
-      <p className="cp-ndi-input-intro">Preview picture and audio from your editor. Playback stays at the source.</p>
-      {canManageSource && input.startCapture && <>
-        <div className="cp-ndi-input-source-label"><label htmlFor="preview-input-kind">Input</label></div>
-        <select id="preview-input-kind" className="cp-select" value={sourceKind} disabled={acting || !!input.snapshot.busy}
-          onChange={event => setSourceKind(event.target.value as "ndi" | "capture")}>
-          <option value="ndi">NDI</option><option value="capture">Application window</option>
-        </select>
-      </>}
-      {canManageSource && sourceKind === "capture" && input.startCapture && <ObsCaptureControls
-        key={currentProgram?.capture ? `capture:${currentProgram.id}` : "capture-draft"} open={open} disabled={acting || !!input.snapshot.busy}
-        initialSelection={captureDraft?.sourceId === (currentProgram?.id ?? null) ? captureDraft.selection : currentProgram?.capture}
-        onSelectionChange={selection => setCaptureDraft({ sourceId: currentProgram?.id ?? null, selection })} refreshRequest={refreshRequest}
-        onPreview={async selection => { onPreviewRequested?.(); await input.startCapture!(selection); }}/>}
+    {canManageSource && input.startCapture && <div className="cp-ndi-input-tabs">
+      <CaptureSourceTabs label="Source type" selected={sourceKind}
+        tabs={SOURCE_TABS.map(tab => ({ ...tab, panelId: `cp-live-source-${tab.id}`, disabled: tabsDisabled }))}
+        onSelect={kind => { if (SOURCE_TABS.some(tab => tab.id === kind)) { previewReveal.cancel(); editingCaptureDraft.current = false; setSourceKind(kind as SourceTab); } }}/>
+    </div>}
+    <div className="cp-ndi-input-body" id={`cp-live-source-${sourceKind}`} role="tabpanel" aria-label={SOURCE_TABS.find(tab => tab.id === sourceKind)?.label}>
+      {sourceKind === "ndi" && <p className="cp-ndi-input-intro">Preview picture and audio from your editor. Playback stays at the source.</p>}
+      {canManageSource && captureMode && input.startCapture && <ObsCaptureControls
+        key={`${captureMode}:${currentProgram?.id ?? "draft"}`} mode={captureMode} open={open} disabled={acting || !!input.snapshot.busy} footerTarget={captureFooter}
+        reportedPreviewError={error || pictureError || recovery?.error}
+        initialSelection={captureDrafts[captureMode]}
+        onSelectionChange={selection => {
+          previewReveal.cancel();
+          if (requestedCapture.current?.tab === captureMode) requestedCapture.current.restoreDraft = false;
+          setCaptureDrafts(drafts => ({ ...drafts, [captureMode]: copyCaptureSelection(selection) }));
+        }} refreshRequest={refreshRequest}
+        onPreview={async selection => {
+          editingCaptureDraft.current = false;
+          const request = { selection: copyCaptureSelection(selection), tab: captureMode, restoreDraft: true };
+          requestedCapture.current = request;
+          onPreviewRequested?.();
+          try { await previewReveal.preview(selection, () => input.startCapture!(selection)); }
+          catch (cause) { if (requestedCapture.current === request) requestedCapture.current = null; throw cause; }
+        }}/>
+      }
       {canManageSource && sourceKind === "ndi" && <>
         <div className="cp-ndi-input-source-label">
           <label htmlFor="ndi-input-source">NDI source</label>
@@ -148,7 +226,7 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
         {discovery?.runtime === "ready" && discovery.sources.length === 0 && <p>No NDI source found. Enable output in the source application, then refresh. Setup help is below.</p>}
         {discovery?.error && discovery.runtime === "ready" && <p role="alert">{discovery.error}</p>}
         <button type="button" className="btn cp-ndi-input-preview" disabled={!canPreview}
-          onClick={() => { onPreviewRequested?.(); void run(() => input.start(selected)); }}>Preview source</button>
+          onClick={() => { requestedCapture.current = null; editingCaptureDraft.current = false; onPreviewRequested?.(); void run(() => input.start(selected)); }}>Preview source</button>
       </>}
         {(currentProgram || sourceKind === "ndi") && <div className="cp-ndi-input-connection">
           {currentProgram && <strong title={currentProgram.name}>{currentProgram.name}</strong>}
@@ -175,17 +253,20 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
           ? <ObsBroadcastControls broadcast={broadcast}
               disabled={!!input.snapshot.busy || currentProgram.stopped || !!pictureError || state.connectionCount === 0}/>
           : !currentProgram?.capture && sourceKind === "ndi" && <p>Not shared with room refers to the Sauce Bunny session, not the source application’s NDI broadcast on your network.</p>}
-        <div className="cp-ndi-input-actions">
-          {canManageSource && input.previewProgram && <button type="button" className="btn btn-ghost"
-            disabled={acting || input.snapshot.busy === "publishing" || input.snapshot.busy === "stopping"}
-            onClick={() => void run(input.cancelPreview)}>Cancel preview</button>}
-          <button type="button" className="btn" onClick={onClose}>Done</button>
-        </div>
       {canManageSource && sourceKind === "ndi" && <>
         <AvidNdiSetup />
         <button type="button" className="cp-toolbar-disclosure cp-ndi-input-settings" onClick={onCompanionSetup}
           disabled={!onCompanionSetup}>Install or set up Premiere…</button>
       </>}
     </div>
+    <footer className="cp-ndi-input-footer">
+      {canManageSource && captureMode && input.startCapture && <div ref={setCaptureFooter}/>}
+      <div className="cp-ndi-input-actions">
+        {canManageSource && input.previewProgram && <button type="button" className="btn btn-ghost"
+          disabled={acting || input.snapshot.busy === "publishing" || input.snapshot.busy === "stopping"}
+          onClick={() => { previewReveal.cancel(); requestedCapture.current = null; editingCaptureDraft.current = false; void run(input.cancelPreview); }}>Cancel preview</button>}
+        <button type="button" className="btn" onClick={close}>Done</button>
+      </div>
+    </footer>
   </section></div>, document.body);
 }

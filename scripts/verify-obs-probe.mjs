@@ -28,6 +28,8 @@ await stat(fixture);
 const machOBinaries = inspectRuntime(bundle).components.length;
 const health = await run(join(bundle, 'MacOS/saucebunny-obs-capture-health-tests'), [bundle], { timeout: 15000 });
 assert(health.stdout.includes('Capture-health tests passed'), 'Native source-failure gate did not pass');
+const exclusions = await run(join(bundle, 'MacOS/saucebunny-obs-region-exclusion-tests'), [bundle], { timeout: 15000 });
+assert(exclusions.stdout.includes('parent-audio exclusion resolvers passed'), 'Native parent/overlay exclusion gate did not pass');
 for (const [name, args] of [
   ['probe', [join(resultDir, 'missing-runtime')]],
   ['media-probe', [bundle, join(resultDir, 'missing-fixture')]],

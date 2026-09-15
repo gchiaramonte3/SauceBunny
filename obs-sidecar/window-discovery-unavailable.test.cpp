@@ -8,4 +8,8 @@ namespace sauce_obs {
 WindowDiscovery windowsForApplication(const std::string &, int32_t) {
     std::exit(90);
 }
+WindowDiscovery allWindowsForCapture(int32_t) {
+    std::exit(91);
+}
+DisplayDiscovery displaysForCapture() { std::exit(92); }
 } // namespace sauce_obs

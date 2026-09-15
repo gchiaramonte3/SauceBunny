@@ -15,10 +15,11 @@ import { associatePremiereInput, getPremiereLink, observePremiereLink, refreshPr
 import { capturePremiereAnchor, type PremiereContext } from "../lib/premiere-notes";
 import { createReviewEnvelope } from "../lib/review-delivery";
 import type { PremiereMarkerRecord } from "../bindings/PremiereMarkerRecord";
+import { selectRoomScreenStream } from "../lib/room-screen-stream";
 
 const mocks = vi.hoisted(() => ({
   listeners: new Map<string, Set<(event: { payload: unknown }) => void>>(),
-  invoke: vi.fn(), persist: vi.fn(),
+  invoke: vi.fn(), persist: vi.fn(), shareOpen: vi.fn(),
   savedListeners: new Set<(doc: ReviewDoc) => void>(),
   mesh: {
     remoteStreams: new Map(), remoteProgramStreams: new Map(), peerStates: new Map(), peerMutedForMe: new Set(),
@@ -36,6 +37,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   }),
 }));
 vi.mock("./use-rtc-mesh", () => ({ useRtcMesh: () => mocks.mesh }));
+vi.mock("../lib/share-stream", () => ({ openShareStream: (...args: unknown[]) => mocks.shareOpen(...args) }));
 vi.mock("../lib/review-store", async (original) => ({
   ...await original<typeof import("../lib/review-store")>(),
   persistReviewDoc: async (doc: ReviewDoc) => {
@@ -105,10 +107,69 @@ async function mount(role: "host" | "peer", kind: "web" | "ndi" = "web") {
 beforeEach(() => {
   setPremiereRoom("off", ""); setPremiereVisibleInput(null);
   vi.useFakeTimers(); localStorage.clear(); mocks.listeners.clear(); mocks.invoke.mockReset(); mocks.persist.mockReset();
+  mocks.shareOpen.mockReset(); mocks.mesh.setVideoOverride.mockClear(); mocks.mesh.setAudioOverride.mockClear();
   mocks.invoke.mockImplementation(async (command) => command === "session_state" ? off : null);
   mocks.persist.mockImplementation(async (doc) => { putReviewDoc(doc); });
 });
 afterEach(async () => { cleanup(); setScrubbing(false); await Promise.resolve(); vi.useRealTimers(); });
+
+describe("mounted room screen-share delivery", () => {
+  const selected = { kind: "display", id: 5, crop: "10,20,640,360", audio: true };
+  function stage(current: ReturnType<typeof useCoReview>) {
+    return selectRoomScreenStream({ session: current.coSession, shareState: current.shareState, shareStream: current.shareStream,
+      sharingMembers: current.sharingMembers, programStreams: current.meshProgramStreams });
+  }
+  function native() {
+    mocks.invoke.mockImplementation(async command => command === "session_state" ? off
+      : command === "start_screen_share" ? "http://127.0.0.1/test/share/v1" : null);
+    const video = { kind: "video" } as MediaStreamTrack, audio = { kind: "audio" } as MediaStreamTrack;
+    const stream = { getVideoTracks: () => [video], getAudioTracks: () => [audio] } as unknown as MediaStream;
+    const handle = { stream, track: video, audioTrack: audio, close: vi.fn() };
+    return handle;
+  }
+  it("puts the exact selected share on the host stage and existing program senders, then retracts it on Stop", async () => {
+    const handle = native(); mocks.shareOpen.mockResolvedValue(handle);
+    const h = await mount("host"); mocks.invoke.mockClear();
+    await act(async () => { h.result.current.startShare(selected); });
+    expect(mocks.invoke).toHaveBeenCalledWith("start_screen_share", { source: selected });
+    expect(mocks.shareOpen.mock.calls[0][2]).toMatchObject({ audio: true });
+    expect(h.result.current.shareState).toBe("sharing");
+    expect(stage(h.result.current)).toMatchObject({ stream: handle.stream, ownerId: "m0", isSelf: true });
+    expect(mocks.mesh.setVideoOverride).toHaveBeenLastCalledWith(handle.track);
+    expect(mocks.mesh.setAudioOverride).toHaveBeenLastCalledWith(handle.audioTrack);
+    expect(mocks.invoke).toHaveBeenCalledWith("session_broadcast", { msg: { kind: "sharing", from: "m0", on: true } });
+    expect(mocks.invoke.mock.calls.some(([cmd]) => String(cmd).includes("ndi"))).toBe(false);
+    await act(async () => { h.result.current.stopShare(); });
+    expect(stage(h.result.current)).toBeNull(); expect(handle.close).toHaveBeenCalledTimes(1);
+    expect(mocks.mesh.setVideoOverride).toHaveBeenLastCalledWith(null);
+    expect(mocks.mesh.setAudioOverride).toHaveBeenLastCalledWith(null);
+  });
+  it("does not announce pending decode and cannot publish a late frame after session end", async () => {
+    const handle = native(); let finish!: (value: typeof handle) => void;
+    mocks.shareOpen.mockImplementation(() => new Promise<typeof handle>(resolve => { finish = resolve; }));
+    const h = await mount("host"); mocks.invoke.mockClear();
+    await act(async () => { h.result.current.startShare(selected); });
+    expect(h.result.current.shareState).toBe("starting"); expect(stage(h.result.current)).toBeNull();
+    expect(mocks.mesh.setVideoOverride).not.toHaveBeenCalled();
+    await emit("session:state", off);
+    expect(mocks.shareOpen.mock.calls[0][2].signal.aborted).toBe(true);
+    await act(async () => { finish(handle); });
+    expect(stage(h.result.current)).toBeNull(); expect(handle.close).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke.mock.calls.some(([, args]) => args?.msg?.kind === "sharing" && args.msg.on)).toBe(false);
+    expect(mocks.mesh.setVideoOverride.mock.calls.every(([track]) => track === null)).toBe(true);
+  });
+  it("unmount aborts a decoder owned by the room and never publishes its late result", async () => {
+    const handle = native(); let finish!: (value: typeof handle) => void;
+    mocks.shareOpen.mockImplementation(() => new Promise<typeof handle>(resolve => { finish = resolve; }));
+    const h = await mount("host"); mocks.invoke.mockClear();
+    await act(async () => { h.result.current.startShare(selected); });
+    h.unmount();
+    expect(mocks.shareOpen.mock.calls[0][2].signal.aborted).toBe(true);
+    await act(async () => { finish(handle); });
+    expect(handle.close).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke.mock.calls.some(([, args]) => args?.msg?.kind === "sharing" && args.msg.on)).toBe(false);
+  });
+});
 
 it("shows native invitation-policy failures to the host without ending the room", async () => {
   const h = await mount("host");

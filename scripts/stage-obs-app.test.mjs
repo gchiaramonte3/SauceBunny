@@ -178,7 +178,8 @@ test('sender signing mismatch fails before sealing the enclosing app', t => {
   assert.ok(!f.calls.some(([name, args]) => name.endsWith('/codesign') && args.includes('--force')));
 });
 
-test('internal builder strips notarization credentials but retains signing and only builds an app', t => {
+for (const audioAcceptance of [undefined, '0', '1']) {
+test(`internal builder keeps acceptance renderer/native opt-in matched (${audioAcceptance ?? 'default'}) and only builds an app`, t => {
   const f = fixture(t), scripts = path.join(f.root, 'scripts');
   mkdirSync(scripts);
   const wrapper = path.join(scripts, 'build-internal-app-with-obs.sh');
@@ -187,19 +188,27 @@ test('internal builder strips notarization credentials but retains signing and o
   const credentials = ['APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID', 'APPLE_API_KEY', 'APPLE_API_ISSUER', 'APPLE_API_KEY_PATH'];
   writeFileSync(path.join(scripts, 'build-app-with-ndi.sh'),
     'test "$1" = --bundles && test "$2" = app || exit 1\n' +
-    `${JSON.stringify(process.execPath)} -e 'console.log(JSON.stringify({credentials:${JSON.stringify(credentials)}.filter(k=>process.env[k]),identity:process.env.APPLE_SIGNING_IDENTITY,target:process.env.CARGO_TARGET_DIR}))'\n`);
+    `${JSON.stringify(process.execPath)} -e 'console.log(JSON.stringify({credentials:${JSON.stringify(credentials)}.filter(k=>process.env[k]),identity:process.env.APPLE_SIGNING_IDENTITY,target:process.env.CARGO_TARGET_DIR,acceptance:process.env.VITE_OBS_AUDIO_ACCEPTANCE,args:process.argv.slice(1)}))' -- "$@"\n`);
   writeFileSync(path.join(scripts, 'build-ndi-sender.sh'),
     'test "$1" = "$SAUCE_NDI_SDK_DIR/include" && test ! -e "$2" || exit 1\nmkdir "$2"\n');
   writeFileSync(path.join(scripts, 'stage-obs-app.mjs'),
     'import {statSync} from "node:fs"; if (process.argv.length !== 6 || !statSync(process.argv[5]).isDirectory()) process.exit(1); console.log("stage-called")\n');
   writeFileSync(path.join(f.runtime, 'runtime-inventory.json'), '{}');
-  const result = spawnSync('/bin/bash', [wrapper, f.runtime, f.destination], {
-    encoding: 'utf8', env: { ...process.env, APPLE_SIGNING_IDENTITY: 'test-identity', TMPDIR: f.root,
+  const environment = { ...process.env, APPLE_SIGNING_IDENTITY: 'test-identity', TMPDIR: f.root,
       SAUCE_NDI_SDK_DIR: path.join(f.root, 'sdk'),
-      ...Object.fromEntries(credentials.map(key => [key, 'test-only-credential'])) },
+      // An inherited renderer-only value must not escape the explicit switch.
+      VITE_OBS_AUDIO_ACCEPTANCE: audioAcceptance === '1' ? '0' : '1',
+      ...Object.fromEntries(credentials.map(key => [key, 'test-only-credential'])) };
+  delete environment.SAUCE_OBS_AUDIO_ACCEPTANCE;
+  if (audioAcceptance !== undefined) environment.SAUCE_OBS_AUDIO_ACCEPTANCE = audioAcceptance;
+  const result = spawnSync('/bin/bash', [wrapper, f.runtime, f.destination], {
+    encoding: 'utf8', env: environment,
   });
   assert.equal(result.status, 0, result.stderr);
   const [report, staged] = result.stdout.trim().split('\n');
-  assert.deepEqual(JSON.parse(report), { credentials: [], identity: 'test-identity', target: path.join(f.root, 'src-tauri/target') });
+  assert.deepEqual(JSON.parse(report), { credentials: [], identity: 'test-identity', target: path.join(f.root, 'src-tauri/target'),
+    acceptance: audioAcceptance ?? '0',
+    args: audioAcceptance === '1' ? ['--bundles', 'app', '--features', 'obs-audio-acceptance'] : ['--bundles', 'app'] });
   assert.equal(staged, 'stage-called');
 });
+}

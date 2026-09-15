@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Enumerates app identities, or windows only for the explicitly requested app.
+// Enumerates app identities, all capturable windows, or one requested app.
 // Neither operation captures picture/audio or asks for permission.
 #import <Foundation/Foundation.h>
 #include "application-discovery.hpp"
@@ -7,11 +7,12 @@
 #include <cstdio>
 #include <charconv>
 #include <cstring>
+#include <unistd.h>
 
 int main(int argc, char **argv) {
     @autoreleasepool {
         if (argc != 2 && argc != 3) {
-            std::fputs("usage: saucebunny-obs-window-probe --applications | <application-bundle-id> [diagnostic-pid]\n", stderr); return 2;
+            std::fputs("usage: saucebunny-obs-window-probe --applications | --all-windows | --displays | <application-bundle-id> [diagnostic-pid]\n", stderr); return 2;
         }
         if (std::strcmp(argv[1], "--applications") == 0) {
             if (argc != 2) return 2;
@@ -33,19 +34,40 @@ int main(int argc, char **argv) {
             std::fputc('\n', stdout);
             return result.error.empty() ? 0 : 4;
         }
-        if (!sauce_obs::validApplicationIdentifier(argv[1])) return 2;
+        if (std::strcmp(argv[1], "--displays") == 0) {
+            if (argc != 2) return 2;
+            const auto result = sauce_obs::displaysForCapture();
+            NSMutableArray *displays = [NSMutableArray array];
+            for (const auto &display : result.displays) {
+                const auto &identity = display.identity;
+                const auto &g = identity.geometry;
+                [displays addObject:@{@"displayId": @(identity.id), @"displayUuid": @(identity.uuid.c_str()),
+                    @"label": @(display.label.c_str()), @"geometry": @{
+                        @"x": @(g.x), @"y": @(g.y), @"width": @(g.width), @"height": @(g.height),
+                        @"pixelWidth": @(g.pixelWidth), @"pixelHeight": @(g.pixelHeight)}}];
+            }
+            NSData *json = [NSJSONSerialization dataWithJSONObject:@{@"displays": displays,
+                @"error": @(result.error.c_str()), @"capturedUserContent": @NO} options:0 error:nil];
+            if (!json || !sauce_obs::applicationResponseFits(json.length)) return 4;
+            std::fwrite(json.bytes, 1, json.length, stdout); std::fputc('\n', stdout);
+            return result.error.empty() ? 0 : 4;
+        }
+        const bool allWindows = std::strcmp(argv[1], "--all-windows") == 0;
+        if (allWindows ? argc != 2 : !sauce_obs::validApplicationIdentifier(argv[1])) return 2;
         int32_t process = 0;
         if (argc == 3) {
             const auto end = argv[2] + std::strlen(argv[2]);
             const auto value = std::from_chars(argv[2], end, process);
             if (value.ec != std::errc() || value.ptr != end || process <= 0) return 2;
         }
-        auto result = sauce_obs::windowsForApplication(argv[1], process);
+        auto result = allWindows ? sauce_obs::allWindowsForCapture(getppid()) : sauce_obs::windowsForApplication(argv[1], process);
         NSMutableArray *windows = [NSMutableArray array];
         for (const auto &window : result.windows) {
-            [windows addObject:@{@"id": @(window.identity.window), @"pid": @(window.identity.process),
+            NSMutableDictionary *choice = [@{@"id": @(window.identity.window), @"pid": @(window.identity.process),
                 @"app": @(window.identity.application.c_str()), @"title": @(window.title.c_str()),
-                @"width": @(window.width), @"height": @(window.height)}];
+                @"width": @(window.width), @"height": @(window.height)} mutableCopy];
+            if (allWindows) choice[@"applicationName"] = @(window.applicationName.c_str());
+            [windows addObject:choice];
         }
         NSDictionary *response = @{@"windows": windows, @"error": @(result.error.c_str()),
                                     @"visibleWindowCount": @(result.visibleWindows),
@@ -56,6 +78,10 @@ int main(int argc, char **argv) {
                                     @"capturedUserContent": @NO};
         NSData *json = [NSJSONSerialization dataWithJSONObject:response options:0 error:nil];
         if (!json) return 3;
+        if (!sauce_obs::applicationResponseFits(json.length)) {
+            std::fputs("{\"windows\":[],\"error\":\"window_list_too_large\",\"capturedUserContent\":false}\n", stdout);
+            return 4;
+        }
         std::fwrite(json.bytes, 1, json.length, stdout);
         std::fputc('\n', stdout);
         return result.error.empty() ? 0 : 4;

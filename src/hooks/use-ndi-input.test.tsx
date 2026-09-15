@@ -26,6 +26,30 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("NDI source lifecycle", () => {
+  it("pulls native desktop Stop truth for the host while retaining the room review and unrelated candidate", async () => {
+    const id = "a".repeat(32), privateId = "b".repeat(32), host = { ...room, role: "host", selfId: "m0" };
+    const program = { id, name: "Shared region", url: "/generated-shared" };
+    const preview = { id: privateId, name: "Private window", url: "/generated-private" };
+    const status = (p: typeof program): NdiStatusResult => ({ ...offStatus, program: p, encodedReady: true, roomGeneration: 1,
+      telemetry: { ...offStatus.telemetry, sourceId: p.id, phase: "live", connectionCount: 1 } });
+    let stopped = false;
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "session_state") return host;
+      if (command === "ndi_sessions") return { programs: [...(stopped ? [] : [status(program)]), status(preview)],
+        room: { generation: 1, presenterEpoch: 0, presenting: true, publishedId: stopped ? null : id,
+          publicationRevision: stopped ? null : 1, source: { id, name: program.name, reviewKey: "ndi:shared-review", state: stopped ? "stopped" : "live" } } };
+      return null;
+    });
+    const h = renderHook(useNdiInput); await act(async () => {});
+    expect(h.result.current.program?.id).toBe(id); expect(h.result.current.previewProgram?.id).toBe(privateId);
+    stopped = true;
+    emit("session:msg", { kind: "loadSource", from: "m0", sourceKind: "ndi", url: id, title: program.name,
+      fingerprint: null, duration: null, reviewKey: "ndi:shared-review", liveState: "stopped" });
+    await act(async () => {});
+    expect(h.result.current.program).toMatchObject({ id, stopped: true, reviewKey: "ndi:shared-review" });
+    expect(h.result.current.previewProgram?.id).toBe(privateId);
+    expect(mocks.invoke.mock.calls.some(([name]) => ["ndi_stop", "ndi_start", "obs_start", "ndi_publish"].includes(name))).toBe(false);
+  });
   it("cancels a pending start by its exact id without stopping a newer receiver", async () => {
     let finish!: (value: unknown) => void;
     mocks.invoke.mockImplementation(async (command: string, args?: { name?: string }) => {
@@ -189,7 +213,7 @@ describe("private preview is not the room presentation", () => {
 });
 
 describe("application capture uses the existing preview controller", () => {
-  const capture = (): ObsSelection => ({ application: "com.adobe.PremierePro", process: 123, window: 45,
+  const capture = (): Exclude<ObsSelection, { kind: "display" }> => ({ application: "com.adobe.PremierePro", process: 123, window: 45,
     crop: { x: 0, y: 0, width: 1, height: 1 } });
   function native() {
     let next = 0;

@@ -803,23 +803,39 @@
   background: rgba(0, 0, 0, 0.55);
 }
 .cp-share-dialog {
-  width: min(680px, calc(100vw - 48px));
-  max-height: min(560px, calc(100vh - 48px));
-  overflow-y: auto;
+  width: min(960px, calc(100vw - var(--s-8)));
+  max-height: min(840px, calc(100dvh - var(--s-8)));
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: var(--s-3);
-  padding: var(--s-5);
   background: var(--bg-1);
   border: 1px solid var(--line-1);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-modal);
 }
+.cp-share-dialog-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  flex: none;
+  padding: var(--s-5);
+}
+.cp-share-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--s-5) var(--s-5);
+}
+.cp-share-dialog-body > * { flex-shrink: 0; }
 .cp-share-dialog-title {
   margin: 0;
   font-family: var(--font-ui);
   font-size: var(--text-2xl);
-  font-weight: var(--weight-black);
+  font-weight: var(--weight-bold);
   color: var(--fg-0);
 }
 .cp-share-dialog-line {
@@ -843,89 +859,7 @@
   text-align: center;
   color: var(--fg-3);
 }
-.cp-share-tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--line-1);
-  padding-bottom: var(--s-2);
-}
-.cp-share-tab {
-  height: 26px;
-  padding: 0 12px;
-  border: 1px solid transparent;
-  border-radius: var(--r-pill);
-  background: transparent;
-  color: var(--fg-3);
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  font-weight: var(--weight-bold);
-  cursor: pointer;
-}
-.cp-share-tab:hover:not(:disabled) { background: rgba(255,255,255,0.06); color: var(--fg-1); }
-.cp-share-tab.here {
-  background: rgba(255,255,255,0.08);
-  border-color: var(--line-2);
-  color: var(--fg-0);
-}
-.cp-share-tab:disabled { opacity: 0.4; cursor: default; }
-.cp-share-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: var(--s-3);
-}
-.cp-share-card {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 6px;
-  border: 1px solid var(--line-1);
-  border-radius: var(--r-md, 8px);
-  background: rgba(255,255,255,0.03);
-  cursor: pointer;
-  text-align: left;
-}
-.cp-share-card:hover { background: rgba(255,255,255,0.07); border-color: var(--line-3); }
-.cp-share-card.picked { border-color: var(--fg-1); background: rgba(255,255,255,0.08); }
-.cp-share-card img,
-.cp-share-card-ph {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  border-radius: var(--r-sm);
-  background: var(--bg-0);
-  display: block;
-}
-.cp-share-card-label {
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  font-weight: var(--weight-semibold);
-  color: var(--fg-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .cp-share-portion { display: flex; flex-direction: column; gap: var(--s-2); }
-.cp-share-portion-surface {
-  position: relative;
-  border-radius: var(--r-md, 8px);
-  overflow: hidden;
-  cursor: crosshair;
-  touch-action: none;
-  background: var(--bg-0);
-  user-select: none;
-  -webkit-user-select: none;
-}
-.cp-share-portion-surface img {
-  width: 100%;
-  display: block;
-  pointer-events: none;
-}
-.cp-share-portion-rect {
-  position: absolute;
-  border: 2px solid var(--fg-0);
-  background: rgba(255,255,255,0.14);
-  pointer-events: none;
-}
 .cp-share-portion-foot {
   display: flex;
   align-items: center;
@@ -933,24 +867,27 @@
   gap: var(--s-2);
 }
 .cp-share-dialog-foot {
+  flex: none;
+  flex-wrap: wrap;
+  background: var(--bg-1);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--s-3);
   border-top: 1px solid var(--line-1);
-  padding-top: var(--s-3);
+  padding: var(--s-3) var(--s-5);
 }
-.cp-share-audio {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  color: var(--fg-2);
-  cursor: pointer;
+.cp-share-dialog-foot > .cp-capture-audio { flex: 1 1 320px; }
+.cp-share-dialog-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--s-2); }
+.cp-share-dialog-foot > .cp-share-dialog-actions { margin-left: auto; }
+.cp-share-refresh { align-self: flex-end; }
+.cp-share-portion-foot { flex-wrap: wrap; }
+@media (max-width: 520px) {
+  .cp-share-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+  .cp-share-dialog-header, .cp-share-dialog-foot { padding: var(--s-3); }
+  .cp-share-dialog-body { padding: 0 var(--s-3) var(--s-3); }
+  .cp-share-dialog-foot > .cp-capture-audio { flex-basis: 100%; }
 }
-.cp-share-audio.off { opacity: 0.6; cursor: default; }
-.cp-share-dialog-actions { display: flex; align-items: center; gap: var(--s-2); }
 
 /* ── In-room source control (r124) ──────────────────────────────────────
    The room strips Clip's toolbar, so the presenter gets this purpose-built

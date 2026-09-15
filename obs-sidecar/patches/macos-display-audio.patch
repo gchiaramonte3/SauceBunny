@@ -1,0 +1,88 @@
+--- a/mac-sck-video-capture.m
++++ b/mac-sck-video-capture.m
+@@ -1,6 +1,53 @@
+ #include "mac-sck-common.h"
+ #include "window-utils.h"
+ #include "sauce-display-crop.h"
++#include "sauce-display-audio.h"
++
++// Metadata-only resolver, exercised without constructing a stream. Actual
++// parent values come from getppid/NSRunningApplication at the call site, not
++// from a renderer-selected bundle or process. A same-name app is not enough.
++API_AVAILABLE(macos(12.5)) NSArray *sauce_capture_display_audio_applications(obs_data_t *settings,
++    NSArray<SCRunningApplication *> *applications, NSArray<SCWindow *> *overlays,
++    pid_t actual_parent, NSString *actual_parent_bundle)
++{
++    if (!settings || !obs_data_get_bool(settings, "capture_audio") || actual_parent <= 1 ||
++        actual_parent == getpid() || ![actual_parent_bundle isEqualToString:@"com.saucebunny.desktop"])
++        return nil;
++    const char *integer_keys[] = {"sauce_display_audio_policy", "sauce_audio_parent_pid"};
++    const int64_t integer_values[] = {1, actual_parent};
++    for (unsigned i = 0; i < 2; ++i) {
++        obs_data_item_t *item = obs_data_item_byname(settings, integer_keys[i]);
++        const bool valid = item && obs_data_item_gettype(item) == OBS_DATA_NUMBER &&
++            obs_data_item_numtype(item) == OBS_DATA_NUM_INT &&
++            obs_data_get_int(settings, integer_keys[i]) == integer_values[i];
++        obs_data_item_release(&item);
++        if (!valid) return nil;
++    }
++    if (overlays.count != 4) return nil;
++    NSMutableSet *seen = [NSMutableSet setWithCapacity:4];
++    for (SCWindow *window in overlays) {
++        // Application exclusions are applied BEFORE window exceptions. These
++        // four exceptions REMOVE helper windows only because their owner is
++        // NOT the excluded parent. A parent-owned exception would re-include
++        // its picture/audio and must fail closed.
++        if (!window.windowID || [seen containsObject:@(window.windowID)] ||
++            window.owningApplication.processID != getpid() ||
++            window.owningApplication.processID == actual_parent) return nil;
++        [seen addObject:@(window.windowID)];
++    }
++    SCRunningApplication *parent = nil;
++    for (SCRunningApplication *application in applications) {
++        if (application.processID != actual_parent) continue;
++        if (parent || ![application.bundleIdentifier isEqualToString:actual_parent_bundle]) return nil;
++        parent = application;
++    }
++    return parent ? @[parent] : nil;
++}
++
++// See Apple's SCContentFilter excludingApplications:exceptingWindows: rules.
++// Do not exclude the helper application too: that would make its four window
++// exceptions INCLUDE the desktop overlay again. Current-process audio is
++// excluded separately by sauce_capture_configure_audio.
+ 
+ // Geometry is frozen by the chooser and revalidated again immediately before
+ // SCStream creation. No fullscreen fallback for a missing/changed region.
+@@ -226,6 +273,25 @@
+                 return false;
+             }
+-            content_filter = [[SCContentFilter alloc] initWithDisplay:target_display excludingWindows:exclusions];
++            obs_data_t *audio_settings = obs_source_get_settings(sc->source);
++            if (obs_data_get_bool(audio_settings, "capture_audio")) {
++                NSRunningApplication *parent = sauce_display_audio_parent();
++                NSArray *applications = parent ? sauce_capture_display_audio_applications(audio_settings,
++                    sc->shareable_content.applications, exclusions, parent.processIdentifier, parent.bundleIdentifier) : nil;
++                if (!applications) {
++                    obs_data_release(audio_settings);
++                    os_atomic_set_bool(&sc->sauce_capture_terminated, true);
++                    os_sem_post(sc->shareable_content_available);
++                    sc->disp = NULL;
++                    os_event_init(&sc->stream_start_completed, OS_EVENT_TYPE_MANUAL);
++                    return false;
++                }
++                content_filter = [[SCContentFilter alloc] initWithDisplay:target_display
++                    excludingApplications:applications exceptingWindows:exclusions];
++                [sc->stream_properties setSampleRate:48000];
++            } else {
++                content_filter = [[SCContentFilter alloc] initWithDisplay:target_display excludingWindows:exclusions];
++            }
++            obs_data_release(audio_settings);
+ 
+             obs_data_t *region_settings = obs_source_get_settings(sc->source);
+             const bool region_ready = sauce_capture_display_region(region_settings, target_display, sc->stream_properties);
+@@ -522,3 +588,4 @@
+     obs_data_set_default_int(settings, "sauce_overlay_policy_version", 1);
+     obs_data_set_default_int(settings, "sauce_display_region_policy_version", 1);
++    obs_data_set_default_int(settings, "sauce_display_audio_policy_version", 1);
+ }

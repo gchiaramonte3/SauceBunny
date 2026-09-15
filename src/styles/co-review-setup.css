@@ -18,7 +18,7 @@
 .cp-setup-rail .cp-colobby-card { border: 0; padding: 0; background: transparent; border-radius: 0; }
 .cp-setup-rail .cp-setup-form[hidden] { display: none; }
 .cp-setup-rail .cp-colobby-field-label { text-transform: none; letter-spacing: normal; font-size: var(--text-md); }
-.cp-setup-rail .cp-colobby-cta { width: 100%; align-self: stretch; }
+.cp-setup-rail .cp-colobby-cta { width: 100%; max-width: none; align-self: stretch; }
 .cp-setup-rail .cp-colobby-hint { margin: 0; text-align: left; }
 .cp-setup-rail .cp-colobby-taken { align-items: flex-start; text-align: left; }
 .cp-setup-rail .cp-colobby-linkbanner { margin: 0; text-align: left; }

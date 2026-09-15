@@ -49,6 +49,22 @@ const allowedProduction = new Set([
   // Passive Avid instructions: React local disclosure state + the already
   // reviewed CollapsibleSection/Icons; no native, storage or media imports.
   "src/components/AvidNdiSetup",
+  // Controlled chooser visuals, pointer/keyboard geometry and scoped CSS only.
+  // Snapshot APIs and capture/permission controllers stay outside the catalog.
+  "src/components/CaptureSourcePicker",
+  // Empty Review choices: Icons/CSS plus local URL and focus state only.
+  // File, URL and source actions are injected inert fixture callbacks.
+  "src/components/ReviewSourceStart",
+  // Controlled AAF lanes: React, type-only bindings, pure time/CSV geometry.
+  // The page, stores, worker hooks and audio element are deliberately absent.
+  "src/components/MultitrackTimeline", "src/lib/multitrack", "src/lib/marker-time",
+  // Controlled track-gain popup and pure viewport text aggregation; no audio,
+  // export, persistence or native command dependencies are imported.
+  "src/components/MultitrackLevel", "src/lib/multitrack-text-layout",
+  // Pure amplitude/decibel conversion and numeric parsing; no audio context.
+  "src/lib/multitrack-gain",
+  // Pure min/max canvas renderers; waveform acquisition stays in the workspace hook.
+  "src/components/MultitrackWaveform", "src/components/TimelineWaveform",
 ]);
 const pureHelpers = [...allowedProduction].flatMap(path => [".tsx", ".ts"].map(extension => resolve(root, path + extension)).filter(existsSync));
 

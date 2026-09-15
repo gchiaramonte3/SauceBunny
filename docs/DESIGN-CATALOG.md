@@ -2,8 +2,8 @@
 
 September 12 Review follow-up: the approved usability corrections are recorded
 in DESIGN.md. The production preview header now distinguishes room sharing from
-locally owned NDI broadcasts. Source settings is the common gear entry; NDI and
-Application window remain distinct inputs. The shared drawer now supports
+locally owned NDI broadcasts. Source settings is the common gear entry; NDI,
+Screen, Window and Region remain distinct inputs. The shared drawer now supports
 arrow-key/roving focus. Other tab families and catalog proposals remain separate.
 These production changes require actual-app regressions, not catalog-only proof.
 
@@ -21,7 +21,18 @@ parity, plus Preview's Live status and Premiere disclosure. All other candidate
 recipes remain for review; no application-wide styling or Preview layout change
 is authorized by this document.
 
-The isolated catalog lives in [design-system](../design-system/). Its source-backed register is [catalog-data.ts](../design-system/catalog-data.ts). It covers Home, Library, Clip, Review, Transcripts, Settings, dialogs, nested components and detached windows. It must not load the production app, invoke native commands, connect NDI, create a room, request camera/microphone permission, or run media jobs.
+The isolated catalog lives in [design-system](../design-system/). Its source-backed register is [catalog-data.ts](../design-system/catalog-data.ts). It covers Home, Library, Clip, Review, Transcripts, Multitrack, Settings, dialogs, nested components and detached windows. It must not load the production app, invoke native commands, connect NDI, create a room, request camera/microphone permission, or run media jobs.
+
+### Multitrack lanes (2026-09-14)
+
+The Panels family includes the real controlled `MultitrackTimeline`: four
+generated waveform lanes, aligned clip boundaries and a gap, one ruler and
+playhead, editable mic names, selection, additive Solo/Mute, text overlay,
+density, and playhead-centered zoom. Waveform canvases reuse Clip's renderer;
+they do not acquire media. It imports no document,
+audio, or transcription hook. These interactions update only the fixture's local
+state. The production workspace reuses the existing transport, volume,
+Generate, and export controls; the catalog does not prove AAF parsing or ASR.
 
 Run `npm run design:catalog` and open [the local catalog](http://127.0.0.1:51731/design-system.html). Run `npm run check:design-catalog` for strict TypeScript, the application's Hooks lint rules, recursive inventory, isolation tests, browser checks, and a temporary production-build exclusion check. This development-only HTML entry is not the production application's default build input.
 
@@ -35,13 +46,23 @@ the normal `dist/`, stamp a release, or build a DMG.
 
 ## Catalog verification
 
-### Application capture controls (2026-09-12)
+### Unified capture controls (2026-09-12)
 
-The Preview entry includes a clearly labeled static source-markup specimen of
-the existing input, application and window controls. It is not a native capture
-demo and imports no native controller. The production popup uses these recipes
-without changing the viewport or notes rail. Source selection, asynchronous
-restoration and explicit broadcast are verified in application tests separately.
+The Preview entry includes controlled production `CaptureSourcePicker`
+components: source tabs, thumbnail cards, audio choice and a draggable/keyboard
+crop editor. Generated fixtures exercise screen, same-title window, portrait,
+missing-thumbnail and region states without importing a native controller.
+The four top tabs match production; the generated NDI state performs no
+discovery. Screen/Region system audio demonstrates an initially off explicit
+choice, with the approved Sauce Bunny window/audio exclusion described beside
+it. Simulate Preview
+is explicitly private and never represents room or NDI publication.
+The production popup uses these recipes without changing the viewport or notes
+rail. Source selection, bounded snapshots, asynchronous restoration and explicit
+publication are verified in application tests separately. Those tests also
+check the persistent dialog footer at normal/125% text, independent tab drafts
+and stale display geometry. The catalog cannot prove native desktop outline
+exclusion, permissions or live audio/video delivery.
 
 ### Avid NDI help candidate (2026-09-11)
 

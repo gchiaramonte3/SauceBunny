@@ -17,7 +17,7 @@ import type { ShareState } from "../lib/share-machine";
  * INSIDE the transport row's right side (Transport's roomControls slot),
  * with the snapshot/speed/volume controls - not floating over the timeline.
  */
-export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareState, onStartShare, onStopShare, theater, onToggleTheater, onReact, handRaised, onToggleHand, liveDrawOn, onToggleLiveDraw, onClearLiveDraw, liveDrawHasMarks, canRecord, recording, onToggleRecording }: {
+export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareState, onStartShare, onStopShare, onChooseSource, theater, onToggleTheater, onReact, handRaised, onToggleHand, liveDrawOn, onToggleLiveDraw, onClearLiveDraw, liveDrawHasMarks, canRecord, recording, onToggleRecording }: {
   micOn: boolean;
   camOn: boolean;
   onToggleMic: () => void;
@@ -25,6 +25,8 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
   shareState: ShareState;
   onStartShare: (source: ShareSourceArg) => void;
   onStopShare: () => void;
+  /** An existing live program must use its explicit preview/publish handoff. */
+  onChooseSource?: () => void;
   theater: boolean;
   onToggleTheater: () => void;
   onReact: (emote: string) => void;
@@ -72,12 +74,13 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
         className={"cp-room-bar-btn" + (shareState === "sharing" ? " active" : "")}
         /* The promise, stated: a share is live pixels, not the review
            subject. Watch-together (the source bar) keeps timecode. */
-        title={shareState === "sharing" ? "Stop sharing" : "Share my screen. Shows your app live; no scrubbing, no timecode."}
-        aria-label={shareState === "sharing" ? "Stop sharing your screen" : "Share your screen. Shows your app live with no scrubbing and no timecode."}
+        title={shareState === "starting" ? "Cancel screen sharing startup" : shareState === "sharing" ? "Stop sharing" : "Share my screen. Shows your app live; no scrubbing, no timecode."}
+        aria-label={shareState === "starting" ? "Cancel screen sharing startup" : shareState === "sharing" ? "Stop sharing your screen" : "Share your screen. Shows your app live with no scrubbing and no timecode."}
         aria-pressed={shareState === "sharing"}
-        disabled={shareState === "starting"}
+        aria-busy={shareState === "starting"}
         onClick={() => {
-          if (shareState === "sharing") onStopShare();
+          if (shareState !== "idle") onStopShare();
+          else if (onChooseSource) { setDevicesOpen(false); setPickerOpen(false); onChooseSource(); }
           else { setDevicesOpen(false); setPickerOpen((v) => !v); }
         }}
       >

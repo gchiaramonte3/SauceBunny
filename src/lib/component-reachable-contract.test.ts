@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import ts from "typescript";
 
 /**
  * Every component must be reachable from somewhere.
@@ -36,7 +37,43 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/** Import syntax, not text mentioning an import. Literal import() includes
+ * lazy/feature-gated components; a computed module expression proves no exact
+ * component reachable and is deliberately not guessed. */
+function importedModules(code: string): string[] {
+  const file = ts.createSourceFile("source.tsx", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const modules: string[] = [];
+  const visit = (node: ts.Node) => {
+    const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
+      : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
+    if (specifier && (ts.isStringLiteral(specifier) || ts.isNoSubstitutionTemplateLiteral(specifier))) modules.push(specifier.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return modules;
+}
+
 describe("no component is written and then left unmounted", () => {
+  it("recognizes static, re-exported and lazy literal module imports", () => {
+    expect(importedModules(`
+      import { Direct } from "./components/Direct";
+      export { Forwarded } from '../components/Forwarded';
+      const Lazy = enabled ? lazy(() => import("./components/Lazy").then(m => ({ default: m.Lazy }))) : null;
+      const Template = import(\`./components/Template\`);
+    `)).toEqual(["./components/Direct", "../components/Forwarded", "./components/Lazy", "./components/Template"]);
+  });
+
+  it("does not count comments, quoted example code or computed module names", () => {
+    expect(importedModules(`
+      // import Hidden from "./components/Hidden";
+      /* const Hidden = lazy(() => import("./components/Hidden")); */
+      const example = 'import Hidden from "./components/Hidden"';
+      const computed = import("./components/" + name);
+      const interpolated = import(\`./components/\${name}\`);
+      const actual = import("./components/Actual");
+    `)).toEqual(["./components/Actual"]);
+  });
+
   it("every component in src/components is imported by something", () => {
     const components = fs.readdirSync(COMPONENTS)
       .filter((f) => f.endsWith(".tsx") && isSource(f))
@@ -46,14 +83,14 @@ describe("no component is written and then left unmounted", () => {
 
     const sources = walk(SRC).map((p) => ({
       base: path.basename(p),
-      text: fs.readFileSync(p, "utf8"),
+      modules: importedModules(fs.readFileSync(p, "utf8")),
     }));
 
     const orphans = components.filter((name) => {
       // Any import specifier ending in this module name, whatever the
       // relative prefix ("./Foo", "../components/Foo").
-      const spec = new RegExp(`from\\s+"[^"]*/${name}"`);
-      return !sources.some((s) => s.base !== `${name}.tsx` && spec.test(s.text));
+      return !sources.some((s) => s.base !== `${name}.tsx`
+        && s.modules.some(specifier => path.basename(specifier).replace(/\.tsx?$/, "") === name));
     });
 
     expect(

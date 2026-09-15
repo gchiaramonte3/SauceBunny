@@ -102,6 +102,7 @@ export function GenerateButton({
       disabled={disabled}
       title={title}
       aria-busy={loading}
+      aria-label={loading ? loadingLabel : resolution === "success" ? "Done" : resolution === "error" ? "Failed" : idleLabel}
     >
       {loading && progress != null && (
         <span className="cp-gen-fill" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} aria-hidden />

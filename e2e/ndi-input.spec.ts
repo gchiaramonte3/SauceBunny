@@ -125,7 +125,7 @@ for (const scale of [1, 1.25]) test(`Avid setup stays in the gear dialog at 1100
   await monitor.evaluate(element => element.setAttribute("data-avid-stage", "retained"));
   const trigger = page.getByRole("button", { name: "Source settings", exact: true });
   await trigger.click();
-  const dialog = page.getByRole("dialog", { name: "NDI settings" });
+  const dialog = page.getByRole("dialog", { name: "Source settings" });
   await dialog.getByRole("button", { name: "Avid Media Composer setup" }).click();
   await expect(dialog.getByText(/Avid sequence timecode and live marker delivery are not connected/)).toBeVisible();
   await expect(dialog.getByText(/other NDI receivers may view or record/)).toBeVisible();
@@ -180,7 +180,7 @@ test("the Preview transport opens private Premiere controls without opening a ro
   await expect(page.getByRole("main",{name:"Review",exact:true})).toBeVisible();
   await expect(page.locator(".cp-room")).toHaveCount(0);
   await expect(page.locator('.cp-nav-item.active')).toContainText("Review");
-  const panel=page.getByRole("dialog",{name:"NDI settings"});
+  const panel=page.getByRole("dialog",{name:"Source settings"});
   await expect(panel).toBeVisible();
   await expect(trigger).toHaveAttribute("aria-expanded","true");
   expect(await trigger.getAttribute("aria-controls")).toBe(await panel.getAttribute("id"));
@@ -192,9 +192,9 @@ test("the Preview transport opens private Premiere controls without opening a ro
   await expect(page.locator(".cp-queue-drawer .cp-ndi-input")).toHaveCount(0);
   await expect(page.getByRole("dialog")).toHaveCount(1);
   await page.keyboard.press("Shift+Tab");
-  await expect(panel.getByRole("button",{name:"Install or set up Premiere…"})).toBeFocused();
+  await expect(panel.getByRole("button",{name:"Done",exact:true})).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(panel.getByRole("button",{name:"Close NDI settings"})).toBeFocused();
+  await expect(panel.getByRole("button",{name:"Close Source settings"})).toBeFocused();
   await expect(monitor).toHaveAttribute("data-preview-stage","same");
   expect(await page.evaluate(()=>(window as unknown as {__ndiCalls:string[]}).__ndiCalls.includes("ndi_start"))).toBe(false);
   expect(await page.evaluate(()=>(window as unknown as {__ndiCalls:string[]}).__ndiCalls.includes("ndi_publish"))).toBe(false);
@@ -209,7 +209,7 @@ test("the Preview transport opens private Premiere controls without opening a ro
   await trigger.press("Space");
   await expect(panel).toBeVisible();
   await expect(trigger).toHaveAttribute("aria-expanded","true");
-  await panel.getByRole("button",{name:"Close NDI settings"}).click();
+  await panel.getByRole("button",{name:"Close Source settings"}).click();
   await expect(panel).not.toBeVisible();
   await expectPremiereReturnFocus(page);
   await page.getByRole("button",{name:"Clip",exact:true}).click();
@@ -225,7 +225,7 @@ test("connection panel fits the minimum window and restores keyboard focus on Es
   await page.screenshot({path:test.info().outputPath("review-setup-inline-1680.png")});
   await page.setViewportSize({width:1100,height:700});
   await page.locator(".cp-connect-premiere").click();
-  const panel=page.getByRole("dialog",{name:"NDI settings"});
+  const panel=page.getByRole("dialog",{name:"Source settings"});
   await expect(panel).toBeVisible();
   const bounds=await panel.boundingBox();
   expect(bounds!.x).toBeGreaterThanOrEqual(0);expect(bounds!.y).toBeGreaterThanOrEqual(0);
@@ -251,8 +251,9 @@ test("private Premiere keeps the real review tabs, saved notes, refresh, and Set
   await expect(page.locator(".cp-ndi-input details")).toHaveCount(0);
   await page.getByRole("combobox",{name:"NDI source"}).selectOption("Synthetic Premiere");
   await page.getByRole("button",{name:"Preview source"}).click();
-  const inspector=page.getByRole("dialog",{name:"NDI settings"});
-  await expect(inspector.getByRole("heading",{name:"NDI",exact:true})).toBeVisible();
+  const inspector=page.getByRole("dialog",{name:"Source settings"});
+  await expect(inspector.getByRole("heading",{name:"Source",exact:true})).toBeVisible();
+  await expect(inspector.getByRole("tab",{name:"NDI",exact:true})).toHaveAttribute("aria-selected","true");
   const topTabs=page.getByRole("tablist",{name:"Right panel sections"});
   const tabBounds=(await topTabs.boundingBox())!;
   // Source settings are a portal, never an inserted section in the note rail.
@@ -367,7 +368,7 @@ for(const size of [{width:1100,height:700},{width:1680,height:1020}]){
 }
 
 for(const viewport of [{width:1100,height:700},{width:1680,height:1020}]) for(const scale of [1,1.25]) {
-  test(`NDI settings stays outside comments with clear spacing at ${viewport.width}px / ${scale}`,async({page})=>{
+  test(`Source settings stays outside comments with clear spacing at ${viewport.width}px / ${scale}`,async({page})=>{
     await page.setViewportSize(viewport);
     await page.emulateMedia({reducedMotion:"reduce"});
     await page.route("**/ndi-fixture/**",route=>route.fulfill({status:503,body:"Synthetic source unavailable"}));
@@ -385,7 +386,7 @@ for(const viewport of [{width:1100,height:700},{width:1680,height:1020}]) for(co
     const link=(await page.getByPlaceholder("Paste a link to watch together").boundingBox())!;
     expect(head.y+head.height-link.y-link.height).toBeGreaterThanOrEqual(12);
     await page.getByRole("button",{name:"Source settings",exact:true}).click();
-    const dialog=page.getByRole("dialog",{name:"NDI settings"});
+    const dialog=page.getByRole("dialog",{name:"Source settings"});
     await dialog.getByRole("combobox",{name:"NDI source"}).selectOption(name);
     await dialog.getByRole("button",{name:"Preview source"}).click();
     await expect(dialog.locator(".cp-ndi-input-connection > strong")).toHaveText(name);
@@ -450,7 +451,7 @@ test("private NDI uses the Preview monitor and preserves its prepared decoder on
   expect(await page.evaluate(()=>(window as unknown as {__ndiCalls:string[]}).__ndiCalls.includes("ndi_discover"))).toBe(true);
   await page.getByRole("combobox",{name:"NDI source"}).selectOption("Synthetic Premiere");
   await page.getByRole("button",{name:"Preview source"}).click();
-  await expect(page.getByRole("dialog",{name:"NDI settings"})).toBeVisible();
+  await expect(page.getByRole("dialog",{name:"Source settings"})).toBeVisible();
   await expectPassiveLiveStatus(page);
   const video=page.locator(".cp-peerstage-video");await expect(video).toBeAttached();
   await expect(page.locator(".cp-monitor .cp-empty")).toHaveAttribute("inert", "");
@@ -468,7 +469,7 @@ test("private NDI uses the Preview monitor and preserves its prepared decoder on
   await expect(video).toHaveAttribute("data-mount-canary","same");
   await page.getByRole("button",{name:"Share",exact:true}).click();
   await page.getByRole("menuitem",{name:/Source settings/}).click();
-  await expect(page.getByRole("dialog",{name:"NDI settings"})).toBeVisible();
+  await expect(page.getByRole("dialog",{name:"Source settings"})).toBeVisible();
   await expect(video).toHaveAttribute("data-mount-canary","same");
   expect(await video.evaluate(el=>(el as HTMLVideoElement).muted)).toBe(true);
 });
@@ -723,7 +724,7 @@ test("opt-in: browser decodes the real native NDI H.264/AAC capture",async({page
   await expect(oldVideo).toHaveAttribute("data-last-good-picture","yes");
   await oldVideo.dispatchEvent("loadeddata");
   await expect(page.getByRole("button",{name:"Share NDI with room"})).toBeDisabled();
-  await page.getByRole("dialog",{name:"NDI settings",exact:true}).getByRole("button",{name:"Reconnect picture"}).click();
+  await page.getByRole("dialog",{name:"Source settings",exact:true}).getByRole("button",{name:"Reconnect picture"}).click();
   await expectNativePicture(page);
   await expect(page.getByRole("button",{name:"Share NDI with room"})).toBeEnabled();
   await expect(page.locator('[data-last-good-picture="yes"]')).toHaveCount(0);
@@ -743,7 +744,7 @@ test("opt-in: browser decodes the real native NDI H.264/AAC capture",async({page
   await expect.poll(()=>promotedVideo.evaluate(el=>(el as HTMLVideoElement).muted)).toBe(false);
   // Recovery is a real settings button acting on the existing decoder. It
   // stays available after closing/reopening, but never covers the picture.
-  const settings=page.getByRole("dialog",{name:"NDI settings"});
+  const settings=page.getByRole("dialog",{name:"Source settings"});
   await settings.getByRole("button",{name:"Done",exact:true}).click();
   await promotedVideo.evaluate(el=>(el as HTMLVideoElement).pause());
   await expect(page.locator(".cp-monitor button:visible,.cp-monitor .cp-peerstage-badge:visible")).toHaveCount(0);
@@ -777,14 +778,14 @@ test("opt-in: browser decodes the real native NDI H.264/AAC capture",async({page
   });
   expect(peaks[0],"decoded left-channel audio").toBeGreaterThan(0.005);
   expect(peaks[1],"decoded right-channel audio").toBeGreaterThan(0.005);
-  await page.getByRole("dialog",{name:"NDI settings"}).getByRole("button",{name:"Done",exact:true}).click();
+  await page.getByRole("dialog",{name:"Source settings"}).getByRole("button",{name:"Done",exact:true}).click();
   await page.locator(".cp-transport .cp-volume > button").click();
   await page.locator(".cp-volume-popover").getByRole("button",{name:"Mute",exact:true}).click();
   await expect.poll(()=>promotedVideo.evaluate(el=>(el as HTMLVideoElement).muted)).toBe(true);
   await page.locator(".cp-transport .cp-volume > button").click();
   await page.locator(".cp-connect-premiere").click();
   await page.getByRole("button",{name:"Share NDI with room"}).click();
-  await expect(page.getByRole("dialog",{name:"NDI settings"})).not.toBeVisible();
+  await expect(page.getByRole("dialog",{name:"Source settings"})).not.toBeVisible();
   await expect(page.locator(".cp-monitor [data-promoted-picture=same]")).toBeVisible();
   await expectNativePicture(page);
   await expect(page.locator(".cp-monitor .cp-ndi-audio-bar")).toHaveCount(0);

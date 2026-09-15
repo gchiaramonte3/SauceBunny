@@ -104,8 +104,8 @@ describe("NDI preflight states", () => {
     await waitFor(()=>expect(mocks.invoke).toHaveBeenCalledWith("ndi_discover",{}));
     const panel=document.getElementById(NDI_INPUT_PANEL_ID)!;
     expect(h.container.contains(panel)).toBe(false);
-    expect(screen.getByRole("dialog",{name:"NDI settings"})).toBe(panel);
-    expect(screen.getByRole("heading",{name:"NDI"})).toBeTruthy();
+    expect(screen.getByRole("dialog",{name:"Source settings"})).toBe(panel);
+    expect(screen.getByRole("heading",{name:"Source"})).toBeTruthy();
     expect(panel.getAttribute("aria-modal")).toBe("true");
     expect(document.activeElement).toBe(panel);
     fireEvent.change(screen.getByRole("combobox",{name:"NDI source"}),{target:{value:"Premiere"}});
@@ -118,7 +118,7 @@ describe("NDI preflight states", () => {
     h.rerender(<NdiInputPanel input={i} onClose={close}/>);
     await waitFor(()=>expect(mocks.invoke).toHaveBeenCalledTimes(2));
     expect((screen.getByRole("combobox",{name:"NDI source"}) as HTMLSelectElement).value).toBe("Premiere");
-    expect(screen.getByRole("dialog",{name:"NDI settings"}).id).toBe(NDI_INPUT_PANEL_ID);
+    expect(screen.getByRole("dialog",{name:"Source settings"}).id).toBe(NDI_INPUT_PANEL_ID);
     expect(i.start).not.toHaveBeenCalled();expect(i.share).not.toHaveBeenCalled();
     expect(i.cancelPreview).not.toHaveBeenCalled();
   });
@@ -204,12 +204,12 @@ describe("NDI preflight states", () => {
     render(<button>Outside panel</button>);
     const outside=screen.getByRole("button",{name:"Outside panel"});outside.focus();
     const h=render(<NdiInputPanel input={i} onClose={close}/>);
-    const panel=await screen.findByRole("dialog",{name:"NDI settings"});
+    const panel=await screen.findByRole("dialog",{name:"Source settings"});
     expect(document.activeElement).toBe(panel);
     expect(h.container.contains(panel)).toBe(false);
     expect(panel.querySelector('video,canvas,input[type="range"]')).toBeNull();
     expect(screen.getByText(/Use the Preview speaker control/)).toBeTruthy();
-    fireEvent.keyDown(screen.getByRole("dialog",{name:"NDI settings"}),{key:"Escape"});
+    fireEvent.keyDown(screen.getByRole("dialog",{name:"Source settings"}),{key:"Escape"});
     expect(close).toHaveBeenCalledOnce();
     h.rerender(<NdiInputPanel input={i} onClose={close} open={false}/>);
     expect(document.activeElement).toBe(outside);
@@ -222,7 +222,7 @@ describe("NDI preflight states", () => {
     render(<NdiInputPanel input={input()} onClose={vi.fn()} onCompanionSetup={setup}/>);
     fireEvent.click(screen.getByRole("button",{name:"Install or set up Premiere…"}));
     expect(setup).toHaveBeenCalledOnce();
-    const panel=screen.getByRole("dialog",{name:"NDI settings"});
+    const panel=screen.getByRole("dialog",{name:"Source settings"});
     expect(panel.querySelector("details")).toBeNull();
     expect(screen.queryByText("Connection details")).toBeNull();
     expect(screen.queryByRole("button",{name:"Download NDI Tools for Premiere"})).toBeNull();
@@ -321,7 +321,7 @@ describe("NDI preflight states", () => {
     const state: ObsBroadcast = { sourceId: "capture-a", status: { sourceId: "capture-a", phase: "live", attempt: 2, error: null },
       error: null, active: true, start: vi.fn(), stop: vi.fn() };
     const h = render(<NdiInputPanel input={i} onClose={vi.fn()} broadcast={state}/>);
-    await screen.findByRole("dialog", { name: "Application capture settings" });
+    await screen.findByRole("dialog", { name: "Source settings" });
     expect(screen.getByRole("status", { name: "Application capture connection" })).toBeTruthy();
     expect(screen.getByRole("status", { name: "NDI broadcast" }).textContent).toContain("Broadcasting on your local network");
     expect(screen.queryByText(/source application’s NDI broadcast/)).toBeNull();

@@ -3,10 +3,56 @@
 // capture source/SCStream is created and no permissions are requested/reset.
 #include "engine.hpp"
 #include "capture-health.hpp"
+#include "capture-audio.hpp"
 #include "mac-sck-common.h"
 #include <cassert>
 #include <dlfcn.h>
 #include <cstdio>
+
+// Configure the actual patched module's policy with an inert configuration.
+// No SCStream/source is created; creating a configuration does not capture.
+static void checkAudioPolicy(void *module) {
+    using Configure = bool (*)(obs_data_t *, SCStreamConfiguration *);
+    const auto configure = reinterpret_cast<Configure>(dlsym(module, "sauce_capture_configure_audio"));
+    assert(configure);
+    auto *defaults = obs_get_source_defaults("screen_capture");
+    assert(defaults && obs_data_get_int(defaults, "sauce_audio_policy_version") == 1);
+    assert(obs_data_get_int(defaults, "sauce_overlay_policy_version") == 1);
+    assert(obs_data_get_int(defaults, "sauce_display_region_policy_version") == 1);
+    assert(obs_data_get_int(defaults, "sauce_display_audio_policy_version") == 1);
+    assert(obs_data_get_bool(defaults, "capture_audio"));
+    auto *settings = obs_data_create();
+    auto *olderDefaults = obs_data_create();
+    assert(sauce_obs::configureDisplayCaptureAudio(settings, nullptr, false));
+    assert(!sauce_obs::configureDisplayCaptureAudio(nullptr, defaults, false));
+    assert(!sauce_obs::configureDisplayCaptureAudio(settings, nullptr, true));
+    assert(!sauce_obs::configureDisplayCaptureAudio(settings, olderDefaults, true));
+    obs_data_set_int(olderDefaults, "sauce_display_audio_policy_version", 2);
+    assert(!sauce_obs::configureDisplayCaptureAudio(settings, olderDefaults, true));
+    // This noncapture executable is launched by the build shell, not the
+    // Sauce Bunny app. A valid module must not turn that into an arbitrary
+    // parent exclusion or silently start system audio.
+    assert(!sauce_display_audio_parent());
+    assert(!sauce_obs::configureDisplayCaptureAudio(settings, defaults, true));
+    assert(!obs_data_has_user_value(settings, "sauce_display_audio_policy"));
+    assert(!obs_data_has_user_value(settings, "sauce_audio_parent_pid"));
+    assert(!sauce_obs::configureCaptureAudio(settings, nullptr, false));
+    assert(!sauce_obs::configureCaptureAudio(settings, olderDefaults, false));
+    assert(!obs_data_has_user_value(settings, "capture_audio"));
+    obs_data_set_int(olderDefaults, "sauce_audio_policy_version", 2);
+    assert(!sauce_obs::configureCaptureAudio(settings, olderDefaults, false));
+    assert(sauce_obs::configureCaptureAudio(settings, olderDefaults, true));
+    for (const bool enabled : {true, false, true, false}) {
+        assert(sauce_obs::configureCaptureAudio(settings, defaults, enabled));
+        SCStreamConfiguration *configuration = [SCStreamConfiguration new];
+        // Start opposite to the desired value: a no-op must fail this test.
+        configuration.capturesAudio = !enabled;
+        assert(configure(settings, configuration) == enabled);
+        assert(configuration.capturesAudio == enabled);
+        assert(configuration.excludesCurrentProcessAudio && configuration.channelCount == 2);
+    }
+    obs_data_release(olderDefaults); obs_data_release(settings); obs_data_release(defaults);
+}
 
 // An idle SCStream notification is not a new picture. Exercise the actual
 // module with a generated IOSurface so a missing geometry attachment cannot
@@ -75,6 +121,7 @@ int main(int argc, char **argv) {
         const auto binary = root / "PlugIns/sauce-obs-capture.plugin/Contents/MacOS/sauce-obs-capture";
         void *module = dlopen(binary.c_str(), RTLD_NOW | RTLD_NOLOAD);
         assert(module);
+        checkAudioPolicy(module);
         checkFrameStatus(module);
         const auto health = reinterpret_cast<proc_handler_proc_t>(dlsym(module, "sauce_capture_health"));
         if (!health) { std::fputs("capture module lacks latched source health\n", stderr); dlclose(module); return 5; }

@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { loadJson, saveJson } from "../lib/storage";
 import { IconVideoOff } from "./Icons";
 import { useModalFocus } from "../hooks/use-modal-focus";
 import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 import type { ShareSources } from "../bindings/ShareSources";
+import { formatError } from "../lib/error-format";
+import { CaptureSourceGrid, CaptureSourceTabs, CaptureRegionEditor, CaptureAudioOption,
+  captureRegionValid, MIN_CAPTURE_REGION_PX, type CaptureRegion } from "./CaptureSourcePicker";
 
 type Tab = "screens" | "windows" | "portion";
 type Crop = { x: number; y: number; w: number; h: number };
@@ -13,11 +16,12 @@ type Crop = { x: number; y: number; w: number; h: number };
  * A dragged region has to clear this in BOTH dimensions to be shareable.
  * A one-pixel-tall strip is a mis-drag, not a selection.
  */
-export const MIN_CROP_PX = 16;
+export const MIN_CROP_PX = MIN_CAPTURE_REGION_PX;
 
 /** The Share button's gate. */
 export function cropShareable(c: Crop | null): boolean {
-  return c != null && c.w > MIN_CROP_PX && c.h > MIN_CROP_PX;
+  return c != null && Object.values(c).every(Number.isFinite) && c.x >= 0 && c.y >= 0
+    && c.w > MIN_CROP_PX && c.h > MIN_CROP_PX;
 }
 
 /**
@@ -41,106 +45,113 @@ export function cropStatus(c: Crop | null, label: string): string {
 /**
  * The share dialog - the Meet/Zoom picker shape: tabs for entire screens,
  * app windows, and a portion of a screen (drag a rect on the screen's
- * thumbnail), live thumbnails from the ScreenCaptureKit engine, and a
- * "Share system audio" footer checkbox. Owns the TCC preflight; without
- * the capture engine it degrades honestly to screens-only, no audio.
+ * thumbnail), bounded snapshots and an explicit audio inclusion choice.
+ * Opening checks access; only a labelled user action requests permission.
  */
 export function ShareDialog({ onPick, onClose }: {
   onPick: (source: ShareSourceArg) => void;
   onClose: () => void;
 }) {
-  const [access, setAccess] = useState<"checking" | "granted" | "denied">("checking");
+  const [access, setAccess] = useState<"checking" | "granted" | "denied" | "undetermined" | "error">("checking");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const [sources, setSources] = useState<ShareSources | null>(null);
   const [tab, setTab] = useState<Tab>("screens");
   const [picked, setPicked] = useState<{ kind: "display" | "window"; id: number } | null>(null);
   const [audio, setAudio] = useState<boolean>(() => loadJson<boolean>("saucebunny.shareAudio", false));
-  // Portion state: which display + the dragged rect in DISPLAY points.
+  // Crop coordinates remain normalized until submitting display points.
   const [portionDisplay, setPortionDisplay] = useState<number | null>(null);
-  const [crop, setCrop] = useState<Crop | null>(null);
-  const dragRef = useRef<{ startX: number; startY: number } | null>(null);
-  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const [crop, setCrop] = useState<CaptureRegion | null>(null);
+  const generation = useRef(0), submitted = useRef(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   useModalFocus(true, dialogRef);
 
-  useEffect(() => {
-    void (async () => {
-      let state = await invoke<string>("screen_capture_access", { request: false }).catch(() => "denied");
-      if (state === "undetermined") {
-        state = await invoke<string>("screen_capture_access", { request: true }).catch(() => "denied");
-      }
+  const discover = useCallback(async (request = false) => {
+    const turn = ++generation.current;
+    setLoading(true); setError(null);
+    try {
+      const state = await invoke<string>("screen_capture_access", { request });
+      if (turn !== generation.current) return;
       if (state !== "granted") {
-        setAccess("denied");
-        return;
+        setAccess(state === "undetermined" ? "undetermined" : "denied"); setSources(null); return;
       }
       setAccess("granted");
-      const s = await invoke<ShareSources>("list_share_sources").catch(() => null);
-      setSources(s ?? { displays: [], windows: [], capture_engine: false });
-    })();
+      const found = await invoke<ShareSources>("list_share_sources");
+      if (turn === generation.current) setSources(found);
+    } catch (cause) {
+      if (turn === generation.current) { setAccess("error"); setSources(null); setError(formatError(cause)); }
+    } finally { if (turn === generation.current) setLoading(false); }
   }, []);
+  const invalidateDiscovery = useCallback(() => { generation.current++; }, []);
+  const close = useCallback(() => { invalidateDiscovery(); onClose(); }, [invalidateDiscovery, onClose]);
+  useEffect(() => {
+    void discover();
+    const focus = () => { void discover(); };
+    window.addEventListener("focus", focus);
+    return () => { invalidateDiscovery(); window.removeEventListener("focus", focus); };
+  }, [discover, invalidateDiscovery]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); } };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+  }, [close]);
 
   const engine = sources?.capture_engine ?? false;
   const displays = sources?.displays ?? [];
   const windows = sources?.windows ?? [];
   const portionSrc = displays.find((d) => d.id === portionDisplay) ?? null;
 
-  const shareReady =
-    tab === "portion" ? portionSrc != null && cropShareable(crop) : picked != null;
+  const pixelCrop = crop && portionSrc ? { x: Math.round(crop.x * portionSrc.width), y: Math.round(crop.y * portionSrc.height),
+    w: Math.min(Math.round(crop.width * portionSrc.width), portionSrc.width - Math.round(crop.x * portionSrc.width)),
+    h: Math.min(Math.round(crop.height * portionSrc.height), portionSrc.height - Math.round(crop.y * portionSrc.height)) } : null;
+  const shareReady = access === "granted" && !loading && !error && (tab === "portion"
+    ? engine && portionSrc != null && captureRegionValid(crop, portionSrc.width, portionSrc.height) && cropShareable(pixelCrop)
+    : tab === "screens" ? picked?.kind === "display" && displays.some(display => display.id === picked.id)
+      : engine && picked?.kind === "window" && windows.some(window => window.id === picked.id));
 
   const share = () => {
+    if (!shareReady || submitted.current) return;
+    submitted.current = true;
     saveJson("saucebunny.shareAudio", audio);
     const withAudio = audio && engine;
-    if (tab === "portion" && portionSrc && crop) {
+    if (tab === "portion" && portionSrc && pixelCrop) {
       onPick({
         kind: "display", id: portionSrc.id,
-        crop: `${Math.round(crop.x)},${Math.round(crop.y)},${Math.round(crop.w)},${Math.round(crop.h)}`,
+        crop: `${pixelCrop.x},${pixelCrop.y},${pixelCrop.w},${pixelCrop.h}`,
         audio: withAudio,
       });
     } else if (picked) {
       onPick({ kind: picked.kind, id: picked.id, crop: null, audio: withAudio });
     }
-    onClose();
-  };
-
-  // Drag-on-thumbnail: pointer coords scale from the rendered surface to
-  // display points (SCDisplay dimensions are points).
-  const portionPointer = (e: React.PointerEvent, phase: "down" | "move" | "up") => {
-    const el = surfaceRef.current;
-    if (!el || !portionSrc) return;
-    const r = el.getBoundingClientRect();
-    const sx = portionSrc.width / r.width;
-    const sy = portionSrc.height / r.height;
-    const px = Math.min(Math.max(e.clientX - r.left, 0), r.width) * sx;
-    const py = Math.min(Math.max(e.clientY - r.top, 0), r.height) * sy;
-    if (phase === "down") {
-      dragRef.current = { startX: px, startY: py };
-      el.setPointerCapture(e.pointerId);
-      setCrop({ x: px, y: py, w: 0, h: 0 });
-    } else if (dragRef.current && (phase === "move" ? e.buttons > 0 : true)) {
-      const { startX, startY } = dragRef.current;
-      setCrop({
-        x: Math.min(startX, px), y: Math.min(startY, py),
-        w: Math.abs(px - startX), h: Math.abs(py - startY),
-      });
-      if (phase === "up") dragRef.current = null;
-    }
+    close();
   };
 
   return (
-    <div className="cp-share-dialog-backdrop" onClick={onClose}>
+    <div className="cp-share-dialog-backdrop" onClick={close}>
       {/* aria-modal is not decoration here: TranscriptViewer gates cmd+F and
           cmd+G on `[role="dialog"][aria-modal="true"]` existing, so without it
           those shortcuts fired at the transcript BEHIND this scrim while the
           user was looking at the dialog. */}
       <div ref={dialogRef} tabIndex={-1} className="cp-share-dialog" role="dialog" aria-modal="true" aria-label="Share your screen" onClick={(e) => e.stopPropagation()}>
-        <h2 className="cp-share-dialog-title">Share your screen</h2>
-
+        <header className="cp-share-dialog-header">
+          <h2 className="cp-share-dialog-title">Share your screen</h2>
+          <p className="cp-share-dialog-sub">Choose a screen, window or area. Nothing is shared until you click Share.</p>
+          {access === "granted" && <CaptureSourceTabs label="Share source type" selected={tab} tabs={[
+            { id: "screens", label: "Screens", panelId: "cp-share-screens" },
+            { id: "windows", label: "Windows", panelId: "cp-share-windows", disabled: !engine },
+            { id: "portion", label: "Portion of screen", panelId: "cp-share-portion", disabled: !engine },
+          ]} onSelect={value => {
+            if (value !== "screens" && value !== "windows" && value !== "portion") return;
+            setTab(value); setPicked(null); setPortionDisplay(null); setCrop(null);
+          }}/>}
+        </header>
+        <div className="cp-share-dialog-body">
         {access === "checking" && <p className="cp-share-dialog-line">Checking screen access…</p>}
+        {access === "undetermined" && <div className="cp-share-dialog-denied">
+          <p className="cp-share-dialog-line">Allow Screen Recording to choose a source.</p>
+          <button type="button" className="btn" disabled={loading} onClick={() => void discover(true)}>Allow screen access</button>
+        </div>}
         {access === "denied" && (
           <div className="cp-share-dialog-denied">
             <IconVideoOff size={22} />
@@ -150,112 +161,56 @@ export function ShareDialog({ onPick, onClose }: {
               onClick={() => { void invoke("open_privacy_pane", { anchor: "Privacy_ScreenCapture" }).catch(() => {}); }}>
               Open System Settings
             </button>
+            <button type="button" className="btn btn-ghost btn-compact" disabled={loading} onClick={() => void discover()}>Check again</button>
           </div>
         )}
+        {error && <div className="cp-share-dialog-denied">
+          <p role="alert" className="cp-share-dialog-line">{error}</p>
+          <button type="button" className="btn" disabled={loading} onClick={() => void discover()}>Try again</button>
+        </div>}
 
         {access === "granted" && (
           <>
-            <div className="cp-share-tabs" role="tablist">
-              <button type="button" role="tab" aria-selected={tab === "screens"}
-                className={"cp-share-tab" + (tab === "screens" ? " here" : "")}
-                onClick={() => setTab("screens")}>
-                Screens
-              </button>
-              <button type="button" role="tab" aria-selected={tab === "windows"}
-                className={"cp-share-tab" + (tab === "windows" ? " here" : "")}
-                disabled={!engine}
-                title={engine ? undefined : "Needs the capture engine (npm run build:capture)"}
-                onClick={() => setTab("windows")}>
-                Windows
-              </button>
-              <button type="button" role="tab" aria-selected={tab === "portion"}
-                className={"cp-share-tab" + (tab === "portion" ? " here" : "")}
-                disabled={!engine}
-                title={engine ? undefined : "Needs the capture engine (npm run build:capture)"}
-                onClick={() => setTab("portion")}>
-                Portion of screen
-              </button>
-            </div>
-
-            {sources == null && <p className="cp-share-dialog-line">Finding what you can share…</p>}
+            {loading && <p className="cp-share-dialog-line" role="status">Finding what you can share…</p>}
+            {!loading && sources && <button type="button" className="cp-toolbar-disclosure cp-share-refresh" onClick={() => void discover()}>Refresh sources</button>}
 
             {sources != null && tab === "screens" && (
-              <div className="cp-share-grid">
-                {displays.map((d) => (
-                  <button key={d.id} type="button"
-                    className={"cp-share-card" + (picked?.kind === "display" && picked.id === d.id ? " picked" : "")}
-                    onClick={() => setPicked({ kind: "display", id: d.id })}>
-                    {d.thumb
-                      ? <img src={`data:image/jpeg;base64,${d.thumb}`} alt="" />
-                      : <span className="cp-share-card-ph" />}
-                    <span className="cp-share-card-label">{d.label}</span>
-                  </button>
-                ))}
-                {displays.length === 0 && <p className="cp-share-dialog-line">No displays found.</p>}
+              <div role="tabpanel" id="cp-share-screens" aria-label="Screens">
+                <CaptureSourceGrid sources={displays.map(display => ({ id: String(display.id), label: display.label,
+                  description: `${display.width} × ${display.height}`, thumbnail: display.thumb ? `data:image/jpeg;base64,${display.thumb}` : null }))}
+                  selectedId={picked?.kind === "display" ? String(picked.id) : null} disabled={loading}
+                  emptyLabel="No displays found." onSelect={id => setPicked({ kind: "display", id: Number(id) })}/>
               </div>
             )}
 
             {sources != null && tab === "windows" && (
-              <div className="cp-share-grid">
-                {windows.map((w) => (
-                  <button key={w.id} type="button"
-                    className={"cp-share-card" + (picked?.kind === "window" && picked.id === w.id ? " picked" : "")}
-                    onClick={() => setPicked({ kind: "window", id: w.id })}>
-                    {w.thumb
-                      ? <img src={`data:image/jpeg;base64,${w.thumb}`} alt="" />
-                      : <span className="cp-share-card-ph" />}
-                    <span className="cp-share-card-label" title={`${w.app} - ${w.title}`}>
-                      {w.app}{w.title ? ` - ${w.title}` : ""}
-                    </span>
-                  </button>
-                ))}
-                {windows.length === 0 && <p className="cp-share-dialog-line">No shareable windows found.</p>}
+              <div role="tabpanel" id="cp-share-windows" aria-label="Windows">
+                <CaptureSourceGrid sources={windows.map(window => ({ id: String(window.id), label: window.title || "Untitled window",
+                  description: `${window.app} · Window ${window.id}`, thumbnail: window.thumb ? `data:image/jpeg;base64,${window.thumb}` : null }))}
+                  selectedId={picked?.kind === "window" ? String(picked.id) : null} disabled={loading}
+                  emptyLabel="No shareable windows found." onSelect={id => setPicked({ kind: "window", id: Number(id) })}/>
               </div>
             )}
 
             {sources != null && tab === "portion" && (
-              <div className="cp-share-portion">
+              <div className="cp-share-portion" role="tabpanel" id="cp-share-portion" aria-label="Portion of screen">
                 {portionSrc == null && (
                   <>
                     <p className="cp-share-dialog-sub">Pick the screen, then drag the area to share.</p>
-                    <div className="cp-share-grid">
-                      {displays.map((d) => (
-                        <button key={d.id} type="button" className="cp-share-card"
-                          onClick={() => { setPortionDisplay(d.id); setCrop(null); }}>
-                          {d.thumb
-                            ? <img src={`data:image/jpeg;base64,${d.thumb}`} alt="" />
-                            : <span className="cp-share-card-ph" />}
-                          <span className="cp-share-card-label">{d.label}</span>
-                        </button>
-                      ))}
-                    </div>
+                    <CaptureSourceGrid sources={displays.map(display => ({ id: String(display.id), label: display.label,
+                      description: `${display.width} × ${display.height}`, thumbnail: display.thumb ? `data:image/jpeg;base64,${display.thumb}` : null }))}
+                      selectedId={null} disabled={loading} emptyLabel="No displays found."
+                      onSelect={id => { setPortionDisplay(Number(id)); setCrop(null); }}/>
                   </>
                 )}
                 {portionSrc != null && (
                   <>
-                    <div
-                      ref={surfaceRef}
-                      className="cp-share-portion-surface"
-                      onPointerDown={(e) => portionPointer(e, "down")}
-                      onPointerMove={(e) => portionPointer(e, "move")}
-                      onPointerUp={(e) => portionPointer(e, "up")}
-                    >
-                      {portionSrc.thumb && <img src={`data:image/jpeg;base64,${portionSrc.thumb}`} alt="" draggable={false} />}
-                      {crop && crop.w > 0 && (
-                        <span
-                          className="cp-share-portion-rect"
-                          style={{
-                            left: `${(crop.x / portionSrc.width) * 100}%`,
-                            top: `${(crop.y / portionSrc.height) * 100}%`,
-                            width: `${(crop.w / portionSrc.width) * 100}%`,
-                            height: `${(crop.h / portionSrc.height) * 100}%`,
-                          }}
-                        />
-                      )}
-                    </div>
+                    <CaptureRegionEditor key={portionSrc.id} label={portionSrc.label} width={portionSrc.width} height={portionSrc.height}
+                      thumbnail={portionSrc.thumb ? `data:image/jpeg;base64,${portionSrc.thumb}` : null}
+                      crop={crop} onChange={setCrop} disabled={loading}/>
                     <div className="cp-share-portion-foot">
                       <span className="cp-share-dialog-sub">
-                        {cropStatus(crop, portionSrc.label)}
+                        {cropStatus(pixelCrop, portionSrc.label)}
                       </span>
                       <button type="button" className="btn btn-ghost btn-compact"
                         onClick={() => { setPortionDisplay(null); setCrop(null); }}>
@@ -267,22 +222,19 @@ export function ShareDialog({ onPick, onClose }: {
               </div>
             )}
 
-            <div className="cp-share-dialog-foot">
-              <label className={"cp-share-audio" + (engine ? "" : " off")}>
-                <input type="checkbox" checked={audio && engine} disabled={!engine}
-                  onChange={(e) => setAudio(e.target.checked)} />
-                Share system audio
-                {!engine && <span className="cp-share-dialog-sub"> (needs the capture engine)</span>}
-              </label>
-              <div className="cp-share-dialog-actions">
-                <button type="button" className="btn btn-ghost btn-compact" onClick={onClose}>Cancel</button>
-                <button type="button" className="btn cp-colobby-cta" disabled={!shareReady} onClick={share}>
-                  Share
-                </button>
-              </div>
-            </div>
           </>
         )}
+        </div>
+        <footer className="cp-share-dialog-foot">
+          {access === "granted" && <CaptureAudioOption checked={audio && engine} disabled={!engine || loading}
+            onChange={setAudio} label="Share system audio" description="Other applications may be audible. Your microphone stays separate."/>}
+          <div className="cp-share-dialog-actions">
+            <button type="button" className="btn btn-ghost btn-compact" onClick={close}>Cancel</button>
+            <button type="button" className="btn cp-colobby-cta" disabled={!shareReady} onClick={share}>
+              Share
+            </button>
+          </div>
+        </footer>
       </div>
     </div>
   );

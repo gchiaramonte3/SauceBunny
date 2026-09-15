@@ -6,6 +6,54 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- Multitrack audition levels use the existing speaker icon and a vertical dB
+  fader with an editable readout, attenuation, silence, and boost up to +36 dB.
+  Signed values with an optional dB suffix replace the selected readout; Reset
+  restores 0 dB. Gain changes affect live audition only, not AAF media or ASR.
+- In-development Multitrack workspace reads embedded-audio AAF sequences into
+  aligned microphone lanes with Clip-style canvas waveforms, additive Solo/Mute,
+  editable cast labels, source timecode, and local Whisper/Parakeet transcription.
+  A centered top transport adds JKL and default-on audio scrubbing; compact lane
+  sizes, playhead-centered zoom, and segment text overlays keep tracks primary.
+  Generate uses checked tracks over the whole sequence; the old acknowledgment
+  gate and visible range form are removed. Save Cast enables when named, and
+  technical notes move beside Import AAF in settings. Processed-range
+  results support search and CSV/text export. Jobs are bounded and cancellable;
+  the source AAF is read-only. Native engine/audio/Stop acceptance remains under
+  user testing; ASR timing and microphone ownership are not verified identity.
+- Capture thumbnails share bounded admission across source tabs; switching
+  categories no longer turns an obsolete in-flight snapshot into a terminal
+  busy error. Native capture controls have source-specific window titles and
+  explicit accessibility labels, with action-delivery regression tests.
+- Internal Source settings now has NDI, Screen, Window and Region tabs with
+  independent drafts, exact display identity checks and bounded snapshots.
+  Preview and audio controls remain in a persistent dialog footer. Screen and
+  Region use the existing private-program lifecycle; publishing to a room or
+  broadcasting over NDI still requires its own action. System audio for these
+  display modes is initially off and explicitly excludes Sauce Bunny's windows
+  and playback through a versioned native-parent policy. Missing identities or
+  older capture modules fail closed. Packaged WKWebView feedback isolation is
+  still a live acceptance gate; no distribution claim is made by these tests.
+- In-development region capture crops inside ScreenCaptureKit and owns a
+  native desktop boundary with attempt-scoped Edit and Stop. Edit opens a draft
+  without changing live capture. Both simultaneous captures exclude the full
+  retained overlay-window registry; missing exclusion identities fail closed.
+  Real desktop rendering and pixel-level exclusion remain unverified in the
+  matching signed package. Ordinary release packaging still excludes OBS.
+- Application Preview now lists visible windows across applications together,
+  with application names beside each exact window choice. No application-menu
+  selection is required before seeing thumbnails. Starting a private preview
+  reveals the existing monitor only after the requested picture is ready;
+  cancelled, failed and superseded requests cannot dismiss a later setup visit.
+- Visual source choosers share screen/window cards, explicit audio choices and
+  pointer/keyboard region selection. Application Preview uses bounded,
+  memory-only snapshots of exact windows; choosing a tile does not start
+  continuous capture, room sharing or NDI broadcasting. Source tabs remain
+  in the settings popup, outside the picture and comments sidebar.
+- Application capture can explicitly exclude application audio at acquisition.
+  The updated embedded runtime is required for audio-off; older modules fail
+  closed instead of ignoring the choice. Existing captures retain their
+  previous audio policy.
 - Preview now exposes application/window/crop capture in its existing source
   settings, plus explicit source-bound NDI Broadcast and Stop controls. Room
   sharing and network broadcasting are separate. These controls require the
@@ -63,6 +111,40 @@ All notable changes to Sauce Bunny. Format loosely follows
   not enabled. “Not shared” describes room publication, not LAN broadcasting.
 
 ### Fixed
+- Multitrack reopening now coordinates with pending mic-owner saves so later
+  edits cannot restore stale labels. Stop reconciles a track already committed
+  by the native worker without starting the next track. Silent audio warming
+  covers the next five-second block, and late delivery holds the playhead in a
+  buffering state instead of unexpectedly pausing a boundary-adjacent start.
+- Room sharing keeps the capture helper and its diagnostic pipe alive after
+  metadata, avoiding an immediate SIGPIPE exit from a discarded Swift
+  continuation. Optimized no-capture lifetime and real-pipe regressions cover
+  startup; bounded, sanitized failure details remain tied to the current share.
+- Stop owns native sharing children from the moment they spawn, including
+  delayed metadata startup. Cancelled and duplicate requests cannot start a
+  late encoder or replace a newer share; cleanup reaps owned child handles
+  rather than signalling potentially reused process IDs.
+- Internal OBS Region preview now reports the actual padded OpenGL row stride,
+  preventing diagonal picture corruption at crop widths such as 1266 pixels.
+  The pinned core build must pass generated GPU readback tests before its
+  provenance is recorded; crop dimensions and capture boundaries are unchanged.
+- Review now starts with explicit File, Link, Screen, Window, Region and NDI
+  choices instead of a Resume prompt. Capture dialogs keep their actions and
+  audio options outside the scrolling region editor. A presenter's explicit
+  screen share owns the main monitor without playing self-audio or allowing
+  the hidden file's transport and transcript events to move it.
+- ScreenCaptureKit helper no longer drops planar stereo samples because of an
+  undersized AudioBufferList. Bounded extraction preserves interleaved and mono
+  PCM; synthetic malformed-buffer and exact-channel regression tests cover it.
+- Screen sharing rejects missing displays and invalid crop regions instead of
+  widening capture. Failed source discovery is reported rather than replaced
+  with an unrelated display list. Picker snapshots reject changed identities
+  and late results after closing or choosing another application.
+- Application capture distinguishes failed window discovery from a successful
+  empty list. Refreshing applications cannot erase window or Preview errors;
+  stale discovery results cannot enable Preview. Inactive Screen Recording
+  access now explains restart and stale-app-grant recovery. Signing-selection
+  regressions guard the existing stable-identity internal build path.
 - Removed the unused single-source broadcast-hook wrapper; reused the existing
   capture-selection snapshot helper and native started-source descriptor.
   Targeted tests preserve action ownership and mutation isolation.

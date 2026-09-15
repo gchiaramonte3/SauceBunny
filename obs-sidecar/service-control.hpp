@@ -5,13 +5,16 @@
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <variant>
 
 namespace sauce_obs {
 struct StartCapture {
     unsigned slot = 0;
     uint64_t generation = 0;
-    WindowIdentity identity;
+    std::variant<WindowIdentity, DisplayIdentity> target;
     Crop crop;
+    bool audio = true;
+    unsigned audioPolicy = 0;
 };
 // Newline JSON start/stop commands plus P/Q lines. Strictly bounded, local
 // owner pipe only. Stops are latched even while the OBS thread is starting.
@@ -20,6 +23,7 @@ public:
     ServiceControl();
     ~ServiceControl();
     bool stopping() const { return stopping_.load(); }
+    int ownerProcess() const { return parent_; }
     bool cancelled(unsigned slot, uint64_t generation) const;
     std::optional<StartCapture> next();
 private:

@@ -9,8 +9,8 @@ behavior. Use the catalog and browser checks alongside those contracts.
 The user approved the Review-page audit fixes, not a new theme or global
 control migration. Keep the existing type, colors, monitor, volume and gear.
 
-- **Source settings** is the shared gear/entry name for NDI and application
-  capture. Inside the popup, retain the specific input names. Opening settings
+- **Source settings** is the shared gear/entry name for NDI, screen, window and
+  region capture. Inside the popup, retain the specific input names. Opening settings
   does not switch the visible picture, start capture, or change the notes tab.
 - Loaded file/web sources and live sources offer the same notes/setup switch.
   Private notes do not require starting a room or opening live-source settings.
@@ -34,19 +34,55 @@ This supersedes earlier NDI-only entry labels and settings-dependent notes
 visibility below. It does not authorize publishing, native capture changes,
 new timing claims, or catalog-wide styling adoption.
 
-### Application capture · 2026-09-12
+### Unified source capture · 2026-09-12
 
 Application capture reuses the existing Preview gear dialog, controls, type,
 spacing, player and comments. There is no new sidebar or picture overlay.
-The Input select chooses NDI or Application window; passive discovery does not
-capture. Preview requires an explicit application, process, window and valid
-crop. Missing windows stay missing, with no desktop or same-title fallback.
-Crop is an optional disclosure using the existing compact numeric fields.
+Source tabs at the top choose NDI, Screen, Window or Region. Metadata discovery
+does not capture; separate bounded snapshots populate the visual chooser.
+Show visible windows across applications immediately, with the application name
+on each card. Choosing an application from a menu is not a prerequisite. Failed
+discovery is not an empty list; retain its error and a usable retry action.
+Window Preview requires an explicit application, process, window, audio policy
+and valid crop. Screen and Region require an exact display UUID, observed ID
+and geometry. Missing or rearranged sources stay unavailable, with no desktop,
+main-display or same-title fallback. Each tab retains its own draft. Region
+requires an explicitly selected valid crop; Window crop is an optional disclosure. Use a
+draggable, correctly proportioned snapshot and compact percentage fields.
+Audio inclusion is not monitoring volume. Screen/Region system audio is an
+explicit, initially off choice. The user approved excluding Sauce Bunny's
+windows as well as its playback audio when it is enabled. Explain this beside
+the checkbox; keep microphone separate. Region cropping narrows picture, not
+the system-audio mix. The versioned native exclusion policy must fail closed
+if its parent identity or capture-module support cannot be confirmed. Live
+WKWebView feedback isolation remains an acceptance gate, not a catalog claim.
+
+Keep Preview and its audio choice in the persistent dialog footer, outside the
+scrolling fields, with Cancel preview and Done. Footer controls occupy layout
+space and must not cover focused fields. Done/X/Escape dismiss settings without
+stopping capture; Cancel preview explicitly cancels the private candidate.
+
+Region capture owns a native desktop boundary, not an overlay inside the app
+monitor. It remains neutral while preparing and turns green only after picture
+and encoder readiness. Edit raises Source settings with that exact source's
+draft; it does not resize, capture or share until Preview is clicked. Stop
+belongs to that exact attempt. Native exclusion and actual desktop interaction
+still need packaged live acceptance; fixtures do not establish either.
+
+Room screen/window/portion sharing and application Preview reuse the controlled
+`CaptureSourcePicker` visuals. Keep category selection, snapshots and submission
+truthful; no hidden-tab source can be submitted, invalid regions never become
+full-screen, and cancelling discovery never starts capture. See
+[the chooser rules](CAPTURE-CHOOSER.md) for ownership and verification boundaries.
 
 Private preview, room sharing and Broadcast to NDI are separate actions. The
 single Preview volume control owns monitoring; the settings popup adds no
 player or second volume. Closing it retains the selected source, draft and
 native broadcast. Stop remains available while a broadcast is starting.
+An explicitly requested application preview closes setup once that exact
+candidate has decoded and encoded readiness. Opening setup around an existing
+picture never closes it automatically; cancellation and failure invalidate a
+pending reveal without changing media ownership or publishing anything.
 Application capture is not a Premiere companion connection and cannot imply
 sequence timecode or marker support. Preserve existing NDI input behavior.
 

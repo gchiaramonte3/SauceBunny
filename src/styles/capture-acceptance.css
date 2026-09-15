@@ -1,0 +1,6 @@
+/* Internal acceptance builds only. Ordinary builds do not import this sheet. */
+.cp-capture-acceptance { padding: var(--s-2) var(--s-4); font-size: var(--text-sm); color: var(--fg-2); }
+.cp-capture-acceptance p { margin: var(--s-2) 0; }
+.cp-capture-acceptance-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.cp-capture-acceptance-channel { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3); margin: var(--s-2) 0; }
+.cp-capture-acceptance pre { max-height: 180px; overflow: auto; font-size: var(--text-xs); }

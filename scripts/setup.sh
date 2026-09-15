@@ -45,6 +45,9 @@ if have saucebunny-capture; then echo "already present — skipping (rebuild: np
 step "llama-server (compiles llama.cpp — a few minutes; powers the AI Summary tab)"
 if have llama-server; then echo "already present — skipping (rebuild: npm run build:llama)"; else bash scripts/build-llama.sh; fi
 
+step "saucebunny-aaf (self-contained AAF reader)"
+if have saucebunny-aaf; then echo "already present - skipping (rebuild: npm run build:aaf)"; else bash scripts/build-aaf.sh; fi
+
 step "done"
 ls -lh src-tauri/binaries/ | grep -v '^total\|\.gitkeep' || true
 echo

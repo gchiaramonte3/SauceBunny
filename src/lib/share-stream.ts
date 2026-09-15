@@ -1,6 +1,6 @@
 /**
- * Play the share proxy stream in a HIDDEN muted <video> and captureStream()
- * it into a MediaStream the mesh can send (WKWebView has no getDisplayMedia;
+ * Play the share proxy stream in a silent hidden <video> and adapt its decoded
+ * output into a MediaStream the mesh can send (WKWebView has no getDisplayMedia;
  * this is the delivery half of the native pipeline). MSE, matching the
  * codebase's proven web-playback path - a live fragmented stream over a
  * plain <video src> is exactly what WKWebView refuses.
@@ -8,10 +8,24 @@
  * DOM-only by design: the state machine around it (share-machine.ts) is
  * pure and unit-tested; this file is the injected `open` seam.
  */
+import type { ShareOpenOptions } from "./share-machine";
+import { openShareMediaBridge, type ShareMediaBridge } from "./share-media-bridge";
+
+const OPEN_TIMEOUT_MS = 15_000;
+
 export async function openShareStream(
   url: string,
   onDied: () => void,
+  options?: ShareOpenOptions,
 ): Promise<{ stream: MediaStream; track: MediaStreamTrack; audioTrack: MediaStreamTrack | null; close: () => void }> {
+  const abort = new AbortController();
+  let rejectFailure: (error: Error) => void = () => {};
+  const failure = new Promise<never>((_, reject) => { rejectFailure = reject; });
+  void failure.catch(() => {});
+  let opened = false;
+  let terminalError: Error | null = null;
+  let bridge: ShareMediaBridge | null = null;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   const video = document.createElement("video");
   video.muted = true;
   video.playsInline = true;
@@ -22,7 +36,13 @@ export async function openShareStream(
   let closed = false;
   let wakeReader: (() => void) | null = null;
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-  const died = () => { if (!closed) onDied(); };
+  const died = (error = new Error("The screen-sharing stream stopped before its picture was ready.")) => {
+    if (closed) return;
+    terminalError = error;
+    rejectFailure(error);
+    if (opened) onDied();
+    teardown();
+  };
 
   /** The ONE teardown, shared by the returned close() and every throw path
    *  below. The caller's state machine records the handle only after this
@@ -34,21 +54,35 @@ export async function openShareStream(
    *  rejects the loop, whose catch calls died() — a SECOND cleanup — and
    *  the flag is what makes that a no-op. */
   const teardown = () => {
+    if (closed) return;
     closed = true;
+    if (timeout !== null) clearTimeout(timeout);
+    options?.signal.removeEventListener("abort", cancelled);
+    abort.abort();
+    bridge?.close();
     wakeReader?.();
     wakeReader = null;
-    try { void reader?.cancel(); } catch { /* already done */ }
+    try { void reader?.cancel().catch(() => {}); } catch { /* already done */ }
     try { if (ms.readyState === "open") ms.endOfStream(); } catch { /* torn */ }
     video.pause();
     video.src = "";
     URL.revokeObjectURL(objectUrl); // no-op if the happy path already did
   };
+  const cancelled = () => {
+    terminalError = new DOMException("Screen sharing was cancelled", "AbortError");
+    rejectFailure(terminalError);
+    teardown();
+  };
+  options?.signal.addEventListener("abort", cancelled, { once: true });
+  timeout = setTimeout(() => died(new Error("Screen sharing did not produce a picture within 15 seconds. Try sharing again.")), OPEN_TIMEOUT_MS);
+  video.addEventListener("error", () => died(new Error("The screen-sharing video could not be decoded.")));
 
   try {
-    await new Promise<void>((resolve, reject) => {
+    if (options?.signal.aborted) cancelled();
+    await Promise.race([failure, new Promise<void>((resolve, reject) => {
       ms.addEventListener("sourceopen", () => resolve(), { once: true });
       video.addEventListener("error", () => reject(new Error("share video failed to open")), { once: true });
-    });
+    })]);
     URL.revokeObjectURL(objectUrl);
     // ultrafast/high yuv420p out of the proxy's libx264 line; AAC rides
     // along when system audio is shared (declaring it for a video-only
@@ -56,7 +90,7 @@ export async function openShareStream(
     const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.640028, mp4a.40.2"');
     sb.mode = "segments";
 
-    const resp = await fetch(url);
+    const resp = await Promise.race([failure, fetch(url, { signal: abort.signal })]);
     if (!resp.ok || !resp.body) throw new Error(`share stream HTTP ${resp.status}`);
     reader = resp.body.getReader();
 
@@ -106,7 +140,7 @@ export async function openShareStream(
             } catch { /* fall through to death below */ }
           }
         }
-        died();
+        died(new Error("The screen-sharing video buffer failed."));
       }
     };
     sb.addEventListener("updateend", pump);
@@ -127,6 +161,7 @@ export async function openShareStream(
       failFirst = reject;
     });
     void (async () => {
+      let receivedData = false;
       try {
         for (;;) {
           if (closed) return;
@@ -136,11 +171,13 @@ export async function openShareStream(
           }
           const { done, value } = await reader.read();
           if (done) {
-            failFirst(new Error("share stream ended before sending any data"));
-            died();
+            const error = new Error(receivedData ? "The screen-sharing stream ended." : "share stream ended before sending any data");
+            failFirst(error);
+            died(error);
             return;
           }
           if (value && value.byteLength) {
+            receivedData = true;
             queue.push(value);
             queuedBytes += value.byteLength;
             pump();
@@ -149,29 +186,26 @@ export async function openShareStream(
         }
       } catch (e) {
         failFirst(e instanceof Error ? e : new Error("share stream read failed"));
-        died();
+        died(e instanceof Error ? e : new Error("share stream read failed"));
       }
     })();
 
-    await gotData;
-    await video.play().catch(() => { /* muted autoplay is allowed */ });
-    const stream = (video as HTMLVideoElement & { captureStream(): MediaStream }).captureStream();
-    const track = stream.getVideoTracks()[0];
-    if (!track) throw new Error("share captureStream produced no video track");
-    // Screen content is text and UI, not motion: tell the encoder to spend
-    // its bits on spatial detail. Pairs with the senders' maintain-resolution
-    // degradation preference (rtc-mesh tuneVideoSender).
-    try { track.contentHint = "detail"; } catch { /* older engines ignore it */ }
+    await Promise.race([failure, gotData]);
+    const decoded = await openShareMediaBridge(video, { audio: options?.audio ?? false, signal: abort.signal, onDied: died });
+    bridge = decoded;
+    if (closed) { decoded.close(); await failure; }
+    opened = true;
+    if (timeout !== null) clearTimeout(timeout);
 
     return {
-      stream,
-      track,
-      audioTrack: stream.getAudioTracks()[0] ?? null,
+      stream: decoded.stream,
+      track: decoded.track,
+      audioTrack: decoded.audioTrack,
       close: teardown,
     };
   } catch (err) {
     teardown();
-    throw err;
+    throw terminalError ?? err;
   }
 }
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build the saucebunny-capture Swift sidecar (on-device live dictation via
-# Apple's Speech framework) and drop the binary into the Tauri sidecar tree
+# Build the saucebunny-capture ScreenCaptureKit sidecar and drop the binary into the Tauri sidecar tree
 # with the platform-tuple naming Tauri expects.
 #
 # Usage:
@@ -13,7 +12,7 @@
 #   src-tauri/binaries/saucebunny-capture-x86_64-apple-darwin   # only with --universal
 #
 # Notes:
-#   - This target has NO external SwiftPM dependencies (system Speech +
+#   - This target has NO external SwiftPM dependencies (system ScreenCaptureKit +
 #     AVFoundation only), so `--product saucebunny-capture` builds fast and
 #     never pulls the heavy diarizer packages.
 #   - Self-contained: links only macOS system frameworks. The otool guard

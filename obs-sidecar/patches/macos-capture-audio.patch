@@ -1,0 +1,72 @@
+--- a/mac-sck-video-capture.m
++++ b/mac-sck-video-capture.m
+@@ -1,6 +1,18 @@
+ #include "mac-sck-common.h"
+ #include "window-utils.h"
+ 
++// This is an acquisition policy, not a monitoring/output-volume control.
++// Return the same flag used for audio-output registration below.
++API_AVAILABLE(macos(13.0)) bool sauce_capture_configure_audio(obs_data_t *settings,
++                                                          SCStreamConfiguration *configuration)
++{
++    const bool enabled = obs_data_get_bool(settings, "capture_audio");
++    [configuration setCapturesAudio:enabled];
++    [configuration setExcludesCurrentProcessAudio:YES];
++    [configuration setChannelCount:2];
++    return enabled;
++}
++
+ API_AVAILABLE(macos(12.5)) static void destroy_screen_stream(struct screen_capture *sc)
+ {
+     if (sc->disp && !sc->capture_failed) {
+@@ -220,9 +232,10 @@
+     [sc->stream_properties setPixelFormat:l10r_type];
+ 
++    bool capture_audio = false;
+     if (@available(macOS 13.0, *)) {
+-        [sc->stream_properties setCapturesAudio:YES];
+-        [sc->stream_properties setExcludesCurrentProcessAudio:YES];
+-        [sc->stream_properties setChannelCount:2];
++        obs_data_t *settings = obs_source_get_settings(sc->source);
++        capture_audio = sauce_capture_configure_audio(settings, sc->stream_properties);
++        obs_data_release(settings);
+     } else {
+         if (sc->capture_type != ScreenCaptureWindowStream) {
+             sc->disp = NULL;
+@@ -242,17 +255,19 @@
+         return !did_add_output;
+     }
+ 
+     if (@available(macOS 13.0, *)) {
+-        did_add_output = [sc->disp addStreamOutput:sc->capture_delegate type:SCStreamOutputTypeAudio
+-                                sampleHandlerQueue:nil
+-                                             error:&addStreamOutputError];
+-        if (!did_add_output) {
+-            MACCAP_ERR("init_screen_stream: Failed to add audio stream output with error %s\n",
+-                       [[addStreamOutputError localizedFailureReason] cStringUsingEncoding:NSUTF8StringEncoding]);
+-            [addStreamOutputError release];
+-            return !did_add_output;
+-        }
++        if (capture_audio) {
++            did_add_output = [sc->disp addStreamOutput:sc->capture_delegate type:SCStreamOutputTypeAudio
++                                    sampleHandlerQueue:nil
++                                                 error:&addStreamOutputError];
++            if (!did_add_output) {
++                MACCAP_ERR("init_screen_stream: Failed to add audio stream output with error %s\n",
++                           [[addStreamOutputError localizedFailureReason] cStringUsingEncoding:NSUTF8StringEncoding]);
++                [addStreamOutputError release];
++                return !did_add_output;
++            }
++        }
+     }
+     os_event_init(&sc->stream_start_completed, OS_EVENT_TYPE_MANUAL);
+ 
+     __block BOOL did_stream_start = NO;
+@@ -399,5 +412,7 @@
+     obs_data_set_default_bool(settings, "hide_obs", false);
+     obs_data_set_default_bool(settings, "show_empty_names", false);
+     obs_data_set_default_bool(settings, "show_hidden_windows", false);
++    obs_data_set_default_bool(settings, "capture_audio", true);
++    obs_data_set_default_int(settings, "sauce_audio_policy_version", 1);
+ }
+ 

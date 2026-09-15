@@ -1,0 +1,36 @@
+--- a/libobs-opengl/gl-stagesurf.c
++++ b/libobs-opengl/gl-stagesurf.c
+@@ -17,6 +17,14 @@
+ 
+ #include "gl-subsystem.h"
+ 
++/* GL readback packs each row to four bytes. NV12's R8/R8G8 planes can
++ * have a non-aligned row even when the output raster is valid and even.
++ * The allocation and mapped stride must describe the same padded rows. */
++static uint32_t packed_row_size(const struct gs_stage_surface *surf)
++{
++	return (surf->width * surf->bytes_per_pixel + 3u) & ~3u;
++}
++
+ static bool create_pixel_pack_buffer(struct gs_stage_surface *surf)
+ {
+ 	GLsizeiptr size;
+@@ -28,8 +36,7 @@
+ 	if (!gl_bind_buffer(GL_PIXEL_PACK_BUFFER, surf->pack_buffer))
+ 		return false;
+ 
+-	size = surf->width * surf->bytes_per_pixel;
+-	size = (size + 3) & 0xFFFFFFFC; /* align width to 4-byte boundary */
++	size = packed_row_size(surf);
+ 	size *= surf->height;
+ 
+ 	glBufferData(GL_PIXEL_PACK_BUFFER, size, 0, GL_DYNAMIC_READ);
+@@ -227,7 +234,7 @@
+ 
+ 	gl_bind_buffer(GL_PIXEL_PACK_BUFFER, 0);
+ 
+-	*linesize = stagesurf->bytes_per_pixel * stagesurf->width;
++	*linesize = packed_row_size(stagesurf);
+ 	return true;
+ 
+ fail:

@@ -33,6 +33,8 @@ const HOME = "src/lib/repath.ts";
 const ALLOWED: ReadonlyArray<readonly [file: string, why: string]> = [
   ["src/lib/review.ts", "normalises a TITLE inside reviewFingerprint, and a composite fingerprint string on lookup — neither is a path"],
   ["src/lib/library.ts", "searchLibrary folds case as well as normalising; matching text is a different job from identifying a file"],
+  ["src/hooks/use-multitrack-document.ts", "normalises ownerName, an editable microphone-owner label; source_path is not normalised here"],
+  ["src/lib/multitrack-person.ts", "normalises a microphone-owner label to group per-person tabs; this is not filesystem identity"],
 ];
 
 function walk(dir: string, out: string[] = []): string[] {

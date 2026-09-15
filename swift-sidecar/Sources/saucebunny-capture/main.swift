@@ -1,20 +1,28 @@
 // saucebunny-capture — ScreenCaptureKit capture engine for review-session
-// screen sharing. Two modes:
+// screen sharing and explicit window previews. Modes:
 //
 //   list [--thumbs]
 //     One JSON object on stdout:
 //       { "displays": [ { "id", "width", "height", "label", "thumb"? } ],
 //         "windows":  [ { "id", "title", "app", "width", "height", "thumb"? } ] }
 //     `thumb` is a base64 JPEG (~320px wide) via SCScreenshotManager.
+//   thumbnail --application <bundle id> --process <pid> --window <id>
+//     One exact-window, bounded base64 JPEG in JSON. No disk writes or stream.
+//   display-thumbnail --identity <JSON UUID, display ID and observed geometry>
+//     One exact-display bounded JPEG; revalidates the display after capture.
 //
 //   stream --kind display|window --id N [--crop x,y,w,h] [--fps 30]
-//          [--max-width 1600] [--audio-fifo <path>]
+//          [--max-width 1600] [--audio-fifo <path>] [--duration-ms 1..12000]
 //     Raw tight-packed BGRA frames on stdout. Before the first frame, ONE
 //     meta line on stderr: `meta:{"width":W,"height":H}` — the spawner reads
 //     it to build the ffmpeg rawvideo args. With --audio-fifo, 48kHz stereo
 //     f32le system audio (this process's own audio excluded) is written to
 //     the FIFO. Runs until killed (the Rust proxy owns the lifetime) or the
 //     stdout pipe closes.
+//     Optional --duration-ms bounds the entire helper lifetime and exits if
+//     its spawning parent disappears, including during blocked startup/writes.
+//     Bounded window references may add --require-parent-window to reject any
+//     window not owned by the immutable, actual spawning process.
 //
 // `--version` / `--help` exit BEFORE touching ScreenCaptureKit — no TCC
 // prompt from the build smoke test or CI. TCC: spawned by the app, capture
@@ -29,8 +37,30 @@ import ScreenCaptureKit
 let argv = Array(CommandLine.arguments.dropFirst())
 
 if argv.isEmpty || argv[0] == "--version" || argv[0] == "--help" {
-    print("saucebunny-capture (ScreenCaptureKit; list | stream)")
+    print("saucebunny-capture (ScreenCaptureKit; list | thumbnail | display-thumbnail | stream)")
+    if argv.first == "--help" {
+        print("stream: optional --duration-ms 1..12000 bounds capture and stops on parent loss")
+        print("bounded window stream: --require-parent-window verifies the spawning process owns the window")
+    }
     exit(argv.isEmpty ? 2 : 0)
+}
+
+// Install the opt-in bound before discovery, capture startup or a FIFO open.
+// Keep this global owner alive for the process lifetime. No flag means no timer.
+let streamLifetimeWatchdog: CaptureStreamWatchdog?
+let streamRequiredWindowParent: Int32?
+do {
+    if let limit = try CaptureStreamLimit.parse(arguments: argv) {
+        let watchdog = try CaptureStreamWatchdog(limit: limit)
+        streamLifetimeWatchdog = watchdog
+        streamRequiredWindowParent = watchdog.requiredWindowParent
+    } else { streamLifetimeWatchdog = nil; streamRequiredWindowParent = nil }
+} catch { fail(error.localizedDescription, code: 2) }
+
+// Keep help/version non-GUI. Real modes need the WindowServer connection
+// before their first suspension; no permission request happens here.
+guard initializeCaptureApplication() else {
+    fail("Capture helper could not initialize the active macOS desktop session.", code: 3)
 }
 
 func fail(_ msg: String, code: Int32 = 1) -> Never {
@@ -51,25 +81,87 @@ func jsonLine(_ obj: [String: Any]) -> String? {
 
 /// Small JPEG for picker cards. Nil on any failure — the picker shows a
 /// glyph placeholder instead.
-func thumbnail(filter: SCContentFilter, width: Int, height: Int) async -> String? {
+func thumbnailJPEG(filter: SCContentFilter, width: Int, height: Int) async throws -> Data {
     let cfg = SCStreamConfiguration()
-    let scale = min(1.0, 320.0 / Double(max(width, 1)))
-    cfg.width = max(32, Int(Double(width) * scale))
-    cfg.height = max(18, Int(Double(height) * scale))
+    let size = try thumbnailDimensions(width: width, height: height)
+    cfg.width = size.width
+    cfg.height = size.height
     cfg.showsCursor = false
-    guard let img = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg) else {
-        return nil
+    let img = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
+    guard img.width <= captureThumbnailMaxDimension, img.height <= captureThumbnailMaxDimension else {
+        throw CapturePolicyError.invalidDimensions
     }
     let ci = CIImage(cgImage: img)
     let ctx = CIContext()
     guard let jpeg = ctx.jpegRepresentation(of: ci, colorSpace: CGColorSpaceCreateDeviceRGB(),
                                             options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.6])
-    else { return nil }
-    return jpeg.base64EncodedString()
+    else { throw CapturePolicyError.invalidJPEG }
+    guard jpeg.count <= captureThumbnailMaxJPEGBytes else { throw CapturePolicyError.invalidJPEG }
+    return jpeg
+}
+
+func thumbnail(filter: SCContentFilter, width: Int, height: Int) async -> String? {
+    try? await thumbnailJPEG(filter: filter, width: width, height: height).base64EncodedString()
+}
+
+func requireCapturePermission() {
+    guard CGPreflightScreenCaptureAccess() else {
+        fail("Screen Recording access is not granted. Enable it in System Settings to preview this window.", code: 4)
+    }
+}
+
+func runThumbnail() async -> Never {
+    guard let application = opt("--application"), let process = opt("--process").flatMap(Int32.init),
+          let window = opt("--window").flatMap(UInt32.init), process != getppid() else {
+        fail(CapturePolicyError.invalidIdentity.localizedDescription, code: 2)
+    }
+    let requested = CaptureWindowIdentity(application: application, process: process, window: window)
+    do { try requested.validate() } catch { fail(error.localizedDescription, code: 2) }
+    requireCapturePermission()
+    do {
+        let jpeg = try await captureExactWindowThumbnail(requested: requested, resolve: {
+            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+            return content.windows.first { $0.windowID == requested.window && $0.isOnScreen && $0.windowLayer == 0 }
+        }, identity: { window in
+            guard let owner = window.owningApplication else { return nil }
+            return CaptureWindowIdentity(application: owner.bundleIdentifier, process: owner.processID, window: window.windowID)
+        }, capture: { window in
+            try await thumbnailJPEG(filter: SCContentFilter(desktopIndependentWindow: window),
+                                    width: Int(window.frame.width), height: Int(window.frame.height))
+        })
+        guard let out = jsonLine(["application": application, "process": process, "window": window,
+                                 "thumb": jpeg.base64EncodedString()]) else { fail("thumbnail JSON encode failed") }
+        print(out)
+        exit(0)
+    } catch { fail("Window thumbnail unavailable: \(error.localizedDescription)", code: 3) }
+}
+
+func runDisplayThumbnail() async -> Never {
+    guard let raw = opt("--identity"), raw.utf8.count <= 2048,
+          let requested = try? JSONDecoder().decode(CaptureDisplayIdentity.self, from: Data(raw.utf8)) else {
+        fail(CapturePolicyError.invalidDisplayIdentity.localizedDescription, code: 2)
+    }
+    do { try requested.validate() } catch { fail(error.localizedDescription, code: 2) }
+    requireCapturePermission()
+    do {
+        let jpeg = try await captureExactDisplayThumbnail(requested: requested, resolve: {
+            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+            return content.displays.first { $0.displayID == requested.displayId }
+        }, identity: { captureDisplayIdentity($0.displayID) }, capture: { display in
+            try await thumbnailJPEG(filter: SCContentFilter(display: display, excludingWindows: []),
+                                    width: Int(requested.geometry.pixelWidth), height: Int(requested.geometry.pixelHeight))
+        })
+        guard let identity = try JSONSerialization.jsonObject(with: JSONEncoder().encode(requested)) as? [String: Any],
+              let out = jsonLine(identity.merging(["thumb": jpeg.base64EncodedString()]) { _, new in new }) else {
+            fail("thumbnail JSON encode failed")
+        }
+        print(out); exit(0)
+    } catch { fail("Display thumbnail unavailable: \(error.localizedDescription)", code: 3) }
 }
 
 // ── list ────────────────────────────────────────────────────────────────
 func runList() async -> Never {
+    requireCapturePermission()
     let content: SCShareableContent
     do {
         content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
@@ -197,47 +289,14 @@ final class StreamOutput: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     private func writeAudio(_ sample: CMSampleBuffer) {
-        guard let fifo = audioFifo,
-              let fmt = CMSampleBufferGetFormatDescription(sample),
-              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fmt)?.pointee else { return }
-        let channels = Int(asbd.mChannelsPerFrame)
-        let planar = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
-
-        // Pull the AudioBufferList. ffmpeg reads the FIFO as interleaved
-        // f32le/2ch, so planar Float32 (SCK's default) must be interleaved
-        // here - copying the raw block verbatim would swap channels/pitch.
-        var blockBuffer: CMBlockBuffer?
-        var abl = AudioBufferList()
-        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-            sample, bufferListSizeNeededOut: nil, bufferListOut: &abl,
-            bufferListSize: MemoryLayout<AudioBufferList>.size, blockBufferAllocator: nil,
-            blockBufferMemoryAllocator: nil, flags: 0, blockBufferOut: &blockBuffer)
-        guard status == noErr else { return }
-
-        let buffers = UnsafeMutableAudioBufferListPointer(&abl)
-        if !planar || channels < 2 || buffers.count < 2 {
-            // Already interleaved (or mono): pass through as f32le. If the
-            // source is truly mono, ffmpeg's -ac 2 upmixes.
-            for b in buffers {
-                if let d = b.mData { fifo.write(Data(bytes: d, count: Int(b.mDataByteSize))) }
-            }
-            return
-        }
-        // Planar -> interleaved f32. Two channels, equal frame counts.
-        let frames = Int(buffers[0].mDataByteSize) / MemoryLayout<Float32>.size
-        let left = buffers[0].mData!.assumingMemoryBound(to: Float32.self)
-        let right = buffers[1].mData!.assumingMemoryBound(to: Float32.self)
-        var inter = [Float32](repeating: 0, count: frames * 2)
-        for i in 0..<frames {
-            inter[i * 2] = left[i]
-            inter[i * 2 + 1] = right[i]
-        }
-        inter.withUnsafeBytes { fifo.write(Data($0)) }
+        guard let fifo = audioFifo, let pcm = captureAudioPCM(sample) else { return }
+        fifo.write(pcm)
     }
 }
 
 func runStream() async -> Never {
-    guard let kind = opt("--kind"), let idStr = opt("--id"), let id = UInt32(idStr) else {
+    guard let kind = opt("--kind"), ["display", "window"].contains(kind),
+          let idStr = opt("--id"), let id = UInt32(idStr) else {
         fail("stream needs --kind display|window and --id N", code: 2)
     }
     let fps = Int(opt("--fps") ?? "30") ?? 30
@@ -245,6 +304,8 @@ func runStream() async -> Never {
     // peer. A recording is an archive, so it opts out and keeps source size.
     let maxWidth = flag("--full-res") ? Int.max : (Int(opt("--max-width") ?? "1600") ?? 1600)
     let audioFifoPath = opt("--audio-fifo")
+    guard fps > 0, maxWidth > 0 else { fail("invalid stream dimensions or frame rate", code: 2) }
+    requireCapturePermission()
 
     let content: SCShareableContent
     do {
@@ -256,31 +317,41 @@ func runStream() async -> Never {
     let filter: SCContentFilter
     var srcW: Int
     var srcH: Int
+    var cropBounds: CGSize?
+    var selectedWindowOwner: Int32?
     if kind == "window" {
         guard let w = content.windows.first(where: { $0.windowID == id }) else {
             fail("window \(id) not found (closed?)", code: 3)
+        }
+        selectedWindowOwner = w.owningApplication?.processID
+        guard captureStreamWindowPermitted(requiredParentPID: streamRequiredWindowParent,
+                                          ownerPID: selectedWindowOwner, observedParentPID: getppid()) else {
+            fail("Reference window is not owned by the original spawning process.", code: 3)
         }
         filter = SCContentFilter(desktopIndependentWindow: w)
         srcW = Int(w.frame.width)
         srcH = Int(w.frame.height)
     } else {
-        guard let d = content.displays.first(where: { $0.displayID == id }) ?? content.displays.first else {
+        guard let d = content.displays.first(where: { $0.displayID == id }) else {
             fail("display \(id) not found", code: 3)
         }
         filter = SCContentFilter(display: d, excludingWindows: [])
         srcW = d.width
         srcH = d.height
+        cropBounds = d.frame.size
     }
+    guard srcW > 0, srcH > 0 else { fail(CapturePolicyError.invalidDimensions.localizedDescription, code: 3) }
 
     let cfg = SCStreamConfiguration()
     // Portion of a display: SCK crops at the source, cursor included.
     if let crop = opt("--crop") {
-        let parts = crop.split(separator: ",").compactMap { Double($0) }
-        if parts.count == 4, parts[2] > 16, parts[3] > 16 {
-            cfg.sourceRect = CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
-            srcW = Int(parts[2])
-            srcH = Int(parts[3])
-        }
+        guard let bounds = cropBounds else { fail("Portion capture requires the selected display.", code: 2) }
+        do {
+            let rect = try captureCrop(crop, width: bounds.width, height: bounds.height)
+            cfg.sourceRect = rect
+            srcW = Int(rect.width)
+            srcH = Int(rect.height)
+        } catch { fail(error.localizedDescription, code: 2) }
     }
     let scale = min(1.0, Double(maxWidth) / Double(max(srcW, 1)))
     // Even dimensions - yuv420p downstream requires them.
@@ -311,6 +382,10 @@ func runStream() async -> Never {
 
     let output = StreamOutput(width: outW, height: outH, audioFifoPath: audioFifoPath)
     let stream = SCStream(filter: filter, configuration: cfg, delegate: output)
+    guard captureStreamWindowPermitted(requiredParentPID: streamRequiredWindowParent,
+                                      ownerPID: selectedWindowOwner, observedParentPID: getppid()) else {
+        fail("Reference window owner changed before capture started.", code: 3)
+    }
     do {
         try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: DispatchQueue(label: "capture.video"))
         if audioFifoPath != nil {
@@ -332,14 +407,11 @@ func runStream() async -> Never {
     // "correctly" on an empty stream, so screen share failed with an HTTP 200,
     // a 780-byte header-only fMP4, and no error anywhere.
     //
-    // dispatchMain() is ALSO wrong here: this file is a main.swift with
-    // top-level `await`, so the program runs as an implicit Task and the
-    // process exits when that task COMPLETES. Suspending it forever is what
-    // keeps us alive - the process stays up, and SCK keeps delivering on its
-    // own dispatch queues. We exit when the proxy kills us or stdout closes
-    // (SIGPIPE), which is exactly the intended lifetime.
-    await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
-    exit(0) // unreachable: the continuation above is never resumed
+    // Keep the top-level task suspended AND retain its capture resources.
+    // The parent still owns Stop and the optional reference watchdog still
+    // enforces its bound. Do not discard a checked continuation: Swift emits
+    // a misuse warning, which killed the helper when the proxy closed stderr.
+    await parkCaptureStream(retaining: (stream, output))
 }
 
 switch argv[0] {
@@ -347,6 +419,10 @@ case "list":
     await runList()
 case "stream":
     await runStream()
+case "thumbnail":
+    await runThumbnail()
+case "display-thumbnail":
+    await runDisplayThumbnail()
 default:
     fail("unknown mode '\(argv[0])' (list | stream)", code: 2)
 }

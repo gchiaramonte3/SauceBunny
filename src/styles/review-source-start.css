@@ -1,0 +1,22 @@
+/* Review's empty monitor uses the same type, controls and neutral surfaces as
+   the surrounding app. No changes to Clip's first-run or resume experience. */
+.cp-empty.cp-empty-custom { padding: 24px; box-sizing: border-box; overflow: auto; }
+.cp-review-source-start { width: min(100%, 520px); flex-shrink: 0; margin: auto; text-align: left; }
+.cp-review-source-start header { margin-bottom: 24px; }
+.cp-empty .cp-review-source-start h3 { font-size: var(--text-2xl); }
+.cp-review-source-start p { margin: 8px 0 0; color: var(--fg-3); font-size: var(--text-base); line-height: var(--leading-normal); }
+.cp-review-source-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.cp-review-source-choice.btn { width: 100%; min-width: 0; min-height: 66px; height: auto; display: flex; justify-content: flex-start; gap: 14px; padding: 14px 16px; text-align: left; white-space: normal; text-transform: none; letter-spacing: normal; }
+.cp-review-source-choice > span:first-child { display: flex; color: var(--fg-3); }
+.cp-review-source-choice > span:last-child { min-width: 0; }
+.cp-review-source-choice strong { display: block; font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.cp-review-source-choice small { display: block; margin-top: 3px; font-size: var(--text-sm); color: var(--fg-3); font-weight: normal; line-height: var(--leading-snug); }
+.cp-review-source-link { display: grid; gap: 10px; }
+.cp-review-source-link label { color: var(--fg-2); font-size: var(--text-base); }
+.cp-review-source-link input { width: 100%; min-width: 0; box-sizing: border-box; }
+.cp-review-source-link-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 8px; }
+@media (max-width: 900px) {
+  .cp-empty.cp-empty-custom { padding: 16px; }
+  .cp-review-source-start header { margin-bottom: 16px; }
+  .cp-review-source-choice.btn { padding: 10px 12px; gap: 10px; }
+}

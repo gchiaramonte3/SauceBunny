@@ -14,6 +14,20 @@
 //! constitution's refactor priority #1.
 
 use super::*;
+#[path = "capture_thumbnail.rs"]
+mod capture_thumbnail;
+use capture_thumbnail::{CaptureWindowThumbnail, CaptureDisplayThumbnail};
+
+/// Explicit window screenshot, independent of metadata-only OBS discovery.
+#[tauri::command]
+pub async fn capture_window_thumbnail(application: String, process: u32, window: u32) -> Result<CaptureWindowThumbnail, crate::AppError> {
+    capture_thumbnail::window_thumbnail(application, process, window).await
+}
+
+#[tauri::command]
+pub async fn capture_display_thumbnail(selection: super::obs::ObsDisplaySelection) -> Result<CaptureDisplayThumbnail, crate::AppError> {
+    capture_thumbnail::display_thumbnail(selection).await
+}
 
 fn is_ffmpeg_progress(line: &str) -> bool {
     let l = line.trim_start();
@@ -3125,13 +3139,10 @@ pub struct ShareSources {
 }
 
 /// Enumerate shareable displays + windows with thumbnails for the share
-/// dialog. Runs the ScreenCaptureKit sidecar's `list` mode; without the
-/// sidecar (or before the Screen Recording grant) it degrades to the
-/// CoreGraphics display list, no thumbnails.
+/// dialog. Only an absent sidecar permits the legacy display-only list.
+/// Permission, process and parse failures remain errors, never empty windows.
 #[tauri::command]
-pub async fn list_share_sources(app: AppHandle) -> Result<ShareSources, crate::AppError> {
-    use tauri_plugin_shell::process::CommandEvent;
-    use tauri_plugin_shell::ShellExt;
+pub async fn list_share_sources(_app: AppHandle) -> Result<ShareSources, crate::AppError> {
     // engine_present distinguishes "no capture binary at all" (windows/portion/
     // audio genuinely unavailable, and the avfoundation share path uses the
     // avfoundation ORDINAL as the display id) from "engine there but listing
@@ -3150,36 +3161,19 @@ pub async fn list_share_sources(app: AppHandle) -> Result<ShareSources, crate::A
         eprintln!("[share] display-only fallback (engine_present={engine_present}): {e}");
         Ok(ShareSources { displays, windows: Vec::new(), capture_engine: engine_present })
     }
-    let cmd = match app.shell().sidecar("saucebunny-capture") {
-        Ok(c) => c,
-        Err(e) => return fallback(false, e.to_string()),
-    };
-    let (mut rx, child) = match cmd.args(["list", "--thumbs"]).spawn() {
-        Ok(v) => v,
-        Err(e) => return fallback(false, e.to_string()),
-    };
-    let mut out = Vec::new();
-    let collect = async {
-        while let Some(ev) = rx.recv().await {
-            match ev {
-                CommandEvent::Stdout(b) => out.extend_from_slice(&b),
-                CommandEvent::Terminated(t) => return t.code.unwrap_or(-1),
-                _ => {}
-            }
-        }
-        -1
-    };
-    // Thumbnails take ~a second; a wedged sidecar must not hang the dialog.
-    let code = match tokio::time::timeout(std::time::Duration::from_secs(10), collect).await {
-        Ok(c) => c,
-        Err(_) => {
-            let _ = child.kill();
-            return fallback(true, "list timed out".into());
-        }
-    };
-    if code != 0 {
-        return fallback(true, format!("list exited {code}"));
+    let binary = sidecar_path("saucebunny-capture")?;
+    match std::fs::metadata(&binary) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return fallback(false, e.to_string()),
+        Err(e) => return Err(e.into()),
+        Ok(_) => {}
     }
+    if !screen_recording_preflight() {
+        return Err(crate::AppError::invalid("Screen Recording access is not granted. Enable it in System Settings to list capture sources."));
+    }
+    // Aggregate picker JSON includes at most 24 window JPEGs plus displays.
+    const MAX_SHARE_LIST_BYTES: usize = 8 * 1024 * 1024;
+    let args = vec!["list".into(), "--thumbs".into(), "--exclude-pid".into(), std::process::id().to_string()];
+    let out = capture_thumbnail::capture_output(&binary, &args, MAX_SHARE_LIST_BYTES, capture_thumbnail::CAPTURE_DEADLINE).await?;
     #[derive(serde::Deserialize)]
     struct RawList {
         displays: Vec<ShareDisplay>,
@@ -3187,7 +3181,7 @@ pub async fn list_share_sources(app: AppHandle) -> Result<ShareSources, crate::A
     }
     match serde_json::from_slice::<RawList>(&out) {
         Ok(raw) => Ok(ShareSources { displays: raw.displays, windows: raw.windows, capture_engine: true }),
-        Err(e) => fallback(true, format!("list parse: {e}")),
+        Err(e) => Err(crate::AppError::internal(format!("Capture source list could not be read: {e}"))),
     }
 }
 
@@ -3198,18 +3192,25 @@ pub async fn list_share_sources(app: AppHandle) -> Result<ShareSources, crate::A
 pub fn start_screen_share(source: ShareSourceArg) -> Result<String, crate::AppError> {
     let base = crate::stream_proxy::base_url()
         .ok_or_else(|| crate::AppError::internal("media proxy not running"))?;
-    let crop = source
-        .crop
-        .as_deref()
-        .filter(|c| c.split(',').filter_map(|p| p.parse::<f64>().ok()).count() == 4)
-        .map(|c| format!("&crop={c}"))
-        .unwrap_or_default();
+    if !matches!(source.kind.as_str(), "window" | "display") {
+        return Err(crate::AppError::invalid("Choose a display or window to share"));
+    }
+    let crop = match source.crop.as_deref() {
+        Some(value) => {
+            if source.kind != "display" { return Err(crate::AppError::invalid("Portion capture requires a display")); }
+            let (x,y,w,h) = crate::stream_proxy::parse_share_crop(value).map_err(crate::AppError::invalid)?;
+            format!("&crop={x},{y},{w},{h}")
+        }
+        None => String::new(),
+    };
     Ok(format!(
-        "{base}/share/v1?kind={}&id={}{}&audio={}",
-        if source.kind == "window" { "window" } else { "display" },
+        "{base}/share/v1?kind={}&id={}{}&audio={}&request={}",
+        source.kind,
         source.id,
         crop,
         if source.audio { 1 } else { 0 },
+        crate::stream_proxy::reserve_share_request()
+            .map_err(|_| crate::AppError::internal("Screen-sharing request could not be created"))?,
     ))
 }
 

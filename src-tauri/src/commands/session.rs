@@ -586,6 +586,21 @@ impl HostShared {
         if changed { if let Some(current)=source.as_mut() { current.state=crate::commands::ndi::NdiPublicationState::Stopped; } }
         Ok(changed)
     }
+    /// A native source has actually stopped (for example its desktop Stop
+    /// control). This is not renderer authorization and cannot stop a healthy
+    /// source or revoke an unrelated newer publication.
+    fn stop_native_program(&self, id: &str) -> Result<bool, crate::AppError> {
+        let mut source = self.program_source.lock().map_err(|_| crate::AppError::internal("Program source unavailable"))?;
+        let mut publication = self.published_program.lock().map_err(|_| crate::AppError::internal("Program state unavailable"))?;
+        if !publication.as_ref().is_some_and(|p| p.program.id == id && p.program.is_stopped()) { return Ok(false); }
+        if let Some(stopped) = publication.take() { stopped.revoke(); }
+        if let Some(current) = source.as_mut().filter(|current| current.id == id) {
+            let changed = current.state != crate::commands::ndi::NdiPublicationState::Stopped;
+            current.state = crate::commands::ndi::NdiPublicationState::Stopped;
+            return Ok(changed);
+        }
+        Ok(false)
+    }
     fn program_source_msg(&self) -> Option<SessionMsg> {
         let source=self.program_source.lock().ok()?.clone()?;
         Some(SessionMsg::LoadSource { from:"m0".into(), source_kind:"ndi".into(), url:Some(source.id),
@@ -965,6 +980,21 @@ pub(crate) async fn ndi_stop_local(app:&AppHandle, id:&str) -> Result<(), crate:
     let manager=app.state::<SessionManager>();
     let _inner=manager.inner.lock().await;
     crate::commands::ndi::stop_program(id)
+}
+
+/// Called only after the owned native producer has synchronously stopped.
+/// Keep the stopped room picture and its notes; never substitute a candidate.
+pub(crate) async fn ndi_source_stopped(app: &AppHandle, id: &str) -> Result<(), crate::AppError> {
+    let manager = app.state::<SessionManager>();
+    let inner = manager.inner.lock().await;
+    let Session::Host { shared, .. } = &inner.session else { return Ok(()); };
+    if shared.stop_native_program(id)? {
+        if let Some(msg) = shared.program_source_msg() {
+            relay_to_others(shared, 0, &msg).await;
+            let _ = app.emit("session:msg", &msg);
+        }
+    }
+    Ok(())
 }
 
 /// Commit permission, not merely a visible-source selection. Both identity

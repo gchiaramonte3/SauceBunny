@@ -4,7 +4,7 @@
  * Keep paths repository-relative so the catalog can link to the inspected code.
  */
 export type CatalogGroup = "Controls" | "Specialty" | "Content" | "Navigation" | "Surfaces" | "Review";
-export type CatalogWorkspace = "Home" | "Library" | "Clip" | "Review" | "Transcripts" | "Settings" | "Dialogs" | "Detached";
+export type CatalogWorkspace = "Home" | "Library" | "Clip" | "Review" | "Transcripts" | "Multitrack" | "Settings" | "Dialogs" | "Detached";
 export type CatalogClassification = "keep" | "standardize" | "intentional exception" | "functional defect";
 
 export type CatalogEntry = {
@@ -19,7 +19,7 @@ export type CatalogEntry = {
   rules: string[];
 };
 
-const everyWorkspace: CatalogWorkspace[] = ["Home", "Library", "Clip", "Review", "Transcripts", "Settings", "Dialogs", "Detached"];
+const everyWorkspace: CatalogWorkspace[] = ["Home", "Library", "Clip", "Review", "Transcripts", "Multitrack", "Settings", "Dialogs", "Detached"];
 
 export const catalogEntries: CatalogEntry[] = [
   {
@@ -312,7 +312,7 @@ export const catalogEntries: CatalogEntry[] = [
     id: "panels",
     title: "Panels, drawers and detached windows",
     group: "Surfaces",
-    workspaces: ["Library", "Clip", "Review", "Transcripts", "Settings", "Detached"],
+    workspaces: ["Library", "Clip", "Review", "Transcripts", "Multitrack", "Settings", "Detached"],
     classification: "standardize",
     current: "The app has resizable sidebars, a multi-tab drawer, setup/NDI rails, transcript panels and an independent detached root. They share tokens but have different header/action spacing. Detached notice Dismiss references cp-btn, which currently has no CSS definition.",
     proposed: "Review common panel-header, divider, empty-state and overflow recipes while preserving each panel's purpose. Treat detached windows as first-class contexts, not copies that inherit the main window's dimensions by assumption.",
@@ -321,6 +321,8 @@ export const catalogEntries: CatalogEntry[] = [
       { path: "src/PanelApp.tsx", note: "Detached root and unstyled cp-btn notice dismissal." },
       { path: "src/components/NdiInputPanel.tsx", note: "Gear-launched source settings dialog, separate from the persistent Preview stage and notes rail." },
       { path: "src/components/TranscriptReader.tsx", note: "Reader split-pane controls." },
+      { path: "src/components/MultitrackTimeline.tsx", note: "Controlled source-timecode lanes, selection, naming, solo and zoom; the fixture has generated peaks and no native jobs or playback." },
+      { path: "src/styles/multitrack.css", note: "Token-based timeline and reading pane, using existing command and typography families." },
       { path: "src/styles/resize.css", note: "Resize behavior is not ordinary button styling." },
     ],
     rules: [
@@ -405,10 +407,15 @@ export const catalogEntries: CatalogEntry[] = [
     sources: [
       { path: "src/App.tsx", note: "Persistent Monitor integration and Premiere sourceControls action." },
       { path: "src/components/Monitor.tsx", note: "Shared mounted picture surface." },
+      { path: "src/components/ReviewSourceStart.tsx", note: "Production empty-Review file/link/live-source choices, rendered with isolated fixture callbacks; no devices, media or session start." },
+      { path: "src/styles/review-source-start.css", note: "Scoped neutral source-choice grid and inline URL entry inside the existing empty monitor." },
       { path: "src/components/Transport.tsx", note: "Playback/readout/utility responsibilities." },
       { path: "src/components/NdiPreviewHeader.tsx", note: "Production component: sharing and unavailable sequence timecode outside the picture." },
       { path: "src/components/AvidNdiSetup.tsx", note: "Production passive Avid setup disclosure in the shared NDI gear dialog; compatibility is separately verified." },
-      { path: "src/components/ObsCaptureControls.tsx", note: "Exact application/window/crop controls inside the same gear dialog. Catalog uses static source markup; native discovery remains outside the catalog." },
+      { path: "src/components/ObsCaptureControls.tsx", note: "Exact application/window/crop/audio controls inside the same gear dialog. Native discovery and snapshots remain outside the catalog." },
+      { path: "src/components/CaptureSourcePicker.tsx", note: "Controlled production tabs, thumbnail cards, audio choice and pointer/keyboard crop editor, rendered with generated fixture props." },
+      { path: "src/components/ShareDialog.tsx", note: "Room screen/window/portion chooser reuses the visual recipes while retaining separate publication ownership." },
+      { path: "docs/CAPTURE-CHOOSER.md", note: "Shared chooser interaction, snapshot/privacy and verification boundaries." },
       { path: "src/components/ObsBroadcastControls.tsx", note: "Explicit native-owned NDI broadcast; separate from preview and room sharing." },
       { path: "src/styles/ndi-preview-header.css", note: "Flow layout keeps the timecode centered without picture overlays." },
       { path: "src/styles/transport.css", note: "Adopted content-sized passive source-status recipe, separate from numeric timecode." },

@@ -29,7 +29,7 @@ project_root="$output_dir/source/helper"
 cmp "$original_build_script" "$project_root/scripts/build-obs-probe.sh"
 node "$project_root/scripts/obs-source-inputs.mjs" --verify-core "$core_build" >/dev/null
 ditto "$core_build/core-build-inputs.json" "$output_dir/source/core-build-inputs.json"
-for patch_name in macos-no-global-input macos-core-dependencies macos-helper-module; do
+for patch_name in macos-no-global-input macos-core-dependencies macos-helper-module macos-stagesurface-stride; do
   cmp "$project_root/obs-sidecar/patches/$patch_name.patch" "$core_build/patches/$patch_name.patch"
 done
 bash "$project_root/scripts/check-obs-core.sh" "$core_framework/Versions/A/libobs"
@@ -82,7 +82,7 @@ ditto "$project_root/obs-sidecar/capture-Info.plist" "$capture_module/Info.plist
 for source_file in mac-sck-video-capture.m mac-sck-common.m mac-sck-common.h window-utils.m window-utils.h; do
   ditto "$obs_source/plugins/mac-capture/$source_file" "$capture_source/$source_file"
 done
-for patch_name in macos-window-privacy macos-capture-health macos-frame-status; do
+for patch_name in macos-window-privacy macos-capture-health macos-frame-status macos-capture-audio macos-region-overlay macos-display-region macos-display-audio; do
   ditto "$project_root/obs-sidecar/patches/$patch_name.patch" "$output_dir/source/$patch_name.patch"
   patch --batch --fuzz=0 -p1 -d "$capture_source" < "$output_dir/source/$patch_name.patch"
 done
@@ -118,14 +118,16 @@ compile_probe media-probe media-probe "${program_sources[@]}"
 compile_probe window-probe window-probe "$project_root/obs-sidecar/window-discovery.mm" "$project_root/obs-sidecar/application-discovery.mm"
 compile_probe capture-probe capture-probe "${program_sources[@]}" "$project_root/obs-sidecar/window-discovery.mm"
 compile_probe capture-overlap-probe capture-overlap-probe "${program_sources[@]}" "$project_root/obs-sidecar/window-discovery.mm"
-compile_probe capture-service capture-service "$project_root/obs-sidecar/service-control.mm" "$project_root/obs-sidecar/raw-control.mm" "${program_sources[@]}" "$project_root/obs-sidecar/window-discovery.mm"
+compile_probe capture-service capture-service "$project_root/obs-sidecar/service-control.mm" "$project_root/obs-sidecar/raw-control.mm" "${program_sources[@]}" "$project_root/obs-sidecar/window-discovery.mm" "$project_root/obs-sidecar/region-overlay.mm"
 compile_probe media-probe media-worker -DSAUCE_OBS_SUPERVISED "${program_sources[@]}"
 compile_probe capture-probe capture-worker -DSAUCE_OBS_SUPERVISED "${program_sources[@]}" "$project_root/obs-sidecar/window-discovery.mm"
 compile_probe capture-health.test capture-health-tests -I "$capture_source" -framework CoreMedia -framework CoreVideo -framework IOSurface
+compile_probe region-exclusion.test region-exclusion-tests
 clang++ -std=c++17 -Wall -Wextra -Werror "$project_root/obs-sidecar/capture-config.test.cpp" \
   -o "$output_dir/MacOS/obs-capture-config-tests"
 "$output_dir/MacOS/obs-capture-config-tests"
 "$output_dir/MacOS/saucebunny-obs-capture-health-tests" "$output_dir"
+"$output_dir/MacOS/saucebunny-obs-region-exclusion-tests" "$output_dir"
 node "$project_root/scripts/snapshot-obs-source.mjs" verify "$project_root" >/dev/null
 # Bash began in the checkout: reject recipe edits even though compiler inputs
 # now come solely from the frozen snapshot.

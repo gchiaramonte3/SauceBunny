@@ -43,6 +43,10 @@ jobs:
       - run: npm run test:obs-capture
       - run: npm run test:obs-packaging
       - run: npm run test:ndi-sender
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: npm run test:aaf
       # CLAUDE.md's dependency rule allows permissive and weak copyleft and
       # rules out GPL/AGPL, because strong copyleft would reach the app's own
       # MIT source. That rule was written down and nothing checked it: a

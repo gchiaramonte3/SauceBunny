@@ -8,8 +8,32 @@ use super::{ObsSelection, framing::Framer, service_wire::{Record, Wire, MAX_GENE
 use super::{raw_control, raw_service};
 use super::super::ndi::{Program, WorkerPermit, NdiTelemetry, NdiPhase};
 use crate::AppError;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+// Only the currently owned child, never a guessed bundle/name. Clear at the
+// reaping result, before any further await can expose a reused PID.
+static HELPER_PROCESS: AtomicU32 = AtomicU32::new(0);
+pub(super) fn helper_process() -> Option<u32> {
+    match HELPER_PROCESS.load(Ordering::Acquire) { 0 => None, pid => Some(pid) }
+}
 
 pub(super) struct Request { pub selection: ObsSelection, pub program: Arc<Program>, pub permit: Option<WorkerPermit> }
+fn start_message(selection: &ObsSelection, slot: usize, generation: u64) -> serde_json::Value {
+    match selection {
+        ObsSelection::Window(value) => serde_json::json!({"op":"start", "slot":slot,"generation":generation,
+            "application":value.application,"process":value.process,"window":value.window,
+            "crop":[value.crop.x,value.crop.y,value.crop.width,value.crop.height],"audio":value.audio.unwrap_or(true)}),
+        ObsSelection::Display(value) => {
+            let mut message = serde_json::json!({"op":"start", "slot":slot,"generation":generation,
+                "kind":"display","displayUuid":value.display_uuid,"displayId":value.display_id,"geometry":value.geometry,
+                "crop":[value.crop.x,value.crop.y,value.crop.width,value.crop.height],"audio":value.audio});
+            // The helper resolves its actual parent itself. A versioned policy
+            // prevents an older module from silently capturing our own output.
+            if value.audio { message["audioPolicy"] = serde_json::json!(1); }
+            message
+        },
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CloseReason { Draining, UnconfirmedReap }
 impl CloseReason {
@@ -137,6 +161,41 @@ struct Active {
     request: Request, generation: u64, framing: Framer,
     progressed: Instant, ready: bool, frames: u64, fragments: u64, closing: Option<Instant>,
 }
+// Native startup diagnostics are a finite contract, not vendor stderr. Never
+// expose a helper-provided title, path, PID or arbitrary error string to the UI.
+fn capture_status_error(code: &str) -> &'static str {
+    match code {
+        "source_stopped" => "Capture stopped because its screen, window, size, visibility or permission changed",
+        "start_cancelled" => "Capture startup was cancelled",
+        "start_discovery_failed" => "Capture could not recheck the selected source before starting",
+        "start_display_identity_changed" => "The selected display changed or is unavailable. Refresh displays and choose it again",
+        "start_window_identity_changed" => "The selected window changed or is unavailable. Refresh windows and choose it again",
+        "start_screen_permission_required" => "Screen recording access is not active for the capture helper. Quit and reopen Sauce Bunny after allowing this app in Screen & System Audio Recording settings",
+        "start_audio_parent_unavailable" => "System audio could not safely identify Sauce Bunny to exclude its playback. Capture did not start",
+        "start_invalid_region" => "The selected capture region is invalid. Choose an area inside the source again",
+        "start_overlay_wrong_thread" => "The desktop capture boundary could not be created on the app's UI thread",
+        "start_overlay_display_unavailable" => "The selected display is unavailable to the desktop capture boundary",
+        "start_overlay_unavailable" => "The desktop capture boundary could not be created. Capture did not start",
+        "start_overlay_busy" => "The desktop capture boundary is busy or its request is no longer current",
+        "start_overlay_identity_unavailable" => "The desktop capture boundary's windows could not be verified. Capture did not start",
+        "start_overlay_activation_already_accessory" => "AppKit rejected the desktop boundary activation request even though its accessory policy is already active. Capture did not start",
+        "start_overlay_activation_rejected" => "AppKit did not enable the desktop boundary's accessory activation policy. Capture did not start",
+        "start_overlay_window_ids_unavailable" => "The desktop capture boundary could not reserve its window identities. Capture did not start",
+        "start_overlay_registry_unavailable" => "The desktop capture boundary's window registry could not be created. Capture did not start",
+        "start_audio_policy_unsupported" => "The capture module could not enforce the selected audio setting. Use a matching Sauce Bunny build",
+        "start_display_policy_unsupported" => "The capture module could not enforce the display crop and exclusion settings. Use a matching Sauce Bunny build",
+        "start_source_creation_failed" => "The capture engine could not create the selected source",
+        "start_source_initialization_failed" => "The screen capture source failed to initialize or stopped during startup",
+        "start_first_frame_unavailable" => "The capture source did not provide its first frame before the startup deadline",
+        "start_source_raster_mismatch" => "The capture source's picture size did not match the selected region. Capture did not start",
+        "start_output_pipe_failed" => "The local capture output connection could not be created",
+        "start_output_preparation_failed" => "The local capture encoder could not be prepared",
+        "start_output_failed" => "The local capture encoder could not start",
+        "start_source_visibility_changed" => "The selected window is no longer on screen. Bring it into view and try again",
+        "start_display_topology_changed" => "The display arrangement or capture boundary changed before capture could start",
+        _ => "The selected screen or window could not start capture",
+    }
+}
 impl Active {
     fn new(request: Request, generation: u64) -> Self {
         Self { request, generation, framing:Framer::default(), progressed:Instant::now(),
@@ -158,15 +217,23 @@ impl Active {
             });
             if result.is_err() { self.fail("Application capture returned invalid or oversized media"); }
         } else {
+            #[derive(Default, Deserialize)] #[serde(rename_all="lowercase")]
+            enum Action { #[default] None, Edit, Stop }
             #[derive(Deserialize)] #[serde(deny_unknown_fields)]
-            struct Status { width:u32, height:u32, frames:u64, error:String }
+            struct Status { width:u32, height:u32, frames:u64, error:String, #[serde(default)] action:Action }
             let Ok(status) = serde_json::from_slice::<Status>(record.payload) else {
                 self.fail("Application capture returned invalid status"); return false;
             };
+            match status.action {
+                Action::Stop => {
+                    self.request.program.capture_stopped();
+                    return false;
+                }
+                Action::Edit => self.request.program.request_capture_edit(),
+                Action::None => {},
+            }
             if !status.error.is_empty() {
-                self.fail(if status.error == "source_stopped" {
-                    "Capture stopped because its window, size, visibility or permission changed"
-                } else { "The selected application window could not start capture" });
+                self.fail(capture_status_error(&status.error));
                 return false;
             }
             if !(2..=1920).contains(&status.width) || !(2..=1080).contains(&status.height) ||
@@ -300,12 +367,15 @@ async fn run(root: PathBuf, mut receiver: mpsc::Receiver<Request>, raw_receiver:
         Ok(child) => child,
         Err(_) => { finish(&mut receiver, &mut slots, "The embedded OBS capture helper could not start"); return; }
     };
+    HELPER_PROCESS.store(child.id().unwrap_or(0), Ordering::Release);
     // prepare_child owns a descriptor in Command's pre_exec closure. Keeping
     // the parent Command alive would keep that peer open after helper exit.
     drop(command);
     let (Some(mut input), Some(mut output), Some(mut errors)) = (child.stdin.take(), child.stdout.take(), child.stderr.take()) else {
         closing(&mut receiver, false);
-        if reap_child(child, None, true, #[cfg(test)] &mut ReapFaults::default()).await {
+        let reaped = reap_child(child, None, true, #[cfg(test)] &mut ReapFaults::default()).await;
+        HELPER_PROCESS.store(0, Ordering::Release);
+        if reaped {
             finish(&mut receiver, &mut slots, "The embedded OBS capture pipes could not open");
         } else { retain_unconfirmed(&mut receiver, &mut slots); }
         return;
@@ -329,10 +399,7 @@ async fn run(root: PathBuf, mut receiver: mpsc::Receiver<Request>, raw_receiver:
                 };
                 generation += 1;
                 if generation > MAX_GENERATION { request.program.fail("Application capture generation exhausted"); break "Application capture generation exhausted"; }
-                let selection = &request.selection;
-                let message = serde_json::json!({"op":"start", "slot":slot,"generation":generation,
-                    "application":selection.application,"process":selection.process,"window":selection.window,
-                    "crop":[selection.crop.x,selection.crop.y,selection.crop.width,selection.crop.height]});
+                let message = start_message(&request.selection, slot, generation);
                 slots[slot] = Some(Active::new(request, generation));
                 raw_captures.send_replace(raw_snapshot(&slots));
                 if !send(&mut input, message).await { break "Application capture control channel closed"; }
@@ -390,6 +457,7 @@ async fn run(root: PathBuf, mut receiver: mpsc::Receiver<Request>, raw_receiver:
     let _ = tokio::time::timeout(Duration::from_millis(100), input.write_all(b"Q\n")).await;
     drop(input);
     let reaped = reap_child(child, Some((output, errors)), false, #[cfg(test)] &mut ReapFaults::default()).await;
+    HELPER_PROCESS.store(0, Ordering::Release);
     if !reaped { retain_unconfirmed(&mut receiver, &mut slots); }
     // Native source teardown closes its raw writers before the existing
     // terminal capture record. The raw actor remains independent until here.

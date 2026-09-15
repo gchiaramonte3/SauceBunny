@@ -1,4 +1,4 @@
-# Embedded OBS application capture
+# Embedded OBS screen and application capture
 
 Status: implementation in progress; not a shipped or verified Avid integration.
 
@@ -7,7 +7,385 @@ about unregistered commands or pending controls describe those checkpoints,
 not the current renderer integration summarized here. Internal test packaging
 is separate from public distribution approval.
 
-## Preview integration · 2026-09-12
+## Unified Source settings · 2026-09-12
+
+The current source implementation uses the existing Preview gear popup for
+NDI, Screen, Window and Region. Window shows cross-application thumbnail cards,
+without a required application dropdown. Screen selects an entire display;
+Region requires an explicit valid crop. Screen, Window and Region use the
+existing OBS producer, two-slot service, Preview coordinator and replacement
+barrier; NDI retains its existing receiver. The OBS sources do not use the
+legacy room participant-share controller as a
+hidden private stream. The Preview picture, commenting sidebar and one program
+volume remain unchanged. See [Capture chooser](CAPTURE-CHOOSER.md) for the shared
+interaction and snapshot rules.
+
+Window selection retains the legacy exact bundle/PID/window/crop shape. Display
+selection is a separate strict typed variant containing UUID, current CG
+display ID, observed logical origin/size and backing-pixel size. Native start
+revalidates all of that geometry and identity; no dummy window/PID or main-display
+fallback is used. The helper also fails closed on topology/geometry changes.
+Region bounds round inward to backing pixels and convert back to logical points
+for both the native boundary and ScreenCaptureKit source rectangle. Each
+accepted dimension must exceed 16 logical points. The patched module applies
+the rectangle before stream creation, and startup requires the resulting raster
+to exactly match the accepted crop. A cleared/invalid Region draft cannot become
+full-screen capture.
+
+The helper now owns the actual desktop boundary and compact native Edit/Stop
+controls, not only an in-dialog crop editor. It reserves a fixed two-slot pool
+of border/control panels before creating a display source. Every display stream
+must exclude all four unique, retained panel IDs after matching each to the
+current helper PID. A released slot hides its panels but retains their IDs for
+the helper lifetime, so a future second capture cannot leak a newly created
+outline into the first stream. Separate overlay-exclusion and display-region
+module capability checks precede source creation. Missing IDs, a wrong owner,
+an older module or an incorrect source raster fail closed. There is no
+name-based `hide_obs` shortcut and no permission bypass.
+
+The border is click-through/nonactivating and turns green only after healthy
+source and encoded-output frame evidence. Attempt-scoped Edit opens that exact
+source's Region draft in Source settings, including when the source is a full
+Screen capture. The running crop is unchanged until an explicit Preview
+replacement. Closing settings leaves it alone; Cancel preview explicitly stops
+a private candidate. The desktop Stop action revokes the
+exact source's reader/raw access, reports it Off, and revokes its room
+publication if it was the currently published program. The review retains a
+stopped picture; an unrelated capture is not stopped. Native teardown still
+uses the existing output/stop-acknowledgment and confirmed child-reap barriers.
+Stale slot/generation actions cannot affect a replacement source.
+
+Preview stays private. Room publication and optional external NDI broadcast
+remain explicit, separate actions; opening settings or choosing a thumbnail
+starts neither. After an explicit Preview has both decoded picture and encoded
+readiness, Source settings closes to reveal the monitor. Late, failed or
+cancelled requests cannot dismiss a newer settings visit. Screen/Region system
+audio is an explicit, initially off choice. The user approved hiding Sauce
+Bunny's windows when audio is included. The helper requires a versioned audio
+policy, derives its real parent natively and excludes that exact application
+through ScreenCaptureKit. The four helper-owned overlay windows remain
+excluded; the helper application must not be added to that application list,
+because doing so reverses the meaning of its window exceptions. Its own audio
+is separately excluded by `excludesCurrentProcessAudio`. Unavailable parent
+identity or an older module fails closed, never to full-system capture. Actual
+WKWebView feedback isolation remains an explicit live acceptance gate. New Window
+choices also start audio-off but retain the existing optional application-audio
+path and legacy selection compatibility. Neither changes camera/microphone or
+adds a second program-volume control.
+
+**Verification boundary:** this describes implemented source, not a shipped or
+live-verified Screen/Region build. Focused Rust tests, strict native syntax,
+generated parser/geometry/overlay-pool tests and the patched-module exclusion
+fixture passed without capturing a display or creating a ScreenCaptureKit
+stream. The exclusion fixture uses generated window metadata; it does not prove
+that reserved hidden AppKit panels appear in a real ScreenCaptureKit snapshot.
+Missing hidden IDs must fail closed, not be worked around by showing/recreating
+panels over an active stream. A matching rebuilt, signed package still needs
+real first-frame crop, two-capture exclusion, native Edit/Cancel/Stop, topology,
+private-monitor, room and external NDI acceptance. The automated/package
+checkpoint immediately below records the rebuilt artifact, not live acceptance.
+Older dated results do not prove these new display sources.
+
+### Screen/Region audio policy checkpoint · 2026-09-12
+
+The user approved excluding Sauce Bunny's own windows when Screen/Region system
+audio is included. The choice starts off and stays a local draft until Preview;
+crop edits, reopening and re-clicking the same exact display preserve it.
+Choosing a different display or changed geometry starts a new audio-off draft.
+The re-click regression was reproduced in both modes before the fix, then both
+cases passed with no capture side effects.
+
+The final full gate passed after that correction: 3,990 frontend tests (two
+skipped), 678 Rust unit tests (24 ignored), three service API tests, 11 Swift
+tests and 403 application browser cases (four opt-in cases skipped), plus
+TypeScript, lint, Clippy, native configuration, packaging, sender and license
+checks. The design catalog passed all 34 browser cases and production-build
+exclusion. The chooser was also inspected at 125% text with its selected audio
+option and persistent Preview footer. Final full-gate log:
+`/private/tmp/sauce-screen-audio-verify.vcYKGf/final-reselect-verify.log`.
+
+Fresh diagnostic runtime:
+`/private/tmp/sauce-screen-audio-runtime.TwKLa0/runtime`.
+Its 74-file frozen helper snapshot digest is
+`a0451881cd57dae978033ccd7ce8b952563ae7818f6cca8c092ba2d1db6c0b54`.
+Configuration, service-wire and actual patched-module resolver tests passed.
+Those tests reject missing/mismatched parent identities, invalid overlay owners
+and unsupported audio policies using generated inputs. They do not acquire
+user picture/audio or establish real ScreenCaptureKit/WKWebView attribution.
+The four-window resolver diagnostic is included in diagnostic builds and frozen
+source provenance, but excluded from the application runtime.
+
+Matching final internal test app:
+`/private/tmp/sauce-screen-audio-app.aHqKyw/SauceBunnyScreenAudioFinal.app`.
+Build `2026091205`, backend ID `2026-09-12-screen-audio-exclusion`, executable
+UUID `C63D1B1F-51D1-3896-8B76-9617D23D5C6D`, SHA-256
+`abec12286c0ee54f37b081a264d8101cb8a3903a0cfb419e7d7162947ed823cf`.
+Independent dependency/provenance inspection, strict signatures, all 19
+application-runtime components and the NDI sender integrity checks passed with
+the existing Apple Development signing team `U8RP5N8P7M`. Final read-only report:
+`/private/tmp/sauce-screen-audio-app.aHqKyw/final-verification.json`.
+The earlier `SauceBunnyScreenAudio.app` in that temporary directory predates the
+same-card regression fix and is not the final artifact.
+
+This remains an internal, non-notarized test artifact. It was subsequently
+launched from its exact temporary path, verified through the running executable
+path and the new Source category tabs in the packaged WKWebView. A separately
+running older installed copy was quit while idle; only the matching test copy
+remained. The installed `2026091202` executable was not replaced; its SHA-256
+remained `cf01ac0563022ac01fe1d2a893e8d4feae776ea8514da25ec53a16ac8fc7a7fa`.
+
+Actual window discovery succeeded in this copy. A private, audio-off Finder
+Applications window preview decoded at 1840 × 872 and 30 fps, automatically
+revealed the existing monitor/comments, reported Not shared with room and
+Not broadcasting, and stopped through Cancel preview. No room/NDI publication,
+privacy setting, DMG or GitHub state changed.
+
+Two previously untested package defects were then observed: window thumbnail
+capture aborted in `CGS_REQUIRE_INIT` because its CLI had not initialized
+AppKit, and display thumbnails were rejected by a stale packaged Swift helper
+without the `display-thumbnail` mode. The normal app assembly must rebuild this
+first-party helper rather than trusting an existing copied binary. A private
+Screen preview also failed with the generic capture-start message; the cause
+was not established by that message. Startup-stage diagnostics are required
+before attributing this separate failure to permissions or overlay exclusions.
+
+Live external/self-audio, successful Screen/Region capture, first-frame
+exclusion and overlapping-capture acceptance remain outstanding. Window
+preview success is not evidence that those paths pass.
+
+#### Startup diagnostic package · 2026091206
+
+The next internal package is
+`/private/tmp/sauce-capture-startup-build.b4jpJL/SauceBunnyCaptureStartup.app`,
+backend ID `2026-09-12-capture-startup-diagnostics`, executable UUID
+`94EAA8FB-141A-323D-A632-7F421DA2E040`. Independent verification passed for its
+signatures, dependencies, provenance and 19 runtime components. The normal
+app build now rebuilds the first-party capture helper; the bundled helper
+advertises `display-thumbnail`. No installed application was replaced.
+
+The complete automated gate passed, including 403 application browser cases.
+The opt-in native AppKit bootstrap test also passed separately in the logged-in
+desktop session without acquiring picture or audio. Full-gate log:
+`/private/tmp/sauce-capture-startup-build.b4jpJL/full-verify.log`.
+
+Actual packaged Window thumbnails now render, confirming that the startup
+crash and stale-helper packaging defects are corrected. Screen thumbnails still
+reject the selected display: the Swift identity reader uses logical dimensions
+where OBS discovery supplies Retina backing dimensions. The exact-identity
+check fails closed; a shared coordinate convention is required, not a relaxed
+identity check.
+
+An audio-off Screen preview now identifies its failure as unavailable desktop
+boundary window identities, before OBS creates the capture source. It was
+cancelled without publishing. These two newly isolated defects are not proof
+of a permission failure, and successful Screen/Region capture and audio
+exclusion remain unverified in this diagnostic package.
+
+#### Exact-source correction package · 2026091207
+
+`/private/tmp/sauce-capture-identity.7iWidS/SauceBunnyCaptureIdentity.app`
+contains backend ID `2026-09-12-capture-source-identity`, executable UUID
+`0B5924AB-B10A-36F3-B929-22196F92AE0F`, and the existing Apple Development
+team. Independent signature/dependency/provenance verification passed for all
+19 runtime components. The full automated gate passed: 3,990 frontend tests
+(two skipped), 680 Rust unit tests (24 ignored), three service API tests,
+11 Swift tests and 403 browser cases (four skipped), plus the remaining native,
+packaging, license, TypeScript, lint and Clippy gates. The opt-in desktop Swift identity and owned-hidden-
+window metadata regressions passed without capture. Evidence is retained in
+`/private/tmp/sauce-capture-identity.7iWidS/`.
+
+This package aligns Swift display identity with OBS's display-mode backing
+pixels. Native boundary validation now asks CoreGraphics for the exact four
+reserved window IDs, rather than using a relative onscreen-list option that
+missed never-ordered panels. Exact owner/ID/count checks and the separate
+ScreenCaptureKit membership/exclusion checks are unchanged. The all-application
+Window chooser also omits non-normal-layer and sub-120 × 90-point surfaces;
+application-specific discovery and exact-window capture are unchanged.
+
+Actual packaged Screen thumbnails now render. A private audio-off Screen
+preview decoded at 1920 × 810, 30 fps, and automatically revealed the existing
+monitor/comments. A subsequent explicit Region preview using left/top 20%
+and width/height 40% also decoded and revealed the cropped picture. Both
+remained Not shared with room and Not broadcasting. These are live first-frame
+and private replacement results, not external publication or audio evidence.
+The Region output reported 1920 × 808 at 30 fps. Replacing it with the same
+explicit crop and system audio included also decoded successfully; the captured
+picture excluded Sauce Bunny's window. The volume popover revealed existing
+monitoring was enabled, and it was explicitly muted. No measured tone-isolation
+or audible-playback claim is made from that test. Cancel preview then stopped
+the candidate, and Region audio inclusion was returned off. The native Window
+chooser now shows two pages of application windows instead of the five pages
+including menu-bar widgets seen in 1206. No NLE content was edited.
+
+Native Edit/Stop interaction, overlapping publication/candidate behavior,
+pixel-level first-frame overlay exclusion and external/self-audio acceptance
+remain outstanding. The old installed app was not replaced, and no DMG,
+notarization, GitHub publication or permission change occurred.
+
+#### Packaged audio acceptance checkpoint · 2026091208
+
+`/private/tmp/sauce-capture-acceptance.9VKkvm/SauceBunnyCaptureAcceptance.app`
+is the separate internal package with backend ID
+`2026-09-12-capture-acceptance`, executable UUID
+`B2D098B4-0558-3725-98E6-833857BEEAB7`, and signing team `U8RP5N8P7M`.
+Independent verification passed for 19 runtime components; this is not a
+notarized/distribution-ready build. The actual main process was launched from
+that exact path. Its optional main-WKWebView diagnostic is absent from the
+default frontend artifact and native command registration.
+
+The complete default verification run passed every gate except two static
+contract parsers that did not understand conditional Rust command attributes
+or literal lazy imports. Those parsers were corrected without exemptions;
+the full unit/Node suite then passed 4,016 tests with two existing skips.
+The same full run passed 680 Rust unit tests, three service API tests, 403
+browser tests and the remaining Swift/native/packaging/license/lint gates.
+The feature-only measurement suite passed 30 tests and strict Clippy.
+Logs and independent package verification are in the path above's parent;
+final unit evidence is in
+`/private/tmp/sauce-acceptance-frontend-review.cDOzQ7/parser-full-tests.log`.
+
+In the actual package, switching rapidly from Window to Region produced a
+usable display thumbnail without the previous terminal busy error. An explicit
+20%/20%/40%/40% Region with system audio enabled decoded at 1920 × 808,
+30 fps, revealed the monitor/comments, and remained private/not broadcasting.
+Local program monitoring was explicitly muted before measurement.
+
+Both HTML-audio and WebAudio measurements ended with `reference_timeout` and
+no report, so **audio isolation has not passed**. Each used generated external
+440/660 Hz stereo and separate 880/1320 Hz self-tones in the actual WKWebView.
+No missing reference was treated as silence or success. Reference and decoder
+children stopped; private preview and the external fixture were then stopped.
+The final process check showed only the main internal app, no capture/tone
+helper. The existing Swift one-buffer `AudioBufferList` is a concrete candidate
+for dropped planar stereo and is being checked with synthetic sample buffers.
+Native live Edit/Stop and overlapping/pixel-level acceptance remain open.
+The installed app, NLE content, permissions, DMGs and GitHub were untouched.
+
+#### Planar stereo correction and live measurements · 2026091301
+
+`/private/tmp/sauce-capture-audio.kv9BM4/SauceBunnyCaptureAudio.app` has backend
+ID `2026-09-13-capture-audio`, executable UUID
+`D962C253-0667-39C7-B042-A84AA1120DBA`, and team `U8RP5N8P7M`.
+Independent verification passed all 19 components. The full `npm run verify`
+invocation passed all gates, including 403 browser cases (four skipped);
+the separate internal feature suite passed 33 tests and strict Clippy.
+The generated capture-policy suite passed seven tests with one desktop-only
+skip. Logs and package verification are retained beside this internal app.
+
+A generated planar-stereo CMSampleBuffer proved that the previous 24-byte
+AudioBufferList returns `kCMSampleBufferError_ArrayTooSmall` (-12737), needing
+40 bytes. The production helper now queries and bounds storage, retains the
+sample block through copying, and validates frames, channels, format and byte
+counts. Tests preserve exact planar/interleaved/mono PCM and reject malformed
+inputs. The packaged own-window reference now returns audio, rather than
+timing out. Reference startup/exit errors also retain bounded, allowlisted
+classifications without raw stderr or private paths.
+
+The actual app (PID 59810 at launch) passed keyboard Escape focus return to
+the gear, Return reopening, and arrow-key source-category navigation. Region
+20%/20%/40%/40% again revealed the monitor only when ready and stayed private,
+not broadcasting. Each live measurement explicitly muted local monitoring.
+
+- WebAudio/system-audio-on attempt
+  `3e82a10c-5d51-44ca-8885-4d7b24b498ce` **passed**: 240,000 decoded stereo
+  frames at 48 kHz, continuous external 440/660 Hz and a valid 880/1320 Hz
+  own-window positive reference. The normal oracle required every 100 ms
+  external amplitude >0.004, unwanted tones <0.0003, and no quiet gap >=5 ms.
+- WebAudio/system-audio-off attempt
+  `bee28dc5-1aa0-490d-8a37-30f7ff08a096` **passed**: complete five-second
+  decoded silence with a valid own-window positive reference and a fresh
+  external fixture. Missing audio was not counted as silence.
+- The earlier WebAudio attempt `0d1b5f49-9484-45dc-a39f-c5964772d88e` failed
+  after the disposable external fixture's built-in 30-second lifetime ended.
+  Repeating with a newly launched fixture produced the pass above.
+- HTML attempts `28420d36-85a8-4078-bc6d-7c6836ebcedb` and
+  `1a39448b-d0f6-4c27-a9e5-ed5c67560b52` were **inconclusive**, not passed.
+  External capture was continuous, but the one-second HTML looping fixture's
+  positive reference had zero-minimum intervals and about 666 ms quiet gaps.
+  A bounded non-looping HTML fixture is required before retrying that case;
+  the acceptance thresholds are unchanged.
+
+These are private Region results, not proof for every Screen/Window/room
+configuration. Native desktop Edit/Stop, pixel-level first-frame overlay
+exclusion and overlapping publication/candidate acceptance remain open.
+
+#### Continuous HTML reference checkpoint · 2026091302
+
+`/private/tmp/sauce-capture-reference.cUssYE/SauceBunnyCaptureReference.app`
+has backend ID `2026-09-13-capture-audio-reference`, executable UUID
+`155ABC79-14B1-34F0-AAFD-4821B5578A40`, and team `U8RP5N8P7M`. Its 19
+components passed independent package verification. PID 70119 was confirmed
+running from that exact executable. Compared with 1301, only the internal
+HTML fixture/result display and build identity changed: HTML uses one
+20-second non-looping WAV; cancellation, WebAudio, native capture and all
+measurement thresholds are unchanged. Eighteen focused frontend tests,
+TypeScript and scoped lint passed after that change. The full all-green
+1301 safety run remains the baseline for the unchanged production code.
+
+A private audio-enabled Screen preview decoded at 1920 × 810, 30 fps, and
+revealed the monitor/comments. HTML attempt
+`61e79649-f835-4dfe-8645-cc2e4ac41fc7` **passed** with a fresh external
+30-second fixture and muted local monitoring. Over five seconds/240,000
+stereo frames, minimum external amplitudes were 0.009945 left/0.009935 right;
+maximum unwanted tones were below 0.000002. Own-window reference tones were
+continuously 0.01000 on both channels, with no meaningful quiet gap. Unlike
+the earlier looping fixture, the positive reference was valid throughout.
+The UI displayed the numeric capture/reference summaries and retained raw
+numeric JSON; no desktop media or PCM was saved.
+
+Together these packages establish measured Screen/HTML and Region/WebAudio
+isolation, plus Region audio-off silence. They do not establish every source,
+room playback, overlapping publication/candidate behavior, native desktop
+Edit/Stop interaction, or pixel-level first-frame overlay exclusion. No room
+or NDI publication was attempted. Each generated external fixture was stopped
+and private Screen preview was cancelled after measurement.
+Final process inspection found only the idle main app, no capture, reference,
+decoder or tone helpers. Source settings was left open with system audio off.
+The installed application, permission settings, NLE projects, DMGs and GitHub
+were unchanged. CUA cannot safely target the resource-only helper's desktop
+controls; do not equate main-dialog cancellation with testing native Edit/Stop.
+
+### Earlier unified chooser automated/package checkpoint · 2026-09-12
+
+The final full gate passed: 3,987 frontend tests (two skipped), 678 Rust unit
+tests (24 ignored), three service API tests, 11 Swift tests and 403 application
+browser cases (four opt-in cases skipped), plus TypeScript, lint, Clippy, native
+configuration, packaging, sender and license checks. The isolated design
+catalog passed 34 browser cases and production-build exclusion. Full gate log:
+`/private/tmp/sauce-cross-app-verify.MVUBQ6/verify-unified-final-3.log`.
+
+The first run exposed a Swift debug compiler expression-complexity error;
+equivalent explicitly typed geometry checks fixed it. A second run exposed an
+existing menu test's deferred focus callback escaping jsdom teardown. That test
+now owns/drains its timers and asserts actual focus/selection; production menu
+behavior was not changed. The final run above includes those corrections and
+the full-Screen desktop Edit regression.
+
+Fresh diagnostic runtime: `/private/tmp/sauce-obs-region-runtime.i1AkHg/runtime`.
+Its 72-file frozen helper snapshot has digest
+`58aaa766d2414f3fb770de8ea6e11dcdd91c50eb6a14588ab7624c10f968edb5`.
+Generated config/module-health fixtures and independent dependency/provenance
+inspection passed without discovery, desktop panels or capture.
+
+Matching internal test app:
+`/private/tmp/sauce-unified-capture-app.Mnmvcp/SauceBunnyChooser.app`.
+Build `2026091204`, backend ID `2026-09-12-cross-application-chooser`, executable
+UUID `DE5FEA27-160B-344E-9D75-620834884B05`, SHA-256
+`e1942c0c58283f91654c4c39984f1377d3b236cda6bd99a3a2834703dd06b765`.
+Strict signatures, the 19-component application runtime, sender integrity and
+same signing team `U8RP5N8P7M` passed independent inspection with macOS trust
+access. The sandbox-only signature check could not access certificate trust;
+no signature, trust setting or validation rule was changed to pass it.
+
+This is an internally signed, non-notarized test artifact, not distribution
+clearance. Build-ID evidence is static embedded-string presence, not a running
+WKWebView/backend handshake. It was not launched or installed. The installed
+`2026091202` executable remains unchanged. No privacy settings, room/NDI
+publication, DMG or GitHub state changed in this checkpoint. Effective Screen
+Recording access and real display/region capture remain unverified; Screen/
+Region audio stays disabled.
+
+## Earlier Preview integration checkpoint · 2026-09-12
 
 The user explicitly requested minimal implementation inside the existing
 Preview, without the earlier Impeccable design approval process. That UI pause
@@ -59,9 +437,12 @@ provide usable native NDI output, initially Avid on Apple Silicon macOS.
    macOS capture module and the required output dependencies. Do not load
    arbitrary user OBS plugins or settings, and do not embed Qt or Chromium.
    The initial probe tests this boundary before any production capture changes.
-2. Select the exact application/window, hide the cursor, crop the viewer, and
-   isolate that application's audio. Missing/closed windows fail explicitly;
-   never silently fall back to capturing the desktop or all system audio.
+2. Select the exact application/window or an explicitly chosen display/region,
+   hide the cursor and honor the selected crop. Missing/changed targets fail
+   explicitly; never silently fall back to another display or all system audio.
+   Window application audio remains separate from the explicitly opted-in
+   Screen/Region system-audio path. The latter excludes Sauce Bunny's windows
+   and playback audio; a selected rectangle limits picture, not audio scope.
 3. Feed timestamped picture and audio into the existing Preview/review flow.
    Use one audible program monitor and preserve the microphone/camera path.
    Integrate controls into the existing gear/settings surface, not the
@@ -683,7 +1064,26 @@ two native-service API checks, native/helper packaging, Swift, lint/license
 checks and 365 browser tests (existing skips retained). No real editor window
 was captured, and no app installation, DMG, notarization or GitHub push occurred.
 
-## Native application discovery
+## Native source discovery
+
+The current Window picker uses one passive `obs_all_windows` query rather than
+an application query followed by a mandatory dropdown. Choices retain exact
+bundle/PID/window identity and application names for same-title context; parent,
+probe and active owned capture-helper windows are excluded by native identity.
+Screen/Region use `obs_displays`, a passive display metadata query with UUID,
+observed CG ID and logical/backing geometry. Both paths retain fresh exact-target
+validation before capture. The old `obs_applications` and `obs_windows` renderer
+registrations were removed when their UI callers were replaced; native filtered
+window/application helpers remain available for validation and tests.
+
+Discovery shares two helper-worker slots, bounded admission with an explicit
+busy/retry error, a five-second total deadline and a 64 KiB output cap. Explicit
+window/display thumbnail commands have their own shared two-worker bound and
+exact identity validation before/after acquisition. Only the current visible
+page is requested and snapshots remain in memory. Neither metadata discovery
+nor thumbnails request permission, start continuous capture, or publish.
+
+### Earlier application-discovery checkpoint
 
 The helper's `--applications` mode uses NSWorkspace to return a bounded local
 snapshot of running regular/accessory applications: display name, bundle ID and
@@ -696,10 +1096,11 @@ promise that it currently has a capturable window.
 
 The existing bundle-ID window probe remains separate and requires existing
 screen-recording permission. Capture still revalidates the exact app/PID/window
-and crop before starting. `obs_applications` is now registered and consumed by
-the explicit application selector; `obs_windows` remains a separate passive
-query. Discovery itself starts neither capture, room publishing nor NDI
-broadcast.
+and crop before starting. At this checkpoint, `obs_applications` was registered
+and consumed by the explicit application selector; `obs_windows` was a separate
+passive query. The current cross-application selector above supersedes those
+renderer registrations. Discovery itself starts neither capture, room
+publishing nor NDI broadcast.
 
 Application and window results share a bounded subprocess reader: fixed bundled
 helper, cleared environment, 64 KiB output cap, five-second deadline, and kill/reap
@@ -977,6 +1378,71 @@ handshake, audible WKWebView test, room share or NDI broadcast. The app was not
 installed, launched, notarized or published. The renderer integration at the top
 of this document supersedes that checkpoint's design-confirmation pause;
 further native micro-tests do not replace packaged live acceptance.
+
+## Screen Recording grant recovery (September 12, 2026)
+
+The installed internal build `2026091201` reproduced a window-discovery failure
+despite an enabled Screen Recording entry. The macOS `tccd` log reported that
+the stored hash-specific code requirement did not match the current app's
+stable Apple Development designated requirement. The app-launched window probe
+was attributed to `com.saucebunny.desktop`, not an independent helper grant.
+The installed app and retained signed builds had matching designated
+requirements. This is evidence of a stale grant from an older app identity,
+not evidence that window enumeration or the OBS capture engine should bypass
+the permission check.
+
+Recovery is user-controlled: in System Settings → Privacy & Security → Screen
+& System Audio Recording, remove only the stale Sauce Bunny app entry, add the
+current `/Applications/Sauce Bunny.app` to the screen-and-audio list, enable it,
+then quit and reopen the app. An older lowercase `sauce-bunny` executable entry
+does not establish access for the installed app. Do not reset the privacy
+database, change unrelated grants, or equate an enabled toggle with an actual
+successful window query. Verify the exact app/PID/window through the packaged
+application, then explicitly test private Preview; neither a successful helper
+run from a terminal nor mocked permission tests proves the app's grant works.
+
+The recovery checkpoint separated application discovery, exact-target window
+discovery and Preview failures. The current unified picker retains independent
+runtime, window/display query and Preview failure states. Only a successful
+current empty query shows empty-source guidance; a failed query cannot become
+“No visible windows found.” Unrelated refreshes cannot clear another query's
+failure or a Preview failure, and obsolete results cannot enable Preview. The
+permission error says access is not active for this copy, without claiming a
+boolean preflight can distinguish denial, a missing grant or a stale identity.
+Discovery remains passive and starts no capture or network publication.
+
+`scripts/stable-signing.test.mjs` tests the existing signing-selection shell
+script with an isolated fake certificate listing, including rejecting ad-hoc
+signing and ambiguous/missing identities. It is included in the native packaging
+gate and excluded from Vitest's separate runner. It neither reads the keychain
+nor signs an app. Actual grant continuity across the recovered installed app
+and a subsequent consistently signed build still requires native validation.
+
+Validation checkpoint: the complete `npm run verify` gate passed after adding
+the Node test to Vitest's exclusions: 3,825 frontend tests, 634 Rust library
+tests, three native-service API checks and 399 browser tests, with existing
+skips/ignored cases retained. Native packaging, signing fixtures, Swift, lint,
+Clippy and license checks also passed. The final local log is
+`/private/tmp/sauce-capture-permission-verify.8u1Qow/final-verify.log`.
+
+Internal build `2026091202`, executable UUID
+`D17838A6-B0D6-3F3E-A2A7-D6C79F1BC80C`, was staged, independently verified,
+installed and launched from `/Applications/Sauce Bunny.app`. Its designated
+requirement matches the previous app, its installed executable hash matches
+the staged executable, and normal macOS signature verification passes. The
+previous app is retained in
+`Sauce Bunny Builds/permission-recovery-backup.6snHnW/Sauce Bunny.app`
+beside the project directory.
+The real packaged picker now shows the inactive-grant error without the false
+empty-window guidance, and application refresh preserves that error.
+
+Native acceptance is **not complete**: the permission list currently contains
+only the older lowercase `sauce-bunny` entry, not the current Sauce Bunny app.
+The app-launched Premiere window query still fails permission preflight. The
+user must restore the current app entry, or approve that exact Settings action,
+before window availability and private picture/audio can be validated. No
+capture, room share, NDI broadcast, privacy-database reset, DMG or GitHub
+publication was performed during this recovery checkpoint.
 
 ## Primary references
 

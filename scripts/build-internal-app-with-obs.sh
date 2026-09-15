@@ -18,6 +18,11 @@ sender_work="$(mktemp -d "${TMPDIR:-/tmp}/sauce-ndi-internal.XXXXXX")"
 bash scripts/build-ndi-sender.sh "$SAUCE_NDI_SDK_DIR/include" "$sender_work/sender"
 export CARGO_TARGET_DIR="$PWD/src-tauri/target"
 # Explicit app-only target: never enter the normal DMG/version/archive flow.
-bash scripts/build-app-with-ndi.sh --bundles app
+if [[ "${SAUCE_OBS_AUDIO_ACCEPTANCE:-0}" == 1 ]]; then
+  # Deliberate internal-only renderer + native opt-in; never a normal build.
+  VITE_OBS_AUDIO_ACCEPTANCE=1 bash scripts/build-app-with-ndi.sh --bundles app --features obs-audio-acceptance
+else
+  VITE_OBS_AUDIO_ACCEPTANCE=0 bash scripts/build-app-with-ndi.sh --bundles app
+fi
 node scripts/stage-obs-app.mjs \
   "$PWD/src-tauri/target/release/bundle/macos/Sauce Bunny.app" "$1" "$2" "$sender_work/sender"

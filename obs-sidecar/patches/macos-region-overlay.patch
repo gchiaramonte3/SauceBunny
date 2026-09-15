@@ -1,0 +1,111 @@
+--- a/mac-sck-video-capture.m
++++ b/mac-sck-video-capture.m
+@@ -1,6 +1,62 @@
+ #include "mac-sck-common.h"
+ #include "window-utils.h"
++#include <unistd.h>
+ 
++static bool sauce_overlay_integer(obs_data_t *settings, const char *name, int64_t *value)
++{
++    obs_data_item_t *item = obs_data_item_byname(settings, name);
++    const bool valid = item && obs_data_item_gettype(item) == OBS_DATA_NUMBER &&
++                       obs_data_item_numtype(item) == OBS_DATA_NUM_INT;
++    obs_data_item_release(&item);
++    if (valid)
++        *value = obs_data_get_int(settings, name);
++    return valid;
++}
++
++// Exact windows from this helper's retained TWO-slot registry. A hidden
++// candidate's IDs must already be excluded by the published source. Missing
++// hidden windows fail closed; never retry by exposing them to a survivor.
++API_AVAILABLE(macos(12.5)) NSArray *sauce_capture_overlay_windows(obs_data_t *settings, NSArray<SCWindow *> *windows)
++{
++    int64_t owner = 0;
++    if (!sauce_overlay_integer(settings, "sauce_overlay_owner_pid", &owner) || owner <= 0 || owner != getpid())
++        return nil;
++    obs_data_array_t *ids = obs_data_get_array(settings, "sauce_overlay_window_ids");
++    if (!ids || obs_data_array_count(ids) != 4) {
++        obs_data_array_release(ids);
++        return nil;
++    }
++    NSMutableArray *selected = [NSMutableArray arrayWithCapacity:4];
++    NSMutableSet *seen = [NSMutableSet setWithCapacity:4];
++    bool valid = true;
++    for (size_t i = 0; i < 4 && valid; ++i) {
++        obs_data_t *entry = obs_data_array_item(ids, i);
++        int64_t value = 0;
++        valid = sauce_overlay_integer(entry, "id", &value) && value > 0 && value <= UINT32_MAX &&
++                ![seen containsObject:@(value)];
++        obs_data_release(entry);
++        if (!valid)
++            break;
++        [seen addObject:@(value)];
++        SCWindow *match = nil;
++        for (SCWindow *window in windows) {
++            if (window.windowID != (uint32_t)value)
++                continue;
++            if (match || window.owningApplication.processID != owner) {
++                valid = false;
++                break;
++            }
++            match = window;
++        }
++        if (!match)
++            valid = false;
++        if (valid)
++            [selected addObject:match];
++    }
++    obs_data_array_release(ids);
++    return valid ? selected : nil;
++}
++
+ // This is an acquisition policy, not a monitoring/output-volume control.
+ // Return the same flag used for audio-output registration below.
+ API_AVAILABLE(macos(13.0)) bool sauce_capture_configure_audio(obs_data_t *settings,
+@@ -122,27 +178,17 @@
+                 os_event_init(&sc->stream_start_completed, OS_EVENT_TYPE_MANUAL);
+                 return true;
+             }
+-            if (sc->hide_obs) {
+-                SCRunningApplication *obsApp = nil;
+-                NSString *mainBundleIdentifier = [[NSBundle mainBundle] bundleIdentifier];
+-                for (SCRunningApplication *app in sc->shareable_content.applications) {
+-                    if ([app.bundleIdentifier isEqualToString:mainBundleIdentifier]) {
+-                        obsApp = app;
+-                        break;
+-                    }
+-                }
+-                NSArray *exclusions = [[NSArray alloc] initWithObjects:obsApp, nil];
+-                NSArray *empty = [[NSArray alloc] init];
+-                content_filter = [[SCContentFilter alloc] initWithDisplay:target_display
+-                                                    excludingApplications:exclusions
+-                                                         exceptingWindows:empty];
+-                [empty release];
+-                [exclusions release];
+-            } else {
+-                NSArray *empty = [[NSArray alloc] init];
+-                content_filter = [[SCContentFilter alloc] initWithDisplay:target_display excludingWindows:empty];
+-                [empty release];
++            obs_data_t *settings = obs_source_get_settings(sc->source);
++            NSArray *exclusions = sauce_capture_overlay_windows(settings, sc->shareable_content.windows);
++            obs_data_release(settings);
++            if (!exclusions) {
++                os_atomic_set_bool(&sc->sauce_capture_terminated, true);
++                os_sem_post(sc->shareable_content_available);
++                sc->disp = NULL;
++                os_event_init(&sc->stream_start_completed, OS_EVENT_TYPE_MANUAL);
++                return false;
+             }
++            content_filter = [[SCContentFilter alloc] initWithDisplay:target_display excludingWindows:exclusions];
+ 
+             set_display_mode(sc, target_display);
+         } break;
+@@ -427,6 +473,7 @@
+     obs_data_set_default_bool(settings, "show_hidden_windows", false);
+     obs_data_set_default_bool(settings, "capture_audio", true);
+     obs_data_set_default_int(settings, "sauce_audio_policy_version", 1);
++    obs_data_set_default_int(settings, "sauce_overlay_policy_version", 1);
+ }
+ 
+ API_AVAILABLE(macos(12.5)) static void sck_video_capture_update(void *data, obs_data_t *settings)

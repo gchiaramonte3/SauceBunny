@@ -47,6 +47,8 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use std::collections::HashSet;
 use std::sync::OnceLock;
+mod share_diagnostics;
+mod share_attempt;
 
 /// Base URL of the running proxy, e.g. `http://127.0.0.1:52431`. Set once
 /// at startup by `start()`. `None` until the server is up (or if it
@@ -121,7 +123,7 @@ fn strip_token_prefix(path: &str, token: &str) -> Option<String> {
 /// guarding the loopback relay with a weaker, guessable token. A macOS where
 /// /dev/urandom is unreadable is already broken; running an open-ish relay
 /// on it does not make it less broken.
-fn mint_token() -> std::io::Result<String> {
+pub(crate) fn mint_token() -> std::io::Result<String> {
     let mut buf = [0u8; 24];
     let mut f = std::fs::File::open("/dev/urandom")?;
     use std::io::Read;
@@ -460,7 +462,10 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
     // low-latency fragmented MP4 (the session room's screen share; the
     // frontend plays it hidden and captureStream()s it into the mesh).
     if raw_path.trim_start_matches('/').starts_with("share/v1") {
-        return serve_share(request, parse_share_source(&raw_path));
+        return match parse_share_source(&raw_path) {
+            Ok(source) => serve_share(request, source, crate::stream_failure::request_id(&raw_path)),
+            Err(error) => request.respond(tiny_http::Response::from_string(error).with_status_code(400)),
+        };
     }
     if raw_path.trim_start_matches('/').starts_with("hls/v1/") {
         return match decode_after("hls/v1/", &raw_path) {
@@ -1533,6 +1538,16 @@ fn decode_upstream(url_path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
 
+    #[test]
+    fn share_request_token_uses_the_production_url_safe_generator() {
+        let token = mint_token().expect("OS random token");
+        assert_eq!(token.len(), 32);
+        assert_eq!(
+            crate::stream_failure::request_id(&format!("/share/v1?request={token}")),
+            Some(token),
+        );
+    }
+
     /// The CORS allowlist. It decides who may READ a proxy response, and until
     /// now it had no test because it took a `tiny_http::Request`.
     #[test]
@@ -1694,18 +1709,33 @@ mod tests {
     // ── parse_share_source — share route query ──────────────────────────
     #[test]
     fn share_source_parses_kinds_crop_audio_and_legacy() {
-        let d = parse_share_source("/share/v1?kind=display&id=7&audio=1");
+        let d = parse_share_source("/share/v1?kind=display&id=7&audio=1").unwrap();
         assert_eq!((d.kind.as_str(), d.id, d.audio, d.crop), ("display", 7, true, None));
-        let w = parse_share_source("/share/v1?kind=window&id=311&audio=0");
+        let w = parse_share_source("/share/v1?kind=window&id=311&audio=0").unwrap();
         assert_eq!((w.kind.as_str(), w.id, w.audio), ("window", 311, false));
-        let c = parse_share_source("/share/v1?kind=display&id=1&crop=10,20,640,360&audio=0");
+        let c = parse_share_source("/share/v1?kind=display&id=1&crop=10,20,640,360&audio=0").unwrap();
         assert_eq!(c.crop, Some((10.0, 20.0, 640.0, 360.0)));
-        // Degenerate crops are dropped, not honored.
-        assert_eq!(parse_share_source("/share/v1?kind=display&id=1&crop=0,0,4,4").crop, None);
+        assert!(parse_share_source("/share/v1?kind=display&id=1&crop=0,0,4,4").is_err());
         // Legacy form still parses as a display share.
-        let l = parse_share_source("/share/v1?display=2");
+        let l = parse_share_source("/share/v1?display=2").unwrap();
         assert_eq!((l.kind.as_str(), l.id, l.audio), ("display", 2, false));
-        assert_eq!(parse_share_source("/share/v1").id, 0);
+        assert!(parse_share_source("/share/v1").is_err());
+    }
+
+    #[test]
+    fn invalid_portions_never_turn_into_whole_displays() {
+        for crop in ["", "0,0,4,4", "-1,0,100,100", "0,0,NaN,100", "0,0,100,inf", "0,0,junk,100,100", "0,,0,100,100"] {
+            assert!(parse_share_source(&format!("/share/v1?kind=display&id=1&crop={crop}")).is_err(), "{crop}");
+        }
+        for query in ["kind=oops&id=1", "kind=window&id=1&crop=0,0,100,100", "kind=display&id=bad", "kind=display", "display=bad"] {
+            assert!(parse_share_source(&format!("/share/v1?{query}")).is_err(), "{query}");
+        }
+        for query in ["kind=window&id=1", "kind=display&id=1&crop=0,0,100,100", "kind=display&id=1&audio=1"] {
+            let source = parse_share_source(&format!("/share/v1?{query}")).unwrap();
+            assert!(validate_share_engine(&source, false).is_err());
+            assert!(validate_share_engine(&source, true).is_ok());
+        }
+        assert!(validate_share_engine(&parse_share_source("/share/v1?display=0").unwrap(), false).is_ok());
     }
 
     // ── parse_rung_query — the Tier B quality ladder ────────────────────
@@ -2243,42 +2273,22 @@ mod nightly_proxy_tests {
 // SCREEN SHARE ROUTE - /share/v1?display=N (token-gated like every route).
 // ============================================================
 
-/// The live share pipeline: its child pids (SCK path = capture + ffmpeg;
-/// legacy path = ffmpeg only) plus the audio FIFO to unlink. stop_screen_share
-/// and a replacement share kill the whole set; the serve loop also kills it
-/// when the client disconnects, so nothing can orphan the capture.
-struct ShareProcs {
-    pids: Vec<u32>,
-    fifo: Option<std::path::PathBuf>,
-}
+static SHARE_ATTEMPTS: OnceLock<share_attempt::Registry> = OnceLock::new();
 
-static SHARE_CHILD: OnceLock<std::sync::Mutex<Option<ShareProcs>>> = OnceLock::new();
+fn share_attempts() -> &'static share_attempt::Registry { SHARE_ATTEMPTS.get_or_init(Default::default) }
 
-fn share_child_cell() -> &'static std::sync::Mutex<Option<ShareProcs>> {
-    SHARE_CHILD.get_or_init(|| std::sync::Mutex::new(None))
+/// Reserve one attempt without starting capture. Only its first matching HTTP
+/// request may spawn children; Stop invalidates even a not-yet-fetched URL.
+pub(crate) fn reserve_share_request() -> std::io::Result<String> {
+    let id = mint_token()?;
+    share_attempts().reserve(id.clone())?;
+    Ok(id)
 }
 
 /// Kill the live share pipeline (invoke: stop_screen_share). SIGKILL is
 /// fine: the output is a pipe we own; there is nothing to finalize.
 pub fn stop_share_child() {
-    if let Ok(mut cell) = share_child_cell().lock() {
-        if let Some(procs) = cell.take() {
-            for pid in procs.pids {
-                unsafe { libc_kill(pid as i32) };
-            }
-            if let Some(f) = procs.fifo {
-                let _ = std::fs::remove_file(f);
-            }
-        }
-    }
-}
-
-/// Tiny raw kill(2) so one call doesn't grow a libc crate dependency.
-unsafe fn libc_kill(pid: i32) {
-    extern "C" {
-        fn kill(pid: i32, sig: i32) -> i32;
-    }
-    kill(pid, 9);
+    share_attempts().stop();
 }
 
 /// What one share request captures, parsed from the route's query.
@@ -2298,24 +2308,43 @@ pub(crate) struct ShareReq {
 /// Pure (unit-tested): share source from the route's query. The legacy
 /// `?display=N` form still parses (an old frontend against a new backend
 /// during dev reload).
-pub(crate) fn parse_share_source(url_path: &str) -> ShareReq {
+pub(crate) fn parse_share_crop(value: &str) -> Result<(f64, f64, f64, f64), &'static str> {
+    let fields: Vec<&str> = value.split(',').collect();
+    let parts: Vec<f64> = fields.iter().filter_map(|v| v.parse().ok()).collect();
+    if fields.len() != 4 || parts.len() != 4 || !parts.iter().all(|v| v.is_finite()) ||
+        parts[0] < 0.0 || parts[1] < 0.0 || parts[2] <= 16.0 || parts[3] <= 16.0 ||
+        !(parts[0] + parts[2]).is_finite() || !(parts[1] + parts[3]).is_finite() {
+        return Err("The selected portion is invalid. Select it again.");
+    }
+    Ok((parts[0], parts[1], parts[2], parts[3]))
+}
+
+pub(crate) fn parse_share_source(url_path: &str) -> Result<ShareReq, &'static str> {
     let q = url_path.split('?').nth(1).unwrap_or("");
     let get = |key: &str| q.split('&').find_map(|kv| kv.strip_prefix(key));
-    let legacy = get("display=").and_then(|v| v.parse::<u32>().ok());
     let kind = match get("kind=") {
         Some("window") => "window",
-        _ => "display",
+        Some("display") => "display",
+        None if get("display=").is_some() => "display",
+        _ => return Err("Choose a display or window to share"),
     };
-    let crop = get("crop=").and_then(|c| {
-        let p: Vec<f64> = c.split(',').filter_map(|v| v.parse().ok()).collect();
-        if p.len() == 4 && p[2] > 16.0 && p[3] > 16.0 { Some((p[0], p[1], p[2], p[3])) } else { None }
-    });
-    ShareReq {
+    let id = get("id=").or_else(|| get("display=")).and_then(|v| v.parse().ok())
+        .ok_or("The selected capture source is missing or invalid")?;
+    let crop = get("crop=").map(parse_share_crop).transpose()?;
+    if kind == "window" && crop.is_some() { return Err("Portion capture requires a display"); }
+    Ok(ShareReq {
         kind: kind.into(),
-        id: get("id=").and_then(|v| v.parse().ok()).or(legacy).unwrap_or(0),
+        id,
         crop,
         audio: get("audio=").map(|v| v == "1").unwrap_or(false),
+    })
+}
+
+fn validate_share_engine(req: &ShareReq, available: bool) -> Result<(), &'static str> {
+    if !available && (req.kind != "display" || req.crop.is_some() || req.audio) {
+        return Err("The capture engine is unavailable. Window, portion and audio sharing cannot start.");
     }
+    Ok(())
 }
 
 /// The saucebunny-capture sidecar (ScreenCaptureKit engine), resolved like
@@ -2368,7 +2397,7 @@ fn share_encode_args(cmd: &mut std::process::Command, audio: bool) {
         .arg("-f").arg("mp4")
         .arg("pipe:1")
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
+        .stderr(std::process::Stdio::piped());
 }
 
 /// Screen share -> low-latency fragmented MP4 piped to the response.
@@ -2376,7 +2405,11 @@ fn share_encode_args(cmd: &mut std::process::Command, audio: bool) {
 /// audio) piping raw BGRA into ffmpeg. Fallback (no capture binary):
 /// ffmpeg's avfoundation display capture, video only. Both paths cap at
 /// 1600w so a 5K display doesn't melt the mesh.
-fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()> {
+fn serve_share(request: tiny_http::Request, req: ShareReq, diagnostic_id: Option<String>) -> std::io::Result<()> {
+    let cap = capture_path();
+    if let Err(error) = validate_share_engine(&req, cap.is_some()) {
+        return request.respond(tiny_http::Response::from_string(error).with_status_code(503));
+    }
     let ff = match ffmpeg_path() {
         Some(p) => p,
         None => {
@@ -2385,15 +2418,13 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
             );
         }
     };
-    // One share at a time: a new request replaces the previous pipeline.
-    stop_share_child();
+    let mut attempt = match diagnostic_id.as_deref().and_then(|id| share_attempts().claim(id).ok()) {
+        Some(attempt) => attempt,
+        None => return request.respond(tiny_http::Response::from_string("Screen sharing was cancelled or replaced").with_status_code(409)),
+    };
+    let mut capture_drain = None;
 
-    let cap = capture_path();
-    let mut pids: Vec<u32> = Vec::new();
-    let mut fifo: Option<std::path::PathBuf> = None;
-    let mut capture_child: Option<std::process::Child> = None;
-
-    let mut child = if let Some(cap_bin) = cap {
+    let mut encoder_pipes = if let Some(cap_bin) = cap {
         // ── ScreenCaptureKit path ──
         let audio = req.audio;
         let fifo_path = if audio {
@@ -2423,6 +2454,7 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
             None
         };
         let audio_live = fifo_path.is_some();
+        if let Some(path) = &fifo_path { attempt.own_fifo(path.clone())?; }
 
         let mut cc = std::process::Command::new(cap_bin);
         cc.arg("stream")
@@ -2438,56 +2470,36 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
         }
         cc.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-        let mut capture = match cc.spawn() {
-            Ok(c) => c,
+        let mut capture_pipes = match attempt.spawn(&mut cc, share_attempt::Role::Capture) {
+            Ok(pipes) => pipes,
             Err(e) => {
-                if let Some(f) = &fifo_path { let _ = std::fs::remove_file(f); }
                 return request.respond(
                     tiny_http::Response::from_string(format!("capture spawn failed: {e}"))
                         .with_status_code(500),
                 );
             }
         };
-        pids.push(capture.id());
-
         // The capture engine prints ONE `meta:{"width":W,"height":H}` line on
         // stderr before the first frame - it sizes ffmpeg's rawvideo input.
         let (w, h) = {
-            use std::io::BufRead;
             // Read the meta line on a helper thread with a deadline: if the
             // engine wedges before printing meta:/error: (e.g. SCShareableContent
             // hangs), the proxy thread must not block forever.
-            let stderr = capture.stderr.take();
-            let dims = if let Some(se) = stderr {
-                let (tx, rx) = std::sync::mpsc::channel::<Option<(u32, u32)>>();
-                std::thread::spawn(move || {
-                    let mut reader = std::io::BufReader::new(se);
-                    let mut line = String::new();
-                    let mut found = None;
-                    while reader.read_line(&mut line).unwrap_or(0) > 0 {
-                        if let Some(json) = line.trim().strip_prefix("meta:") {
-                            let get = |key: &str| {
-                                json.split(&format!("\"{key}\":")).nth(1)
-                                    .and_then(|r| r.trim_start().split(|c: char| !c.is_ascii_digit()).next()?.parse::<u32>().ok())
-                            };
-                            found = get("width").zip(get("height"));
-                            break;
-                        }
-                        if line.starts_with("error:") { break; }
-                        line.clear();
-                    }
-                    let _ = tx.send(found);
-                });
-                rx.recv_timeout(std::time::Duration::from_secs(8)).unwrap_or(None)
+            capture_drain = capture_pipes.stderr.take().map(|stderr|
+                share_diagnostics::drain(stderr, share_diagnostics::ChildKind::Capture, diagnostic_id.clone()));
+            let dims = if let Some(drain) = &capture_drain {
+                drain.metadata.recv_timeout(std::time::Duration::from_secs(8)).unwrap_or(None)
             } else {
                 None
             };
+            if !attempt.is_active() {
+                return request.respond(tiny_http::Response::from_string("Screen sharing was cancelled or replaced").with_status_code(409));
+            }
             match dims {
                 Some(d) => d,
                 None => {
-                    let _ = capture.kill();
-                    let _ = capture.wait();
-                    if let Some(f) = &fifo_path { let _ = std::fs::remove_file(f); }
+                    attempt.finish();
+                    if let Some(drain) = &capture_drain { drain.finish(); }
                     return request.respond(
                         tiny_http::Response::from_string(
                             "capture engine produced no stream (screen recording permission?)",
@@ -2498,12 +2510,9 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
             }
         };
 
-        let cap_out = match capture.stdout.take() {
+        let cap_out = match capture_pipes.stdout.take() {
             Some(s) => s,
             None => {
-                let _ = capture.kill();
-                let _ = capture.wait();
-                if let Some(f) = &fifo_path { let _ = std::fs::remove_file(f); }
                 return request.respond(
                     tiny_http::Response::from_string("no capture stdout").with_status_code(500),
                 );
@@ -2526,13 +2535,9 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
         }
         share_encode_args(&mut cmd, audio_live);
         cmd.stdin(std::process::Stdio::from(cap_out));
-        fifo = fifo_path;
-        capture_child = Some(capture);
-        match cmd.spawn() {
+        match attempt.spawn(&mut cmd, share_attempt::Role::Encoder) {
             Ok(c) => c,
             Err(e) => {
-                if let Some(mut c) = capture_child.take() { let _ = c.kill(); let _ = c.wait(); }
-                if let Some(f) = &fifo { let _ = std::fs::remove_file(f); }
                 return request.respond(
                     tiny_http::Response::from_string(format!("ffmpeg spawn failed: {e}"))
                         .with_status_code(500),
@@ -2549,7 +2554,7 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
             .arg("-i").arg(format!("Capture screen {}", req.id))
             .arg("-vf").arg("scale='min(1600,iw)':-2");
         share_encode_args(&mut cmd, false);
-        match cmd.spawn() {
+        match attempt.spawn(&mut cmd, share_attempt::Role::Encoder) {
             Ok(c) => c,
             Err(e) => {
                 return request.respond(
@@ -2559,20 +2564,20 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
             }
         }
     };
-    pids.push(child.id());
-    if let Ok(mut cell) = share_child_cell().lock() {
-        *cell = Some(ShareProcs { pids: pids.clone(), fifo: fifo.clone() });
-    }
-    let stdout = match child.stdout.take() {
+    let encoder_drain = encoder_pipes.stderr.take().map(|stderr|
+        share_diagnostics::drain(stderr, share_diagnostics::ChildKind::Encoder, diagnostic_id.clone()));
+    let stdout = match encoder_pipes.stdout.take() {
         Some(s) => s,
         None => {
-            let _ = child.kill();
-            if let Some(mut c) = capture_child.take() { let _ = c.kill(); let _ = c.wait(); }
             return request.respond(
                 tiny_http::Response::from_string("no ffmpeg stdout").with_status_code(500),
             );
         }
     };
+
+    if !attempt.is_active() {
+        return request.respond(tiny_http::Response::from_string("Screen sharing was cancelled or replaced").with_status_code(409));
+    }
 
     let cors = cors_origin_for(&request);
     let mut headers: Vec<tiny_http::Header> = Vec::new();
@@ -2589,22 +2594,22 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
     let result = request.respond(response);
     // Client gone (stop button, session end, window closed, force-quit's
     // socket teardown) -> the whole pipeline dies here, every path converging.
-    let my_pid = child.id();
-    let _ = child.kill();
-    let _ = child.wait();
-    if let Some(mut c) = capture_child.take() {
-        let _ = c.kill();
-        let _ = c.wait();
-    }
-    if let Some(f) = &fifo {
-        let _ = std::fs::remove_file(f);
-    }
-    if let Ok(mut cell) = share_child_cell().lock() {
-        // A replacement share may have registered ITS pids - never clobber
-        // them, or its Stop button dies.
-        if cell.as_ref().is_some_and(|p| p.pids.contains(&my_pid)) {
-            *cell = None;
-        }
+    let finished = attempt.finish();
+    if let Some(drain) = &capture_drain { drain.finish(); }
+    if let Some(drain) = &encoder_drain { drain.finish(); }
+    if finished.was_current && result.is_ok() {
+        // Explicit Stop has already taken this registry entry. A socket
+        // cancellation is also not a capture failure. Known stderr
+        // failures were recorded first; these fixed fallbacks cover a
+        // child exiting without diagnostic text before natural HTTP EOF.
+        let (kind, message) = if finished.capture_exit.is_some() {
+            ("share_capture_exited", "The screen-sharing capture helper exited before sharing was stopped.")
+        } else if finished.encoder_exit.is_some_and(|status| !status.success()) {
+            ("share_encoder_exited", "The screen-sharing encoder exited without delivering a complete picture.")
+        } else {
+            ("share_stream_ended", "The screen-sharing stream ended before sharing was stopped.")
+        };
+        crate::stream_failure::remember_fixed(&diagnostic_id, kind, message);
     }
     result
 }

@@ -194,9 +194,11 @@ export function createPlaybackSessionController(
       externalProgram = active;
       command++; resumeAfterScrub = false;
       if (active) {
+        // Engines may synchronously report pause from either call below.
+        // Observers must already see the accepted paused state at that point.
+        publish({ playing: false, phase: snapshot.sourceId ? "ready" : "loading" });
         getPlayer()?.setShuttle?.(0);
         getPlayer()?.pause();
-        publish({ playing: false, phase: snapshot.sourceId ? "ready" : "loading" });
       }
     },
     setSource(sourceId, durationSeconds = 0, representation = "proxy") {
@@ -229,6 +231,9 @@ export function createPlaybackSessionController(
       publish({ representation });
     },
     reportPresented(seconds) {
+      // The covered file can emit a queued decoder callback after a live
+      // source takes over. It cannot move the parked file/review clock.
+      if (externalProgram) return;
       // While scrubbing/landing, the requested coordinate remains visible.
       // Decoded-frame reports still update the confirmed media clock.
       publish({ presentedSeconds: Math.max(0, seconds) });

@@ -3,6 +3,7 @@ import {
   RtcMesh, isOfferer, memberNum, MESH_MAX_OFFERS, MESH_WATCHDOG_MS,
   type MeshDeps, type MeshSignalPayload,
 } from "./rtc-mesh";
+import { selectRoomScreenStream } from "./room-screen-stream";
 
 // ── Fakes (no browser RTC in vitest) ────────────────────────────────────
 
@@ -580,5 +581,16 @@ describe("program receive routing", () => {
     pc.ontrack?.({ track: { kind: "audio", id: "soundtrack" }, transceiver: pc.transceivers[3] });
     expect(cameras.at(-1)?.getTracks().map((t) => t.id)).toEqual(["camera", "mic"]);
     expect(programs.at(-1)?.getTracks().map((t) => t.id)).toEqual(["program", "soundtrack"]);
+    // Feed the stream actually emitted by RTC routing to the same room-stage
+    // selector as App, not a second fabricated stream or the camera route.
+    const selected = selectRoomScreenStream({
+      session: { role: "host", code: "room", selfId: "m0", presenter: "m1", presenterEpoch: 1,
+        peers: [{ id: "m1", name: "Guest", epoch: 1 }], title: null, error: null },
+      shareState: "idle", shareStream: null, sharingMembers: new Set(["m1"]),
+      programStreams: new Map([["m1", programs.at(-1)!]]),
+    });
+    expect(selected?.stream).toBe(programs.at(-1)); expect(selected?.isSelf).toBe(false);
+    expect(selected?.stream.getTracks().map(t => t.id)).toEqual(["program", "soundtrack"]);
+    mesh.close();
   });
 });

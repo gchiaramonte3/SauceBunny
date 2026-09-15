@@ -152,8 +152,12 @@ test('builder freezes before extraction and records only after successful output
   const configure = builder.indexOf('cmake -S');
   const build = builder.indexOf('cmake --build');
   const check = builder.indexOf('bash "$recipe_root/scripts/check-obs-core.sh" "$core"');
+  const stride = builder.indexOf('bash "$recipe_root/scripts/verify-obs-stagesurface.sh" "$output_dir"');
   const recordBuild = builder.indexOf('--record-core');
-  assert(prepare > 0 && prepare < extract && extract < configure && configure < build && build < check && check < recordBuild);
+  assert(prepare > 0 && prepare < extract && extract < configure && configure < build && build < check && check < stride && stride < recordBuild);
+  assert(corePatchNames.includes('macos-stagesurface-stride'));
+  assert(coreRecipeFiles.includes('obs-sidecar/stagesurface-stride.test.mm'));
+  assert(coreRecipeFiles.includes('scripts/verify-obs-stagesurface.sh'));
   assert(builder.includes('ditto "$recipe_root/obs-sidecar/patches/$patch_name.patch"'));
   assert(builder.includes('! -L "$output_dir"'));
   execFileSync('/bin/bash', ['-n', path.join(project, 'scripts/build-obs-core.sh')]);

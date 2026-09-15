@@ -5,6 +5,7 @@
 // retired-stalled.sbr (failed channel, possibly a partial record),
 // first-frame.bgra (320x180 BGRA), audio.f32 (48 kHz stereo interleaved LE).
 // Survivor image/audio samples use the same names under survivor-samples/.
+// silent-encoded.mp4 and silent.sbr prove output compatibility with no audio input.
 #import <Foundation/Foundation.h>
 #include "proof-output.hpp"
 #include "raw-frame.hpp"
@@ -282,6 +283,39 @@ void quiescent(const Drain &drain) {
     sauce_obs::pumpEvents(.25);
     check(drain.snapshot().bytes == before.bytes, "raw_bytes_arrived_after_stop");
 }
+void silentInput(const std::filesystem::path &directory) {
+    // An empty private scene has no devices, media, or audio-producing source.
+    // This tests the mix downstream of acquisition being disabled, not a mute.
+    struct Scene {
+        obs_scene_t *value = obs_scene_create_private("generated-silent-input");
+        ~Scene() { if (value) obs_scene_release(value); }
+    } scene;
+    check(scene.value != nullptr, "silent_scene_creation_failed");
+    Pipe encodedPipe, rawPipe;
+    Drain encoded(encodedPipe.read.value, directory / "silent-encoded.mp4");
+    Drain raw(rawPipe.read.value, directory / "silent.sbr", 33, os_gettime_ns(), {}, 1);
+    sauce_obs::ProgramOutput program;
+    const sauce_obs::Raster raster{0, 0, 0, 0, 320, 180};
+    check(program.prepare(obs_scene_get_source(scene.value), raster, 0, encodedPipe.write.value),
+          "silent_program_prepare_failed");
+    check(program.start(), "silent_program_start_failed");
+    check(await(5, [&] { return program.frames() >= 30; }), "silent_encoded_warmup_failed");
+    check(program.startRaw(rawPipe.write.value, 33, 1), "silent_raw_start_failed");
+    check(await(4, [&] { return populated(raw, 1); }), "silent_raw_population_timeout");
+    boundedStop(program);
+    quiescent(raw);
+    program.stop();
+    sauce_obs::pumpEvents(.15);
+    raw.stop(); encoded.stop();
+    const auto state = raw.snapshot();
+    check(state.error.empty(), state.error.c_str());
+    check(state.generations.size() == 1 && state.pendingBytes == 0, "silent_raw_records_incomplete");
+    const auto &track = state.generations.at(1);
+    check(track.videoFrames >= 30 && track.audioFrames >= 48000, "silent_av_population_missing");
+    check(track.energy[0] == 0 && track.energy[1] == 0, "no_audio_input_leaked_audio");
+    check(program.code() == 0 && program.stopped() && encoded.snapshot().error.empty() &&
+          encoded.snapshot().bytes > 0, "silent_encoded_output_failed");
+}
 void printGeneration(const TrackStats &s, bool &first) {
     if (!first) std::putchar(',');
     first = false;
@@ -444,6 +478,7 @@ int main(int argc, char **argv) {
                   "encoded_program_stop_failed");
             check(primaryState.pendingBytes == 0 && survivorState.pendingBytes == 0 && freshState.pendingBytes == 0,
                   "final_raw_record_incomplete");
+            silentInput(directory);
             passed = true;
         } catch (const std::exception &error) {
             // Error identifiers above contain no paths or quotes. Filesystem

@@ -2,14 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import type { ProgramDiagnostics } from "../lib/program-diagnostics";
 
 /** The explicitly selected presenter's program feed. Conversation stays separate. */
-export function PeerStageVideo({ stream, who, ownerId, readDiagnostics }: {
+export function PeerStageVideo({ stream, who, ownerId, readDiagnostics, isSelf = false }: {
   stream: MediaStream;
   who: string;
   ownerId?: string;
   readDiagnostics?: (id: string) => Promise<ProgramDiagnostics | null>;
+  /** The outgoing screen is monitored silently, never looped to the speakers. */
+  isSelf?: boolean;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
   const [volume, setVolume] = useState(1);
   const [stale, setStale] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -28,6 +32,9 @@ export function PeerStageVideo({ stream, who, ownerId, readDiagnostics }: {
     };
     const activity = () => { lastFrame = performance.now(); };
     el.srcObject = stream;
+    // Before play(), including when a remote feed is replaced by our own.
+    // This changes only this monitor element, not the outgoing audio track.
+    el.muted = isSelf || mutedRef.current;
     setBlocked(false);
     void el.play().catch(() => { if (!disposed) setBlocked(true); });
     if (el.requestVideoFrameCallback) frameId = el.requestVideoFrameCallback(frame);
@@ -43,11 +50,11 @@ export function PeerStageVideo({ stream, who, ownerId, readDiagnostics }: {
       el.removeEventListener("timeupdate", activity);
       el.srcObject = null;
     };
-  }, [stream]);
+  }, [stream, isSelf]);
 
   useEffect(() => {
-    if (ref.current) { ref.current.muted = muted; ref.current.volume = volume; }
-  }, [muted, volume, stream]);
+    if (ref.current) { ref.current.muted = isSelf || muted; ref.current.volume = volume; }
+  }, [muted, volume, stream, isSelf]);
 
   useEffect(() => {
     if (!showStats || !ownerId || !readDiagnostics) return;
@@ -74,13 +81,13 @@ export function PeerStageVideo({ stream, who, ownerId, readDiagnostics }: {
     n == null ? "unavailable" : `${n.toFixed(digits)}${suffix}`;
   return (
     <div className="cp-peerstage">
-      <video ref={ref} className="cp-peerstage-video" playsInline autoPlay muted={muted} />
-      <span className="cp-peerstage-badge" role="status">
+      <video ref={ref} className="cp-peerstage-video" aria-label={isSelf ? "Your shared screen" : `${who}'s shared screen`} playsInline autoPlay muted={isSelf || muted} />
+      {!isSelf && <span className="cp-peerstage-badge" role="status">
         {stale ? `No fresh picture from ${who} · last frame` : `Live view of ${who}'s screen`}
-      </span>
-      <div className="cp-peerstage-audio">
+      </span>}
+      {(!isSelf || blocked) && <div className="cp-peerstage-audio">
         {blocked && <button type="button" onClick={resume}>Start program playback</button>}
-        <button type="button" onClick={() => {
+        {!isSelf && <><button type="button" onClick={() => {
           // Apply in the user gesture, before play(), rather than waiting for
           // React's effect (important for WebKit's audible autoplay policy).
           if (ref.current) ref.current.muted = !muted;
@@ -92,8 +99,9 @@ export function PeerStageVideo({ stream, who, ownerId, readDiagnostics }: {
         <input aria-label="Program audio volume" type="range" min="0" max="1" step="0.05"
           value={volume} onChange={(e) => setVolume(Number(e.target.value))} />
         <button type="button" aria-expanded={showStats} onClick={() => setShowStats((v) => !v)}>Diagnostics</button>
-      </div>
-      {showStats && <div className="cp-program-diagnostics">
+        </>}
+      </div>}
+      {!isSelf && showStats && <div className="cp-program-diagnostics">
         <div>Picture: {stats?.width && stats?.height ? `${stats.width} × ${stats.height}` : "unavailable"}</div>
         <div>Frame rate: {measured(stats?.fps, " fps", 1)}</div>
         <div>Receive bitrate: {measured(stats?.bitrate == null ? null : stats.bitrate / 1_000_000, " Mbps", 2)}</div>

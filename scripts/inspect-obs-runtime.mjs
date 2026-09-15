@@ -11,7 +11,7 @@ export const corePath = 'Frameworks/libobs.framework/Versions/A/libobs';
 export const requiredCode = [corePath, 'Frameworks/libobs-opengl.dylib',
   'PlugIns/obs-ffmpeg.plugin/Contents/MacOS/obs-ffmpeg',
   'PlugIns/sauce-obs-capture.plugin/Contents/MacOS/sauce-obs-capture',
-  ...['probe', 'window-probe', 'media-probe', 'capture-probe', 'capture-overlap-probe', 'capture-service', 'media-worker', 'capture-worker', 'capture-health-tests', 'audio-buffer-tests']
+  ...['probe', 'window-probe', 'media-probe', 'capture-probe', 'capture-overlap-probe', 'capture-service', 'media-worker', 'capture-worker', 'capture-health-tests', 'region-exclusion-tests', 'audio-buffer-tests']
     .map(name => `MacOS/saucebunny-obs-${name}`)];
 export const applicationRequiredCode = [...requiredCode.slice(0, 4),
   'MacOS/saucebunny-obs-capture-service', 'MacOS/saucebunny-obs-window-probe'];

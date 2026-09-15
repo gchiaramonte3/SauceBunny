@@ -142,7 +142,13 @@ export function useNdiInput() {
       if (candidate?.id === payload.sourceId && !candidate.encodedReady && payload.phase !== "error") refresh(payload.sourceId);
     });
     const messages = listen<SessionMsg>("session:msg", ({ payload: m }) => {
-      if (disposed || m.kind !== "loadSource" || m.from !== "m0" || room.current?.role !== "peer" || room.current.presenter !== "m0") return;
+      if (disposed || m.kind !== "loadSource" || m.from !== "m0") return;
+      if (room.current?.role === "host" && m.sourceKind === "ndi" && m.liveState === "stopped") {
+        // Native desktop Stop revokes the publication before this message.
+        // Pull that truth without substituting a private candidate or file.
+        void sync().catch(() => {}); return;
+      }
+      if (room.current?.role !== "peer" || room.current.presenter !== "m0") return;
       const turn = ++remoteTurn.current;
       if (m.sourceKind !== "ndi" || !m.url || !/^[a-f0-9]{32}$/i.test(m.url)) {
         currentRemote.current = noRemote(); setRemote(noRemote()); return;

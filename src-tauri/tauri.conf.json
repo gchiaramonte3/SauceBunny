@@ -58,6 +58,7 @@
       "binaries/saucebunny-diarize",
       "binaries/saucebunny-dictate",
       "binaries/saucebunny-capture",
+      "binaries/saucebunny-aaf",
       "binaries/llama-server"
     ],
     "resources": {
@@ -65,12 +66,13 @@
       "../THIRD-PARTY-LICENSES.md": "licenses/THIRD-PARTY-LICENSES.md",
       "../licenses/GPLv3.txt": "licenses/GPLv3.txt",
       "../licenses/DENO-LICENSE.md": "licenses/DENO-LICENSE.md",
+      "../aaf-sidecar/THIRD-PARTY-LICENSES.txt": "licenses/AAF-THIRD-PARTY-LICENSES.txt",
       "icons/Assets.car": "."
     },
     "macOS": {
       "minimumSystemVersion": "14.0",
       "entitlements": "entitlements.plist",
-      "bundleVersion": "2026091201"
+      "bundleVersion": "2026091502"
     },
     "category": "public.app-category.video"
   },

@@ -40,6 +40,7 @@ describe("npm run verify covers every gate CI runs", () => {
     ["npm run test:obs-capture", "npm run test:obs-capture"],
     ["npm run test:obs-packaging", "npm run test:obs-packaging"],
     ["npm run test:ndi-sender", "npm run test:ndi-sender"],
+    ["npm run test:aaf", "npm run test:aaf"],
     ["npm run lint", "npm run lint"],
     ["cargo check", "cargo check"],
     ["cargo test --lib", "cargo test --lib"],

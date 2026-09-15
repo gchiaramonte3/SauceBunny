@@ -243,12 +243,19 @@ export type TranscriptMarkerCue = { start: number; speaker: string; text: string
 export function transcriptToAvidTxt(
   cues: TranscriptMarkerCue[], settings: MarkerExportSettings, color: CanonicalColor = "red",
 ): string {
+  return avidMarkerRowsToTxt(cues.map((cue) => ({ ...cue, timecode: absTc(cue.start, settings), track: "V1" })), color);
+}
+
+/** Shared Avid serialization for seconds-based media and frame-based AAF cues. */
+export function avidMarkerRowsToTxt(
+  cues: Array<{ speaker: string; timecode: string; track: string; text: string }>, color: CanonicalColor = "red",
+): string {
   const lines: string[] = [];
   for (const c of cues) {
     const comment = inlineClean(c.text);
     if (!comment) continue;
     const name = inlineClean(c.speaker) || "Speaker";
-    lines.push(`${name}\t${absTc(c.start, settings)}\tV1\t${color}\t${comment}`);
+    lines.push(`${name}\t${inlineClean(c.timecode)}\t${inlineClean(c.track)}\t${color}\t${comment}`);
   }
   return lines.join("\n") + "\n";
 }

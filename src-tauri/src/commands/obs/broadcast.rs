@@ -126,6 +126,10 @@ impl Drop for Permit {
 pub(super) fn cancel_all() {
     if let Ok(senders) = senders().lock() { senders.cancel_all(); }
 }
+#[cfg(feature = "obs-audio-acceptance")]
+pub(super) fn acceptance_idle() -> bool {
+    senders().lock().is_ok_and(|registry| registry.entries.is_empty() && !registry.closing)
+}
 
 /// Atomically close admission, latch cancellation, and include every admitted
 /// startup in the snapshot. No wait or child operation runs under this lock.

@@ -14,11 +14,129 @@ pub(super) fn trace_errors(bytes: &[u8]) {
 }
 
 fn selection() -> ObsSelection {
-    ObsSelection { application:"com.saucebunny.capture-test-source".into(), process:1, window:2,
-        crop:ObsCrop {x:0.0,y:0.0,width:1.0,height:1.0} }
+    ObsSelection::Window(super::super::ObsWindowSelection { application:"com.saucebunny.capture-test-source".into(), process:1, window:2, audio:None,
+        crop:ObsCrop {x:0.0,y:0.0,width:1.0,height:1.0} })
 }
 fn active() -> Active {
     Active::new(Request {selection:selection(), program:Program::new("unit".into(), "test".into(), None),permit:None}, 4)
+}
+fn program_error(program: Arc<Program>) -> Option<String> {
+    use std::io::Read;
+    let mut reader = super::super::super::ndi::ProgramReader::new(program);
+    let mut header = [0u8;5];
+    reader.read_exact(&mut header).unwrap();
+    assert_eq!(header[0], 3);
+    let length = u32::from_be_bytes(header[1..].try_into().unwrap()) as usize;
+    assert!(length <= 8192);
+    let mut payload = vec![0u8;length]; reader.read_exact(&mut payload).unwrap();
+    serde_json::from_slice::<NdiTelemetry>(&payload).unwrap().error
+}
+#[test]
+fn startup_diagnostics_only_publish_allowlisted_messages_and_keep_first_failure() {
+    let native = include_str!("../../../../obs-sidecar/capture-start-failure.hpp");
+    let codes: Vec<&str> = native.lines().filter_map(|line| {
+        let (_, tail) = line.split_once("return \"start_")?;
+        let end = tail.find('"')?;
+        Some(&tail[..end])
+    }).collect();
+    assert_eq!(codes.len(), 29, "Every native startup enum must stay covered by this wire test");
+    for suffix in codes {
+        let code = format!("start_{suffix}");
+        let message = capture_status_error(&code);
+        if code != "start_failed" {
+            assert_ne!(message, capture_status_error("unknown"), "Unmapped native reason: {code}");
+        }
+        let mut active = active();
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "width":0,"height":0,"frames":0,"error":code,"action":"none",
+        })).unwrap();
+        assert!(!active.record(Record {kind:2,slot:0,generation:3,payload:&payload}));
+        assert!(!active.request.program.is_stopped(), "A stale reason cannot affect this source");
+        assert!(!active.record(Record {kind:2,slot:0,generation:4,payload:&payload}));
+        assert!(active.request.program.is_stopped());
+        assert_eq!(program_error(active.request.program.clone()).as_deref(), Some(message));
+        assert!(active.record(Record {kind:3,slot:0,generation:4,payload:b""}));
+        assert_eq!(program_error(active.request.program.clone()).as_deref(), Some(message), "Terminal acknowledgment must not replace the startup cause");
+        assert_eq!(active.frames, 0);
+    }
+}
+#[test]
+fn startup_diagnostics_never_echo_unknown_helper_text() {
+    for private in ["/private/project.mov", "window title secret", "start_unknown\nPID=123", "start_screen_permission_required /private/token"] {
+        let mut active = active();
+        let payload = serde_json::to_vec(&serde_json::json!({"width":0,"height":0,"frames":0,"error":private})).unwrap();
+        active.record(Record {kind:2,slot:0,generation:4,payload:&payload});
+        assert_eq!(program_error(active.request.program.clone()).as_deref(), Some("The selected screen or window could not start capture"));
+    }
+}
+#[test]
+fn display_wire_has_no_window_fallback_and_requires_explicit_audio_policy() {
+    let mut selected: ObsSelection = serde_json::from_value(serde_json::json!({"kind":"display",
+        "displayUuid":"12345678-1234-1234-1234-123456789ABC","displayId":42,
+        "geometry":{"x":-1920,"y":0,"width":1920,"height":1080,"pixelWidth":3840,"pixelHeight":2160},
+        "crop":{"x":0.25,"y":0.25,"width":0.5,"height":0.5},"audio":false})).unwrap();
+    let command=start_message(&selected,1,123);
+    assert_eq!(command["kind"],"display"); assert_eq!(command["audio"],false);
+    assert_eq!(command["crop"],serde_json::json!([0.25,0.25,0.5,0.5]));
+    assert_eq!(command["geometry"]["x"],-1920.0);
+    assert_eq!(command.as_object().unwrap().len(),9);
+    for key in ["window","application","process"] { assert!(command.get(key).is_none()); }
+    assert!(command.get("audioPolicy").is_none());
+    let ObsSelection::Display(display) = &mut selected else { panic!("display fixture"); };
+    display.audio = true;
+    let with_audio = start_message(&selected,1,124);
+    assert_eq!(with_audio["audio"],true);
+    assert_eq!(with_audio["audioPolicy"],1);
+    assert_eq!(with_audio["generation"],124);
+    assert_eq!(with_audio.as_object().unwrap().len(),10);
+    for key in ["window","application","process","parentPid","parentBundle","excludedApplications"] {
+        assert!(with_audio.get(key).is_none(),"{key} must not be renderer-controlled");
+    }
+}
+#[test]
+fn native_stop_retires_only_matching_generation_as_off_before_teardown_ack() {
+    let mut active=active();
+    let stop=br#"{"width":640,"height":360,"frames":12,"error":"","action":"stop"}"#;
+    assert!(!active.record(Record{kind:2,slot:0,generation:3,payload:stop}));
+    assert!(!active.request.program.is_stopped());
+    active.request.program.publish(1,b"init"); active.request.program.publish(2,b"fragment");
+    assert!(active.request.program.encoded_ready());
+    assert!(!active.record(Record{kind:2,slot:0,generation:4,payload:stop}),"intent is not a teardown acknowledgment");
+    assert!(active.request.program.is_stopped());
+    assert!(!active.request.program.encoded_ready());
+    assert_eq!(active.request.program.phase(),NdiPhase::Off);
+    assert!(!active.record(Record{kind:2,slot:0,generation:4,payload:br#"{"width":640,"height":360,"frames":20,"error":""}"#}));
+    assert_eq!(active.request.program.phase(),NdiPhase::Off);
+    assert!(active.record(Record{kind:3,slot:0,generation:4,payload:b""}));
+    assert_eq!(active.request.program.phase(),NdiPhase::Off);
+}
+#[test]
+fn audio_choice_is_optional_strict_and_resolved_on_the_service_wire() {
+    let legacy = serde_json::json!({"application":"com.example.fixture","process":1,"window":2,
+        "crop":{"x":0.0,"y":0.0,"width":1.0,"height":1.0}});
+    let omitted: ObsSelection = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(matches!(omitted, ObsSelection::Window(value) if value.audio.is_none()));
+    for value in [None, Some(serde_json::Value::Null), Some(serde_json::json!(true)), Some(serde_json::json!(false))] {
+        let mut json = legacy.clone();
+        if let Some(value) = value { json["audio"] = value; }
+        let selected: ObsSelection = serde_json::from_value(json).unwrap();
+        let ObsSelection::Window(value)=&selected else { panic!("window fixture"); };
+        let serialized = serde_json::to_value(&selected).unwrap();
+        assert_eq!(serialized.get("audio"), value.audio.map(serde_json::Value::Bool).as_ref());
+        let command = start_message(&selected, 1, 123);
+        assert_eq!(command["audio"], value.audio.unwrap_or(true));
+        assert_eq!(command["slot"], 1);
+        assert_eq!(command["generation"], 123);
+        assert_eq!(command["application"], "com.example.fixture");
+        assert_eq!(command["process"], 1);
+        assert_eq!(command["window"], 2);
+        assert_eq!(command["crop"], serde_json::json!([0.0,0.0,1.0,1.0]));
+        assert_eq!(command.as_object().unwrap().len(), 8);
+    }
+    for value in [serde_json::json!(0), serde_json::json!(1), serde_json::json!("false"), serde_json::json!([])] {
+        let mut json = legacy.clone(); json["audio"] = value;
+        assert!(serde_json::from_value::<ObsSelection>(json).is_err());
+    }
 }
 #[test]
 fn late_media_status_and_stop_cannot_affect_a_reused_slot() {
@@ -170,7 +288,7 @@ async fn native_shared_service_survives_slot_stop_and_replacement() {
     let selected: Vec<ObsSelection> = serde_json::from_str(&std::env::var("SAUCE_OBS_TEST_SELECTIONS").unwrap()).unwrap();
     assert_eq!(selected.len(),2);
     for selection in &selected {
-        assert!(selection.valid() && selection.application.starts_with("com.saucebunny.capture-test-"));
+        assert!(selection.valid() && matches!(&selection, ObsSelection::Window(value) if value.application.starts_with("com.saucebunny.capture-test-")));
     }
     let programs: Vec<_> = (0..3).map(|i|Program::new(format!("generated-{i}"), "Generated fixture".into(), None)).collect();
     let _guard = StopOnDrop(programs.clone());
@@ -190,7 +308,8 @@ async fn native_shared_service_survives_slot_stop_and_replacement() {
     // test-only Arc-count poll. A replacement must obtain real capacity now.
     wait_stopped(&programs[0].id).await.unwrap();
     let mut replacement = selected[0].clone();
-    replacement.crop = ObsCrop{x:0.25,y:0.25,width:0.5,height:0.5};
+    let ObsSelection::Window(value)=&mut replacement else { panic!("window fixture"); };
+    value.crop = ObsCrop{x:0.25,y:0.25,width:0.5,height:0.5};
     recordings.push(record(programs[2].clone(), output.join("2.mp4")));
     enqueue(root, Request { selection:replacement, program:programs[2].clone(),permit:Some(WorkerPermit::acquire().unwrap()) }).unwrap();
     assert!(until(||programs[2].encoded_ready(),8).await,"replacement capture never ready");
@@ -225,7 +344,7 @@ async fn native_shared_service_contains_source_loss() {
     assert!(matches!(action.as_str(), "M" | "R" | "H" | "C" | "Q"));
     assert_eq!(selected.len(), 2);
     for selection in &selected {
-        assert!(selection.valid() && selection.application.starts_with("com.saucebunny.capture-test-"));
+        assert!(selection.valid() && matches!(&selection, ObsSelection::Window(value) if value.application.starts_with("com.saucebunny.capture-test-")));
     }
     let mut control = std::fs::OpenOptions::new().write(true).open(output.join("selected.stdin")).unwrap();
     let programs: Vec<_> = (0..3).map(|i|Program::new(format!("lifecycle-{i}"), "Generated fixture".into(), None)).collect();

@@ -156,14 +156,14 @@ export class NdiProgramCoordinator {
   }
   previewCapture(selection: ObsSelection): Promise<void> {
     this.ensureMutable();
-    if (!validCaptureSelection(selection)) return Promise.reject(new Error("Choose a valid application window and crop"));
-    // Freeze the requested window/crop before entering the serialized queue.
+    if (!validCaptureSelection(selection)) return Promise.reject(new Error("Choose a valid capture source and crop"));
+    // Freeze the exact source geometry/crop before entering the serialized queue.
     return this.previewSource({ kind: "capture", selection: copyCaptureSelection(selection) });
   }
   private previewSource(source: NdiProgramSource): Promise<void> {
     this.ensureMutable();
     if (source.kind === "ndi" && !source.name.trim()) return Promise.reject(new Error("Choose an NDI source"));
-    if (source.kind === "capture" && !validCaptureSelection(source.selection)) return Promise.reject(new Error("Choose a valid application window and crop"));
+    if (source.kind === "capture" && !validCaptureSelection(source.selection)) return Promise.reject(new Error("Choose a valid capture source and crop"));
     const turn = ++this.intent;
     this.update({ busy: "starting", error: null });
     return this.enqueue(async () => {
@@ -186,7 +186,7 @@ export class NdiProgramCoordinator {
         if (!this.valid(turn)) { await this.ports.stop(started.id); return; }
         if (source.kind === "capture" && (!result.selection || !sameProgramSource(source, { kind: "capture", selection: result.selection }))) {
           await this.ports.stop(started.id);
-          throw new Error("The captured window changed. Choose the source again.");
+          throw new Error("The captured source changed. Choose the source again.");
         }
         this.update({ candidate: this.local(started, roomAtStart, result.selection) });
         await this.refreshStatus(started.id);

@@ -100,7 +100,7 @@ function bodyOf(mode: "chunks" | "live" | "empty" | "error", chunks: Uint8Array[
 let currentMs: FakeMediaSource;
 
 function installEnv(opts: {
-  body: ReturnType<typeof bodyOf>;
+  body: ReturnType<typeof bodyOf> | ReadableStream<Uint8Array>;
   ok?: boolean;
   status?: number;
   currentTime?: number;
@@ -118,9 +118,15 @@ function installEnv(opts: {
   const proto = window.HTMLVideoElement.prototype as unknown as Record<string, unknown>;
   proto.captureStream = function () {
     const track = { kind: "video", contentHint: "", stop() {} } as unknown as MediaStreamTrack;
-    return { getVideoTracks: () => [track], getAudioTracks: () => [] } as unknown as MediaStream;
+    return { getTracks: () => [track], getVideoTracks: () => [track], getAudioTracks: () => [] } as unknown as MediaStream;
   };
   proto.play = async function () {};
+  proto.pause = vi.fn();
+  Object.defineProperties(proto, {
+    readyState: { configurable: true, get: () => 2 },
+    videoWidth: { configurable: true, get: () => 1280 },
+    videoHeight: { configurable: true, get: () => 720 },
+  });
   Object.defineProperty(proto, "currentTime", {
     configurable: true,
     get() { return opts.currentTime ?? 0; },
@@ -129,8 +135,47 @@ function installEnv(opts: {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("startup ownership", () => {
+  it("aborts a pending network open immediately on Stop", async () => {
+    installEnv({ body: bodyOf("live") });
+    const abort = new AbortController();
+    const fetcher = vi.fn(() => new Promise<never>(() => {})); vi.stubGlobal("fetch", fetcher);
+    const pending = openShareStream("http://127.0.0.1/x", vi.fn(), { audio: false, signal: abort.signal });
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalled());
+    abort.abort(); await rejected;
+    const init = fetcher.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init[1].signal?.aborted).toBe(true);
+  });
+  it("rejects after the fixed deadline when bytes arrive but no decoded frame does", async () => {
+    vi.useFakeTimers(); installEnv({ body: bodyOf("live", [chunk(64)]) });
+    Object.defineProperty(HTMLVideoElement.prototype, "readyState", { configurable: true, get: () => 1 });
+    const onDied = vi.fn();
+    const pending = openShareStream("http://127.0.0.1/x", onDied);
+    const rejected = expect(pending).rejects.toThrow(/within 15 seconds/);
+    await vi.advanceTimersByTimeAsync(15_000); await rejected;
+    expect(onDied).not.toHaveBeenCalled();
+    expect(HTMLVideoElement.prototype.pause).toHaveBeenCalled();
+  });
+  it("preserves a decoder failure instead of turning it into cancellation or a success", async () => {
+    installEnv({ body: bodyOf("live", [chunk(64)]) });
+    Object.defineProperty(HTMLVideoElement.prototype, "readyState", { configurable: true, get: () => 1 });
+    let video: HTMLVideoElement | null = null;
+    const create = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag, options) => {
+      const element = create(tag, options); if (tag === "video") video = element as HTMLVideoElement; return element;
+    });
+    const onDied = vi.fn(), pending = openShareStream("http://127.0.0.1/x", onDied);
+    const rejected = expect(pending).rejects.toThrow(/could not be decoded/);
+    await vi.waitFor(() => expect(currentMs.sb.appends.length).toBeGreaterThan(0));
+    (video as HTMLVideoElement | null)?.dispatchEvent(new Event("error")); await rejected;
+    expect(onDied).not.toHaveBeenCalled();
+  });
 });
 
 const chunk = (n: number) => new Uint8Array(n);
@@ -149,6 +194,20 @@ describe("a stream that dies before its first byte", () => {
     installEnv({ body: bodyOf("error") });
     await expect(openShareStream("http://127.0.0.1/x", vi.fn()))
       .rejects.toThrow(/connection reset/);
+  });
+
+  it("contains cleanup rejection from a real already-errored reader", async () => {
+    const error = new Error("native share connection reset");
+    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.error(error); } });
+    const reader = body.getReader();
+    const cancel = vi.spyOn(reader, "cancel");
+    vi.spyOn(body, "getReader").mockReturnValue(reader);
+    installEnv({ body });
+    await expect(openShareStream("http://127.0.0.1/x", vi.fn())).rejects.toBe(error);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    // Do not attach a test catch to cancel's result: production teardown must
+    // own it. Before the fix Vitest reports this real rejection as unhandled.
+    await new Promise(resolve => setTimeout(resolve, 0));
   });
 
   it("tears down rather than leaking a playing video and an open MediaSource", async () => {
@@ -173,7 +232,7 @@ describe("a stream that delivers data", () => {
   it("resolves with a video track and appends the chunks", async () => {
     // The canary: every rejection above is meaningless if the happy path cannot
     // open at all.
-    installEnv({ body: bodyOf("chunks", [chunk(64), chunk(32)]) });
+    installEnv({ body: bodyOf("live", [chunk(64), chunk(32)]) });
     const handle = await openShareStream("http://127.0.0.1/x", vi.fn());
     expect(handle.track.kind).toBe("video");
     expect(currentMs.sb.appends[0]).toBe(64);
@@ -181,7 +240,7 @@ describe("a stream that delivers data", () => {
   });
 
   it("marks the track as detail, since screen content is text not motion", async () => {
-    installEnv({ body: bodyOf("chunks", [chunk(8)]) });
+    installEnv({ body: bodyOf("live", [chunk(8)]) });
     const handle = await openShareStream("http://127.0.0.1/x", vi.fn());
     expect(handle.track.contentHint).toBe("detail");
     handle.close();
@@ -209,9 +268,9 @@ describe("the SourceBuffer quota", () => {
     installEnv({ body: bodyOf("live", [chunk(16)]), currentTime: 4 });
     const onDied = vi.fn();
     currentMs.sb.throwOnAppend = { nth: 1, error: new DOMException("full", "QuotaExceededError") };
-    await openShareStream("http://127.0.0.1/x", onDied).catch(() => {});
+    await expect(openShareStream("http://127.0.0.1/x", onDied)).rejects.toThrow(/video buffer failed/);
     expect(currentMs.sb.removes, "it evicted from a stream with nothing played").toEqual([]);
-    expect(onDied, "an un-evictable quota hit neither recovered nor died").toHaveBeenCalled();
+    expect(onDied, "start failures must reject, not cancel their own user-facing error").not.toHaveBeenCalled();
   });
 
   it("dies when the eviction itself is refused", async () => {
@@ -219,8 +278,8 @@ describe("the SourceBuffer quota", () => {
     const onDied = vi.fn();
     currentMs.sb.removeThrows = true;
     currentMs.sb.throwOnAppend = { nth: 1, error: new DOMException("full", "QuotaExceededError") };
-    await openShareStream("http://127.0.0.1/x", onDied).catch(() => {});
-    expect(onDied).toHaveBeenCalled();
+    await expect(openShareStream("http://127.0.0.1/x", onDied)).rejects.toThrow(/video buffer failed/);
+    expect(onDied).not.toHaveBeenCalled();
   });
 
   it("treats a NON-quota append failure as a death immediately", async () => {
@@ -229,8 +288,8 @@ describe("the SourceBuffer quota", () => {
     installEnv({ body: bodyOf("live", [chunk(16)]), currentTime: 30 });
     const onDied = vi.fn();
     currentMs.sb.throwOnAppend = { nth: 1, error: new DOMException("bad state", "InvalidStateError") };
-    await openShareStream("http://127.0.0.1/x", onDied).catch(() => {});
+    await expect(openShareStream("http://127.0.0.1/x", onDied)).rejects.toThrow(/video buffer failed/);
     expect(currentMs.sb.removes, "a non-quota error tried to evict").toEqual([]);
-    expect(onDied).toHaveBeenCalled();
+    expect(onDied).not.toHaveBeenCalled();
   });
 });

@@ -28,7 +28,7 @@ echo
 # epoch probe falls back to the rebased timeline with no hard failure).
 # Pin verification permits absent files on fresh clones; release presence must
 # also require Deno, the bundled yt-dlp challenge runtime.
-REQUIRED_SIDECARS="yt-dlp deno ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate saucebunny-capture llama-server"
+REQUIRED_SIDECARS="yt-dlp deno ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate saucebunny-capture saucebunny-aaf llama-server"
 for req in $REQUIRED_SIDECARS; do
   bin="${ROOT_DIR}/src-tauri/binaries/${req}-aarch64-apple-darwin"
   if [ ! -f "$bin" ]; then

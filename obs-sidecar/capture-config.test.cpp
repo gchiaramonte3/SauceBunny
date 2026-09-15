@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "capture-config.hpp"
+#include "include/sauce-display-crop.h"
 #include <cassert>
 #include <limits>
 #include <iostream>
@@ -14,6 +15,27 @@ int main() {
     assert(!sameWindow({}, {}));
     assert(!sameWindow({100, 0, target.application}, {100, 0, target.application}));
     assert(!sameWindow({100, 50, ""}, {100, 50, ""}));
+    const DisplayIdentity display{42, "12345678-1234-1234-1234-123456789ABC", {-1920, 10, 1920, 1080, 3840, 2160}};
+    assert(sameDisplay(display, display));
+    auto changed = display; changed.id++; assert(!sameDisplay(display, changed));
+    changed = display; changed.uuid[0] = 'A'; assert(!sameDisplay(display, changed));
+    changed = display; changed.geometry.x++; assert(!sameDisplay(display, changed));
+    changed = display; changed.geometry.pixelWidth++; assert(!sameDisplay(display, changed));
+    changed = display; changed.geometry.width = 0; assert(!sameDisplay(changed, changed));
+    assert(!validDisplayUuid("not-a-uuid") && !validDisplayUuid("12345678-1234-1234-1234-123456789ABZ"));
+    sauce_display_crop region{};
+    assert(sauce_display_crop_make(1920, 1080, 3840, 2160, 0, 0, 1, 1, &region));
+    assert(region.x == 0 && region.y == 0 && region.width == 1920 && region.pixels_wide == 3840);
+    assert(sauce_display_crop_make(1000, 1000, 2000, 2000, .0011, .0011, .5, .5, &region));
+    assert(region.x == 1.5 && region.y == 1.5 && region.width == 499.5 && region.pixels_wide == 999);
+    assert(!sauce_display_crop_make(1000, 1000, 2000, 2000, 0, 0, .016, 1, &region));
+    assert(!sauce_display_crop_make(1000, 1000, 2000, 2000, 0, 0, .0161, 1, &region));
+    assert(sauce_display_crop_make(1000, 1000, 2000, 2000, 0, 0, .0165, 1, &region));
+    assert(!sauce_display_crop_make(1000, 1000, 2000, 2000, -.1, 0, .5, 1, &region));
+    assert(!sauce_display_crop_make(1000, 1000, 2000, 2000, .9, 0, .5, 1, &region));
+    assert(!sauce_display_crop_make(1000, 1000, 2000.5, 2000, 0, 0, 1, 1, &region));
+    assert(!sauce_display_crop_make(1000, 1000, INFINITY, 2000, 0, 0, 1, 1, &region));
+    assert(!sauce_display_crop_make(1000, 1000, 2000, 2000, NAN, 0, 1, 1, &region));
     assert(parseCrop({"0", "0.25", "1", "0.5"}));
     assert(!parseCrop({"", "0", "1", "1"}));
     assert(!parseCrop({"no", "0", "1", "1"}));

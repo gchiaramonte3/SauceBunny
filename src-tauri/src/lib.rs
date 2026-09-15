@@ -194,6 +194,12 @@ pub fn run() {
         .manage(commands::SessionManager::default())
         .manage(commands::PendingReviewLink::default())
         .invoke_handler(tauri::generate_handler![
+            #[cfg(feature = "obs-audio-acceptance")]
+            commands::obs::audio_acceptance::obs_audio_acceptance_start,
+            #[cfg(feature = "obs-audio-acceptance")]
+            commands::obs::audio_acceptance::obs_audio_acceptance_read,
+            #[cfg(feature = "obs-audio-acceptance")]
+            commands::obs::audio_acceptance::obs_audio_acceptance_cancel,
             commands::premiere::premiere_bridge_start,
             commands::premiere::premiere_bridge_stop,
             commands::premiere::premiere_bridge_status,
@@ -214,8 +220,8 @@ pub fn run() {
             commands::session::ndi_unpublish,
             commands::ndi::ndi_remote_source,
             commands::obs::obs_preflight,
-            commands::obs::obs_applications,
-            commands::obs::obs_windows,
+            commands::obs::obs_all_windows,
+            commands::obs::obs_displays,
             commands::obs::obs_start,
             commands::obs::obs_broadcast_start,
             commands::obs::obs_broadcast_status,
@@ -235,6 +241,13 @@ pub fn run() {
             commands::dictate_stop,
             commands::list_audio_input_devices,
             commands::generate_transcript,
+            commands::aaf_import,
+            commands::aaf_open,
+            commands::aaf_list,
+            commands::aaf_save_labels,
+            commands::aaf_prepare_audio,
+            commands::aaf_waveform,
+            commands::aaf_transcribe_track,
             commands::list_llm_models,
             commands::download_llm_model,
             commands::delete_llm_model,
@@ -302,6 +315,8 @@ pub fn run() {
             commands::write_raw_to_path,
             commands::screen_capture_access,
             commands::list_share_sources,
+            commands::capture_window_thumbnail,
+            commands::capture_display_thumbnail,
             commands::start_screen_share,
             commands::stop_screen_share,
             commands::read_text_file_capped,
@@ -506,6 +521,8 @@ pub fn run() {
             // Kill the resident llama-server on quit — it holds a multi-GB
             // model in memory and would otherwise survive as an orphan.
             if let tauri::RunEvent::Exit = event {
+                #[cfg(feature = "obs-audio-acceptance")]
+                commands::obs::audio_acceptance::cancel_all();
                 premiere_bridge::shutdown();
                 commands::ndi::stop_all();
                 app.state::<commands::LlmServer>().shutdown();

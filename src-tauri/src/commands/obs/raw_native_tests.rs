@@ -118,7 +118,7 @@ async fn native_raw_output_lifecycle() {
     let _guard = StopOnDrop(programs.clone());
     let mut encoded = Vec::new();
     for index in 0..2 {
-        assert!(selections[index].valid() && selections[index].application.starts_with("com.saucebunny.capture-test-"));
+        assert!(selections[index].valid() && matches!(&selections[index], super::super::ObsSelection::Window(value) if value.application.starts_with("com.saucebunny.capture-test-")));
         encoded.push(record(programs[index].clone(),output.join(format!("{index}.mp4"))));
         enqueue(runtime.clone(),Request{selection:selections[index].clone(),program:programs[index].clone(),permit:Some(WorkerPermit::acquire().unwrap())}).unwrap();
         assert!(until(||programs[index].encoded_ready(),10).await,"generated capture never ready");

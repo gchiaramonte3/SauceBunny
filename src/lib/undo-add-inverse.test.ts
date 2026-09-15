@@ -60,8 +60,10 @@ describe("deleting a comment is reversible, replies included", () => {
 
   it("round-trips: delete then resurrect restores both comments", () => {
     const doc = docWith({ t: "add", comment: root }, { t: "add", comment: reply });
-    const inv = inverseReviewOps(doc, { t: "del", id: root.id });
-    const deleted = applyReviewOp(doc, { t: "del", id: root.id });
+    // Model execution ordering explicitly. Wall-clock calls could cross a
+    // millisecond under suite load and stamp the delete AFTER its own undo.
+    const inv = inverseReviewOps(doc, { t: "del", id: root.id }, 3001);
+    const deleted = applyReviewOp(doc, { t: "del", id: root.id, at: 3000 });
     const restored = inv.reduce((d, op) => applyReviewOp(d, op), deleted);
     expect(restored.comments.map((c) => c.id).sort()).toEqual([root.id, reply.id].sort());
   });

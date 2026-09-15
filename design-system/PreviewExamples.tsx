@@ -3,7 +3,9 @@ import { IconChevronDown } from "../src/components/Icons";
 import { VolumeControl } from "../src/components/VolumeControl";
 import { NdiPreviewHeader } from "../src/components/NdiPreviewHeader";
 import { AvidNdiSetup } from "../src/components/AvidNdiSetup";
+import { ReviewSourceStart } from "../src/components/ReviewSourceStart";
 import { StatusBadge } from "./StatusBadge";
+import { CapturePickerExamples } from "./CapturePickerExamples";
 import "./participants.css";
 import "../src/styles/ndi-input.css";
 
@@ -26,6 +28,27 @@ function SourceSpecimen({ state }: { state: "disabled" | "focus" | "expanded" | 
   </section>;
 }
 
+/** The actual empty-Review component; every action stays in fixture state. */
+function ReviewSourceStartExample() {
+  const [inSession, setInSession] = useState(false);
+  const [result, setResult] = useState("No source selected. No session, storage or devices are accessed.");
+  return <section className="cp-ds-preview-proposed" data-testid="review-source-start-example">
+    <h3 className="cp-ds-fixture-title">Production component · Empty Review source choices</h3>
+    <p className="cp-ds-fixture-caption">The real Review starter inside the production empty-monitor styling. File, link and live-source callbacks only update the fixture status below.</p>
+    <label className="cp-ds-inline"><input type="checkbox" checked={inSession}
+      onChange={event => setInSession(event.target.checked)}/>Session copy (fixture)</label>
+    <div className="cp-monitor" style={{ width: "100%", height: 400 }} aria-label="Review starter fixture, no live media">
+      <div className="cp-empty cp-empty-custom">
+        <ReviewSourceStart inSession={inSession}
+          onImportFile={() => setResult("File picker simulated. No files opened.")}
+          onLoadUrl={() => setResult("Open link simulated. No network request made.")}
+          onChooseLiveSource={kind => setResult(`${kind === "ndi" ? "NDI" : kind[0].toUpperCase() + kind.slice(1)} settings simulated. No capture or sharing started.`)}/>
+      </div>
+    </div>
+    <p className="cp-ds-fixture-caption" role="status">{result}</p>
+  </section>;
+}
+
 export function PreviewExamples() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [muted, setMuted] = useState(true);
@@ -34,6 +57,7 @@ export function PreviewExamples() {
   const [broadcasting, setBroadcasting] = useState(true);
   const [posted, setPosted] = useState(false);
   return <div className="cp-ds-preview-examples">
+    <ReviewSourceStartExample />
     <section className="cp-ds-preview-proposed" data-testid="preview-proposed" data-ds-example="proposed">
       <h3 className="cp-ds-fixture-title">Corrected · Preview source controls</h3>
       <p className="cp-ds-fixture-caption">Source-markup fixture using the production status and disclosure recipes. Audio uses the existing VolumeControl with local state.</p>
@@ -74,19 +98,7 @@ export function PreviewExamples() {
       <p className="cp-ds-fixture-caption">The production gear dialog uses this passive disclosure. No discovery, installation, media, or room is started by this example.</p>
       <AvidNdiSetup />
     </section>
-    <section className="cp-ndi-input" aria-label="Application capture control recipes">
-      <h3 className="cp-ds-fixture-title">Source-markup fixture · Application capture</h3>
-      <p className="cp-ds-fixture-caption">Existing gear-dialog controls, not a new Preview layout. This static specimen does not discover windows, start capture, or broadcast. Actual-App tests cover those handlers.</p>
-      <div className="cp-ndi-input-source-label"><label htmlFor="catalog-capture-input">Input</label></div>
-      <select id="catalog-capture-input" className="cp-select" defaultValue="capture"><option value="ndi">NDI</option><option value="capture">Application window</option></select>
-      <div className="cp-ndi-input-source-label"><label htmlFor="catalog-capture-app">Application</label><button type="button" className="cp-toolbar-disclosure" disabled>Refresh applications</button></div>
-      <select id="catalog-capture-app" className="cp-select" defaultValue="editor"><option value="editor">Avid Media Composer</option></select>
-      <div className="cp-ndi-input-source-label"><label htmlFor="catalog-capture-window">Window</label><button type="button" className="cp-toolbar-disclosure" disabled>Refresh windows</button></div>
-      <select id="catalog-capture-window" className="cp-select" defaultValue="composer"><option value="composer">Composer · 1200 × 704</option></select>
-      <p>Only the selected window is captured. Other application windows are excluded from the picture.</p>
-      <button type="button" className="btn cp-ndi-input-preview" disabled>Preview source</button>
-      <div className="cp-obs-broadcast"><p>Not broadcasting</p><p>Broadcasting to NDI is a separate explicit action. Closing settings preserves the existing Preview and notes.</p><button type="button" className="cp-toolbar-disclosure" disabled>Broadcast to NDI</button></div>
-    </section>
+    <CapturePickerExamples />
     <details className="cp-ds-before-fix" data-testid="preview-before-fix">
       <summary>Before the fix</summary>
       <section className="cp-ds-preview-current" data-testid="preview-current" data-ds-example="current" data-known-defect="preview-control-vocabulary">

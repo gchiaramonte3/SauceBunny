@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useMenubarEvents } from "./use-menubar-events";
 
 /**
@@ -134,24 +134,95 @@ describe("Check for Updates", () => {
 });
 
 describe("the URL bar item respects a live room", () => {
+  let fields: HTMLDivElement;
+
+  beforeEach(() => {
+    fields = document.createElement("div");
+    document.body.append(fields);
+  });
+
+  afterEach(() => {
+    try {
+      // Menu focus is intentionally deferred until the destination view mounts.
+      // Execute owned callbacks while this test's document still exists, even
+      // when an assertion failed, rather than leaving real timers past teardown.
+      if (vi.isFakeTimers()) {
+        act(() => vi.runAllTimers());
+        expect(vi.getTimerCount()).toBe(0);
+      }
+    } finally {
+      fields.remove();
+      vi.useRealTimers();
+    }
+  });
+
+  async function mountForFocus(over: Record<string, unknown> = {}) {
+    // Listener setup uses Testing Library's real-timer waitFor. Take ownership
+    // of timers after it finishes and before dispatching any menu action.
+    const mounted = await mount(over);
+    vi.useFakeTimers();
+    return mounted;
+  }
+
+  function field(className: string) {
+    const wrapper = document.createElement("div");
+    wrapper.className = className;
+    const input = document.createElement("input");
+    input.value = "https://example.test/video";
+    wrapper.append(input);
+    fields.append(wrapper);
+    return input;
+  }
+
+  function expectDeferredFocus(input: HTMLInputElement) {
+    expect(document.activeElement).not.toBe(input);
+    expect(vi.getTimerCount()).toBe(1);
+    // select() also queues jsdom selection events; drain those while the same
+    // document is alive instead of abandoning them when real timers return.
+    act(() => vi.runAllTimers());
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
+    expect(vi.getTimerCount()).toBe(0);
+  }
+
   it("stays put in a session instead of ejecting to Clip", async () => {
     // The sticky-workspace rule: in a room the URL bar IS the source bar.
-    const { d } = await mount({ sessionRoomRef: { current: { id: "r1" } }, activeViewRef: { current: "coreview" } });
+    const { d } = await mountForFocus({ sessionRoomRef: { current: { id: "r1" } }, activeViewRef: { current: "coreview" } });
+    field("cp-url");
+    const roomInput = field("cp-room-source-field");
     click("open_url_bar");
     expect(d.setActiveView).not.toHaveBeenCalled();
+    expectDeferredFocus(roomInput);
   });
 
   it("surfaces the Clip view everywhere else, since a hidden field cannot focus", async () => {
-    const { d } = await mount();
+    const { d } = await mountForFocus();
+    field("cp-room-source-field");
     click("open_url_bar");
     expect(d.setActiveView).toHaveBeenCalledWith("clip");
+    // The newly surfaced Clip field can appear after the menu event but before
+    // its queued focus callback, just as it does after React commits the view.
+    expectDeferredFocus(field("cp-url"));
   });
 
   it("does not stay put for a room that is not the active view", async () => {
     // Both halves of the condition matter: a backgrounded session must not
     // stop the menu item working from the Library.
-    const { d } = await mount({ sessionRoomRef: { current: { id: "r1" } }, activeViewRef: { current: "library" } });
+    const { d } = await mountForFocus({ sessionRoomRef: { current: { id: "r1" } }, activeViewRef: { current: "library" } });
+    field("cp-room-source-field");
+    const clipInput = field("cp-url");
     click("open_url_bar");
     expect(d.setActiveView).toHaveBeenCalledWith("clip");
+    expectDeferredFocus(clipInput);
+  });
+
+  it("finishes the deferred action safely when no URL field is mounted", async () => {
+    await mountForFocus();
+    click("open_url_bar");
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => vi.runAllTimers());
+    expect(document.activeElement).toBe(document.body);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -2,22 +2,22 @@
 import type { NdiPublicationState } from "./NdiPublicationState";
 import type { PeerInfo } from "./PeerInfo";
 
-export type SessionMsg = { "kind": "hello", name: string, install: string, grant: string | null, } | { "kind": "welcome", you: string, title: string | null, } | { "kind": "peerList", peers: Array<PeerInfo>, } | { "kind": "rtc", from: string, to: string, payload: string, } | { "kind": "loadSource", from: string, sourceKind: string, url: string | null, fingerprint: string | null, title: string | null, duration: number | null, reviewKey: string,
+export type SessionMsg = { "kind": "hello", name: string, install: string, grant: string | null, } | { "kind": "welcome", you: string, title: string | null, } | { "kind": "peerList", peers: Array<PeerInfo>, } | { "kind": "rtc", from: string, to: string, payload: string, } | { "kind": "loadSource", from: string, sourceKind: string, url: string | null, fingerprint: string | null, title: string | null, duration: number | null, reviewKey: string, 
 /**
  * Additive to the original NDI announcement. Older clients can still
  * receive live media, but cannot request private or stopped sources.
  */
-liveState?: NdiPublicationState, } | { "kind": "sourceStatus", from: string, state: string, detail: string | null, } | { "kind": "presenter", member: string, epoch: number, } | { "kind": "bye" } | { "kind": "transport", playing: boolean, position: number, rate: number, atMs: number, seq: number,
+liveState?: NdiPublicationState, } | { "kind": "sourceStatus", from: string, state: string, detail: string | null, } | { "kind": "presenter", member: string, epoch: number, } | { "kind": "bye" } | { "kind": "transport", playing: boolean, position: number, rate: number, atMs: number, seq: number, 
 /**
  * Protocol 2 separates a durable transport command from its repeated
  * heartbeat. Defaults keep one-release compatibility with old peers.
  */
-protocol: number, command: number, phase: string, target: number | null, presented: number | null, sourceKey: string, sessionId: string,
+protocol: number, command: number, phase: string, target: number | null, presented: number | null, sourceKey: string, sessionId: string, 
 /**
  * Host-stamped sender id + the presenter epoch it was sent under, so
  * lines from a superseded presenter can be ordered and discarded.
  */
-from: string, epoch: number, } | { "kind": "reviewOp", op: string, from: string, } | { "kind": "reviewDoc", doc: string, } | { "kind": "presence", name: string, position: number, } | { "kind": "sharing", from: string, on: boolean, } | { "kind": "recording", from: string, what: string, on: boolean, } | { "kind": "reaction", from: string, emote: string, on: boolean, } | { "kind": "offerFile", from: string, name: string, size: number, blake3: string,
+from: string, epoch: number, } | { "kind": "reviewOp", op: string, from: string, } | { "kind": "reviewDoc", doc: string, } | { "kind": "presence", name: string, position: number, } | { "kind": "sharing", from: string, on: boolean, } | { "kind": "recording", from: string, what: string, on: boolean, } | { "kind": "reaction", from: string, emote: string, on: boolean, } | { "kind": "offerFile", from: string, name: string, size: number, blake3: string, 
 /**
  * Codec identifiers for the source's video and audio tracks, so a
  * guest can build the MSE MIME for the LIVE stream without probing

@@ -19,6 +19,11 @@ name = "sauce_bunny_lib"
 # we target iOS / Android / Windows.
 crate-type = ["rlib"]
 
+[features]
+default = []
+# Internal packaged-main acceptance only. No diagnostic commands in normal builds.
+obs-audio-acceptance = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

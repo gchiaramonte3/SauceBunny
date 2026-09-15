@@ -55,6 +55,7 @@ import type { MeshPeerState } from "../lib/rtc-mesh";
 import { ShareController, type ShareState } from "../lib/share-machine";
 import { ViewerShareController, type ViewerShareState } from "../lib/viewer-share";
 import { openShareStream } from "../lib/share-stream";
+import { describeShareStreamError } from "../lib/share-stream-error";
 import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 import { acknowledgeEnvelope, clearDelivered, enqueueEnvelope, pendingEnvelopes, pendingLegacyOps, pendingCount, pendingOps } from "../lib/review-outbox";
 import { applyCommit, createReviewDelivery, createReviewEnvelope, isReviewAck, isReviewEnvelope, isReviewOp, sanitizeReviewOpForWire, type ReviewEnvelope } from "../lib/review-delivery";
@@ -1898,7 +1899,10 @@ export function useCoReview({
     shareRef.current = new ShareController({
       start: (source) => invoke<string>("start_screen_share", { source }),
       stopPipeline: () => invoke("stop_screen_share").then(() => undefined),
-      open: openShareStream,
+      open: async (url, onDied, options) => {
+        try { return await openShareStream(url, onDied, options); }
+        catch (error) { throw await describeShareStreamError(url, error, options.signal); }
+      },
       setOverride: (t) => meshOverrideRef.current(t),
       setAudioOverride: (t) => meshAudioOverrideRef.current(t),
       // Conversation has its own audio sender; never mix the microphone a
@@ -2295,6 +2299,10 @@ export function useCoReview({
   // A share is consent for THIS room, not for a subsequent room that happens
   // to reuse our member id. Direct room switches need not render "off".
   const shareRoomRef = useRef(coSession.code);
+  useEffect(() => () => {
+    void shareRef.current?.stop();
+    viewerShareRef.current?.stop();
+  }, []);
   useEffect(() => {
     if (!coSessionActive || shareRoomRef.current !== coSession.code) {
       void shareRef.current?.stop();

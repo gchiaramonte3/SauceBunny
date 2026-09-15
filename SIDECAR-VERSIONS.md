@@ -56,6 +56,7 @@ guard rail and refuses to install a leaky binary.
 | `llama-server-aarch64-apple-darwin` | `npm run build:llama` | llama.cpp source, static + Metal |
 | `saucebunny-dictate-aarch64-apple-darwin` | `npm run build:dictate` | `swift-sidecar/` (SPM, owned by us) |
 | `saucebunny-capture-aarch64-apple-darwin` | `npm run build:capture` | `swift-sidecar/` (SPM, owned by us) |
+| `saucebunny-aaf-aarch64-apple-darwin` | `npm run build:aaf` | `aaf-sidecar/`, pyaaf2 1.7.1, PyInstaller 6.22.3; Python bundled, not required on users' Macs |
 
 
 ## whisper-cli

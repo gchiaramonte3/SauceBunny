@@ -115,6 +115,16 @@ impl JobRegistry {
     pub(crate) fn is_cancelled(&self, id: &str) -> bool {
         self.cancelled.lock().map(|g| g.contains(id)).unwrap_or(false)
     }
+    /// Serialize a short final publication with Stop's acknowledgement. Never
+    /// hold this guard across subprocess work or an await.
+    pub(crate) fn while_active<T>(
+        &self, id: &str, action: impl FnOnce() -> Result<T, crate::AppError>,
+    ) -> Result<T, crate::AppError> {
+        let cancelled = self.cancelled.lock()
+            .map_err(|_| crate::AppError::internal("Job cancellation lock unavailable"))?;
+        if cancelled.contains(id) { return Err(crate::AppError::Cancelled); }
+        action()
+    }
     /// Drop all bookkeeping for a finished job — the cancel flag plus any
     /// lingering child handle. Pipeline tasks call this on every exit path so
     /// the cancel set can't accumulate stale entries across a session.
@@ -867,7 +877,7 @@ fn sweep_stale_files(cache: &std::path::Path, now: std::time::SystemTime) -> u32
 /// `write_bytes_to_path` used to be the third caller; its last TypeScript
 /// use went away when the frame snapshot moved to the raw body, so the
 /// command is gone and this stayed.
-fn write_bytes_impl(
+pub(crate) fn write_bytes_impl(
     path: &str,
     bytes: &[u8],
     if_not_exists: bool,
@@ -1553,7 +1563,7 @@ pub fn default_export_path(app: AppHandle) -> Result<String, crate::AppError> {
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-09-12-obs-broadcast-observation";
+pub const BACKEND_BUILD_ID: &str = "2026-09-15-multitrack-lifecycle-fixes";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {
@@ -2250,6 +2260,42 @@ mod media_cap_transfers_tests {
 #[cfg(test)]
 mod job_key_tests {
     use super::{belongs_to_job, JobRegistry};
+
+    #[test]
+    fn stopped_jobs_cannot_publish_results() {
+        let registry = JobRegistry::default();
+        let mut published = false;
+        registry.while_active("live", || { published = true; Ok(()) }).unwrap();
+        assert!(published);
+        registry.mark_cancelled("live");
+        let result = registry.while_active("live", || { published = false; Ok(()) });
+        assert!(matches!(result, Err(crate::AppError::Cancelled)));
+        assert!(published, "Stop must refuse the publication closure entirely");
+    }
+
+    #[test]
+    fn stop_acknowledgement_cannot_overtake_an_atomic_publication() {
+        let registry = std::sync::Arc::new(JobRegistry::default());
+        let writer_registry = registry.clone();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || writer_registry.while_active("live", || {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            Ok(())
+        }).unwrap());
+        entered_rx.recv().unwrap();
+        assert!(registry.cancelled.try_lock().is_err(), "the publication must hold Stop's cancellation guard");
+        let stop_registry = registry.clone();
+        let (stopped_tx, stopped_rx) = std::sync::mpsc::channel();
+        let stop = std::thread::spawn(move || { stop_registry.mark_cancelled("live"); stopped_tx.send(()).unwrap(); });
+        assert!(stopped_rx.recv_timeout(std::time::Duration::from_millis(25)).is_err());
+        release_tx.send(()).unwrap();
+        writer.join().unwrap();
+        stopped_rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+        stop.join().unwrap();
+        assert!(matches!(registry.while_active("live", || Ok(())), Err(crate::AppError::Cancelled)));
+    }
 
     #[test]
     fn a_job_owns_its_own_key_and_its_stage_keys() {

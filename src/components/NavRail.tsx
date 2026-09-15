@@ -1,6 +1,7 @@
 import { IconHome, IconStack, IconScissors, IconSettings, IconCoReview, IconTranscript } from "./Icons";
 import type { AppView } from "../App";
 import logoUrl from "../assets/saucebunny.svg";
+import { IconMultitrack } from "./IconMultitrack";
 
 /**
  * Persistent left navigation rail — the app-shell switch between the
@@ -25,13 +26,14 @@ type Props = {
   clipShortcut?: string;
   coreviewShortcut?: string;
   readerShortcut?: string;
+  multitrackShortcut?: string;
   /** A co-review session is live — lights the badge dot on the Review item. */
   sessionActive: boolean;
   /** People connected to the live session — surfaced in the item's title. */
   sessionPeers?: number;
 };
 
-export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libraryShortcut, clipShortcut, coreviewShortcut, readerShortcut, sessionActive, sessionPeers }: Props) {
+export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libraryShortcut, clipShortcut, coreviewShortcut, readerShortcut, multitrackShortcut, sessionActive, sessionPeers }: Props) {
   return (
     <nav className="cp-nav" aria-label="Primary">
       {/* Brand mark — a non-interactive logo, NOT a second Home button. The
@@ -102,6 +104,17 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libr
       >
         <IconTranscript size={18} />
         <span className="cp-nav-label">Transcripts</span>
+      </button>
+      <button
+        type="button"
+        className={"cp-nav-item" + (active === "multitrack" ? " active" : "")}
+        onClick={() => onNavigate("multitrack")}
+        title={multitrackShortcut ? `Multitrack (${multitrackShortcut})` : "Multitrack"}
+        aria-label="Multitrack"
+        aria-current={active === "multitrack" ? "page" : undefined}
+      >
+        <IconMultitrack />
+        <span className="cp-nav-label">Multitrack</span>
       </button>
       <div className="cp-nav-spacer" />
       <button

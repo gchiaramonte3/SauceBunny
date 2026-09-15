@@ -40,20 +40,49 @@ bool ServiceControl::accept(const std::string &line) {
             if (generation > cancelled_[slot]) cancelled_[slot] = generation;
             return true;
         }
-        if (![record[@"op"] isEqual:@"start"] || record.count != 7 || generation <= last_[slot]) return false;
-        NSString *application = record[@"application"];
-        if (![application isKindOfClass:[NSString class]] || application.length < 3 || application.length > 256 ||
-            ![application containsString:@"."] ||
-            [application rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:
-                @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_"] invertedSet]].location != NSNotFound ||
-            !integer(record[@"process"], 1, INT32_MAX) || !integer(record[@"window"], 1, UINT32_MAX)) return false;
+        id audio = record[@"audio"];
+        id audioPolicy = record[@"audioPolicy"];
+        const bool display = [record[@"kind"] isEqual:@"display"];
+        if (![record[@"op"] isEqual:@"start"] || record.count != (display ? (audioPolicy ? 10u : 9u) : (audio ? 8u : 7u)) || generation <= last_[slot]) return false;
+        if (audio && (![audio isKindOfClass:[NSNumber class]] ||
+            CFGetTypeID((__bridge CFTypeRef)audio) != CFBooleanGetTypeID())) return false;
         NSArray *crop = record[@"crop"];
         if (![crop isKindOfClass:[NSArray class]] || crop.count != 4) return false;
         for (id value in crop) if (!number(value, 0, 1)) return false;
         Crop area{[crop[0] doubleValue], [crop[1] doubleValue], [crop[2] doubleValue], [crop[3] doubleValue]};
         if (area.width <= 0 || area.height <= 0 || area.x + area.width > 1 || area.y + area.height > 1) return false;
-        StartCapture command{slot, generation, {[record[@"window"] unsignedIntValue],
-            [record[@"process"] intValue], application.UTF8String}, area};
+        StartCapture command;
+        command.slot = slot; command.generation = generation; command.crop = area;
+        command.audio = audio ? [audio boolValue] : true;
+        if (display) {
+            NSString *uuid = record[@"displayUuid"];
+            NSDictionary *g = record[@"geometry"];
+            // No dummy window identity, missing audio default, mixed target or
+            // implicit main-display fallback is accepted on the local wire.
+            if (!audio || (command.audio ? !integer(audioPolicy, 1, 1) : audioPolicy != nil) ||
+                record[@"application"] || record[@"process"] || record[@"window"] ||
+                ![uuid isKindOfClass:[NSString class]] || uuid.length != 36 || !validDisplayUuid(uuid.UTF8String) ||
+                !integer(record[@"displayId"], 1, UINT32_MAX) ||
+                ![g isKindOfClass:[NSDictionary class]] || g.count != 6 ||
+                !number(g[@"x"], -1000000, 1000000) || !number(g[@"y"], -1000000, 1000000) ||
+                !integer(g[@"width"], 2, 16384) || !integer(g[@"height"], 2, 16384) ||
+                !integer(g[@"pixelWidth"], 2, 16384) || !integer(g[@"pixelHeight"], 2, 16384)) return false;
+            DisplayIdentity identity{[record[@"displayId"] unsignedIntValue], uuid.UTF8String,
+                {[g[@"x"] doubleValue], [g[@"y"] doubleValue], [g[@"width"] unsignedIntValue],
+                 [g[@"height"] unsignedIntValue], [g[@"pixelWidth"] unsignedIntValue], [g[@"pixelHeight"] unsignedIntValue]}};
+            if (!validDisplayGeometry(identity.geometry) || area.width * identity.geometry.width <= 16 ||
+                area.height * identity.geometry.height <= 16) return false;
+            command.target = identity;
+            command.audioPolicy = command.audio ? 1 : 0;
+        } else {
+            NSString *application = record[@"application"];
+            if (record[@"kind"] || audioPolicy || ![application isKindOfClass:[NSString class]] || application.length < 3 || application.length > 256 ||
+                ![application containsString:@"."] ||
+                [application rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:
+                    @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_"] invertedSet]].location != NSNotFound ||
+                !integer(record[@"process"], 1, INT32_MAX) || !integer(record[@"window"], 1, UINT32_MAX)) return false;
+            command.target = WindowIdentity{[record[@"window"] unsignedIntValue], [record[@"process"] intValue], application.UTF8String};
+        }
         std::lock_guard<std::mutex> lock(mutex_);
         if (pending_.size() >= 2) return false;
         last_[slot] = generation;

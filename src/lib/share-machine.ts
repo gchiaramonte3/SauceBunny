@@ -7,6 +7,7 @@
  */
 
 export type ShareState = "idle" | "starting" | "sharing";
+export type ShareOpenOptions = { audio: boolean; signal: AbortSignal };
 
 import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 
@@ -17,7 +18,7 @@ export type ShareDeps = {
   stopPipeline: () => Promise<void>;
   /** Play the proxy stream hidden and captureStream() it (share-stream.ts).
    *  `onDied` fires when the pipeline ends underneath us (ffmpeg death). */
-  open: (url: string, onDied: () => void) => Promise<{ stream: MediaStream; track: MediaStreamTrack; audioTrack: MediaStreamTrack | null; close: () => void }>;
+  open: (url: string, onDied: () => void, options: ShareOpenOptions) => Promise<{ stream: MediaStream; track: MediaStreamTrack; audioTrack: MediaStreamTrack | null; close: () => void }>;
   /** Mesh video override: the share track out, null restores the camera. */
   setOverride: (track: MediaStreamTrack | null) => void;
   /** Mesh audio override: system audio mixed with the mic, null = mic only. */
@@ -34,11 +35,26 @@ export type ShareDeps = {
   onStartError?: (err: unknown) => void;
 };
 
+type ShareAttempt = {
+  generation: number;
+  abort: AbortController;
+  opened: Awaited<ReturnType<ShareDeps["open"]>> | null;
+  mix: ReturnType<ShareDeps["mixAudio"]> | null;
+  began: boolean;
+  pending: boolean;
+  settled: Promise<void>;
+  finish: () => void;
+  cleanup: Promise<void> | null;
+};
+
 export class ShareController {
   private deps: ShareDeps;
   private state: ShareState = "idle";
-  private opened: { stream: MediaStream; track: MediaStreamTrack; audioTrack: MediaStreamTrack | null; close: () => void } | null = null;
-  private mix: { track: MediaStreamTrack; close: () => void } | null = null;
+  private generation = 0;
+  private attempt: ShareAttempt | null = null;
+  // stopPipeline addresses a global native pipeline, not an attempt ID. A
+  // replacement must wait until old open/stop calls can no longer affect it.
+  private retiring: Promise<void> = Promise.resolve();
 
   constructor(deps: ShareDeps) {
     this.deps = deps;
@@ -50,52 +66,97 @@ export class ShareController {
 
   async start(source: ShareSourceArg): Promise<void> {
     if (this.state !== "idle") return;
+    const predecessor = this.retiring;
+    let finish = () => {};
+    const settled = new Promise<void>((resolve) => { finish = resolve; });
+    const attempt: ShareAttempt = { generation: ++this.generation, abort: new AbortController(), opened: null, mix: null,
+      began: false, pending: true, settled, finish, cleanup: null };
+    this.attempt = attempt;
     this.set("starting", null);
+    let failure: { error: unknown } | null = null;
     try {
+      await predecessor;
+      if (this.attempt !== attempt) return;
+      attempt.began = true;
       const url = await this.deps.start(source);
-      const opened = await this.deps.open(url, () => this.onPipelineDied());
-      this.opened = opened;
+      if (this.attempt !== attempt) return;
+      const opened = await this.deps.open(url, () => this.onPipelineDied(attempt), { audio: source.audio, signal: attempt.abort.signal });
+      attempt.opened = opened;
+      if (this.attempt !== attempt) { this.closeOwned(attempt); return; }
       this.deps.setOverride(opened.track);
       if (opened.audioTrack) {
         // System audio rode the fMP4: mix it with the mic into the one
         // outgoing audio track (no renegotiation).
-        this.mix = this.deps.mixAudio(opened.audioTrack);
-        this.deps.setAudioOverride(this.mix.track);
+        attempt.mix = this.deps.mixAudio(opened.audioTrack);
+        this.deps.setAudioOverride(attempt.mix.track);
       }
       this.deps.announce(true);
       this.set("sharing", opened.stream);
       this.deps.log("info", `screen share started (${source.kind} ${source.id}${source.audio ? " + audio" : ""})`);
     } catch (err) {
-      this.deps.log("err", `screen share failed to start: ${err instanceof Error ? err.message : String(err)}`);
-      await this.cleanup();
-      this.deps.onStartError?.(err);
+      if (this.attempt === attempt) {
+        this.deps.log("err", `screen share failed to start: ${err instanceof Error ? err.message : String(err)}`);
+        failure = { error: err };
+      }
+    } finally {
+      attempt.pending = false;
+      attempt.finish();
+    }
+    if (failure) {
+      await this.cleanup(attempt);
+      if (this.generation === attempt.generation) this.deps.onStartError?.(failure.error);
     }
   }
 
   /** Bar button / session end. */
   async stop(): Promise<void> {
-    if (this.state === "idle") return;
-    await this.cleanup();
+    ++this.generation;
+    await (this.attempt ? this.cleanup(this.attempt) : this.retiring);
   }
 
   /** The ffmpeg child died underneath us - same cleanup, loud log. */
-  private onPipelineDied(): void {
-    if (this.state === "idle") return;
+  private onPipelineDied(attempt: ShareAttempt): void {
+    if (this.attempt !== attempt) return;
     this.deps.log("err", "screen share pipeline died; restoring camera");
-    void this.cleanup();
+    void this.cleanup(attempt);
   }
 
-  private async cleanup(): Promise<void> {
-    const opened = this.opened;
-    const mix = this.mix;
-    this.opened = null;
-    this.mix = null;
-    this.set("idle", null);
+  private closeOwned(attempt: ShareAttempt): void {
+    const { opened, mix } = attempt;
+    attempt.opened = null;
+    attempt.mix = null;
     try { opened?.close(); } catch { /* already closed */ }
     try { mix?.close(); } catch { /* already closed */ }
+  }
+
+  private cleanup(attempt: ShareAttempt): Promise<void> {
+    if (attempt.cleanup) return attempt.cleanup;
+    const predecessor = this.retiring;
+    let finish = () => {};
+    attempt.cleanup = new Promise<void>((resolve) => { finish = resolve; });
+    this.retiring = attempt.cleanup;
+    this.attempt = null; // Invalidate before close can fire onDied again.
+    attempt.abort.abort(); // Own fetch/decode even before open returns a handle.
+    this.set("idle", null);
+    this.closeOwned(attempt);
     this.deps.setOverride(null);
     this.deps.setAudioOverride(null);
     this.deps.announce(false);
+    const pending = attempt.pending && attempt.began;
+    void (async () => {
+      if (attempt.began) await this.stopPipeline();
+      await predecessor;
+      await attempt.settled;
+      this.closeOwned(attempt);
+      // Stop may have reached native before an in-flight open created its
+      // pipeline. Retire that late result before admitting any replacement.
+      if (pending) await this.stopPipeline();
+      finish();
+    })();
+    return attempt.cleanup;
+  }
+
+  private async stopPipeline(): Promise<void> {
     try { await this.deps.stopPipeline(); } catch { /* proxy already gone */ }
   }
 

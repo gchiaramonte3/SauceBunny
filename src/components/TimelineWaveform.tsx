@@ -6,6 +6,8 @@ type Props = {
   /** Timeline's measured track width (already bucketed to 24px by its
    *  ResizeObserver) — a dep so a real resize redraws at the new size. */
   widthPx: number;
+  /** Multitrack can use its existing purple palette without restyling Clip. */
+  colorful?: boolean;
 };
 
 /**
@@ -15,17 +17,17 @@ type Props = {
  * effect + `lib/waveform.ts`. Deliberately muted so the playhead, marks,
  * comment markers and speaker lanes stay visually dominant.
  */
-export function TimelineWaveform({ peaks, widthPx }: Props) {
+export function TimelineWaveform({ peaks, widthPx, colorful = false }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (ref.current) drawWaveform(ref.current, peaks);
-  }, [peaks, widthPx]);
+    if (ref.current) drawWaveform(ref.current, peaks, colorful);
+  }, [peaks, widthPx, colorful]);
 
   return <canvas ref={ref} className="cp-track-wave" aria-hidden />;
 }
 
-function drawWaveform(canvas: HTMLCanvasElement, peaks: WaveformPeaks) {
+function drawWaveform(canvas: HTMLCanvasElement, peaks: WaveformPeaks, colorful: boolean) {
   const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
   const w = Math.max(1, Math.round(canvas.clientWidth * dpr));
   const h = Math.max(1, Math.round(canvas.clientHeight * dpr));
@@ -41,7 +43,7 @@ function drawWaveform(canvas: HTMLCanvasElement, peaks: WaveformPeaks) {
   // lift moved fg-4 away from it, so the fallback named a colour the palette
   // had deliberately abandoned. (Not `currentColor`: as a canvas fillStyle it
   // resolves to the inherited `color`, and an unparseable value paints black.)
-  const ink = getComputedStyle(canvas).getPropertyValue("--fg-4").trim();
+  const ink = colorful ? getComputedStyle(canvas).color : getComputedStyle(canvas).getPropertyValue("--fg-4").trim();
   ctx.clearRect(0, 0, w, h);
 
   const { mins, maxs } = peaks;
@@ -50,10 +52,10 @@ function drawWaveform(canvas: HTMLCanvasElement, peaks: WaveformPeaks) {
   const cy = h / 2;
   // Keep peaks clear of the track edges and the 5px speaker-lane strip
   // hugging the bottom.
-  const amp = Math.max(2, cy - 6 * dpr);
+  const amp = Math.max(2, cy - (colorful ? 2 : 6) * dpr);
 
   ctx.fillStyle = ink;
-  ctx.globalAlpha = 0.5;
+  ctx.globalAlpha = colorful ? 0.9 : 0.5;
   // One vertical bar per device-pixel column, aggregating every bucket the
   // column covers so narrow tracks never drop transient peaks.
   for (let x = 0; x < w; x++) {

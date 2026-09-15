@@ -25,7 +25,7 @@ mkdir -p "$deps_root"
 tar -xf "$deps_archive" -C "$deps_root"
 # The helper-only patch disables OBS's downloader; all inputs were verified
 # above. Configure from this exact dependency tree, with no Qt/CEF bootstrap.
-for patch_name in macos-no-global-input macos-core-dependencies macos-helper-module; do
+for patch_name in macos-no-global-input macos-core-dependencies macos-helper-module macos-stagesurface-stride; do
   ditto "$recipe_root/obs-sidecar/patches/$patch_name.patch" "$output_dir/patches/$patch_name.patch"
   patch --batch --fuzz=0 -p1 -d "$output_dir/source" < "$output_dir/patches/$patch_name.patch"
 done
@@ -42,6 +42,9 @@ core="$output_dir/build/libobs/Release/libobs.framework/Versions/A/libobs"
 # Inspect the linked binary, not just the source patch or a version label.
 # This also catches a future patch/build regression that reintroduces a listener.
 bash "$recipe_root/scripts/check-obs-core.sh" "$core"
+# Generated textures only: catch padded NV12 rows before recording a core as
+# usable. This creates an offscreen graphics context, not a capture source.
+bash "$recipe_root/scripts/verify-obs-stagesurface.sh" "$output_dir"
 node "$project_root/scripts/obs-source-inputs.mjs" --record-core "$output_dir" "$source_archive" "$deps_archive" >/dev/null
 echo "Built private libobs without global input: $output_dir"
 echo 'Developer build only; release signing and complete corresponding-source packaging remain separate gates.'

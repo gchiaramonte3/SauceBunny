@@ -8,6 +8,17 @@ pub struct StreamFailure { pub request_id: String, pub kind: String, pub message
 
 static FAILURES: OnceLock<Mutex<VecDeque<StreamFailure>>> = OnceLock::new();
 
+/// Callers with an allowlisted native failure use only static descriptions.
+/// No child stderr, source identity, URL, or filesystem path enters this API.
+pub(crate) fn remember_fixed(id: &Option<String>, kind: &'static str, message: &'static str) {
+    let Some(id) = id else { return };
+    if let Ok(mut failures) = FAILURES.get_or_init(Default::default).lock() {
+        if failures.iter().any(|failure| failure.request_id == *id) { return; }
+        if failures.len() >= 64 { failures.pop_front(); }
+        failures.push_back(StreamFailure { request_id: id.clone(), kind: kind.into(), message: message.into() });
+    }
+}
+
 #[tauri::command]
 pub fn get_stream_failure(request_id: String) -> Option<StreamFailure> {
     FAILURES.get_or_init(Default::default).lock().ok()?.iter().find(|f| f.request_id == request_id).cloned()

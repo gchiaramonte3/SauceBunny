@@ -12,7 +12,7 @@ export const helperSourceScripts = Object.freeze([
   'build-obs-core.sh', 'build-obs-probe.sh', 'check-obs-core.sh',
   'inspect-obs-runtime.mjs', 'obs-source-inputs.mjs', 'sign-obs-runtime.mjs',
   'snapshot-obs-source.mjs', 'stable-signing.sh', 'stage-obs-runtime.mjs',
-  'verify-obs-owner.mjs', 'verify-obs-probe.mjs',
+  'verify-obs-owner.mjs', 'verify-obs-probe.mjs', 'verify-obs-stagesurface.sh',
 ].map(file => `scripts/${file}`).sort());
 export const helperBuildComponents = Object.freeze([
   'MacOS/obs-capture-config-tests', 'MacOS/saucebunny-obs-audio-buffer-tests',
@@ -20,6 +20,7 @@ export const helperBuildComponents = Object.freeze([
   'MacOS/saucebunny-obs-capture-probe', 'MacOS/saucebunny-obs-capture-service',
   'MacOS/saucebunny-obs-capture-worker', 'MacOS/saucebunny-obs-media-probe',
   'MacOS/saucebunny-obs-media-worker', 'MacOS/saucebunny-obs-probe',
+  'MacOS/saucebunny-obs-region-exclusion-tests',
   'MacOS/saucebunny-obs-window-probe',
   'PlugIns/sauce-obs-capture.plugin/Contents/MacOS/sauce-obs-capture',
 ].sort());

@@ -14,6 +14,32 @@ struct WindowIdentity {
     int32_t process = 0;
     std::string application;
 };
+struct DisplayGeometry {
+    double x = 0, y = 0;
+    uint32_t width = 0, height = 0, pixelWidth = 0, pixelHeight = 0;
+};
+inline bool validDisplayGeometry(const DisplayGeometry &value) {
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::abs(value.x) <= 1000000 &&
+        std::abs(value.y) <= 1000000 && value.width >= 2 && value.width <= 16384 &&
+        value.height >= 2 && value.height <= 16384 && value.pixelWidth >= 2 && value.pixelWidth <= 16384 &&
+        value.pixelHeight >= 2 && value.pixelHeight <= 16384;
+}
+inline bool validDisplayUuid(const std::string &uuid) {
+    if (uuid.size() != 36) return false;
+    for (size_t i = 0; i < uuid.size(); i++) {
+        const char c = uuid[i];
+        if (i == 8 || i == 13 || i == 18 || i == 23) { if (c != '-') return false; }
+        else if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+    }
+    return true;
+}
+struct DisplayIdentity { uint32_t id = 0; std::string uuid; DisplayGeometry geometry; };
+inline bool sameDisplay(const DisplayIdentity &wanted, const DisplayIdentity &observed) {
+    const auto &a = wanted.geometry, &b = observed.geometry;
+    return wanted.id != 0 && validDisplayUuid(wanted.uuid) && validDisplayGeometry(a) &&
+        wanted.id == observed.id && wanted.uuid == observed.uuid && a.x == b.x && a.y == b.y &&
+        a.width == b.width && a.height == b.height && a.pixelWidth == b.pixelWidth && a.pixelHeight == b.pixelHeight;
+}
 inline bool sameWindow(const WindowIdentity &wanted, const WindowIdentity &observed) {
     return wanted.window != 0 && wanted.process > 0 && !wanted.application.empty() &&
            wanted.window == observed.window && wanted.process == observed.process &&

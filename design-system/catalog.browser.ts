@@ -469,6 +469,75 @@ test("Preview preserves one volume control and only discloses source details", a
   await expect(monitor).toHaveAttribute("data-monitor-identity", "original");
 });
 
+test("production Review starter uses fixture-only actions and preserves link focus", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await page.getByTestId("catalog-text-scale").check();
+  await selectFamily(page, "preview");
+  const fixture = page.getByTestId("review-source-start-example");
+  const starter = fixture.getByRole("region", { name: "Choose a review source" });
+  await expect(starter.getByRole("button")).toHaveCount(6);
+  await expect(starter.getByText(/Your preview stays on this Mac/)).toBeVisible();
+  await starter.getByRole("button", { name: "Local file A video or audio file" }).click();
+  await expect(fixture.getByRole("status")).toHaveText("File picker simulated. No files opened.");
+  for (const category of ["Screen", "Window", "Region", "NDI"]) {
+    await starter.getByRole("button", { name: new RegExp(`^${category} `) }).click();
+    await expect(fixture.getByRole("status")).toHaveText(`${category} settings simulated. No capture or sharing started.`);
+  }
+  await starter.getByRole("button", { name: "Link Paste a video URL" }).click();
+  const url = starter.getByRole("textbox", { name: "Video URL" });
+  await expect(url).toBeFocused();
+  await url.fill("https://example.invalid/generated-video");
+  await starter.getByRole("button", { name: "Open link" }).click();
+  await expect(fixture.getByRole("status")).toHaveText("Open link simulated. No network request made.");
+  await url.press("Escape");
+  await expect(starter.getByRole("button", { name: "Link Paste a video URL" })).toBeFocused();
+  await fixture.getByRole("checkbox", { name: "Session copy (fixture)" }).check();
+  await expect(starter.getByText(/Live sources preview privately before sharing/)).toBeVisible();
+  await expect(fixture.locator("video,audio,canvas")).toHaveCount(0);
+  await fixture.screenshot({ path: info.outputPath("review-source-start-catalog.png") });
+});
+
+test("capture picker keeps selected hover violet and edits a real fixture region", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await selectFamily(page, "preview");
+  const picker = page.getByTestId("capture-picker-example");
+  await picker.scrollIntoViewIfNeeded();
+  await expect(picker.getByRole("tab")).toHaveText(["NDI", "Screen", "Window", "Region"]);
+  const windows = picker.getByRole("tab", { name: "Window", exact: true });
+  await windows.click();
+  const chosen = picker.getByRole("button", { name: "Composer · Avid Media Composer · Window 102", exact: true });
+  await chosen.click();
+  await chosen.hover();
+  await expect(chosen).toHaveAttribute("aria-pressed", "true");
+  const selectedColor = await windows.evaluate(node => getComputedStyle(node).backgroundColor);
+  await expect(chosen).toHaveCSS("background-color", selectedColor);
+  await picker.screenshot({ path: info.outputPath("capture-picker-windows-selected-hover.png") });
+  await page.mouse.move(0, 0);
+  await expect(chosen).toHaveCSS("background-color", selectedColor);
+
+  await picker.getByRole("tab", { name: "Region", exact: true }).click();
+  await picker.getByRole("button", { name: "Studio display · 1000 × 600 · fixture", exact: true }).click();
+  const surface = picker.getByRole("group", { name: "Studio display crop" });
+  await surface.scrollIntoViewIfNeeded();
+  const box = (await surface.boundingBox())!;
+  expect(Math.abs(box.width / box.height - 1000 / 600)).toBeLessThan(.01);
+  expect(box.height).toBeLessThanOrEqual(224.1);
+  await page.mouse.move(box.x + box.width * .1, box.y + box.height * .1);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * .6, box.y + box.height * .7);
+  await page.mouse.up();
+  for (const [name, value] of [["Left", 10], ["Top", 10], ["Width", 50], ["Height", 60]] as const) {
+    const actual = Number(await picker.getByRole("spinbutton", { name, exact: true }).inputValue());
+    expect(Math.abs(actual - value)).toBeLessThan(.1);
+  }
+  const systemAudio = picker.getByRole("checkbox", { name: "Include system audio" });
+  await expect(systemAudio).toBeEnabled(); await expect(systemAudio).not.toBeChecked();
+  await systemAudio.focus(); await page.keyboard.press("Space"); await expect(systemAudio).toBeChecked();
+  await expect(picker.getByText(/Hides Sauce Bunny's windows/)).toBeVisible();
+  await expect(picker.getByRole("button", { name: "Simulate Preview" })).toBeEnabled();
+  await picker.screenshot({ path: info.outputPath("capture-picker-region.png") });
+});
+
 test("actual GenerateButton keeps its artwork, source options, progress and outcomes", async ({ page }) => {
   await selectFamily(page, "generate");
   const specimen = page.getByTestId("generate-specialty-current");

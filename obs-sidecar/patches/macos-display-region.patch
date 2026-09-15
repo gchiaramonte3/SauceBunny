@@ -1,0 +1,62 @@
+--- a/mac-sck-video-capture.m
++++ b/mac-sck-video-capture.m
+@@ -1,3 +1,37 @@
+ #include "mac-sck-common.h"
+ #include "window-utils.h"
++#include "sauce-display-crop.h"
++
++// Geometry is frozen by the chooser and revalidated again immediately before
++// SCStream creation. No fullscreen fallback for a missing/changed region.
++API_AVAILABLE(macos(12.5)) bool sauce_capture_display_region(obs_data_t *settings,
++    SCDisplay *display, SCStreamConfiguration *configuration)
++{
++    const char *required[] = {"sauce_display_x", "sauce_display_y", "sauce_display_width", "sauce_display_height",
++        "sauce_display_pixel_width", "sauce_display_pixel_height", "sauce_region_x", "sauce_region_y",
++        "sauce_region_width", "sauce_region_height"};
++    for (unsigned i = 0; i < 10; i++) if (!obs_data_has_user_value(settings, required[i])) return false;
++    if (!display || !CGDisplayIsActive(display.displayID)) return false;
++    const CGRect bounds = CGDisplayBounds(display.displayID);
++    CGDisplayModeRef mode = CGDisplayCopyDisplayMode(display.displayID);
++    if (!mode) return false;
++    const size_t pixels_wide = CGDisplayModeGetPixelWidth(mode), pixels_high = CGDisplayModeGetPixelHeight(mode);
++    CGDisplayModeRelease(mode);
++    if (bounds.origin.x != obs_data_get_double(settings, "sauce_display_x") ||
++        bounds.origin.y != obs_data_get_double(settings, "sauce_display_y") ||
++        bounds.size.width != obs_data_get_double(settings, "sauce_display_width") ||
++        bounds.size.height != obs_data_get_double(settings, "sauce_display_height") ||
++        pixels_wide != obs_data_get_double(settings, "sauce_display_pixel_width") ||
++        pixels_high != obs_data_get_double(settings, "sauce_display_pixel_height")) return false;
++    struct sauce_display_crop crop;
++    if (!sauce_display_crop_make(bounds.size.width, bounds.size.height, pixels_wide, pixels_high,
++        obs_data_get_double(settings, "sauce_region_x"), obs_data_get_double(settings, "sauce_region_y"),
++        obs_data_get_double(settings, "sauce_region_width"), obs_data_get_double(settings, "sauce_region_height"), &crop))
++        return false;
++    [configuration setSourceRect:CGRectMake(crop.x, crop.y, crop.width, crop.height)];
++    [configuration setWidth:crop.pixels_wide];
++    [configuration setHeight:crop.pixels_high];
++    return true;
++}
++
+ #include <unistd.h>
+@@ -191,5 +225,15 @@
+             content_filter = [[SCContentFilter alloc] initWithDisplay:target_display excludingWindows:exclusions];
+ 
+-            set_display_mode(sc, target_display);
++            obs_data_t *region_settings = obs_source_get_settings(sc->source);
++            const bool region_ready = sauce_capture_display_region(region_settings, target_display, sc->stream_properties);
++            obs_data_release(region_settings);
++            if (!region_ready) {
++                [content_filter release];
++                os_atomic_set_bool(&sc->sauce_capture_terminated, true);
++                os_sem_post(sc->shareable_content_available);
++                sc->disp = NULL;
++                os_event_init(&sc->stream_start_completed, OS_EVENT_TYPE_MANUAL);
++                return false;
++            }
+         } break;
+         case ScreenCaptureWindowStream: {
+@@ -475,3 +520,4 @@
+     obs_data_set_default_int(settings, "sauce_audio_policy_version", 1);
+     obs_data_set_default_int(settings, "sauce_overlay_policy_version", 1);
++    obs_data_set_default_int(settings, "sauce_display_region_policy_version", 1);
+ }

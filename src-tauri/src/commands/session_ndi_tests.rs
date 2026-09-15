@@ -1,4 +1,33 @@
 use super::*;
+#[test] fn native_stop_retires_only_the_exact_stopped_publication_and_keeps_review() {
+    let shared = HostShared { generation: 7, ..HostShared::default() };
+    let a = source("a", true);
+    shared.commit_program(a.clone(), "ndi:review-a", 7, 0).unwrap();
+    let lease = shared.program_for_peer("a").unwrap();
+    assert!(!shared.stop_native_program("a").unwrap(), "a healthy producer cannot be revoked by this callback");
+    assert!(!shared.stop_native_program("other").unwrap());
+    assert!(lease.active());
+    a.stop();
+    assert!(shared.stop_native_program("a").unwrap());
+    assert!(!lease.active());
+    assert!(shared.program_for_peer("a").is_none());
+    assert!(!shared.stop_native_program("a").unwrap(), "a duplicate stop does not announce again");
+    assert!(matches!(shared.program_source_msg(), Some(SessionMsg::LoadSource { url, review_key,
+        live_state: Some(crate::commands::ndi::NdiPublicationState::Stopped), .. })
+        if url.as_deref() == Some("a") && review_key == "ndi:review-a"));
+}
+#[test] fn late_native_stop_cannot_revoke_a_newer_room_source_or_a_private_candidate() {
+    let shared = HostShared { generation: 7, ..HostShared::default() };
+    let a = source("a", true); let b = source("b", true); let private = source("private", true);
+    shared.commit_program(a.clone(), "ndi:review-a", 7, 0).unwrap();
+    shared.commit_program(b, "ndi:review-b", 7, 0).unwrap();
+    a.stop(); private.stop();
+    assert!(!shared.stop_native_program("a").unwrap());
+    assert!(!shared.stop_native_program("private").unwrap());
+    assert!(shared.program_for_peer("b").is_some());
+    assert!(matches!(shared.program_source_msg(), Some(SessionMsg::LoadSource { url,
+        live_state: Some(crate::commands::ndi::NdiPublicationState::Live), .. }) if url.as_deref() == Some("b")));
+}
 #[test] fn a_join_during_commit_uses_native_source_truth_not_a_stale_render() {
     let shared=HostShared {generation:7,..HostShared::default()};
     shared.commit_program(source("b",true),"ndi:review-b",7,0).unwrap();

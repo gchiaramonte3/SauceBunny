@@ -111,8 +111,8 @@ async fn unconfirmed_reap_keeps_stop_pending_and_capture_capacity_reserved() {
         return;
     }
     let program = Program::new("a".repeat(32), "Generated fixture".into(), None);
-    let selection = super::super::ObsSelection { application: "com.example.fixture".into(), process: 1, window: 2,
-        crop: super::super::ObsCrop { x: 0.0, y: 0.0, width: 1.0, height: 1.0 } };
+    let selection = super::super::ObsSelection::Window(super::super::ObsWindowSelection { application: "com.example.fixture".into(), process: 1, window: 2, audio: None,
+        crop: super::super::ObsCrop { x: 0.0, y: 0.0, width: 1.0, height: 1.0 } });
     let (sender, mut receiver) = mpsc::channel(2);
     let (done, observation) = watch::channel(false);
     *client().lock().unwrap() = Some(Client { root: PathBuf::from("/generated-fixture"), sender,

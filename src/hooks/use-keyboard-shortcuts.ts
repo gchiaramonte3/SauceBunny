@@ -28,6 +28,7 @@ export type KeyboardShortcutsDeps = {
   clipViewRef: RefObject<HTMLDivElement | null>;
   coreviewViewRef: RefObject<HTMLDivElement | null>;
   readerViewRef: RefObject<HTMLDivElement | null>;
+  multitrackViewRef?: RefObject<HTMLDivElement | null>;
   readerPlayerRef: RefObject<PlayerHandle | null>;
   tcEntryRef: { current: string | null };
   kHeldRef: { current: boolean };
@@ -86,7 +87,7 @@ export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
     programInputActive = false,
     comboToAction, status, fps, readerFps, durationFrames, settingsOpen, exportOpts,
     activeViewRef, homeViewRef, libraryViewRef, clipViewRef, coreviewViewRef,
-    readerViewRef, readerPlayerRef, tcEntryRef, kHeldRef,
+    readerViewRef, multitrackViewRef, readerPlayerRef, tcEntryRef, kHeldRef,
     reviewRangeGateRef, reviewRangeKeysRef,
     onPlayToggle, shuttleStep, onMarkIn, onMarkOut, onClearMarks,
     onGotoIn, onGotoOut, onStep, onSeek, readerSeekRel,
@@ -162,7 +163,8 @@ export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
         case "view.library":
         case "view.clip":
         case "view.coreview":
-        case "view.reader": {
+        case "view.reader":
+        case "view.multitrack": {
           // View switching stays live during a session: the room is a
           // dressing of the shared stage, not a trap (leaving to Clip keeps
           // the session connected; the rail's Review badge is the way back).
@@ -170,7 +172,8 @@ export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
             id === "view.home" ? "home" :
             id === "view.library" ? "library" :
             id === "view.coreview" ? "coreview" :
-            id === "view.reader" ? "reader" : "clip";
+            id === "view.reader" ? "reader" :
+            id === "view.multitrack" ? "multitrack" : "clip";
           // Route through navigateView (not raw setActiveView) so Home also
           // bumps homeResetTick like every other nav surface does.
           navigateView(v);
@@ -181,12 +184,13 @@ export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
             v === "home" ? homeViewRef :
             v === "library" ? libraryViewRef :
             v === "coreview" ? coreviewViewRef :
-            v === "reader" ? readerViewRef : clipViewRef;
+            v === "reader" ? readerViewRef :
+            v === "multitrack" ? multitrackViewRef : clipViewRef;
           requestAnimationFrame(() => {
             // Review's preview monitor shares the mounted stage, while its
             // session-setup root is hidden. Focus the visible root only.
             const target=v === "coreview" && coreviewViewRef.current?.hidden
-              ? clipViewRef.current : viewRef.current;
+              ? clipViewRef.current : viewRef?.current;
             target?.focus();
           });
           break;
@@ -385,7 +389,7 @@ export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
     // with no deps), so the effect still subscribes exactly once — listing
     // them changes the lint, not the behaviour.
     activeViewRef, clipViewRef, coreviewViewRef, homeViewRef, libraryViewRef,
-    readerFps, readerPlayerRef, readerViewRef,
+    readerFps, readerPlayerRef, readerViewRef, multitrackViewRef,
     reviewRangeGateRef, reviewRangeKeysRef, tcEntryRef,
     setLogsOpen, setPaletteOpen, setSettingsOpen, setShortcutsOpen, setTcEntry,
   ]);

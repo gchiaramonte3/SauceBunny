@@ -96,6 +96,25 @@ beforeEach(() => { d = deps(); });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("view scoping", () => {
+  it("leaves Multitrack transport keys to its own player", () => {
+    const dm = deps({ activeViewRef: { current: "multitrack" } });
+    renderHook(() => useKeyboardShortcuts(dm));
+    expect(press(" ").defaultPrevented).toBe(false);
+    expect(dm.onPlayToggle).not.toHaveBeenCalled();
+  });
+
+  it("navigates to and focuses the separate Multitrack workspace", async () => {
+    const view = document.createElement("div");
+    view.tabIndex = -1;
+    document.body.append(view);
+    const dm = deps({ comboToAction: new Map([["mod+6", "view.multitrack"]]), multitrackViewRef: { current: view } });
+    renderHook(() => useKeyboardShortcuts(dm));
+    press("6", { code: "Digit6", metaKey: true });
+    expect(dm.navigateView).toHaveBeenCalledWith("multitrack");
+    await vi.waitFor(() => expect(document.activeElement).toBe(view));
+    view.remove();
+  });
+
   it("runs a playback action on the Clip view", () => {
     // The canary: if the binding map or the dispatch stops matching, every
     // "does not fire" assertion below passes for the wrong reason.

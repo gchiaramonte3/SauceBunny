@@ -10,6 +10,8 @@ A macOS desktop app for **clipping sections out of online videos** (YouTube, Vim
 - Optional Whisper transcription (`base.en` recommended, others available)
 - Optional speaker diarization on top of Whisper, with a Riverside-style speaker-editor UI
 - Auto-loading transcripts when you re-open the same source
+- A separate Multitrack workspace for read-only embedded-audio AAF inspection
+  and per-microphone local transcription (see [AAF-MULTITRACK.md](AAF-MULTITRACK.md))
 
 What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Everything runs on your machine.
 
@@ -44,6 +46,7 @@ What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Ever
 │       ├── saucebunny-diarize/  # speaker diarization (SpeakerKit, FluidAudio fallback)
 │       ├── saucebunny-dictate/  # live on-device dictation (Apple Speech)
 │       └── saucebunny-capture/  # ScreenCaptureKit screen sharing for co-review
+├── aaf-sidecar/               # Read-only AAF reader, frozen with pyaaf2 and Python
 ├── scripts/                   # Build + maintenance scripts
 ├── e2e/                       # Playwright UI smoke — boots the frontend with Tauri IPC mocked
 ├── harness-audio/             # Decode probes (see below)
@@ -77,6 +80,19 @@ available stand-in for the WKWebView the app actually ships in. See
 probes have already overturned.
 
 ## Data flow
+
+### Multitrack documents
+
+`MultitrackPage` owns its document, track selection, single-clock PCM audition, and
+transcription jobs independently of App's Clip player. Navigation hides the
+workspace without throwing away jobs, and pauses its audition when inactive.
+`commands/aaf.rs` exposes the typed boundary; `commands/aaf/` separates the
+versioned model/store, cancellable processes, bounded audio preparation, and
+ASR result handling. The bundled `saucebunny-aaf` process resolves source spans
+and reads embedded PCM; existing FFmpeg, Whisper, and Parakeet sidecars provide
+resampling and recognition. No diarization or cloud service is involved.
+
+### Clip and Review media
 
 ```
 URL / local file
@@ -688,6 +704,56 @@ Remaining, roughly in priority order:
 1. ~~**UI smoke harness**~~ — done (r105). `npm run test:e2e` drives the Vite-served frontend in Chromium with the Tauri IPC layer mocked at the `__TAURI_INTERNALS__` seam; tauri-driver has no macOS/WKWebView support, so it is deliberately a shell smoke. Native playback and transcription remain manual (see `docs/HAND-TEST.md`).
 2. **First public release** — tagged v0.1.0 with a notarized .dmg (see docs/DISTRIBUTION.md), plus an app-update story (tauri-plugin-updater) and a plan for yt-dlp staleness (YouTube breaks extractors faster than app releases ship).
 3. **Linux / Windows builds** — macOS-first while we hit 1.0; cross-platform after.
+
+## Multitrack settled-view work (September 14, 2026)
+
+Multitrack retains its existing AudioContext audition clock, indexed native
+PCM reader and persistent min/max waveform pyramids. The architecture review
+found unnecessary **render-time** work, not evidence for replacing that audio
+engine: timeline clips, text-overlay geometry and ruler labels were recalculated
+on every playhead and hover update. The timeline now caches clip geometry by
+track data and viewport, and groups enabled text overlays in one pass per
+document/viewport/overlay change. Previously each enabled track scanned all
+transcript rows on every tick. The cursor and accessible slider position remain
+live. No extra source of time, global cache or persisted state was introduced.
+
+The right transcript pane caches the visible page's fixed timecodes and run
+information separately from current-cue highlighting. Search, pagination,
+document replacement, timing-review results and changed run reports invalidate
+the relevant calculation. Caches are component-owned and disappear on unmount.
+The waveform canvas already avoids repainting unchanged peaks; broad React
+memoization, a new state library and decoder lazy-loading were not adopted.
+
+Person-scoped transcripts and exports share `multitrackPeople`/`multitrackScope`;
+explicit cast IDs take precedence over assigned mic labels. Track regeneration
+snapshots its engine/model and reuses the normal job/save path, replacing only
+the selected track after success. A shared export hook owns the destination
+dialog and bounded atomic writes; Avid serialization reuses the existing marker
+formatter, with rational sequence-frame conversion at the boundary. No new
+persistence schema, transcription engine, or native command is introduced.
+
+Each audition voice feeds its track gain before the existing master gain, all
+on one AudioContext clock. Gain changes never rebuild voices. Warm scrub resumes
+the context only on an enabled gesture and guards async completion by generation;
+throttling retains the latest pointer position. Text overlays aggregate at wide
+views and preserve segment bounds at close zoom. The Generate/Export footers
+share grid rows; size containment belongs inside the editor, not on its subgrid.
+
+Regression instrumentation reproduced 375 clip-position reads across the
+initial three-track render plus 24 frame updates, versus 15 after caching;
+changing zoom still recalculates them. A second regression reproduced four
+fixed-clock conversions per transcript tick; those conversions now happen only
+when their input changes, while active-cue highlighting still follows playback.
+These are work-count measurements, not claims about end-to-end audio latency.
+The existing Undo round-trip unit test now uses explicit operation timestamps
+instead of depending on two wall-clock calls landing in the same millisecond;
+the production undo path and its execution-time restamping are unchanged.
+
+The deliverable uses the internal OBS staging recipe so it includes the current
+screen/region controls and isolated NDI sender as well as Multitrack. The normal
+`build:dmg` path alone does not include those helpers. The test app retains
+`com.saucebunny.desktop` and stable Apple Development signing; it is not a
+Developer ID-notarized public release.
 
 ## Boot cost, measured — and why the decode stack stays eagerly imported
 

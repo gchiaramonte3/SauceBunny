@@ -1,5 +1,6 @@
 import { RoomAccessDialog } from "./components/RoomAccessDialog";
-import type { ComponentProps } from "react";
+import { MultitrackPage } from "./components/MultitrackPage";
+import { lazy, Suspense, type ComponentProps } from "react";
 import {
   useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"; import { invoke } from "@tauri-apps/api/core"; import { notifyFramesChanged } from "./lib/frames"; import { getVersion } from "@tauri-apps/api/app"; import { listen } from "@tauri-apps/api/event"; import { save as saveDialog } from "@tauri-apps/plugin-dialog"; import {   isPermissionGranted, requestPermission, sendNotification, } from "@tauri-apps/plugin-notification"; import { Toolbar } from "./components/Toolbar"; import { NavRail } from "./components/NavRail";  import { LibraryView } from "./components/LibraryView"; import { LibraryBrowser } from "./components/LibraryBrowser"; import { useTranscriptListeners } from "./hooks/use-transcript-listeners"; import { useDiarizerPrepare } from "./hooks/use-diarizer-prepare"; import { useLibraryScan } from "./hooks/use-library-scan"; import { Sidebar } from "./components/Sidebar"; import { PeoplePanel } from "./components/PeoplePanel"; import { ReactionLayer } from "./components/ReactionLayer";
 import { PeerStageVideo } from "./components/PeerStageVideo"; import { MediaSpikePanel } from "./components/MediaSpikePanel"; import { PeerStreamSpike } from "./components/PeerStreamSpike"; import { CoReviewLobby } from "./components/CoReviewLobby"; import { Monitor, type AspectId } from "./components/Monitor"; import type { Notif } from "./components/NotificationBell"; import type { ToastKind } from "./components/CanvasToast"; import { playSuccess, playError, playInfo } from "./lib/sound"; import { Transport } from "./components/Transport"; import { Timeline } from "./components/Timeline"; import { ViewOptions } from "./components/ViewOptions"; import { LogsPanel } from "./components/LogsPanel"; import { RoomControlBar } from "./components/RoomControlBar"; import { ReviewStatusChip } from "./components/ReviewStatusChip"; import { useMediaCapture, subscribeCaptureError, setCaptureLogSink } from "./hooks/use-media-capture"; import { SettingsModal, type Defaults } from "./components/SettingsModal"; import { YouTubeAuthModal } from "./components/YouTubeAuthModal"; import type { PlayerHandle } from "./components/player-handle"; import type {   AppStatus, ClientLog, ExportOpts, LocalFileMeta, Metadata, QueuedClip, RecentClip, SourceKind, WhisperModel, ReviewRangeDraft, } from "./types"; import { isQueuedClip } from "./types"; import { asLogTag } from "./types"; import { formatError } from "./lib/error-format"; import { fmtElapsed, stageLabel } from "./lib/elapsed"; import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase"; import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek } from "./lib/playhead-store"; import { usePanelBus } from "./hooks/use-panel-bus"; import { useStreamRung } from "./hooks/use-stream-rung"; import type { YtdlpStatus } from "./bindings/YtdlpStatus"; import { clipTranscriptPath, type ActiveTranscript } from "./lib/transcript-owner"; import { useTransport } from "./hooks/use-transport"; import { useSourceMarks } from "./hooks/use-source-marks"; import { useTranscriptJobs } from "./hooks/use-transcript-jobs"; import { useFetchSource } from "./hooks/use-fetch-source"; import { useLocalSource } from "./hooks/use-local-source"; import { useWebPlayback } from "./hooks/use-web-playback"; import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type SessionSource } from "./hooks/use-co-review"; import { QueueDrawer } from "./components/QueueDrawer"; import { TranscriptReader } from "./components/TranscriptReader"; import { TranscriptViewer } from "./components/TranscriptViewer"; import { ReaderPlayerStage, type ReaderSource } from "./components/ReaderPlayerStage"; import { useReaderMarkers } from "./hooks/use-reader-markers"; import { ReaderAnalysis } from "./components/ReaderAnalysis"; import { CommandPalette } from "./components/CommandPalette"; import { ShortcutSheet } from "./components/ShortcutSheet"; import { DropTarget } from "./components/DropTarget"; import { WelcomeScreen } from "./components/WelcomeScreen"; import { PermissionsOnboarding } from "./components/PermissionsOnboarding"; import { RoomSourceBar } from "./components/RoomSourceBar"; import { LiveDrawLayer } from "./components/LiveDrawLayer"; import { AnnotationOverlay } from "./components/AnnotationOverlay";
@@ -19,9 +20,14 @@ import { createPlaybackSessionController } from "./lib/playback-session-controll
 import { createReviewSession } from "./lib/review-session";
 import { useNdiInput } from "./hooks/use-ndi-input";
 import { NDI_INPUT_PANEL_ID, NdiInputPanel } from "./components/NdiInputPanel";
+import { ReviewSourceStart, type ReviewLiveSourceKind } from "./components/ReviewSourceStart";
+import { selectRoomScreenStream } from "./lib/room-screen-stream";
 import { NdiPreviewHeader } from "./components/NdiPreviewHeader";
 import { ObsBroadcastIndicator } from "./components/ObsBroadcastIndicator";
 import { useObsBroadcasts } from "./hooks/use-obs-broadcast";
+import { useObsRegionEdit, type CaptureEditRequest } from "./hooks/use-obs-region-edit";
+import { isDisplayCapture } from "./lib/ndi-program-source";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { NdiPlaybackRecovery } from "./components/NdiProgramMonitor";
 import { observePremiereLink, setPremiereVisibleInput } from "./lib/premiere-link";
 import { IconSettings } from "./components/Icons";
@@ -68,13 +74,16 @@ function nowHms(): string {
  * A state switch, NOT a router (CLAUDE.md) — and the Clip view is never
  * unmounted, only [hidden], so playback/jobs/listeners survive navigation.
  */
-export type AppView = "home" | "library" | "clip" | "coreview" | "reader";
+export type AppView = "home" | "library" | "clip" | "coreview" | "reader" | "multitrack";
 
 // v2 bump: re-encode default flipped from ON to OFF. Older v1 settings are
 // intentionally abandoned so users get the new, much faster default.
 const DEFAULTS_KEY  = "cp-defaults-v2";
 const RECENTS_KEY   = "cp-recents";
 const ASPECT_KEY    = "cp-aspect";
+
+const CaptureAudioAcceptance = import.meta.env.VITE_OBS_AUDIO_ACCEPTANCE === "1"
+  ? lazy(() => import("./components/CaptureAudioAcceptance").then(module => ({ default: module.CaptureAudioAcceptance }))) : null;
 
 // In-browser audio extraction (mediabunny/WebCodecs → OfflineAudioContext)
 // decodes the WHOLE track into memory at the source sample rate, so it's only
@@ -642,6 +651,8 @@ export default function App() {
     () => createReviewSession(playbackController),
     [playbackController],
   );
+  const screenProgramActive = useSyncExternalStore(reviewSession.subscribeProgram,
+    () => reviewSession.getProgramSource()?.kind === "screen");
   const [isPlaying, setIsPlaying] = useState(false);
   const ndiInput = useNdiInput();
   const ndiProgram = ndiInput.program;
@@ -654,6 +665,8 @@ export default function App() {
   const [ndiPanelOpen,setNdiPanelOpen] = useState(false);
   const [ndiRecovery,setNdiRecovery] = useState<NdiPlaybackRecovery|null>(null);
   const [ndiRefreshRequest,setNdiRefreshRequest] = useState(0);
+  const [captureEditRequest, setCaptureEditRequest] = useState<CaptureEditRequest>();
+  const [reviewSourceRequest, setReviewSourceRequest] = useState<{ kind: ReviewLiveSourceKind; serial: number }>();
   const [previewSelected,setPreviewSelected] = useState(false);
   const [reviewLobbyOpen,setReviewLobbyOpen] = useState(false);
   const [roomAccessOpen,setRoomAccessOpen] = useState(false);
@@ -661,6 +674,19 @@ export default function App() {
     setNdiPanelOpen(true);
     setNdiRefreshRequest(n => n + 1);
   }, []);
+  const chooseReviewLiveSource = (kind: ReviewLiveSourceKind) => {
+    setReviewSourceRequest(previous => ({ kind, serial: (previous?.serial ?? 0) + 1 }));
+    openPremiere();
+  };
+  useObsRegionEdit(ndiInput.snapshot, request => {
+    setCaptureEditRequest(request);
+    setActiveView("coreview");
+    setReviewLobbyOpen(false);
+    openPremiere();
+    // The click came from the desktop's explicit Edit control. Raising this
+    // settings dialog does not alter the visible source or sharing state.
+    void getCurrentWindow().show().then(() => getCurrentWindow().setFocus()).catch(() => {});
+  });
   const [sessionsRequestTick,setSessionsRequestTick] = useState(0);
   const previewStatus = ndiInput.previewState.phase === "error" ? "Preview needs attention · Not shared with room"
     : ndiInput.snapshot.candidate?.decodedReady && ndiInput.snapshot.candidate.encodedReady ? "Preview ready · Not shared with room" : "Preview connecting · Not shared with room";
@@ -912,6 +938,7 @@ export default function App() {
   const clipViewRef = useRef<HTMLDivElement>(null);
   const coreviewViewRef = useRef<HTMLDivElement>(null);
   const readerViewRef = useRef<HTMLDivElement>(null);
+  const multitrackViewRef = useRef<HTMLDivElement>(null);
   // Shared library scan state — owned here so Home's shelves and the Library
   // browser read the SAME scan results (switching views never rescans) and
   // the same thumbnail cache. Both views are keep-alive-mounted below.
@@ -1710,7 +1737,7 @@ export default function App() {
 
   const onPlayerStateChange = useCallback((playing: boolean) => {
     playbackController.reportPlaying(playing);
-    setIsPlaying(playing);
+    setIsPlaying(playbackController.getSnapshot().playing);
   }, [playbackController]);
 
   const onRepresentationChange = useCallback((representation: "proxy" | "presentation") => {
@@ -2966,8 +2993,8 @@ export default function App() {
   // deliberately continues), so entering the reader must pause it, and leaving
   // must pause the reader player.
   useEffect(() => {
-    if (activeView === "reader") { try { playerRef.current?.pause(); } catch { /* no clip player */ } }
-    else { try { readerPlayerRef.current?.pause(); } catch { /* no reader player */ } }
+    if (activeView === "reader" || activeView === "multitrack") { try { playerRef.current?.pause(); } catch { /* no clip player */ } }
+    if (activeView !== "reader") { try { readerPlayerRef.current?.pause(); } catch { /* no reader player */ } }
   }, [activeView]);
 
   // Hero "Paste a URL" → the same focus lever as the File-menu "Open URL…".
@@ -3331,10 +3358,10 @@ export default function App() {
   // Nothing in the body changed, so the diff is a move; tsc enumerated the
   // dependency surface below rather than me guessing at it.
   useKeyboardShortcuts({
-    programInputActive: privateInspectionVisible || (activeView === "coreview" && (!!ndiProgram || !!ndiRoomSource)),
+    programInputActive: privateInspectionVisible || (activeView === "coreview" && (!!ndiProgram || !!ndiRoomSource || screenProgramActive)),
     comboToAction, status, fps, readerFps, durationFrames, settingsOpen, exportOpts,
     activeViewRef, homeViewRef, libraryViewRef, clipViewRef, coreviewViewRef,
-    readerViewRef, readerPlayerRef, tcEntryRef, kHeldRef,
+    readerViewRef, multitrackViewRef, readerPlayerRef, tcEntryRef, kHeldRef,
     reviewRangeGateRef, reviewRangeKeysRef: reviewSession.rangeCommandsRef,
     onPlayToggle, shuttleStep, onMarkIn, onMarkOut, onClearMarks,
     onGotoIn, onGotoOut, onStep, onSeek, readerSeekRel,
@@ -3398,7 +3425,7 @@ export default function App() {
   // its current state + handlers. The dependency array below is unchanged from
   // when the array was inline, so memoization behaves identically.
   const commands: Command[] = useMemo(() => buildCommands({
-    url, hasSource: hasSource && !privateInspectionVisible && !(activeView === "coreview" && (ndiProgram || ndiRoomSource)), isPlaying, inFrames, outFrames, durationFrames, fps,
+    url, hasSource: hasSource && !privateInspectionVisible && !(activeView === "coreview" && (ndiProgram || ndiRoomSource || screenProgramActive)), isPlaying, inFrames, outFrames, durationFrames, fps,
     captionsOn, playbackRate, activeView, onNavigateView: navigateView,
     logsOpen, clipQueueLength: clipQueue.length, queueRunning,
     activeTranscriptPath: activeTranscript?.path ?? null,
@@ -3431,7 +3458,7 @@ export default function App() {
     // Overlay the live (user-editable) hotkey onto each rebindable command so the
     // palette + Settings list always show the real binding, never a stale literal.
   }).map((c) => {
-    if ((privateInspectionVisible || (activeView === "coreview" && (ndiProgram || ndiRoomSource)))
+    if ((privateInspectionVisible || (activeView === "coreview" && (ndiProgram || ndiRoomSource || screenProgramActive)))
       && (c.group === "Playback" || c.group === "Marks" || c.id === "export.snapshot")) {
       c = { ...c, disabled: true };
     }
@@ -3451,7 +3478,7 @@ export default function App() {
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleGenerateTranscript, handleDownloadCaptions, handleImportTranscript,
     handleStop, keybindings, undoSnap, performUndo, performRedo,
-    pushNotification, setQueueOpenChoice, privateInspectionVisible, ndiProgram, ndiRoomSource,
+    pushNotification, setQueueOpenChoice, privateInspectionVisible, ndiProgram, ndiRoomSource, screenProgramActive,
   ]);
 
   // ====== First-run checklist derivation ======
@@ -3876,12 +3903,43 @@ export default function App() {
   activeViewRef.current = activeView;
   const roomActive = coSessionActive && activeView === "coreview";
   const reviewStageActive = activeView === "coreview";
+  // A host needs to see the external screen they actually shared, too. Never
+  // reflect the file/viewer capture back into itself. Preview is always muted.
+  const roomScreenStream = useMemo(() => selectRoomScreenStream({ session: coSession,
+    shareState, shareStream, sharingMembers, programStreams: meshProgramStreams }),
+  [coSession, shareState, shareStream, sharingMembers, meshProgramStreams]);
+  const visibleRoomScreen = roomActive ? roomScreenStream : null;
   const reviewSetupMode = reviewStageActive && !coSessionActive;
   const ndiPictureVisible = privateInspectionVisible || (roomActive && (!!ndiProgram || !!ndiRoomSource));
   const canManageNdiSource = coSession.role === "off" || (coSession.role === "host" && isPresenter);
   // Notes follow the represented source, not whether its settings were opened.
-  const reviewToolsVisible = reviewStageActive && (hasSource || ndiPictureVisible);
+  const reviewToolsVisible = reviewStageActive && (hasSource || ndiPictureVisible || !!visibleRoomScreen);
   const privateReviewProgram = privateInspectionVisible && !coSessionActive ? ndiInput.previewProgram : null;
+  // Shared by the header and the empty-state choices, retaining the existing
+  // room source handoff and cancellation behavior.
+  const loadReviewUrl = (u: string) => {
+    if (roomActive) {
+      void ndiInput.stop().then(() => { setUrl(u); void handleFetch(u); })
+        .catch(e => pushNotification("error", "Couldn't switch program source", formatError(e)));
+    } else {
+      setPreviewSelected(false); setReviewLobbyOpen(false); setUrl(u); void handleFetch(u);
+    }
+  };
+  const importReviewFile = () => { void (async () => {
+    const picked = await pickLocalFile();
+    if (typeof picked !== "string") return;
+    if (!roomActive) {
+      setPreviewSelected(false); setReviewLobbyOpen(false);
+      if (!(hasSource && sourceKind === "file" && localFilePath === picked)) await loadLocalPath(picked);
+      return;
+    }
+    const returnToOpenFile = !!ndiRoomSource && hasSource && sourceKind === "file" && picked === localFilePath;
+    const sourceTurn = sourceSeqRef.current;
+    await ndiInput.stop();
+    if (sourceSeqRef.current !== sourceTurn) return;
+    // Returning to the still-mounted file preserves its marks, captions and clock.
+    if (!returnToOpenFile) await loadLocalPath(picked);
+  })().catch(e => pushNotification("error", "Couldn't open file", formatError(e))); };
   const visibleNdiState = privateInspectionVisible ? ndiInput.previewState : ndiInput.state;
   const visibleNdiName = privateInspectionVisible ? ndiInput.previewProgram?.name : ndiProgram?.name ?? ndiRoomSource?.name;
   const closePremiere = () => {
@@ -4121,7 +4179,7 @@ export default function App() {
   const shareOptions = useMemo(() => {
     const out: ShareOption[] = [];
     if(coSession.role === "host") {
-      out.push({key:"ndi",label:"Source settings…",detail:ndiInput.previewProgram ? previewStatus : "NDI or application window · Beta",onSelect:openPremiere});
+      out.push({key:"ndi",label:"Source settings…",detail:ndiInput.previewProgram ? previewStatus : "NDI, screen, window or region · Beta",onSelect:openPremiere});
       if(ndiInput.canShare) out.push({key:"ndi-publish",label:"Share preview with room",detail:"Publish the prepared picture",onSelect:()=>{
         void publishPremiere().then(()=>{setProgramMuted(previewMuted);setProgramVolume(previewVolume);setPreviewSelected(false);setNdiPanelOpen(false);stopShare();stopViewerShare();}).catch(error=>pushNotification("error","Couldn't share preview",formatError(error)));
       }});
@@ -4153,29 +4211,8 @@ export default function App() {
     return out;
   }, [viewerShareState, localFilePath, offeredFile, playbackPath, metadata, offerCurrentFile, startViewerShare, stopViewerShare, stopShare, coSession.role, ndiProgram, ndiRoomSource, ndiInput.previewProgram, ndiInput.canShare, publishPremiere, stopPremiereSharing, previewStatus, pushNotification, openPremiere, previewMuted, previewVolume]);
 
-  /* A PEER'S LIVE VIEW, ON THE STAGE.
-     The first cut of this pushed the presenter's captured monitor onto the
-     mesh as a camera override, so it surfaced in the guest's people TILE - a
-     thumbnail beside a face. That is not where an asset goes, and it is why
-     "show them what I am watching" did not answer the problem it was built
-     for. The stream was always fine; it was rendered in the wrong place.
-     Only a peer's, never your own: the presenter is already looking at the
-     real thing, and echoing their own capture back at them would be a
-     feedback loop with a compression generation in it. */
-  const peerLiveStream = useMemo(() => {
-    for (const id of sharingMembers) {
-      if (id === coSession.selfId || id !== coSession.presenter) continue;
-      const stream = meshProgramStreams.get(id);
-      if (stream && stream.getVideoTracks().length > 0) {
-        const who = coSession.peers.find((p) => p.id === id)?.name ?? "them";
-        return { stream, who, ownerId: id };
-      }
-    }
-    return null;
-  }, [sharingMembers, meshProgramStreams, coSession.selfId, coSession.presenter, coSession.peers]);
-
-  const programOwner = peerLiveStream?.ownerId;
-  const programName = peerLiveStream?.who;
+  const programOwner = roomScreenStream?.ownerId;
+  const programName = roomScreenStream?.isSelf ? "Your shared screen" : roomScreenStream ? `${roomScreenStream.who}'s shared picture` : undefined;
   useEffect(observePremiereLink, []);
   useEffect(() => {
     const visiblePremiere = privateInspectionVisible ? ndiInput.previewProgram : ndiProgram;
@@ -4190,11 +4227,11 @@ export default function App() {
       id:ndiRoomSource.reviewKey,ownerId:"m0",kind:"ndi",label:ndiRoomSource.name,
     } : programOwner ? {
       id: `screen:${programOwner}`, ownerId: programOwner,
-      kind: "screen", label: `${programName}'s shared picture`,
+      kind: "screen", label: programName ?? "Shared screen",
+      notesBlocked: activeView !== "coreview" ? "Open Review to add live-input notes." : undefined,
     } : null);
     // A private candidate must not pause the file/web clock feeding the room.
-    playbackController.setExternalProgram(!!ndiRoomSource);
-    if (programOwner && !ndiProgram) playbackController.pause({ origin: "remote" });
+    playbackController.setExternalProgram(!!ndiRoomSource || !!programOwner);
   }, [programOwner, programName, reviewSession, playbackController, ndiProgram, ndiRoomSource, ndiInput.reviewBlocked, activeView,
     privateInspectionVisible, ndiInput.previewProgram, privateReviewProgram]);
 
@@ -4463,14 +4500,14 @@ export default function App() {
     setQueueOpen,
     snapshot: {
       sourceIdentity: reviewSourceKey,
-      programInputActive: privateInspectionVisible || !!ndiProgram || !!ndiRoomSource,
+      programInputActive: privateInspectionVisible || !!ndiProgram || !!ndiRoomSource || screenProgramActive,
       queue: clipQueue,
       fps,
       running: queueRunning,
       hasFolder: !!exportOpts.folder,
       transcriptPath: activeTranscript?.path ?? null,
       transcriptOrigin: activeTranscript?.origin ?? "unknown",
-      transcriptPlayhead: privateInspectionVisible || ndiProgram || ndiRoomSource ? null : transcriptPlayhead,
+      transcriptPlayhead: privateInspectionVisible || ndiProgram || ndiRoomSource || screenProgramActive ? null : transcriptPlayhead,
       transcriptArrivedTick,
       regenerateBusy: transcriptState === "running",
       canRegenerate: hasSource && !!selectedModel?.downloaded && !ndiProgram && !ndiRoomSource,
@@ -4534,6 +4571,7 @@ export default function App() {
   const clipCombo = bindingsFor("view.clip", keybindings)[0];
   const coreviewCombo = bindingsFor("view.coreview", keybindings)[0];
   const readerCombo = bindingsFor("view.reader", keybindings)[0];
+  const multitrackCombo = bindingsFor("view.multitrack", keybindings)[0];
 
   // ── Stale-binary banner ──────────────────────────────────────────────
   // Only shows when the Rust backend doesn't match the frontend's expected
@@ -4585,6 +4623,11 @@ export default function App() {
   return (
     <div className="cp-window">
       {buildBanner}
+      {CaptureAudioAcceptance && <Suspense fallback={null}><CaptureAudioAcceptance
+        key={ndiInput.previewProgram?.id ?? "no-private-source"}
+        sourceId={ndiInput.previewProgram?.capture && isDisplayCapture(ndiInput.previewProgram.capture)
+          && !ndiInput.previewProgram.stopped ? ndiInput.previewProgram.id : null}
+      /></Suspense>}
       {import.meta.env.DEV && mediaSpikeOpen && (
         <MediaSpikePanel appendLog={appendLog} onClose={() => setMediaSpikeOpen(false)} />
       )}
@@ -4616,6 +4659,7 @@ export default function App() {
             clipShortcut={clipCombo ? formatCombo(clipCombo) : undefined}
             coreviewShortcut={coreviewCombo ? formatCombo(coreviewCombo) : undefined}
             readerShortcut={readerCombo ? formatCombo(readerCombo) : undefined}
+            multitrackShortcut={multitrackCombo ? formatCombo(multitrackCombo) : undefined}
             sessionActive={coSessionActive}
             sessionPeers={coSession.peers.length}
           />
@@ -4762,6 +4806,14 @@ export default function App() {
               />
             </TranscriptReader>
           </div>
+          {/* AAF documents own their audio and jobs, not the Clip transport.
+              Keep the workspace mounted so navigation cannot discard work. */}
+          <div ref={multitrackViewRef} tabIndex={-1} className="cp-view cp-view-multitrack" hidden={activeView !== "multitrack"}>
+            <MultitrackPage
+              active={activeView === "multitrack"}
+              onOpenSettings={() => { setSettingsInitialTab("transcription"); setSettingsOpen(true); }}
+            />
+          </div>
           {/* Clip — the ENTIRE pre-rail app, toolbar included. NEVER
               unmounted: while Home is active it's [hidden] (the QueueDrawer
               keep-alive pattern), so playback, export/transcript jobs,
@@ -4859,13 +4911,8 @@ export default function App() {
                 {reviewSetupMode && <div className="cp-room-head cp-preview-head">
                   <div className="cp-room-title"><span className="cp-room-name">Preview</span></div>
                   <RoomSourceBar hasSource={hasSource}
-                    onLoadUrl={u => { setPreviewSelected(false); setReviewLobbyOpen(false); setUrl(u); void handleFetch(u); }}
-                    onImportFile={() => { void (async () => {
-                      const picked = await pickLocalFile();
-                      if (typeof picked !== "string") return;
-                      setPreviewSelected(false); setReviewLobbyOpen(false);
-                      if (!(hasSource && sourceKind === "file" && localFilePath === picked)) await loadLocalPath(picked);
-                    })().catch(e => pushNotification("error", "Couldn't open file", formatError(e))); }}
+                    onLoadUrl={loadReviewUrl}
+                    onImportFile={importReviewFile}
                     onClear={() => { setPreviewSelected(false); handleClear(); }} />
                   {reviewToolsVisible && <button type="button" className="cp-toolbar-disclosure"
                     onClick={() => setReviewLobbyOpen(value => !value)}>
@@ -4879,7 +4926,7 @@ export default function App() {
                       <span className="cp-room-name" title={coSession.title || ndiProgram?.name || metadata?.title || undefined}>
                         {coSession.title || ndiProgram?.name || metadata?.title || "Review session"}
                       </span>
-                      {ndiProgram && <span className="cp-room-source" title={ndiProgram.name}>{ndiProgram.capture ? "Application window" : "NDI"} · {ndiProgram.stopped ? "Sharing stopped" : ndiInput.state.phase === "error" ? "Disconnected" : ndiInput.state.phase === "stale" ? "Picture parked" : "Live"}</span>}
+                      {ndiProgram && <span className="cp-room-source" title={ndiProgram.name}>{ndiProgram.capture ? isDisplayCapture(ndiProgram.capture) ? "Screen capture" : "Application window" : "NDI"} · {ndiProgram.stopped ? "Sharing stopped" : ndiInput.state.phase === "error" ? "Disconnected" : ndiInput.state.phase === "stale" ? "Picture parked" : "Live"}</span>}
                       {!ndiProgram && metadata?.title && coSession.title && metadata.title !== coSession.title && (
                         <span className="cp-room-source" title={metadata.title}>{metadata.title}</span>
                       )}
@@ -4931,19 +4978,8 @@ export default function App() {
                     {isPresenter && (
                       <RoomSourceBar
                         hasSource={hasSource || !!ndiProgram}
-                        onLoadUrl={(u) => { void ndiInput.stop().then(()=>{setUrl(u);void handleFetch(u);}).catch(e=>pushNotification("error","Couldn't switch program source",formatError(e))); }}
-                        onImportFile={() => { void (async()=>{
-                          const picked=await pickLocalFile();
-                          if(typeof picked!=="string")return;
-                          const returnToOpenFile=!!ndiRoomSource && hasSource && sourceKind==="file" && picked===localFilePath;
-                          const sourceTurn=sourceSeqRef.current;
-                          await ndiInput.stop();
-                          if(sourceSeqRef.current!==sourceTurn)return;
-                          // This file never unmounted beneath the live picture.
-                          // Re-importing it resets its marks, captions and clock;
-                          // an explicit return only changes the room's source.
-                          if(!returnToOpenFile)await loadLocalPath(picked);
-                        })().catch(e=>pushNotification("error","Couldn't switch program source",formatError(e))); }}
+                        onLoadUrl={loadReviewUrl}
+                        onImportFile={importReviewFile}
                         onClear={()=>{void ndiInput.stop().then(()=>handleClear()).catch(e=>pushNotification("error","Couldn't clear program source",formatError(e)));}}
                       />
                     )}
@@ -5076,10 +5112,13 @@ export default function App() {
                   </NdiPreviewHeader>}
                   <Monitor
                     ref={playerRef}
-                    pictureCovered={ndiPictureVisible || !!peerLiveStream}
+                    pictureCovered={ndiPictureVisible || !!visibleRoomScreen}
                     displayAspect={ndiPictureVisible && visibleNdiState.inputWidth >= 16 && visibleNdiState.inputHeight >= 16
                       ? visibleNdiState.inputWidth / visibleNdiState.inputHeight : undefined}
-                    emptyActions={reviewStageActive && (coSession.role === "off" || (coSession.role === "host" && isPresenter)) ? <button type="button" className="btn btn-ghost" onClick={openPremiere}>Choose live source…</button> : undefined}
+                    emptyContent={reviewStageActive ? (coSession.role === "off" || isPresenter)
+                      ? <ReviewSourceStart inSession={roomActive} onImportFile={importReviewFile}
+                          onLoadUrl={loadReviewUrl} onChooseLiveSource={chooseReviewLiveSource} />
+                      : <div><h3>Waiting for the presenter</h3><p>The shared picture will appear here.</p></div> : undefined}
                     status={status}
                     metadata={metadata}
                     errorDetail={errorDetail}
@@ -5096,8 +5135,8 @@ export default function App() {
                     }
                     /* Empty-state "Resume last session" — one-click reopen of the
                        most recent source via the same fetch/import handlers. */
-                    resumeTitle={recentSources.length > 0 ? recentSources[0].title : null}
-                    onResume={recentSources.length > 0 ? () => handleOpenRecentSource(recentSources[0]) : undefined}
+                    resumeTitle={!reviewStageActive && recentSources.length > 0 ? recentSources[0].title : null}
+                    onResume={!reviewStageActive && recentSources.length > 0 ? () => handleOpenRecentSource(recentSources[0]) : undefined}
                     /* First-run checklist card — null once done/dismissed. */
                     onboarding={!reviewStageActive && onboardingSteps ? {
                       steps: onboardingSteps,
@@ -5299,7 +5338,7 @@ export default function App() {
                     transcriptPath={clipTxPath}
                     transcriptReloadToken={transcriptArrivedTick}
                     fps={fps}
-                    captionsOn={captionsOn && !peerLiveStream && !ndiPictureVisible}
+                    captionsOn={captionsOn && !visibleRoomScreen && !ndiPictureVisible}
                     /* User-tunable caption look (Settings → Captions). r82: no sync
                        offset — the audio-master clock keeps captions on the heard
                        audio across every path. */
@@ -5316,7 +5355,7 @@ export default function App() {
                        fade picks from the saved list as the playhead passes. */
                     annotation={ndiPictureVisible?null:annStrokes}
                     annotationDrawing={annDrawing&&!ndiPictureVisible}
-                    proximityAnnotations={!peerLiveStream && !ndiPictureVisible && !annDrawing && !annotationDisplay
+                    proximityAnnotations={!visibleRoomScreen && !ndiPictureVisible && !annDrawing && !annotationDisplay
                       ? reviewAnnotations.filter(item => hiddenDrawing?.source !== reviewSourceKey || item.time !== hiddenDrawing.time) : undefined}
                     onAnnotationChange={onReviewDraftChange}
                     annotationTime={annPinned ? annotationDisplayTime : null}
@@ -5341,9 +5380,9 @@ export default function App() {
                           roomAudio={{muted:programMuted,volume:programVolume}} previewAudio={{muted:previewMuted,volume:previewVolume}}
                           onFrameDecoded={ndiInput.frameDecoded} onPictureFailed={ndiInput.pictureFailed}
                           onPreviewFrameDecoded={ndiInput.previewFrameDecoded} onPreviewPictureFailed={ndiInput.previewPictureFailed} />
-                        {!privateInspectionVisible && !ndiProgram && !ndiRoomSource && peerLiveStream && (
-                          <PeerStageVideo stream={peerLiveStream.stream} who={peerLiveStream.who}
-                            ownerId={peerLiveStream.ownerId} readDiagnostics={readProgramDiagnostics} />
+                        {!privateInspectionVisible && !ndiProgram && !ndiRoomSource && visibleRoomScreen && (
+                          <PeerStageVideo stream={visibleRoomScreen.stream} who={visibleRoomScreen.who} isSelf={visibleRoomScreen.isSelf}
+                            ownerId={visibleRoomScreen.ownerId} readDiagnostics={readProgramDiagnostics} />
                         )}
                         {/* The room's live marks, fading. Always mounted in a
                             session so a peer's stroke appears whether or not
@@ -5373,7 +5412,7 @@ export default function App() {
                   />
                   <Transport
                     liveController={ndiPictureVisible?"ndi":"presenter"}
-                    liveInput={(ndiPictureVisible ? visibleNdiName : undefined) ?? (peerLiveStream ? `${peerLiveStream.who}'s shared picture` : undefined)}
+                    liveInput={(ndiPictureVisible ? visibleNdiName : undefined) ?? (visibleRoomScreen ? programName : undefined)}
                     sourceControls={reviewStageActive && (canManageNdiSource || ndiPictureVisible) ? <button ref={connectPremiereRef} type="button" className="cp-icon-btn cp-connect-premiere" title="Source settings" aria-label="Source settings" aria-haspopup="dialog" aria-expanded={ndiPanelOpen} aria-controls={NDI_INPUT_PANEL_ID} onClick={openPremiere}><IconSettings size={16} /></button> : undefined}
                     status={status}
                     isPlaying={isPlaying}
@@ -5406,6 +5445,7 @@ export default function App() {
                         onToggleCam={() => capture.setEnabled("video", !capture.cameraOn)}
                         shareState={shareState}
                         onStartShare={startShare}
+                        onChooseSource={ndiPictureVisible ? () => chooseReviewLiveSource("screen") : undefined}
                         onStopShare={stopShare}
                         theater={theater}
                         onToggleTheater={() => setTheater((v) => !v)}
@@ -5429,7 +5469,7 @@ export default function App() {
                     ) : undefined}
                   />
                   {ndiPictureVisible ? <div className="cp-timeline cp-timeline-live" role="region" aria-label="Live timeline" aria-disabled="true" style={{height:timelineHeightRef.current}}>
-                  </div> : !peerLiveStream && <Timeline
+                  </div> : !visibleRoomScreen && <Timeline
                     onHeightChange={rememberTimelineHeight}
                     status={status}
                     durationFrames={durationFrames}
@@ -5502,7 +5542,7 @@ export default function App() {
                             : inFrames == null && outFrames != null
                               ? "Mark in (I) to set the start."
                               : null)
-                        : status === "empty" && bindingsFor("app.shortcuts", keybindings)[0]
+                        : status === "empty" && !reviewStageActive && bindingsFor("app.shortcuts", keybindings)[0]
                           ? (
                             <>
                               <kbd className="cp-keycap">
@@ -5558,6 +5598,8 @@ export default function App() {
               {/* The room's review rail overrides detachment - a session
                   with no review panel is a session you can't comment in. */}
               <NdiInputPanel input={ndiInput} open={reviewStageActive && ndiPanelOpen} onClose={closePremiere} refreshRequest={ndiRefreshRequest}
+                editRequest={captureEditRequest}
+                sourceRequest={reviewSourceRequest}
                 broadcast={broadcastState.forSource((privateInspectionVisible ? ndiInput.previewProgram?.id : ndiProgram?.id) ?? null)}
                 returnFocus={connectPremiereRef}
                 recovery={ndiRecovery} canManageSource={canManageNdiSource} previewVisible={privateInspectionVisible}
@@ -5596,9 +5638,9 @@ export default function App() {
                 onRenameClip={handleQueueRename}
                 onReorderQueue={handleQueueReorder}
                 onRenameAll={handleQueueRenameAll}
-                transcriptPath={ndiPictureVisible ? null : clipTxPath}
+                transcriptPath={ndiPictureVisible || visibleRoomScreen ? null : clipTxPath}
                 transcriptOrigin={activeTranscript?.origin ?? "unknown"}
-                playheadAvailable={hasSource && !ndiPictureVisible}
+                playheadAvailable={hasSource && !ndiPictureVisible && !visibleRoomScreen}
                 transcriptFps={fps}
                 sourceStartTimecode={clipStartTc}
                 onSetSourceTimecode={clipSourceKey ? (tc) => {

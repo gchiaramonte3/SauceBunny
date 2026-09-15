@@ -29,6 +29,14 @@
 }
 .cp-ndi-input-header h2 { margin: 0; font-size: var(--text-xl); font-weight: var(--weight-bold); }
 .cp-ndi-input-header > button { margin-left: auto; }
+.cp-modal.cp-ndi-input-capture { width: min(960px, calc(100vw - var(--s-8))); }
+.cp-ndi-input-tabs { flex: none; padding: var(--s-2) var(--s-4) 0; }
+.cp-capture-pagination,
+.cp-capture-snapshot-note { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); margin-top: var(--s-2); }
+.cp-capture-snapshot-note { flex-wrap: wrap; color: var(--fg-3); font-size: var(--text-base); }
+.cp-capture-preview-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-3); margin-top: var(--s-4); }
+.cp-capture-preview-foot .cp-ndi-input-preview { margin-top: 0; flex: none; }
+.cp-ndi-input .cp-capture-selected { color: var(--fg-1); }
 .cp-premiere-beta {
   display: inline-block;
   flex: none;
@@ -42,6 +50,10 @@
   vertical-align: middle;
 }
 .cp-ndi-input-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--s-4); }
+.cp-ndi-input-footer { flex: none; padding: var(--s-3) var(--s-4); border-top: 1px solid var(--line-1); background: var(--bg-1); }
+.cp-ndi-input-footer .cp-capture-preview-foot { margin-top: 0; }
+.cp-ndi-input-footer .cp-ndi-input-actions { margin: var(--s-3) 0 0; }
+.cp-ndi-input-footer > .cp-ndi-input-actions:first-child { margin-top: 0; }
 .cp-ndi-input p { margin: var(--s-2) 0; color: var(--fg-3); overflow-wrap: anywhere; }
 .cp-ndi-input p[role="alert"] { color: var(--danger-text); }
 .cp-ndi-input .cp-ndi-input-intro { margin-top: 0; }
@@ -65,9 +77,6 @@
 .cp-ndi-input-settings { white-space: normal; max-width: 100%; }
 .cp-obs-crop { margin-top: var(--s-3); }
 .cp-obs-crop summary { cursor: pointer; min-height: 26px; display: list-item; }
-.cp-obs-crop-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-2); }
-.cp-obs-crop-fields label { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
-.cp-obs-crop-fields input { width: 100%; min-width: 0; }
 .cp-obs-broadcast { margin-top: var(--s-4); }
 .cp-obs-broadcast > button { margin-top: var(--s-2); }
 .cp-ndi-sender-setup { margin-bottom: var(--s-3); }

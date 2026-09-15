@@ -21,6 +21,26 @@ function player(overrides: Partial<PlayerHandle> = {}): PlayerHandle {
 }
 
 describe("PlaybackSessionController", () => {
+  it("publishes the paused snapshot before a synchronous engine pause callback", () => {
+    const states: boolean[] = [];
+    const p = player({ pause: () => { c.reportPlaying(false); states.push(c.getSnapshot().playing); } });
+    const c = createPlaybackSessionController(() => p);
+    c.setSource("file", 100); c.reportPlaying(true);
+    c.setExternalProgram(true);
+    expect(states).toEqual([false]);
+  });
+  it("ignores late file clock and play reports until the external screen is released", () => {
+    const p = player(), c = createPlaybackSessionController(() => p);
+    c.setSource("file", 100); c.reportPresented(12);
+    c.setExternalProgram(true);
+    c.reportPresented(45); c.reportPlaying(true);
+    expect(c.getSnapshot()).toMatchObject({ presentedSeconds: 12, playing: false });
+    c.setExternalProgram(false);
+    expect(c.getSnapshot()).toMatchObject({ presentedSeconds: 12, playing: false });
+    expect(p.play).not.toHaveBeenCalled();
+    c.reportPresented(13);
+    expect(c.getSnapshot().presentedSeconds).toBe(13);
+  });
   it("pauses an asynchronous file play that completes after live input takes over", async () => {
     let finish!: () => void;
     const p = player({ play: () => new Promise<void>(resolve => { finish = resolve; }) });

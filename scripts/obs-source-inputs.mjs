@@ -82,9 +82,11 @@ export function validatePinnedArchives(sourceArchive, dependencyArchive) {
   });
 }
 
-export const corePatchNames = Object.freeze(['macos-core-dependencies', 'macos-helper-module', 'macos-no-global-input']);
+export const corePatchNames = Object.freeze(['macos-core-dependencies', 'macos-helper-module', 'macos-no-global-input',
+  'macos-stagesurface-stride']);
 export const coreRecipeFiles = Object.freeze(sorted([
   'scripts/build-obs-core.sh', 'scripts/check-obs-core.sh', 'scripts/obs-source-inputs.mjs',
+  'scripts/verify-obs-stagesurface.sh', 'obs-sidecar/stagesurface-stride.test.mm',
   'obs-sidecar/upstream-inputs.json', ...corePatchNames.map(name => `obs-sidecar/patches/${name}.patch`),
 ]));
 export const coreBuildComponents = Object.freeze([

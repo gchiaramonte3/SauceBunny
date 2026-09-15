@@ -50,6 +50,7 @@ run "Swift tests" swift test --package-path swift-sidecar
 run "OBS capture configuration" npm run test:obs-capture --silent
 run "OBS internal packaging" npm run test:obs-packaging --silent
 run "NDI sender isolation" npm run test:ndi-sender --silent
+run "AAF reader" npm run test:aaf --silent
 # CI runs this too, and this script did not - the same subset bug as clippy
 # below, found the same way. It takes a second and it is the check that stops
 # a strong-copyleft dependency being LINKED into an MIT app, which is the one

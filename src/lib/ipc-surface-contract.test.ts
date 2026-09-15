@@ -37,15 +37,49 @@ function stripComments(t: string): string {
   return t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 }
 
-function registered(): string[] {
-  const lib = readFileSync(join(ROOT, "src-tauri/src/lib.rs"), "utf8");
-  const m = /generate_handler!\s*\[([\s\S]*?)\]/.exec(stripComments(lib));
+function closingBracket(code: string, opening: number): number {
+  let depth = 0, quoted = false, escaped = false;
+  for (let index = opening; index < code.length; index++) {
+    const char = code[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') quoted = true;
+    else if (char === "[") depth++;
+    else if (char === "]" && --depth === 0) return index;
+  }
+  throw new Error("Unclosed generate_handler! list or attribute - update the parser, not the command surface");
+}
+
+function parseRegistered(source: string): string[] {
+  const code = stripComments(source);
+  const m = /generate_handler!\s*\[/.exec(code);
   if (!m) throw new Error("generate_handler! not found - the matcher broke, not the code");
-  return m[1]
+  const opening = m.index + m[0].length - 1;
+  const body = code.slice(opening + 1, closingBracket(code, opening));
+  // Audit the union of registrations across features. #[cfg(...)] contains
+  // brackets and commas of its own; neither terminates/splits the outer list.
+  let paths = "";
+  for (let index = 0; index < body.length;) {
+    const attribute = /^#\s*\[/.exec(body.slice(index));
+    if (attribute) index = closingBracket(body, index + attribute[0].length - 1) + 1;
+    else paths += body[index++];
+  }
+  return paths
     .split(",")
     .map((x) => x.trim())
     .filter(Boolean)
-    .map((x) => x.split("::").pop()!);
+    .map((entry) => {
+      if (!/^[A-Za-z_]\w*(?:\s*::\s*[A-Za-z_]\w*)*$/.test(entry)) {
+        throw new Error(`Unrecognized handler path: ${entry}`);
+      }
+      return entry.split(/\s*::\s*/).pop()!;
+    });
+}
+
+function registered(): string[] {
+  return parseRegistered(readFileSync(join(ROOT, "src-tauri/src/lib.rs"), "utf8"));
 }
 
 function nonTestSources(): Array<[rel: string, code: string]> {
@@ -102,6 +136,33 @@ function invoked(): Map<string, Set<string>> {
 }
 
 describe("the IPC surface", () => {
+  it("parses all feature-gated handlers and the ordinary commands after them", () => {
+    expect(parseRegistered(`tauri::generate_handler![
+      #[cfg(feature = "internal")]
+      commands::internal::first,
+      #[cfg(any(feature = "one", feature = "two"))]
+      #[cfg_attr(feature = "nested", doc = "a [,] bracket")]
+      commands::internal::second,
+      // commands::removed,
+      commands :: ordinary,
+      /* #[cfg(feature = "gone")] commands::gone, */
+      final_handler,
+    ]`)).toEqual(["first", "second", "ordinary", "final_handler"]);
+  });
+
+  it("handles quoted brackets/escaped quotes without truncating attributes", () => {
+    expect(parseRegistered(String.raw`generate_handler![
+      #[cfg_attr(feature = "internal", doc = "quoted \"]\" text")]
+      commands::one, commands::two,
+    ]`)).toEqual(["one", "two"]);
+  });
+
+  it("fails loudly on missing, unclosed, or unsupported handler syntax", () => {
+    expect(() => parseRegistered("// generate_handler![comment_only]")).toThrow("not found");
+    expect(() => parseRegistered('generate_handler![#[cfg(feature = "one")] commands::one')).toThrow("Unclosed");
+    expect(() => parseRegistered("generate_handler![unexpected!(commands::one)]")).toThrow("Unrecognized");
+  });
+
   it("really parsed both sides", () => {
     // A matcher that finds nothing agrees with everything.
     expect(registered().length).toBeGreaterThan(50);

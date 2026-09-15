@@ -21,7 +21,7 @@ const ready = (p: NdiStarted, roomGeneration: number | null = 1): NdiStatusResul
   telemetry: { ...emptyNdiTelemetry(), sourceId: p.id, phase: "live", connectionCount: 1,
     receivedFrames: 30, inputWidth: 1920, inputHeight: 1080, outputFps: 30 },
 });
-const selection = (): ObsSelection => ({ application: "com.apple.FinalCut", process: 240, window: 91,
+const selection = (): Exclude<ObsSelection, { kind: "display" }> => ({ application: "com.apple.FinalCut", process: 240, window: 91,
   crop: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 } });
 function harness(inRoom = true) {
   let next = 0, revision = 10;
@@ -292,13 +292,13 @@ describe("typed application capture preview sources", () => {
   });
   it("rejects absent/invalid selections and mismatched native captures without falling back to NDI", async () => {
     const h = harness();
-    await expect(h.ctl.previewCapture(undefined as unknown as ObsSelection)).rejects.toThrow(/valid application/);
+    await expect(h.ctl.previewCapture(undefined as unknown as ObsSelection)).rejects.toThrow(/valid capture source/);
     const invalid = selection(); invalid.crop.x = NaN;
-    await expect(h.ctl.previewCapture(invalid)).rejects.toThrow(/valid application/);
+    await expect(h.ctl.previewCapture(invalid)).rejects.toThrow(/valid capture source/);
     expect(h.ports.startCapture).not.toHaveBeenCalled();
     const wrong = selection(); wrong.window += 1;
     vi.mocked(h.ports.startCapture).mockResolvedValueOnce({ program: { id: "wrong", name: "Premiere A", url: "/wrong" }, selection: wrong });
-    await expect(h.ctl.previewCapture(selection())).rejects.toThrow(/captured window changed/);
+    await expect(h.ctl.previewCapture(selection())).rejects.toThrow(/captured source changed/);
     expect(h.ports.stop).toHaveBeenCalledExactlyOnceWith("wrong");
     expect(h.ctl.getSnapshot().candidate).toBeNull();
     expect(h.ports.start).not.toHaveBeenCalled();
@@ -306,6 +306,84 @@ describe("typed application capture preview sources", () => {
 });
 
 describe("Premiere source generations and cancellation", () => {
+  it.each([
+    [{ x: .03546611, y: .23030471000299998, width: .20652741000299998, height: .37924018000099996 },
+      { x: .03546611, y: .230304710003, width: .206527410003, height: .379240180001 }],
+    [{ x: 0, y: .20452178000299998, width: .24022880000299998, height: .32388176 },
+      { x: 0, y: .204521780003, width: .240228800003, height: .32388176 }],
+  ])("keeps a fractional Region preview when native JSON preserves its exact pixel boundary %#", async (crop, returnedCrop) => {
+    const h = harness(false);
+    const requested: Extract<ObsSelection, { kind: "display" }> = {
+      kind: "display", displayUuid: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", displayId: 5,
+      geometry: { x: 0, y: 0, width: 3008, height: 1269, pixelWidth: 6016, pixelHeight: 2538 }, crop, audio: false,
+    };
+    const returned = { ...requested, crop: returnedCrop };
+    const start = h.ports.startCapture;
+    vi.mocked(start).mockImplementationOnce(async () => {
+      const program = { id: "fractional-region", name: "Screen 1", url: "/fractional" };
+      h.native.set(program.id, { ...ready(program, null), capture: returned });
+      return { program, selection: returned };
+    });
+    await h.ctl.previewCapture(requested);
+    expect(h.ctl.getSnapshot()).toMatchObject({ candidate: { id: "fractional-region", capture: returned }, error: null, busy: null });
+    expect(h.ports.stop).not.toHaveBeenCalled();
+    await h.ctl.previewCapture(requested);
+    expect(start).toHaveBeenCalledExactlyOnceWith(requested);
+    expect(h.ports.publish).not.toHaveBeenCalled();
+    expect(h.ports.start).not.toHaveBeenCalled();
+  });
+  it.each(["pixel", "audio", "displayId", "displayUuid", "geometry"] as const)(
+    "stops a returned fractional Region when the actual %s differs", async changed => {
+      const h = harness(false);
+      const requested: Extract<ObsSelection, { kind: "display" }> = {
+        kind: "display", displayUuid: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", displayId: 5,
+        geometry: { x: 0, y: 0, width: 3008, height: 1269, pixelWidth: 6016, pixelHeight: 2538 },
+        crop: { x: .03546611, y: .23030471, width: .20652741, height: .37924018 }, audio: false,
+      };
+      const returned = { ...requested, geometry: { ...requested.geometry }, crop: { ...requested.crop } };
+      if (changed === "pixel") returned.crop.x += 1 / returned.geometry.pixelWidth;
+      else if (changed === "audio") returned.audio = true;
+      else if (changed === "displayId") returned.displayId++;
+      else if (changed === "displayUuid") returned.displayUuid = "BBBBBBBB-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
+      else returned.geometry.x++;
+      vi.mocked(h.ports.startCapture).mockResolvedValueOnce({
+        program: { id: "wrong-region", name: "Screen 1", url: "/wrong-region" }, selection: returned,
+      });
+      await expect(h.ctl.previewCapture(requested)).rejects.toThrow("captured source changed");
+      expect(h.ports.stop).toHaveBeenCalledExactlyOnceWith("wrong-region");
+      expect(h.ctl.getSnapshot().candidate).toBeNull();
+      expect(h.ports.publish).not.toHaveBeenCalled();
+    });
+  it("freezes display geometry and crop while an older preview drains", async () => {
+    const h = harness(false), pending = deferred<NdiStarted>();
+    vi.mocked(h.ports.start).mockReturnValueOnce(pending.promise);
+    const previous = h.ctl.preview("old NDI"); await Promise.resolve();
+    const requested: Extract<ObsSelection, { kind: "display" }> = {
+      kind: "display", displayUuid: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", displayId: 7,
+      geometry: { x: -1920, y: 0, width: 1920, height: 1080, pixelWidth: 3840, pixelHeight: 2160 },
+      crop: { x: .1, y: .2, width: .5, height: .6 }, audio: false,
+    };
+    const expected = copyCaptureSelection(requested), starting = h.ctl.previewCapture(requested);
+    requested.geometry.x = 1920; requested.crop.width = .8;
+    pending.resolve({ id: "old", name: "old NDI", url: "/old" });
+    await Promise.all([previous, starting]);
+    expect(h.ports.startCapture).toHaveBeenCalledExactlyOnceWith(expected);
+    expect(h.ctl.getSnapshot().candidate?.capture).toEqual(expected);
+    expect(h.ports.publish).not.toHaveBeenCalled();
+  });
+  it("rejects a native display response whose identity or geometry changed", async () => {
+    const h = harness(false);
+    const requested: Extract<ObsSelection, { kind: "display" }> = {
+      kind: "display", displayUuid: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", displayId: 7,
+      geometry: { x: -1920, y: 0, width: 1920, height: 1080, pixelWidth: 3840, pixelHeight: 2160 },
+      crop: { x: .1, y: .2, width: .5, height: .6 }, audio: false,
+    };
+    const wrong = { ...requested, geometry: { ...requested.geometry, x: 1920 } };
+    vi.mocked(h.ports.startCapture).mockResolvedValueOnce({ program: { id: "changed", name: "Generated display", url: "/changed" }, selection: wrong });
+    await expect(h.ctl.previewCapture(requested)).rejects.toThrow("captured source changed");
+    expect(h.ports.stop).toHaveBeenCalledExactlyOnceWith("changed");
+    expect(h.ctl.getSnapshot().candidate).toBeNull(); expect(h.ports.start).not.toHaveBeenCalled();
+  });
   it("waits for private teardown before starting a replacement without stopping the shared source", async () => {
     const h = harness(); const shared = await h.publish(); const privateSource = await h.preview("B");
     const stopping = deferred<void>(), released = deferred<void>();

@@ -177,6 +177,8 @@ type Props = {
   /** Local program framing must not inherit a hidden file's aspect mask. */
   displayAspect?: number;
   emptyActions?: ReactNode;
+  /** Review source chooser; omitted in Clip to preserve its existing start. */
+  emptyContent?: ReactNode;
   onToastDismiss: () => void;
   onPlayerTimeUpdate?: (seconds: number) => void;
   onPlayerStateChange?: (playing: boolean) => void;
@@ -350,7 +352,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     streamRung, onStreamStall, onStreamInfo, streamRungBadge, streamRungBadgeTitle, streamKeepBadge, streamKeepAction, onStreamKeepAction,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs, scrubAudio,
     streamLoadingPhase,
-    toast, onToastDismiss, stageOverlay, pictureCovered, displayAspect, emptyActions,
+    toast, onToastDismiss, stageOverlay, pictureCovered, displayAspect, emptyActions, emptyContent,
     onPlayerTimeUpdate, onPlayerStateChange, onRepresentationChange, onPlayerReady, onSurfaceClick,
     transcriptPath, transcriptReloadToken, fps, captionsOn, captionStyle, tcOverlay,
     shuttleRate, playbackRateHud,
@@ -403,7 +405,8 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
       <div className="cp-monitor-area">
         <div className="cp-monitor" ref={monitorRef} style={monitorStyle}>
           {recording && <div className="cp-monitor-rec-frame" aria-hidden />}
-          <div className="cp-empty" {...fileInteraction}>
+          <div className={"cp-empty" + (emptyContent ? " cp-empty-custom" : "")} {...fileInteraction}>
+            {emptyContent ?? <>
             <h3>Paste a URL or drop a file.</h3>
             {emptyActions}
             {resumeTitle && onResume && (
@@ -449,6 +452,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
                 ))}
               </div>
             )}
+            </>}
           </div>
           {stageOverlay}
           {statusStack()}
