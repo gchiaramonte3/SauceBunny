@@ -4,6 +4,7 @@ import type { VideoSceneProxy } from "../../bindings/VideoSceneProxy";
 import type { SceneAnalysisResult } from "./mediabunny-scene-analysis";
 import { createAudioEvidence, createSceneEvidence, shotBatches, sourceTime, validateShotAnswers } from "./evidence";
 import type { VideoAudioAnalysis } from "../../bindings/VideoAudioAnalysis";
+import type { VideoMusicAnalysis } from "../../bindings/VideoMusicAnalysis";
 import { DEFAULT_DETECTOR_CONFIG } from "./detector-core";
 
 Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: true });
@@ -29,6 +30,23 @@ export function fixtures(cuts = 11) {
 }
 
 describe("source-bound shot evidence", () => {
+  it("freezes the music vocabulary and full score vectors independently of worker output", async () => {
+    const { proxy, detection } = fixtures();
+    const scene = await createSceneEvidence(proxy, detection, []);
+    const audio: VideoMusicAnalysis = { analysis_id: scene.id, source: proxy.source, audio_track_index: 0,
+      classifier: "ast-audioset@pinned", os: "test", preprocessing_version: "test", status: "decoded",
+      labels: ["Music", "Speech"],
+      windows: [{ start_us: 0, end_us: 10e6, rms: .1, peak: .2, status: "classified", scores: [.8, .1] }] };
+    const result = createAudioEvidence(scene, audio);
+    const window = result.windows[0];
+    if (!("labels" in result) || !("scores" in window)) throw new Error("Expected music evidence");
+    audio.labels[0] = "Changed"; audio.windows[0].scores[0] = .2;
+    expect(result.labels).toEqual(["Music", "Speech"]);
+    expect(window.scores).toEqual([.8, .1]);
+    expect(Object.isFrozen(result.labels)).toBe(true);
+    expect(Object.isFrozen(window.scores)).toBe(true);
+    expect(() => createAudioEvidence(scene, { ...audio, analysis_id: "different" })).toThrow(/unrelated source/);
+  });
   it("binds actual audio to the exact detection and freezes a separate snapshot", async () => {
     const { proxy, detection } = fixtures();
     const scene = await createSceneEvidence(proxy, detection, []);

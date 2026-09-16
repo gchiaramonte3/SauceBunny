@@ -15,6 +15,27 @@ const evidence: AudioEvidence = { analysis_id: "test", source: { path: "/clip.mp
   ] };
 
 describe("actual-audio evidence disclosure", () => {
+  it("shows a tentative music type with source-range support and keeps raw diagnostics collapsed", async () => {
+    const music = { ...evidence, classifier: "ast-audioset@f826b80d28226b62986cc218e5cec390b1096902",
+      preprocessing_version: "pyav-swr16k-mono-10s-kaldi-ast-v1", labels: ["Music", "Electronic music", "Electronic dance music", "Jazz"],
+      windows: [
+        { start_us: 0, end_us: 10e6, scores: [.9, .3, .29, 0] },
+        { start_us: 12e6, end_us: 22e6, scores: [.9, 0, 0, 0] },
+        { start_us: 22e6, end_us: 23.5e6, scores: [.9, 0, 0, .9] },
+      ].map(window => ({ ...window, rms: .2, peak: .4, status: "classified" as const })) };
+    const onSeek = vi.fn();
+    render(<ShotAudioEvidence audio={{ status: "ready", evidence: music }} error="" busy={false} onSeek={onSeek} />);
+    expect(screen.getByText("Possible music type: Electronic music.")).toBeTruthy();
+    expect(screen.queryByText(/score 0.900/)).toBeNull();
+    fireEvent.click(screen.getByText("Audio evidence · 3 windows"));
+    await waitFor(() => expect(screen.getByText("Possible type: Electronic music.")).toBeTruthy());
+    expect(screen.getByText("Music suggested. Type unclear.")).toBeTruthy();
+    expect(screen.getByText("Short window. Music type unclear.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "00:12.000 to 00:22.000" }));
+    expect(onSeek).toHaveBeenCalledWith(12);
+    expect(screen.getByText(/not song boundaries/)).toBeTruthy();
+    expect(screen.queryByText(/100%|confidence|No music detected/i)).toBeNull();
+  });
   it("renders compact AudioSet evidence without mutating scores or claiming a genre verdict", async () => {
     const music = { ...evidence, labels: ["Electronic music", "Speech", "Music"],
       windows: [{ start_us: 0, end_us: 2e6, rms: .2, peak: .5, status: "classified" as const, scores: [.3, .5, .8] }] };

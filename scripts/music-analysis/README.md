@@ -1,6 +1,6 @@
 # Offline music-analysis feasibility checks
 
-Developer diagnostics, **not an installed feature or production runtime recipe**.
+Developer diagnostics and opt-in worker verification, **not installed-app certification**.
 These scripts do not start playback, capture a device, change preferences, or
 upload media. They take explicitly supplied local fixtures. Inference is offline;
 model downloads are a separate, explicit preparation step.
@@ -170,7 +170,9 @@ No weights or audio files are committed or automatically downloaded here.
 resampled 16 kHz audio. `ast_mlx_compare.py` compares the candidate
 `video-sidecar/audio_ast.py` against the pinned PyTorch reference offline.
 The candidate uses NumPy/Kaldi preprocessing and MLX operations, not PyTorch.
-It is deliberately **not** registered in the app model catalog or dispatcher.
+The initial parity probe ran independently of the app. The subsequent optional
+AudioSet registration and owned worker are described below; the diagnostic
+PyTorch stack is still excluded from the production runtime.
 
 ```sh
 python scripts/music-analysis/ast_probe.py --model-dir /absolute/scratch/ast \
@@ -241,8 +243,9 @@ unverified evidence. Music-presence policy and style inference remain unvalidate
   otherwise retaining native audio evidence. It never downloads during analysis.
   The compact wire format retains all 527 float32 scores with one vocabulary,
   and the Rust collector rejects incomplete or mismatched evidence.
-  Existing frozen runtimes must be rebuilt against the changed decoder recipe;
-  scratch success is not packaged-app validation.
+  Existing frozen runtimes must be rebuilt against the changed decoder recipe.
+  The rebuilt worker is covered by the offline smoke below; standalone success
+  is not packaged-app validation.
 - `SNAudioFileAnalyzer` raised an uncaught Objective-C exception on the MP4
   fixture. PCM WAV succeeded. The prototype's extension guard is not an
   untrusted-file validator; production needs validated extraction and owned
@@ -264,6 +267,85 @@ unverified evidence. Music-presence policy and style inference remain unvalidate
   changes must reject late audio results, and no partial coverage may be marked
   complete. Verify cancellation and packaged WKWebView behavior before rollout.
 
-The music feature is **not integrated or release-ready**. These tests establish
-a candidate path and reject a broken checkpoint; they do not finish the overall
-scene-analysis / AI Summary goal.
+Raw audio evidence is integrated behind the existing feature flag; music
+interpretation is **not release-ready**. These tests establish the transport and
+candidate path, not the overall scene-analysis / AI Summary goal.
+
+## Real worker, offline and cancellation smoke
+
+`verify_worker.py` uses the already-approved 23.5-second reviewed scene fixture
+(SHA-256 `c2b9b3ea9727c598674e7044967d68476cee5772ba7de7458c2951f90cb727e8`)
+and the four pinned AST artifacts from a supplied local directory. It does not
+download weights or write app data. A temporary model directory gets a receipt
+only after the production artifact verifier rehashes every copied file; any
+attempt to fetch a missing artifact fails the test.
+
+```sh
+python scripts/music-analysis/verify_worker.py \
+  --model-dir /absolute/approved-ast-artifacts \
+  --fixture /absolute/reviewed-scene-fixture.mp4 \
+  --worker /absolute/frozen-runtime/saucebunny-video \
+  --output /absolute/scratch/music-worker.json
+SAUCE_MUSIC_WORKER_REPORT=/absolute/scratch/music-worker.json \
+  cargo test --lib --manifest-path src-tauri/Cargo.toml \
+  real_music_worker_protocol_is_adopted_only_after_complete -- --ignored
+```
+
+Omit `--worker` to exercise the source worker with the selected Python runtime.
+The harness itself needs the pinned build environment's PyAV and NumPy. Each
+worker has network access denied by a macOS sandbox profile (including a denial
+canary), an empty Hub cache, and no Homebrew on PATH. It verifies an explicit
+missing-model error, actual source-bound windows, all 527 finite score values,
+Stop at model loading and after the first inference window, and a successful
+new run after Stop. Cancellation is triggered by protocol events, not a sleep.
+The test deadline is a harness safeguard, not a product readiness delay.
+
+The report feeds actual worker packets through the production Rust collector.
+Completed and restarted runs must be adopted; both stopped runs must be rejected.
+Frontend tests separately cover Stop, source changes, unmount, foreground
+playback, failure, and deep immutability for the optional AST route. Neither test
+substitutes for exercising the complete Tauri/WKWebView process lifecycle.
+
+September 16 observations on this development Mac: source-worker completion
+took 1.23 seconds; the frozen worker's first completion took 12.36 seconds and
+its post-Stop completion took 0.90 seconds. Frozen Stop-to-exit was 1.88 ms during
+model loading and 8.30 ms after the first window. All three expected ranges were
+preserved: [0, 10), [10, 20), [20, 23.5) seconds. These are single smoke timings,
+not cold-start attribution, p95, minimum-laptop or genre-accuracy guarantees.
+
+The same smoke also passed from a dereferenced resource copy, matching Tauri's
+file-copy behavior. Its manifest, signatures/linkage, shader resources and
+macOS 14 deployment floor passed verification; completion took 8.13 seconds on
+its first run and 0.86 seconds after Stop. Its actual packets also passed the
+Rust collector test. This catches resource-layout failures without installing
+or launching a new application build.
+
+Regression follow-up: 4,324 frontend tests passed (two existing skips), 761
+native library tests passed (29 opt-in tests ignored), and all 67 worker tests
+passed with `AUDIO_TEST_FFMPEG` and `VIDEO_TEST_H264_PROXY=1`. The real-report
+collector test was additionally run explicitly against source, frozen and
+copied-resource output. TypeScript, focused ESLint and all-targets Clippy passed.
+The browser suite was not rerun for this test-and-documentation-only follow-up.
+
+## Experimental music-summary policy
+
+The subsequent `audioset-music-summary.v1` presentation layer is separately
+tested in `src/lib/scene-analysis/music-summary.test.ts`. It applies only to the
+pinned AST checkpoint and preprocessing version. Five seconds of context, a
+Music score of 0.5, a family score of 0.1 and a best/next-family ratio of 1.5
+are provisional review thresholds, not calibrated probabilities. Related
+genre labels contribute their maximum, never an accumulated vote. Instruments,
+moods and music-use labels do not become genre suggestions.
+
+The compact UI says "Possible music type" or leaves the type unclear. It retains
+the actual analyzed ranges, including gaps and short tails, without inventing
+song boundaries or making a negative no-music claim. Raw evidence is unchanged.
+The real worker report can also exercise this policy:
+
+```sh
+MUSIC_POLICY_REPORT=/absolute/scratch/music-worker.json \
+  npx vitest run src/lib/scene-analysis/music-summary.test.ts
+```
+
+This is still feature-flagged and requires held-out music calibration and
+packaged-app validation before rollout.

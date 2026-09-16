@@ -45,6 +45,7 @@ neither operation touches original footage or existing transcripts.
 | Search | Qwen3-VL-Embedding-2B, MLX 4-bit | 1.8 GB |
 | Optional reranking | Qwen3-VL-Reranker-2B, MLX 4-bit | 1.8 GB |
 | Descriptions | Qwen3.5-9B, MLX 4-bit | 6.0 GB |
+| Optional audio evidence | AudioSet AST, MLX adapter | 346 MB |
 
 Exact repositories, revisions and artifact hashes are in
 `video-sidecar/models.json`. No Qwen Omni or 27B/35B model is included.
@@ -306,9 +307,28 @@ worker instead of the native audio classifier. No download starts during analysi
 All 527 scores are retained as compact float32 vectors with one shared vocabulary;
 Rust validates the streamed evidence and clean process exit before adoption.
 The existing disclosure shows ranked raw suggestions, not a calibrated verdict.
-No audio model or dependency was added to the installed app. Existing frozen
-workers must be rebuilt; classification policy, durable audio results and
-packaged lifecycle validation remain open.
+No audio model or dependency was added to the installed app. The standalone
+frozen worker has been rebuilt and tested with locally supplied weights, OS-denied
+networking, and no Homebrew on PATH. Its actual windows pass the production Rust
+collector; event-triggered Stop during model loading and inference yields no
+adoptable partial result, and a new run completes afterward. Missing models fail
+explicitly without download. See the [real-worker smoke instructions](../scripts/music-analysis/README.md#real-worker-offline-and-cancellation-smoke).
+The first frozen completion took 12.36 seconds on this Mac, versus 0.90 seconds
+for a new process after Stop; this is not a minimum-device or p95 claim.
+The dereferenced Tauri-style resource copy also passed manifest/native checks,
+the offline inference/cancellation smoke, and Rust packet adoption. Its first
+completion took 8.13 seconds, followed by 0.86 seconds after Stop. No installed
+application or permissions were changed for these checks.
+The feature-flagged disclosure now includes a tentative music summary using
+`audioset-music-summary.v1`. This experimental presentation policy requires
+at least five seconds of context and a Music score of 0.5; a broad genre family
+also needs a score of 0.1 and a 1.5 ratio over the next family. Correlated parent
+and child scores use their maximum, not a sum. These are provisional review
+thresholds, not calibrated probabilities or a measured accuracy guarantee.
+Uncertain windows remain unclear, and the original ranges and all raw scores
+stay intact. Suggestions do not identify song boundaries or claim that music
+is absent. Policy calibration, durable audio results and packaged lifecycle
+validation remain open; the feature flag remains off by default.
 
 ### Native audio evidence transport (internal, September 16)
 

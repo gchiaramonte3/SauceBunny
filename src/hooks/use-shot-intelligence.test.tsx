@@ -131,6 +131,37 @@ describe("optional source audio", () => {
     expect(mocks.audioCreate).toHaveBeenCalledWith(evidence, music);
     expect(result.current.audio).toEqual({ status: "ready", evidence: music });
   });
+  it.each(["stop", "source", "unmount", "playback", "failure"])("installed music analysis respects %s without borrowing a late result", async kind => {
+    const gate = deferred<unknown>();
+    const original = mocks.run.getMockImplementation()!;
+    mocks.run.mockImplementation(request => request.operation === "models"
+      ? Promise.resolve({ models: [...models.models, { id: "ast-audioset", ready: true }] })
+      : request.operation === "analyze-music" ? gate.promise : original(request));
+    const { result, rerender, unmount } = renderHook(({ path, busy }) => useShotIntelligence(path, null, null, 0, busy),
+      { initialProps: { path: "/clip.mp4", busy: false } });
+    let operation!: Promise<void>;
+    act(() => { operation = result.current.start(); });
+    await waitFor(() => expect(result.current.audio.status).toBe("analyzing"));
+    expect(mocks.run).toHaveBeenLastCalledWith(expect.objectContaining({ operation: "analyze-music" }));
+    if (kind === "stop") act(() => result.current.stop());
+    if (kind === "source") rerender({ path: "/other.mp4", busy: false });
+    if (kind === "playback") rerender({ path: "/clip.mp4", busy: true });
+    if (kind === "unmount") unmount();
+    if (kind === "failure") mocks.nativeError = "Music model failed";
+    await act(async () => {
+      gate.resolve(kind === "failure" ? null : { music_analysis: { ...audio, labels: [] } });
+      await operation;
+    });
+    expect(mocks.audioCreate).not.toHaveBeenCalled();
+    expect(mocks.run.mock.calls.some(call => call[0].operation === "analyze-audio" || call[0].operation === "download")).toBe(false);
+    if (kind !== "failure") expect(mocks.stop).toHaveBeenCalledOnce();
+    if (kind !== "unmount") {
+      expect(result.current.busy).toBe(false);
+      expect(result.current.answers).toEqual(kind === "source" ? [] : answer.shots);
+      expect(result.current.complete).toBe(kind === "failure");
+    }
+    if (kind === "failure") expect(result.current.audioError).toBe("Music model failed");
+  });
   function holdAudio() {
     const gate = deferred<unknown>();
     const original = mocks.run.getMockImplementation()!;

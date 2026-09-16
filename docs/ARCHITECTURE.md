@@ -934,8 +934,14 @@ an adoptable result. The transport preserves all 527 float32 scores per window,
 with one shared vocabulary; Rust validates identity, coverage and the complete
 stream before returning immutable frontend evidence. The LGPL decoder recipe
 enables the required audio filters. Existing frozen workers need rebuilding.
-Interpretation policy and packaged lifecycle validation remain open; this source
-checkpoint does not update the installed app or enable the feature flag.
+`scene-analysis/music-summary.ts` is a versioned presentation policy over that
+completed evidence, not another inference engine. It groups related AudioSet
+genre scores by their maximum and abstains on short, weak or conflicting
+evidence. Suggestions preserve actual window ranges and leave the raw scores
+unchanged. Its provisional thresholds and remaining calibration gates are
+documented in [Video Intelligence](VIDEO-INTELLIGENCE.md). Packaged lifecycle
+validation remains open; this source checkpoint does not update the installed
+app or enable the feature flag.
 
 ## Tone-card design grammar (shell v3)
 

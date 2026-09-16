@@ -261,4 +261,37 @@ mod tests {
             job.push(done).unwrap(); assert!(job.finish().unwrap().music_analysis.unwrap().windows[0].scores.is_empty());
         }
     }
+
+    #[test]
+    #[ignore = "requires the real worker report from scripts/music-analysis/verify_worker.py"]
+    fn real_music_worker_protocol_is_adopted_only_after_complete() {
+        let path = std::env::var("SAUCE_MUSIC_WORKER_REPORT").expect("Set SAUCE_MUSIC_WORKER_REPORT");
+        let report: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(report["schema"], "sauce.music-worker-smoke.v1");
+        assert_eq!(report["network"], "sandbox-denied");
+        let request: VideoRequest = serde_json::from_value(report["request"].clone()).unwrap();
+        request.validate().unwrap();
+        for kind in ["completed", "restarted"] {
+            assert_eq!(report[kind]["exit_code"], 0);
+            let mut job = Collector::new(&request).unwrap();
+            for packet in report[kind]["packets"].as_array().unwrap() {
+                if packet["type"] == "progress" { continue; }
+                job.push(packet.clone()).unwrap();
+            }
+            let evidence = job.finish().unwrap().music_analysis.unwrap();
+            assert_eq!(evidence.labels.len(), MUSIC_LABELS);
+            assert_eq!(evidence.windows.iter().map(|w| (w.start_us, w.end_us)).collect::<Vec<_>>(),
+                [(0, 10_000_000), (10_000_000, 20_000_000), (20_000_000, 23_500_000)]);
+            assert!(evidence.windows.iter().all(|w| w.scores.len() == MUSIC_LABELS));
+        }
+        for stopped in report["stopped"].as_object().unwrap().values() {
+            assert_ne!(stopped["exit_code"], 0);
+            let mut job = Collector::new(&request).unwrap();
+            for packet in stopped["packets"].as_array().unwrap() {
+                if packet["type"] == "progress" { continue; }
+                job.push(packet.clone()).unwrap();
+            }
+            assert!(job.finish().is_err(), "Stop must not adopt partial evidence");
+        }
+    }
 }
