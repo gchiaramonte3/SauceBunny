@@ -275,15 +275,18 @@ Music is not analyzed by Qwen's visual frames or supplied transcript text.
 Actual-audio music classification remains a separate integration, not an inferred
 claim in shot descriptions; native results currently report `audio_analyzed:false`.
 
-Research candidate, checked September 16: LAION's
-[music-trained CLAP checkpoint](https://huggingface.co/laion/larger_clap_music)
-supports zero-shot audio classification by comparing actual audio to candidate
-text descriptions. The [official implementation](https://github.com/LAION-AI/CLAP)
-is the reference for input preprocessing. The proposed app path is to extract
-bounded audio windows locally, score a reviewed vocabulary of music styles,
-moods and instruments, and associate results with source-time intervals.
-Similarity rankings are not calibrated confidence, song identification, or proof
-that background music is separable from dialogue. Show uncertain/insufficient
-evidence rather than force a genre. CPU/Apple Silicon behavior, packaging and
-dialogue-over-music accuracy still need testing; no weights were downloaded or
-classification claimed in this pass.
+Actual-audio feasibility checks on September 16 rejected the initially proposed
+Hub `laion/larger_clap_music` checkpoint: its text vectors collapsed and controls
+received nearly identical rankings under two Transformers versions. LAION's
+original music checkpoint, strictly converted, produced distinct features but
+still failed the musical control's music-presence test. Apple SoundAnalysis
+separated the generated speech/music controls better, but also ranked music first
+for silence at a low score. Neither top-label selection nor softmax is a safe
+classification policy.
+
+The [reproducible music-analysis diagnostics](../scripts/music-analysis/README.md)
+record pinned checkpoint hashes, conversion, actual audio controls, measurements,
+decoder limitations and remaining integration gates. The candidate path is native
+music-presence/instrument evidence plus tentative CLAP style descriptions, with
+explicit uncertainty and source-time coverage. No audio model or dependency was
+added to the installed app; music integration and packaged validation remain open.
