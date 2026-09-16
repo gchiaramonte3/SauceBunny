@@ -13,6 +13,7 @@ from pathlib import Path
 from artifacts import MODELS, delete, download, model_spec, ready, require_model
 from index_store import IndexStore, source_identity, source_unchanged
 from media import Video, windows
+from shot_analysis import analyze_shots, inspect_source
 
 VERSION = "1"
 EMBEDDING = "qwen3-vl-embedding-2b"
@@ -161,6 +162,11 @@ def dispatch(root: Path, request: dict):
     memory = request.get("memory_bytes", 8 * 1024**3)
     if type(memory) is not int or not 2 * 1024**3 <= memory <= 16 * 1024**3:
         raise ValueError("Invalid local inference memory limit")
+    if operation == "inspect-video":
+        return inspect_source(local_path(request.get("path")))
+    if operation == "analyze-shots":
+        return analyze_shots(local_path(request.get("path")), request,
+                             lambda: load_model(models, REASONING, memory), progress)
     with contextlib.closing(IndexStore(root / "index")) as store:
         if operation == "sources":
             return {"sources": store.sources()}

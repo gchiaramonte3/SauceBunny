@@ -74,3 +74,37 @@ class Video:
         if not images:
             raise ValueError("No decoded frame was available for this range")
         return images, timestamps
+
+    def sample_shot(self, start_us: int, end_us: int):
+        """Bounded visual evidence across a detected shot, not cut detection.
+
+        Seek to at most eight evenly distributed positions even for long shots.
+        Return actual decoded source-relative PTS, never the requested times or
+        frames from a neighbouring shot. Native stream origin stays internal.
+        """
+        if (type(start_us) is not int or type(end_us) is not int
+                or not 0 <= start_us < end_us <= round(self.duration * 1_000_000)):
+            raise ValueError("Invalid shot range")
+        images, timestamps_us = [], []
+        for index in range(8):
+            target_us = start_us + (end_us - start_us) * index // 8
+            if timestamps_us and target_us <= timestamps_us[-1]:
+                continue
+            self.container.seek(int((self.origin + target_us / 1_000_000) / float(self.stream.time_base)),
+                                stream=self.stream, backward=True)
+            for frame in self.container.decode(self.stream):
+                if frame.pts is None:
+                    continue
+                position_us = round((frame.pts * frame.time_base - self.origin) * 1_000_000)
+                if position_us >= end_us:
+                    break
+                if position_us < target_us:
+                    continue
+                image = frame.to_image().convert("RGB")
+                image.thumbnail((MAX_FRAME_SIDE, MAX_FRAME_SIDE))
+                images.append(image)
+                timestamps_us.append(position_us)
+                break
+        if not images:
+            raise ValueError("No decoded frame was available inside this shot")
+        return images, timestamps_us

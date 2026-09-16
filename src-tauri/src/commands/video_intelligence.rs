@@ -57,7 +57,7 @@ fn check_hardware(request: &VideoRequest) -> Result<(), AppError> {
         let mut size = std::mem::size_of::<u64>();
         // Read-only kernel property; the output is an exactly sized u64.
         let result = unsafe { libc::sysctlbyname(c"hw.memsize".as_ptr(), (&mut bytes as *mut u64).cast(), &mut size, std::ptr::null_mut(), 0) };
-        let minimum = if matches!(request, VideoRequest::Reason { .. }) { 24 } else { 16 };
+        let minimum = if request.reasoning() { 24 } else { 16 };
         if result != 0 || bytes < minimum * 1024 * 1024 * 1024 {
             return Err(AppError::invalid(format!("This video model needs a Mac with at least {minimum} GB of memory")));
         }
@@ -116,7 +116,7 @@ pub async fn video_intelligence_run(app: AppHandle, job_id: String, request: Vid
     let _guard = JobGuard::begin(&app, &job_id, &request)?;
     let key = JobRegistry::stage_key(&job_id, if request.read_only() { "video-read" } else { "video" });
     if request.heavy() && foreground_busy(&app, &key) {
-        return Err(AppError::invalid("Pause playback and finish transcription first. If a local text model is loaded, unload it in Video Intelligence settings. Completed index work is saved."));
+        return Err(AppError::invalid(format!("Pause playback and finish transcription first. If a local text model is loaded, unload it in Video Intelligence settings.{}", request.saved_work_note())));
     }
     let root = app.path().app_data_dir().map_err(|e| AppError::internal(e.to_string()))?.join("video-intelligence");
     std::fs::create_dir_all(&root)?;
@@ -143,11 +143,11 @@ pub async fn video_intelligence_run(app: AppHandle, job_id: String, request: Vid
     tokio::pin!(timeout);
     loop {
         let event = tokio::select! {
-            _ = &mut timeout => return Err(AppError::invalid("Video job exceeded its 24-hour limit. Completed segments are saved.")),
+            _ = &mut timeout => return Err(AppError::invalid(format!("Video job exceeded its 24-hour limit.{}", request.saved_work_note()))),
             _ = heartbeat.tick() => {
                 check_cancelled(&app, &job_id)?;
                 if request.heavy() && foreground_busy(&app, &key) {
-                    return Err(AppError::invalid("Video indexing yielded to playback or another task. Completed segments are saved; resume when ready."));
+                    return Err(AppError::invalid(format!("Video analysis yielded to playback or another task. Try again when ready.{}", request.saved_work_note())));
                 }
                 continue;
             },
@@ -183,11 +183,11 @@ pub async fn video_intelligence_run(app: AppHandle, job_id: String, request: Vid
                 if let Some(error) = error { return Err(AppError::invalid(error)); }
                 if status.code != Some(0) || status.signal.is_some() {
                     log::warn!("Video worker failed: {}", super::truncate_utf8_bytes(&stderr, 2000));
-                    return Err(AppError::invalid("The local video worker stopped unexpectedly. Completed index segments are saved."));
+                    return Err(AppError::invalid(format!("The local video worker stopped unexpectedly.{}", request.saved_work_note())));
                 }
                 return result.ok_or_else(|| AppError::invalid("The video worker returned no result"));
             },
-            Some(CommandEvent::Error(_)) | None => return Err(AppError::invalid("The video worker disconnected. Completed segments are saved.")),
+            Some(CommandEvent::Error(_)) | None => return Err(AppError::invalid(format!("The video worker disconnected.{}", request.saved_work_note()))),
             _ => {},
         }
     }
