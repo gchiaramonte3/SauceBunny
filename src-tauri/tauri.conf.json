@@ -63,6 +63,7 @@
     ],
     "resources": {
       "video-runtime/": "video-runtime/",
+      "audio-runtime/": "audio-runtime/",
       "../LICENSE": "licenses/LICENSE",
       "../THIRD-PARTY-LICENSES.md": "licenses/THIRD-PARTY-LICENSES.md",
       "../licenses/GPLv3.txt": "licenses/GPLv3.txt",

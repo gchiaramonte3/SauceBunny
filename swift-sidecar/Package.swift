@@ -43,6 +43,12 @@ let package = Package(
     ),
   ],
   targets: [
+    // Optional file-audio evidence. No capture permissions, Python or model download.
+    .target(name: "AudioEvidenceCore", path: "Sources/AudioEvidenceCore"),
+    .executableTarget(name: "saucebunny-audio-analysis", dependencies: ["AudioEvidenceCore"],
+                      path: "Sources/saucebunny-audio-analysis"),
+    .testTarget(name: "AudioEvidenceTests", dependencies: ["AudioEvidenceCore"],
+                path: "Tests/AudioEvidenceTests"),
     // Pure cue-construction for the Parakeet ASR path, with NO dependencies so
     // `swift test` is fast and needs no models on disk. It lives in its own
     // target because an executable target cannot be imported by tests, and

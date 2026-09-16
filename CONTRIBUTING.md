@@ -95,6 +95,11 @@ automatically.
 npm run verify
 ```
 
+The native audio-evidence gate uses generated PCM only: no device capture,
+library access, playback or model download. `npm run test:audio-analysis` runs it
+on its own. Supplying `AUDIO_TEST_FFMPEG` with a real bundled FFmpeg path also
+enables generated AAC timestamp regressions; those are skipped with CI stubs.
+
 One command, every automated gate, in the order CI runs them: `tsc --noEmit`,
 vitest, lint, `cargo check`, `cargo test --lib` (which also regenerates the
 `ts-rs` bindings in `src/bindings/`), `cargo clippy -D warnings`,

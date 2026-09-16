@@ -22,6 +22,8 @@
     "build:capture": "bash scripts/build-capture.sh",
     "build:aaf": "bash scripts/build-aaf.sh",
     "build:video": "bash scripts/build-video.sh",
+    "build:audio-analysis": "bash scripts/build-audio-analysis.sh",
+    "test:audio-analysis": "swift build --package-path swift-sidecar --product saucebunny-audio-analysis && node --test scripts/audio-analysis.test.mjs",
     "test:video": "bash scripts/test-video.sh",
     "test:aaf": "bash scripts/test-aaf.sh",
     "refresh:sidecars": "bash scripts/refresh-sidecars.sh",

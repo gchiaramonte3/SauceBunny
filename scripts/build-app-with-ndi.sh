@@ -10,6 +10,7 @@ source scripts/stable-signing.sh
 bash scripts/build-capture.sh
 bash scripts/build-aaf.sh
 VIDEO_PYTHON="${VIDEO_PYTHON:-${AAF_PYTHON:-python3.12}}" bash scripts/build-video.sh
+bash scripts/build-audio-analysis.sh
 npm --prefix premiere-companion run ccx
 PREMIERE_BUNDLE_CONFIG="$(node scripts/prepare-premiere-bundle.mjs)"
 NDI_BUNDLE_CONFIG="$(node scripts/prepare-ndi-bundle.mjs)"

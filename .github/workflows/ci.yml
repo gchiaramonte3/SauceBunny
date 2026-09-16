@@ -118,6 +118,10 @@ jobs:
       # Swift and nothing ever ran it.
       - run: swift test
         working-directory: swift-sidecar
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm run test:audio-analysis
 
   ui-smoke:
     name: ui smoke (playwright)

@@ -25,6 +25,8 @@ swift-sidecar/.swiftpm
 src-tauri/binaries/*
 !src-tauri/binaries/.gitkeep
 src-tauri/video-runtime/saucebunny-video/
+src-tauri/audio-runtime/saucebunny-audio-analysis
+src-tauri/audio-runtime/runtime-manifest.json
 video-sidecar/__pycache__/
 
 # Local

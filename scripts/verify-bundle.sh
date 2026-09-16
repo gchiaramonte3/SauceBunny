@@ -56,6 +56,16 @@ else
   fail "Video Intelligence runtime is missing, stale or incompatible; run scripts/build-video.sh"
 fi
 
+# Native audio evidence is separate from the Python/MLX runtime. The receipt
+# binds the first-party sources to a build UUID that survives release signing.
+if [ "${ALLOW_STUBS}" -eq 1 ]; then
+  warn "Native audio analysis runtime not certified in stub-sidecar CI builds"
+elif node "${ROOT_DIR}/scripts/audio-analysis-runtime.mjs" verify "${RES}/audio-runtime"; then
+  pass "Native audio analysis matches its source recipe and macOS 14 floor"
+else
+  fail "Native audio analysis helper is missing, stale or incompatible; run npm run build:audio-analysis"
+fi
+
 # ── 1. The executable exists and is the right architecture ──────────
 if [ -x "${BIN}" ]; then
   BIN_ARCH="$(file -b "${BIN}" 2>/dev/null || true)"

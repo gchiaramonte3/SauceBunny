@@ -133,6 +133,13 @@ measure classifier accuracy, native cancellation or production source timing.
 
 ## Integration consequences and remaining gates
 
+The later native evidence transport is documented in
+[Video Intelligence](../../docs/VIDEO-INTELLIGENCE.md#native-audio-evidence-transport-internal-september-16).
+It uses AVAssetReader plus bounded SNAudioStreamAnalyzer windows, not this
+file-analyzer probe. It preserves edit-mapped output PTS and rejects the generated
+AAC gap case when native decoding changes source timing. Raw evidence transport
+is implemented; policy, style inference and AI Summary adoption are not.
+
 - The minimal PyAV/FFmpeg build inside the video sidecar lacks `aformat` and
   `aresample`. `av.AudioResampler` fails there. Reuse the existing app-bundled
   FFmpeg audio extraction, under the Rust job owner, not an accidental Homebrew

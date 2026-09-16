@@ -905,6 +905,15 @@ Inference has no server or implicit download. Source navigation uses decoded
 timestamps, never model-authored timecodes. See [Video Intelligence](VIDEO-INTELLIGENCE.md)
 for resource bounds, build locks, runtime verification and current limitations.
 
+The optional `analyze-audio` request uses the same Rust job owner but starts
+`saucebunny-audio-analysis`, a system-only Swift resource helper, instead of the
+Python worker. AVFoundation decodes local audio into three-second PCM windows;
+SoundAnalysis returns raw scores with actual source-time coverage. Rust adopts
+the collected evidence only after matching source identity and a clean worker
+completion. It does not capture a device or download a model. AI Summary does
+not request this operation yet: music calibration, UI adoption and packaged
+validation remain separate rollout gates.
+
 ## Tone-card design grammar (shell v3)
 
 Panels (sidebar, queue drawer, library tree/detail, the co-review participant rail) are uniform

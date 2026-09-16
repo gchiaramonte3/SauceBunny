@@ -290,3 +290,45 @@ decoder limitations and remaining integration gates. The candidate path is nativ
 music-presence/instrument evidence plus tentative CLAP style descriptions, with
 explicit uncertainty and source-time coverage. No audio model or dependency was
 added to the installed app; music integration and packaged validation remain open.
+
+### Native audio evidence transport (internal, September 16)
+
+`VideoRequest.analyze-audio` now runs a first-party Swift worker under the same
+Rust job owner, Stop handling, foreground priority and child-exit validation as
+video analysis. It is **not yet called by AI Summary**, and it does not return a
+genre or calibrated music-presence verdict. The installed app was not rebuilt.
+
+- The request carries the inspected source SHA-256, analysis ID, source origin,
+  duration and explicit audio-track index. Content is verified before and after
+  decoding. A result is adopted only after matching terminal identity and clean
+  exit; streamed windows alone are never a successful result.
+- AVFoundation supplies local PCM, with external media references forbidden.
+  CoreMedia's **output** timestamps retain edit mapping; raw packet timestamps
+  do not. This adds a system-only native decoder instead of relying on the
+  minimal Python video runtime's missing resampler or creating a full WAV.
+- Retained PCM is one three-second, 48 kHz mono window. SoundAnalysis provides
+  backpressure through synchronous per-window completion. Digital silence is
+  recorded without classification; short tails remain `insufficient-context`.
+  Non-overlapping three-second windows deliberately differ from the initial
+  overlapping feasibility probe, so their scores need separate calibration.
+- Generated AAC with a two-second timestamp gap exposed AVAssetReader flattening
+  the audio timeline. The worker rejects a decoded/source-range disagreement;
+  it does not publish the misplaced windows. Endpoint tolerance follows the
+  actual container time-base precision or one output sample. Gap-bearing media
+  still needs a timestamp-preserving decoder path before broader rollout.
+- Native evidence includes raw scores, signal energy, actual covered intervals,
+  OS/classifier and preprocessing identity. It is not a replacement for the
+  immutable visual shot result, and it never infers sound from Qwen's images.
+
+`npm run test:audio-analysis` runs generated-PCM native lifecycle tests, while
+the existing Swift/Rust suites cover window timing and streamed-result adoption.
+Set `AUDIO_TEST_FFMPEG` to a real bundled FFmpeg executable to additionally test
+generated AAC origins/gaps (CI's sidecar stubs cannot encode those fixtures).
+`npm run build:audio-analysis` stages only the helper, not a DMG or installed app.
+Normal app builds now include it, and bundle verification checks its source
+receipt, Mach-O build identity, system linkage and macOS 14 floor.
+
+Remaining: reviewed real-audio calibration (including pure tones, dialogue over
+music and sound effects), tentative style-model packaging, persistent audio
+evidence, UI association with shots, and packaged WKWebView validation. The music
+feature and overall scene-analysis/AI Summary goal remain incomplete.

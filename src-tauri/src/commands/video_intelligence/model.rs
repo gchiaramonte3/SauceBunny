@@ -17,11 +17,14 @@ pub enum VideoRequest {
     InspectVideo { path: String },
     PrepareShotProxy { path: String },
     AnalyzeShots { path: String, source_sha256: String, analysis_id: String, query: String, shots: Vec<VideoShot> },
+    AnalyzeAudio { path: String, source_sha256: String, analysis_id: String,
+        #[ts(type = "number")] origin_us: i64, #[ts(type = "number")] duration_us: u64, audio_track_index: u32 },
 }
 impl VideoRequest {
     pub fn read_only(&self) -> bool { matches!(self, Self::Models {} | Self::Sources {}) }
     pub fn reasoning(&self) -> bool { matches!(self, Self::Reason { .. } | Self::AnalyzeShots { .. }) }
-    pub fn heavy(&self) -> bool { self.reasoning() || matches!(self, Self::Index { .. } | Self::Search { .. } | Self::PrepareShotProxy { .. }) }
+    pub fn native_audio(&self) -> bool { matches!(self, Self::AnalyzeAudio { .. }) }
+    pub fn heavy(&self) -> bool { self.reasoning() || self.native_audio() || matches!(self, Self::Index { .. } | Self::Search { .. } | Self::PrepareShotProxy { .. }) }
     pub fn saved_work_note(&self) -> &'static str {
         if matches!(self, Self::Index { .. }) { " Completed index segments are saved." } else { "" }
     }
@@ -47,6 +50,10 @@ impl VideoRequest {
                 && valid_key(source_sha256) && !source_sha256.bytes().any(|b| b.is_ascii_uppercase())
                 && valid_key(analysis_id) && !analysis_id.bytes().any(|b| b.is_ascii_uppercase())
                 && valid_query(query) && valid_shots(shots),
+            Self::AnalyzeAudio { path, source_sha256, analysis_id, origin_us, duration_us, .. } => valid_path(path)
+                && valid_key(source_sha256) && !source_sha256.bytes().any(|b| b.is_ascii_uppercase())
+                && valid_key(analysis_id) && !analysis_id.bytes().any(|b| b.is_ascii_uppercase())
+                && (1..=MAX_SHOT_TIME_US).contains(duration_us) && origin_us.checked_add(*duration_us as i64).is_some(),
         };
         if valid { Ok(()) } else { Err(crate::AppError::invalid("Invalid Video Intelligence request")) }
     }
@@ -123,6 +130,41 @@ pub struct VideoShotAnalysis {
     pub audio_analyzed: bool, pub shots: Vec<VideoShotAnswer>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub enum VideoAudioWindowStatus { Classified, DigitalSilence, InsufficientContext }
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct VideoAudioScore { pub identifier: String, pub score: f64 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct VideoAudioWindow {
+    #[ts(type = "number")] pub start_us: u64,
+    #[ts(type = "number")] pub end_us: u64,
+    pub rms: f64, pub peak: f64, pub status: VideoAudioWindowStatus,
+    pub classifications: Vec<VideoAudioScore>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub enum VideoAudioStatus { NoAudio, Decoded }
+
+/// Raw actual-audio evidence, not a calibrated genre or music-presence verdict.
+/// Missing ranges and insufficient-context tails remain visibly unclassified.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct VideoAudioAnalysis {
+    pub analysis_id: String, pub source: VideoAnalysisSource, pub audio_track_index: u32,
+    pub classifier: String, pub os: String, pub preprocessing_version: String,
+    pub status: VideoAudioStatus, pub windows: Vec<VideoAudioWindow>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct VideoModel {
@@ -164,6 +206,8 @@ pub struct VideoResponse {
     #[ts(optional)] pub shot_analysis: Option<VideoShotAnalysis>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)] pub scene_proxy: Option<VideoSceneProxy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)] pub audio_analysis: Option<VideoAudioAnalysis>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

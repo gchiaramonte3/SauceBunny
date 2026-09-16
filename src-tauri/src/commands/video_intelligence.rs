@@ -1,5 +1,6 @@
 //! Offline video intelligence, isolated from playback and existing transcription.
 pub mod model;
+mod audio;
 use crate::{commands::{JobRegistry, LlmServer}, AppError};
 use model::*;
 use std::{collections::HashSet, path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Mutex}, time::Duration};
@@ -47,7 +48,8 @@ fn check_cancelled(app: &AppHandle, id: &str) -> Result<(), AppError> {
 }
 
 fn check_hardware(request: &VideoRequest) -> Result<(), AppError> {
-    if !request.heavy() { return Ok(()); }
+    // The system sound classifier does not load an MLX model or need its memory budget.
+    if !request.heavy() || request.native_audio() { return Ok(()); }
     if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         return Err(AppError::invalid("Video Intelligence requires an Apple Silicon Mac"));
     }
@@ -88,6 +90,17 @@ fn runtime(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(path)
 }
 
+fn audio_runtime(app: &AppHandle) -> Result<PathBuf, AppError> {
+    let path = app.path().resource_dir().map_err(|e| AppError::internal(e.to_string()))?
+        .join("audio-runtime/saucebunny-audio-analysis");
+    #[cfg(debug_assertions)]
+    let path = if path.is_file() { path } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../swift-sidecar/.build/debug/saucebunny-audio-analysis")
+    };
+    if !path.is_file() { return Err(AppError::sidecar_missing("saucebunny-audio-analysis")); }
+    Ok(path)
+}
+
 fn foreground_busy(app: &AppHandle, own_key: &str) -> bool {
     let playback = app.state::<VideoIntelligenceState>().foreground_windows.lock().map(|mut windows| {
         // A closed detached player cannot leave the background worker blocked.
@@ -120,12 +133,13 @@ pub async fn video_intelligence_run(app: AppHandle, job_id: String, request: Vid
     }
     let root = app.path().app_data_dir().map_err(|e| AppError::internal(e.to_string()))?.join("video-intelligence");
     std::fs::create_dir_all(&root)?;
-    let executable = runtime(&app)?;
+    let executable = if request.native_audio() { audio_runtime(&app)? } else { runtime(&app)? };
     let mut payload = serde_json::to_vec(&request)?;
     if payload.len() > 256 * 1024 { return Err(AppError::invalid("Video request is too large")); }
     payload.push(b'\n');
     check_cancelled(&app, &job_id)?;
-    let (mut events, child) = app.shell().command(executable).args(["--root", root.to_string_lossy().as_ref()])
+    let args = if request.native_audio() { Vec::new() } else { vec!["--root".to_string(), root.to_string_lossy().into_owned()] };
+    let (mut events, child) = app.shell().command(executable).args(args)
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
         .env("HF_HUB_OFFLINE", "1").env("TRANSFORMERS_OFFLINE", "1").env("HF_HUB_DISABLE_TELEMETRY", "1")
         .spawn().map_err(|e| AppError::internal(format!("Cannot start Video Intelligence: {e}")))?;
@@ -134,6 +148,7 @@ pub async fn video_intelligence_run(app: AppHandle, job_id: String, request: Vid
     check_cancelled(&app, &job_id)?;
     if !registry.write_stdin(&key, &payload) { return Err(AppError::internal("Cannot send request to the video worker")); }
     let mut result = None;
+    let mut audio = audio::Collector::new(&request);
     let mut error = None;
     let mut stderr = String::new();
     let mut output_bytes: usize = 0;
@@ -161,6 +176,14 @@ pub async fn video_intelligence_run(app: AppHandle, job_id: String, request: Vid
                 }
                 let packet: serde_json::Value = serde_json::from_slice(&bytes)
                     .map_err(|_| AppError::invalid("The video worker returned an invalid response"))?;
+                if let Some(collector) = audio.as_mut() {
+                    if packet.get("type").and_then(|value| value.as_str()) != Some("error") {
+                        let (completed, total) = collector.push(packet)?;
+                        let _ = app.emit("video-intelligence-progress", VideoProgress { job_id: job_id.clone(),
+                            phase: "analyzing-audio".into(), completed, total });
+                        continue;
+                    }
+                }
                 match packet.get("type").and_then(|value| value.as_str()) {
                     Some("progress") => {
                         let phase = packet["phase"].as_str().unwrap_or("working");
@@ -185,6 +208,7 @@ pub async fn video_intelligence_run(app: AppHandle, job_id: String, request: Vid
                     log::warn!("Video worker failed: {}", super::truncate_utf8_bytes(&stderr, 2000));
                     return Err(AppError::invalid(format!("The local video worker stopped unexpectedly.{}", request.saved_work_note())));
                 }
+                if let Some(collector) = audio { return collector.finish(); }
                 return result.ok_or_else(|| AppError::invalid("The video worker returned no result"));
             },
             Some(CommandEvent::Error(_)) | None => return Err(AppError::invalid(format!("The video worker disconnected.{}", request.saved_work_note()))),
