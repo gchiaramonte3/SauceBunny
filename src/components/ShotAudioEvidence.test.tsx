@@ -15,6 +15,16 @@ const evidence: AudioEvidence = { analysis_id: "test", source: { path: "/clip.mp
   ] };
 
 describe("actual-audio evidence disclosure", () => {
+  it("renders compact AudioSet evidence without mutating scores or claiming a genre verdict", async () => {
+    const music = { ...evidence, labels: ["Electronic music", "Speech", "Music"],
+      windows: [{ start_us: 0, end_us: 2e6, rms: .2, peak: .5, status: "classified" as const, scores: [.3, .5, .8] }] };
+    render(<ShotAudioEvidence audio={{ status: "ready", evidence: music }} error="" busy={false} />);
+    expect(screen.getByText(/AudioSet suggestions need review/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Audio evidence · 1 window"));
+    await waitFor(() => expect(screen.getByText(/Music \(score 0.800\).*Speech.*Electronic music/)).toBeTruthy());
+    expect(screen.getByText(/Short windows have limited context/)).toBeTruthy();
+    expect(music.windows[0].scores).toEqual([.3, .5, .8]);
+  });
   it("keeps raw suggestions collapsed, labels uncertainty and seeks the actual relative window without changing its range", async () => {
     const onSeek = vi.fn();
     render(<ShotAudioEvidence audio={{ status: "ready", evidence }} error="" busy={false} onSeek={onSeek} />);

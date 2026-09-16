@@ -2,6 +2,21 @@
   "schema_version": 1,
   "models": [
     {
+      "id": "ast-audioset",
+      "role": "audio",
+      "name": "AudioSet AST",
+      "repo": "MIT/ast-finetuned-audioset-10-10-0.4593",
+      "revision": "f826b80d28226b62986cc218e5cec390b1096902",
+      "license": "BSD-3-Clause",
+      "files": [
+        { "name": "model.safetensors", "bytes": 346404948, "sha256": "ae0c1e2ad4e1381d851fa9bf298ba13ebc9c5a914cdee2dbe427a6583869924d" },
+        { "name": "config.json", "bytes": 26763, "sha256": "a93d525511d77e8ecc933d09674b85099815bbbb417c228a4edd655e252fb9ff" },
+        { "name": "preprocessor_config.json", "bytes": 297, "sha256": "8d04ba5a9c6fca5d39d0de2b1fd05ecf79deb589fbba279728bbebac39934231" },
+        { "name": "README.md", "bytes": 1165, "sha256": "dbc8ce1fc5abd1635d073640d8cb032901bfe264a5e06507f363f10a6112cfc8" }
+      ],
+      "bytes": 346433173
+    },
+    {
       "id": "qwen3-vl-embedding-2b",
       "role": "embedding",
       "name": "Qwen3-VL Embedding 2B",

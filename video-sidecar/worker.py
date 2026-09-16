@@ -14,6 +14,7 @@ from artifacts import MODELS, delete, download, model_spec, ready, require_model
 from index_store import IndexStore, source_identity, source_unchanged
 from media import Video, windows
 from shot_analysis import analyze_shots, inspect_source
+from audio_ast import MODEL_ID as AUDIO_MODEL
 
 VERSION = "1"
 EMBEDDING = "qwen3-vl-embedding-2b"
@@ -53,6 +54,9 @@ def load_model(root, model_id, memory):
     # implicit Hub download in a third-party loader.
     directory = require_model(root, model_id)
     progress("loading-model")
+    if model_id == AUDIO_MODEL:
+        from audio_ast import AudioSpectrogramClassifier
+        return AudioSpectrogramClassifier(directory, memory)
     from inference import Inference
     return Inference(directory, model_spec(model_id)["role"], memory)
 
@@ -170,6 +174,14 @@ def dispatch(root: Path, request: dict):
     if operation == "analyze-shots":
         return analyze_shots(local_path(request.get("path")), request,
                              lambda: load_model(models, REASONING, memory), progress)
+    if operation == "analyze-music":
+        # Require the explicit download even for silence/no-audio. Readiness is
+        # a receipt check only; the classifier itself stays lazy until needed.
+        require_model(models, AUDIO_MODEL)
+        from music_analysis import analyze_music
+        analyze_music(local_path(request.get("path")), request,
+                      lambda: load_model(models, AUDIO_MODEL, memory), emit)
+        return None  # Streaming operation already emitted its terminal packet.
     with contextlib.closing(IndexStore(root / "index")) as store:
         if operation == "sources":
             return {"sources": store.sources()}
@@ -215,7 +227,8 @@ def main():
             raise ValueError("Video Intelligence is already working. Stop it before starting another task.") from None
         with contextlib.redirect_stdout(sys.stderr):
             result = dispatch(root, request)
-    emit({"type": "result", **result})
+    if result is not None:
+        emit({"type": "result", **result})
 
 
 if __name__ == "__main__":

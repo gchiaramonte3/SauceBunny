@@ -60,6 +60,7 @@ export function useShotIntelligence(path: string | null, transcriptPath: string 
       if (!models?.models.some(model => model.id === "qwen3.5-9b-video" && model.ready)) {
         throw new Error("Download the local video reasoning model in Models before analyzing. No download starts automatically.");
       }
+      const musicModelReady = models.models.some(model => model.id === "ast-audioset" && model.ready);
       const prepared = await nativeRun({ operation: "prepare-shot-proxy", path });
       assertCurrent();
       if (!prepared?.scene_proxy) throw new Error("Could not prepare the analysis video. See the video runtime status below.");
@@ -99,12 +100,13 @@ export function useShotIntelligence(path: string | null, transcriptPath: string 
       // results if this decoder/classifier cannot analyze the source.
       update({ audio: { status: "analyzing" }, phase: "Analyzing source audio…", progress: null });
       try {
-        const response = await nativeRun({ operation: "analyze-audio", path: proxy.source.path,
+        const response = await nativeRun({ operation: musicModelReady ? "analyze-music" : "analyze-audio", path: proxy.source.path,
           source_sha256: proxy.source.sha256, analysis_id: evidence.id,
           origin_us: proxy.source.origin_us, duration_us: proxy.source.duration_us, audio_track_index: 0 });
         assertCurrent();
-        update({ audio: response?.audio_analysis
-          ? { status: "ready", evidence: createAudioEvidence(evidence, response.audio_analysis) }
+        const audio = musicModelReady ? response?.music_analysis : response?.audio_analysis;
+        update({ audio: audio
+          ? { status: "ready", evidence: createAudioEvidence(evidence, audio) }
           : { status: "unavailable", error: "" } });
       } catch (cause) {
         if (current()) update({ audio: { status: "unavailable", error: formatError(cause) } });

@@ -12,8 +12,8 @@
 
 """Offline float32 AST inference using existing MLX/NumPy, without PyTorch.
 
-Candidate adapter only: not registered as a downloadable app model or dispatched
-by the worker yet. Scores are independent sigmoid outputs, not genre certainty.
+Scores are independent sigmoid outputs, not genre certainty. The worker checks
+explicitly downloaded artifacts before loading this model.
 The caller must provide source-timed PCM and preserve actual window coverage.
 """
 from __future__ import annotations

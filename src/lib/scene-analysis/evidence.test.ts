@@ -37,8 +37,10 @@ describe("source-bound shot evidence", () => {
       windows: [{ start_us: 0, end_us: 3e6, rms: .1, peak: .2, status: "classified", classifications: [{ identifier: "music", score: .8 }] }] };
     const result = createAudioEvidence(scene, audio);
     audio.windows[0].classifications[0].score = .1;
-    expect(result.windows[0].classifications[0].score).toBe(.8);
-    expect(Object.isFrozen(result.windows[0].classifications[0])).toBe(true);
+    const window = result.windows[0];
+    if (!("classifications" in window)) throw new Error("Expected native audio evidence");
+    expect(window.classifications[0].score).toBe(.8);
+    expect(Object.isFrozen(window.classifications[0])).toBe(true);
     for (const wrong of [{ ...audio, analysis_id: "x" }, { ...audio, audio_track_index: 1 },
       ...[{ path: "/other.mp4" }, { sha256: "c".repeat(64) }, { origin_us: 0 }, { duration_us: 10 }]
         .map(change => ({ ...audio, source: { ...audio.source, ...change } }))]) {

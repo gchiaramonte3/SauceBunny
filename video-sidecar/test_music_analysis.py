@@ -1,5 +1,6 @@
 """Owned music-evidence lifecycle; synthetic video, no weights or network."""
 from pathlib import Path
+import base64
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -50,7 +51,8 @@ class MusicAnalysisTests(unittest.TestCase):
             analyze_music(self.path, self.request, self.factory, packets.append)
         self.factory.assert_not_called()
         self.assertEqual([p["status"] for p in packets], ["digital-silence", "insufficient-context", "decoded"])
-        self.assertTrue(all(p["classifications"] == [] for p in packets[:2]))
+        self.assertTrue(all(p["scores_f32le"] == "" for p in packets[:2]))
+        self.assertEqual(packets[-1]["labels"], [])
         audio.close.assert_called_once()
 
     def test_evidence_keeps_actual_ranges_and_one_owned_model(self):
@@ -67,7 +69,24 @@ class MusicAnalysisTests(unittest.TestCase):
         self.assertEqual(packets[-1]["source_sha256"], self.request["source_sha256"])
         self.assertEqual(packets[-1]["analysis_id"], self.request["analysis_id"])
         self.assertEqual(packets[-1]["windows"], 2)
-        self.assertEqual(packets[0]["classifications"][0], {"identifier": "Music", "score": .6})
+        self.assertEqual(packets[-1]["labels"], ["Music", "Speech"])
+        scores = np.frombuffer(base64.b64decode(packets[0]["scores_f32le"]), dtype="<f4")
+        np.testing.assert_array_equal(scores, np.array([.6, .3], dtype=np.float32))
+
+    def test_reordered_scores_use_the_shared_vocabulary_order(self):
+        self.engine.classify.return_value.reverse()
+        packets = []
+        with patch("music_analysis.Audio", return_value=self.fake_audio([self.row()])):
+            analyze_music(self.path, self.request, self.factory, packets.append)
+        scores = np.frombuffer(base64.b64decode(packets[0]["scores_f32le"]), dtype="<f4")
+        np.testing.assert_array_equal(scores, np.array([.6, .3], dtype=np.float32))
+
+    def test_cleanup_failure_cannot_publish_completion(self):
+        self.engine.close.side_effect = RuntimeError("model cleanup failed")
+        packets = []
+        with patch("music_analysis.Audio", return_value=self.fake_audio([self.row()])), self.assertRaisesRegex(RuntimeError, "cleanup"):
+            analyze_music(self.path, self.request, self.factory, packets.append)
+        self.assertEqual([p["type"] for p in packets], ["window"])
 
     def test_bad_identity_or_video_timing_is_rejected_before_loading(self):
         for changes in [{"source_sha256": "b" * 64}, {"analysis_id": "invalid"},

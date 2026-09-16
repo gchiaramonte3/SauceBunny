@@ -13,6 +13,15 @@ beforeEach(() => {
   mocks.invoke.mockResolvedValue({ models: [model], sources: [], hits: [], answers: [] });
 });
 afterEach(cleanup);
+it("offers the optional audio model through the same explicit download control", async () => {
+  mocks.invoke.mockResolvedValue({ models: [{ ...model, id: "ast-audioset", role: "audio", name: "AudioSet AST", bytes: 346433173 }], sources: [], hits: [], answers: [] });
+  render(<VideoIntelligenceSettings />);
+  await screen.findByText("AudioSet AST");
+  expect(screen.getByText(/Analyze music and sound/)).toBeTruthy();
+  expect(mocks.invoke.mock.calls.every(call => call[1]?.request?.operation === "models")).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Download" }));
+  await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("video_intelligence_run", expect.objectContaining({ request: { operation: "download", model_id: "ast-audioset" } })));
+});
 it("shows models in StrictMode without starting a download", async () => {
   render(<StrictMode><VideoIntelligenceSettings /></StrictMode>);
   await screen.findByText(model.name);

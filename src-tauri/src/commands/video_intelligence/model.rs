@@ -19,12 +19,14 @@ pub enum VideoRequest {
     AnalyzeShots { path: String, source_sha256: String, analysis_id: String, query: String, shots: Vec<VideoShot> },
     AnalyzeAudio { path: String, source_sha256: String, analysis_id: String,
         #[ts(type = "number")] origin_us: i64, #[ts(type = "number")] duration_us: u64, audio_track_index: u32 },
+    AnalyzeMusic { path: String, source_sha256: String, analysis_id: String,
+        #[ts(type = "number")] origin_us: i64, #[ts(type = "number")] duration_us: u64, audio_track_index: u32 },
 }
 impl VideoRequest {
     pub fn read_only(&self) -> bool { matches!(self, Self::Models {} | Self::Sources {}) }
     pub fn reasoning(&self) -> bool { matches!(self, Self::Reason { .. } | Self::AnalyzeShots { .. }) }
     pub fn native_audio(&self) -> bool { matches!(self, Self::AnalyzeAudio { .. }) }
-    pub fn heavy(&self) -> bool { self.reasoning() || self.native_audio() || matches!(self, Self::Index { .. } | Self::Search { .. } | Self::PrepareShotProxy { .. }) }
+    pub fn heavy(&self) -> bool { self.reasoning() || self.native_audio() || matches!(self, Self::Index { .. } | Self::Search { .. } | Self::PrepareShotProxy { .. } | Self::AnalyzeMusic { .. }) }
     pub fn saved_work_note(&self) -> &'static str {
         if matches!(self, Self::Index { .. }) { " Completed index segments are saved." } else { "" }
     }
@@ -36,7 +38,7 @@ impl VideoRequest {
         let valid = match self {
             Self::Models {} | Self::Sources {} => true,
             Self::Download { model_id } | Self::DeleteModel { model_id } => matches!(model_id.as_str(),
-                "qwen3-vl-embedding-2b" | "qwen3-vl-reranker-2b" | "qwen3.5-9b-video"),
+                "qwen3-vl-embedding-2b" | "qwen3-vl-reranker-2b" | "qwen3.5-9b-video" | "ast-audioset"),
             Self::Forget { source_key } => valid_key(source_key),
             Self::Index { paths } => !paths.is_empty() && paths.len() <= 2000 && paths.iter().all(|path|
                 path.len() <= 4096 && std::path::Path::new(path).is_absolute() && std::path::Path::new(path).is_file()),
@@ -50,7 +52,8 @@ impl VideoRequest {
                 && valid_key(source_sha256) && !source_sha256.bytes().any(|b| b.is_ascii_uppercase())
                 && valid_key(analysis_id) && !analysis_id.bytes().any(|b| b.is_ascii_uppercase())
                 && valid_query(query) && valid_shots(shots),
-            Self::AnalyzeAudio { path, source_sha256, analysis_id, origin_us, duration_us, .. } => valid_path(path)
+            Self::AnalyzeAudio { path, source_sha256, analysis_id, origin_us, duration_us, .. }
+            | Self::AnalyzeMusic { path, source_sha256, analysis_id, origin_us, duration_us, .. } => valid_path(path)
                 && valid_key(source_sha256) && !source_sha256.bytes().any(|b| b.is_ascii_uppercase())
                 && valid_key(analysis_id) && !analysis_id.bytes().any(|b| b.is_ascii_uppercase())
                 && (1..=MAX_SHOT_TIME_US).contains(duration_us) && origin_us.checked_add(*duration_us as i64).is_some(),
@@ -165,6 +168,24 @@ pub struct VideoAudioAnalysis {
     pub status: VideoAudioStatus, pub windows: Vec<VideoAudioWindow>,
 }
 
+/// Shared vocabulary avoids repeating 527 labels for every ten-second window.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct VideoMusicWindow {
+    #[ts(type = "number")] pub start_us: u64,
+    #[ts(type = "number")] pub end_us: u64,
+    pub rms: f64, pub peak: f64, pub status: VideoAudioWindowStatus,
+    pub scores: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct VideoMusicAnalysis {
+    pub analysis_id: String, pub source: VideoAnalysisSource, pub audio_track_index: u32,
+    pub classifier: String, pub os: String, pub preprocessing_version: String,
+    pub status: VideoAudioStatus, pub labels: Vec<String>, pub windows: Vec<VideoMusicWindow>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct VideoModel {
@@ -208,6 +229,8 @@ pub struct VideoResponse {
     #[ts(optional)] pub scene_proxy: Option<VideoSceneProxy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)] pub audio_analysis: Option<VideoAudioAnalysis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)] pub music_analysis: Option<VideoMusicAnalysis>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

@@ -7,6 +7,7 @@ failure/cancellation. This does not turn model scores into a genre verdict.
 from __future__ import annotations
 
 import contextlib
+import base64
 import math
 from pathlib import Path
 import platform
@@ -37,6 +38,7 @@ def analyze_music(path: Path, request: dict, engine_factory, emit):
             raise ValueError("The requested audio range does not match the inspected video")
     engine = None
     count = 0
+    labels = []
     try:
         with contextlib.closing(Audio(path, track, origin, duration)) as audio:
             with contextlib.closing(audio.windows()) as windows:
@@ -46,7 +48,7 @@ def analyze_music(path: Path, request: dict, engine_factory, emit):
                     peak = float(np.max(np.abs(window.pcm)))
                     # Accumulate energy in f64, avoiding f32 under/overflow.
                     rms = float(np.sqrt(np.mean(window.pcm.astype(np.float64) ** 2)))
-                    classifications = []
+                    encoded_scores = ""
                     if peak == 0:
                         status = "digital-silence"
                     elif len(window.pcm) < FRAME_SAMPLES:
@@ -54,27 +56,36 @@ def analyze_music(path: Path, request: dict, engine_factory, emit):
                     else:
                         if engine is None:
                             engine = engine_factory()
+                            labels = [engine.labels[str(index)] for index in range(len(engine.labels))]
                         scores = engine.classify(window.pcm)
                         if (len(scores) != len(engine.labels) or {row["label"] for row in scores} != set(engine.labels.values())
                                 or any(not isinstance(row["label"], str) or not row["label"]
                                     or not math.isfinite(row["score"]) or not 0 <= row["score"] <= 1 for row in scores)):
                             raise ValueError("The audio classifier returned invalid evidence")
-                        classifications = [{"identifier": row["label"], "score": row["score"]} for row in scores]
+                        # Preserve every model f32 exactly; repeating 527 label
+                        # strings per window would overwhelm long-run transport.
+                        by_label = {row["label"]: row["score"] for row in scores}
+                        encoded_scores = base64.b64encode(np.array([by_label[label] for label in labels],
+                            dtype="<f4").tobytes()).decode("ascii")
                         status = "classified"
                     if not source_unchanged(source):
                         raise ValueError("The video changed during audio analysis")
                     emit({"type": "window", "start_us": window.start_us, "end_us": window.end_us,
-                        "rms": rms, "peak": peak, "status": status, "classifications": classifications})
+                        "rms": rms, "peak": peak, "status": status, "scores_f32le": encoded_scores})
                     count += 1
             maximum_retained_samples = audio.maximum_retained_samples
             status = "no-audio" if audio.stream is None else "decoded"
         # A full second hash also catches same-size/timestamp replacement.
         if source_identity(path) != source:
             raise ValueError("The video changed during audio analysis")
+        if engine is not None:
+            engine.close()
+            engine = None
         emit({"type": "complete", "analysis_id": request["analysis_id"], "source_sha256": source["sha256"],
             "origin_us": origin, "duration_us": duration, "audio_track_index": track,
             "classifier": CLASSIFIER, "os": platform.platform(), "preprocessing_version": PREPROCESSING,
-            "status": status, "windows": count, "maximum_retained_frames": maximum_retained_samples})
+            "status": status, "windows": count, "maximum_retained_frames": maximum_retained_samples,
+            "labels": labels})
     finally:
         if engine is not None:
             engine.close()

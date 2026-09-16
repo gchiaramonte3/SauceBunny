@@ -10,6 +10,7 @@ const descriptions: Record<string, string> = {
   embedding: "Find moments by what’s on screen.",
   reranker: "Refine the closest matches. Optional.",
   reasoning: "Describe selected moments.",
+  audio: "Analyze music and sound. Optional. Classifier suggestions need review.",
 };
 const size = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
@@ -60,7 +61,7 @@ export function VideoIntelligenceSettings() {
     {error && <p className="cp-settings-note" role="alert">{error}</p>}
     <CollapsibleSection id="video-details" label="Details" open={details} onToggle={() => setDetails(!details)}>
       <p className="cp-settings-note tight">Choose videos in Library, then open Video Intelligence. Index only what you select. Stop keeps completed work.</p>
-      <p className="cp-settings-note tight">Apple Silicon required. Search needs 16 GB of memory; video descriptions need 24 GB.</p>
+      <p className="cp-settings-note tight">Apple Silicon required. Search and AudioSet analysis need 16 GB of memory; video descriptions need 24 GB.</p>
       <p className="cp-settings-note tight">Downloads need internet. Analysis stays local; it does not identify people or replace transcription. Existing transcripts can provide dialogue context.</p>
       <p className="cp-settings-note tight">Playback and transcription take priority. If text AI is loaded, finish your conversation before freeing its memory for video.</p>
       <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => {

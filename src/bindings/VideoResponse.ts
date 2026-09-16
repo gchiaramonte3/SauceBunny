@@ -4,8 +4,9 @@ import type { VideoAnswer } from "./VideoAnswer";
 import type { VideoAudioAnalysis } from "./VideoAudioAnalysis";
 import type { VideoHit } from "./VideoHit";
 import type { VideoModel } from "./VideoModel";
+import type { VideoMusicAnalysis } from "./VideoMusicAnalysis";
 import type { VideoSceneProxy } from "./VideoSceneProxy";
 import type { VideoShotAnalysis } from "./VideoShotAnalysis";
 import type { VideoSource } from "./VideoSource";
 
-export type VideoResponse = { models: Array<VideoModel>, sources: Array<VideoSource>, hits: Array<VideoHit>, answers: Array<VideoAnswer>, analysis_source?: VideoAnalysisSource, shot_analysis?: VideoShotAnalysis, scene_proxy?: VideoSceneProxy, audio_analysis?: VideoAudioAnalysis, };
+export type VideoResponse = { models: Array<VideoModel>, sources: Array<VideoSource>, hits: Array<VideoHit>, answers: Array<VideoAnswer>, analysis_source?: VideoAnalysisSource, shot_analysis?: VideoShotAnalysis, scene_proxy?: VideoSceneProxy, audio_analysis?: VideoAudioAnalysis, music_analysis?: VideoMusicAnalysis, };

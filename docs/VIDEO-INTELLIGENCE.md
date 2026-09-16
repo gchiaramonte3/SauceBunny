@@ -290,7 +290,7 @@ decoder limitations and remaining integration gates. Follow-up comparison matche
 the converted CLAP model to the pinned original inference components, but its
 current prompts still performed poorly on tested public audio. A supervised
 AudioSet AST candidate separated these smoke controls more usefully. Its
-unregistered MLX adapter matched the PyTorch reference over 24 windows, with
+MLX adapter matched the PyTorch reference over 24 windows, with
 identical preprocessing; this is numerical parity, not classification accuracy.
 The experimental `audio_pcm.py` / `music_analysis.py` path now decodes a selected
 audio stream in-process, preserves source anchors and gaps, and feeds bounded
@@ -300,9 +300,15 @@ flush the resampler instead of being joined. Generated AAC edit-list/gap cases,
 fractional origins, cancellation and source-replacement tests cover this path.
 The reviewed 23.5-second scene fixture produced three actual-audio AST windows;
 their scores remain uncalibrated evidence, not a genre verdict.
-No audio model or dependency was added to the installed app. Worker dispatch,
-model management, classification policy, music integration and packaged
-validation remain open.
+The model catalog now offers an explicit AudioSet AST download. Once its verified
+receipt is ready, the feature-flagged controller uses the owned `analyze-music`
+worker instead of the native audio classifier. No download starts during analysis.
+All 527 scores are retained as compact float32 vectors with one shared vocabulary;
+Rust validates the streamed evidence and clean process exit before adoption.
+The existing disclosure shows ranked raw suggestions, not a calibrated verdict.
+No audio model or dependency was added to the installed app. Existing frozen
+workers must be rebuilt; classification policy, durable audio results and
+packaged lifecycle validation remain open.
 
 ### Native audio evidence transport (internal, September 16)
 

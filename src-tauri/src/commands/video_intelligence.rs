@@ -177,7 +177,7 @@ pub async fn video_intelligence_run(app: AppHandle, job_id: String, request: Vid
                 let packet: serde_json::Value = serde_json::from_slice(&bytes)
                     .map_err(|_| AppError::invalid("The video worker returned an invalid response"))?;
                 if let Some(collector) = audio.as_mut() {
-                    if packet.get("type").and_then(|value| value.as_str()) != Some("error") {
+                    if !matches!(packet.get("type").and_then(|value| value.as_str()), Some("error" | "progress")) {
                         let (completed, total) = collector.push(packet)?;
                         let _ = app.emit("video-intelligence-progress", VideoProgress { job_id: job_id.clone(),
                             phase: "analyzing-audio".into(), completed, total });

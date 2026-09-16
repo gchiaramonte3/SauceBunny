@@ -7,10 +7,18 @@ from unittest.mock import patch
 
 import numpy as np
 
-from audio_ast import AudioSpectrogramClassifier, FRAME_SAMPLES, WINDOW_SAMPLES, prepare_features
+from audio_ast import AudioSpectrogramClassifier, FRAME_SAMPLES, WINDOW_SAMPLES, prepare_features, MODEL_ID, MODEL_REVISION, FILES
+from artifacts import model_spec
 
 
 class AudioAstTests(unittest.TestCase):
+    def test_download_catalog_matches_the_exact_adapter_artifacts(self):
+        spec = model_spec(MODEL_ID)
+        self.assertEqual(spec["revision"], MODEL_REVISION)
+        self.assertEqual(spec["role"], "audio")
+        self.assertEqual(spec["bytes"], sum(item["bytes"] for item in spec["files"]))
+        self.assertEqual({item["name"]: item["sha256"] for item in spec["files"] if item["name"] in FILES}, FILES)
+
     def test_invalid_pcm_is_rejected_before_loading_inference_dependencies(self):
         invalid = [np.zeros(FRAME_SAMPLES - 1), np.zeros(WINDOW_SAMPLES + 1),
                    np.zeros((2, FRAME_SAMPLES)), np.full(FRAME_SAMPLES, np.nan),

@@ -236,7 +236,11 @@ unverified evidence. Music-presence policy and style inference remain unvalidate
   Run them with `npm run test:video`; provide `AUDIO_TEST_FFMPEG` to enable the
   real AAC fixtures. A rebuilt scratch LGPL runtime analyzed the reviewed
   23.5-second scene fixture into windows [0, 10), [10, 20), [20, 23.5) seconds.
-  This path is not yet dispatched by the app or registered in its model catalog.
+  The model catalog now offers an explicit download; the feature-flagged AI
+  Summary controller selects this worker when the verified receipt is ready,
+  otherwise retaining native audio evidence. It never downloads during analysis.
+  The compact wire format retains all 527 float32 scores with one vocabulary,
+  and the Rust collector rejects incomplete or mismatched evidence.
   Existing frozen runtimes must be rebuilt against the changed decoder recipe;
   scratch success is not packaged-app validation.
 - `SNAudioFileAnalyzer` raised an uncaught Objective-C exception on the MP4

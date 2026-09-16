@@ -918,19 +918,24 @@ window ranges and unverified classifier suggestions, not inferred music genres.
 Music calibration, durable audio results and packaged validation remain rollout
 gates.
 
-An unregistered AST candidate (`video-sidecar/audio_ast.py`) performs local
-MLX/NumPy classification against checksum-pinned AudioSet weights. Developer-only
-parity scripts live in `scripts/music-analysis/`; neither the worker dispatcher
-nor the model catalog loads it. Numerical parity is verified on smoke fixtures,
-not music accuracy. `audio_pcm.py` now supplies bounded ten-second, 16 kHz mono
+The optional AST candidate (`video-sidecar/audio_ast.py`) performs local
+MLX/NumPy classification against checksum-pinned AudioSet weights. Settings offers
+an explicit download; the feature-flagged controller selects `analyze-music` when
+its receipt is ready, otherwise retaining the native `analyze-audio` path. Both
+use the same owned job and Stop/source-generation checks. Developer-only parity
+scripts live in `scripts/music-analysis/`; numerical parity is verified on smoke
+fixtures, not music accuracy. `audio_pcm.py` supplies bounded ten-second, 16 kHz mono
 windows through PyAV's in-process resampler. Decoded PTS validate each contiguous
 region before an exact sample clock removes container quantization; original
 anchors, gaps and unpadded tails remain source-timed. `music_analysis.py` owns the
 decoder and model, streams evidence, and emits completion only after a second
-source hash. Failure or cancellation closes both without a completion packet.
-The LGPL decoder recipe enables the required audio filters. Dispatcher/model
-management, interpretation policy and packaged lifecycle validation remain open;
-the experimental path is not activated in the app.
+source hash and successful model cleanup. Failure or cancellation cannot publish
+an adoptable result. The transport preserves all 527 float32 scores per window,
+with one shared vocabulary; Rust validates identity, coverage and the complete
+stream before returning immutable frontend evidence. The LGPL decoder recipe
+enables the required audio filters. Existing frozen workers need rebuilding.
+Interpretation policy and packaged lifecycle validation remain open; this source
+checkpoint does not update the installed app or enable the feature flag.
 
 ## Tone-card design grammar (shell v3)
 

@@ -119,6 +119,18 @@ describe("shot analysis ownership", () => {
 });
 
 describe("optional source audio", () => {
+  it("uses the installed music model without downloading or running two audio classifiers", async () => {
+    const original = mocks.run.getMockImplementation()!;
+    const music = { ...audio, labels: [] };
+    mocks.run.mockImplementation(request => request.operation === "models"
+      ? Promise.resolve({ models: [...models.models, { id: "ast-audioset", ready: true }] })
+      : request.operation === "analyze-music" ? Promise.resolve({ music_analysis: music }) : original(request));
+    const { result } = renderHook(() => useShotIntelligence("/clip.mp4", null));
+    await act(() => result.current.start());
+    expect(mocks.run.mock.calls.map(call => call[0].operation)).toEqual(["models", "prepare-shot-proxy", "inspect-video", "analyze-shots", "analyze-music"]);
+    expect(mocks.audioCreate).toHaveBeenCalledWith(evidence, music);
+    expect(result.current.audio).toEqual({ status: "ready", evidence: music });
+  });
   function holdAudio() {
     const gate = deferred<unknown>();
     const original = mocks.run.getMockImplementation()!;

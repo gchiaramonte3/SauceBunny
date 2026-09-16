@@ -42,6 +42,24 @@ def make_video(path, seconds=2, fps=Fraction(24000, 1001)):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_music_request_never_downloads_or_imports_mlx_without_receipt(self):
+        import sys
+        with tempfile.TemporaryDirectory() as folder, patch.dict(sys.modules, {"mlx.core": None}), \
+                patch("worker.download") as download:
+            with self.assertRaisesRegex(ValueError, "Download AudioSet AST"):
+                dispatch(Path(folder), {"operation": "analyze-music"})
+            download.assert_not_called()
+
+    def test_music_stream_dispatch_has_no_second_result_or_index(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "fixture.mp4"
+            make_video(path)
+            request = {"operation": "analyze-music", "path": str(path)}
+            with patch("worker.require_model"), patch("music_analysis.analyze_music") as analyze, patch("worker.IndexStore") as store:
+                self.assertIsNone(dispatch(Path(folder), request))
+                self.assertEqual(analyze.call_args.args[:2], (path.resolve(), request))
+                store.assert_not_called()
+
     def test_tauri_resource_copy_preserves_inventory(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder) / "runtime"
