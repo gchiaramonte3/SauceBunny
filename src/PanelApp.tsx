@@ -55,6 +55,7 @@ type ActionKind =
   | "importTranscript"
   | "transcriptEdited"
   | "openAiSettings"
+  | "openVideoSettings"
   | "chaptersChanged";
 
 function sendAction(kind: ActionKind, payload?: unknown) {
@@ -217,6 +218,9 @@ export default function PanelApp() {
         aiModelId={state.aiModelId}
         aiStyle={state.aiStyle}
         onOpenAiSettings={() => sendAction("openAiSettings")}
+        aiVideoPath={state.programInputActive ? null : state.aiVideoPath}
+        aiForegroundBusy={state.aiForegroundBusy}
+        onOpenVideoSettings={() => sendAction("openVideoSettings")}
         /* Auto-chapters: the panel's AI tab saves to the SHARED localStorage
            itself; this action only tells main to re-read for its timeline. */
         chapterSourceKey={state.chapterSourceKey}

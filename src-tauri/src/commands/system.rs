@@ -1563,7 +1563,7 @@ pub fn default_export_path(app: AppHandle) -> Result<String, crate::AppError> {
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-09-16-shot-analysis";
+pub const BACKEND_BUILD_ID: &str = "2026-09-16-shot-proxy";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

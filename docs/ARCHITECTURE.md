@@ -259,9 +259,15 @@ window only serves compressed native filesystem ranges through the existing
 typed IPC commands. Terminal messages acknowledge cleanup, and run IDs isolate
 late results. The reference detector is distinct from the native video worker's
 sampled semantic-retrieval index: only full-frame boundaries may establish a
-shot count. AI Summary wiring, standardized proxy/time-map production and durable
-evidence adoption are not complete. See `docs/VIDEO-INTELLIGENCE.md` for tested
-browser surfaces and rollout gates.
+shot count. The internally flagged AI Summary path prepares a 540p H.264 proxy
+in the owned native worker, verifies every presentation timestamp after encoding,
+and compares the browser's full decoded-PTS digest before adopting boundaries.
+Versioned proxy/source mapping and immutable detector evidence are saved before
+model reasoning. `useShotIntelligence` owns source/transcript generations and
+Stop across preparation, detection, persistence and bounded native shot batches.
+The existing text conversation stays mounted across the compact mode switch.
+This is not yet enabled by default. See `docs/VIDEO-INTELLIGENCE.md` for tested
+browser surfaces and remaining rollout gates.
 
 ## Local AI: one transcript ingestion, shared by every feature
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# A narrow LGPL-only decoder for the Python worker. No vendor GPL wheel libs.
+# LGPL-only media libraries for local decoding and Apple's H.264 proxy encoder.
+# No vendor GPL wheel libs and no external child encoder to orphan on Stop.
 set -euo pipefail
 : "${VIDEO_BUILD_DIR:?Use the isolated video build directory}"
 export MACOSX_DEPLOYMENT_TARGET=14.0
@@ -16,7 +17,8 @@ cd "${DECODER_DIR}/ffmpeg-8.0.3"
   --extra-cflags=-mmacosx-version-min=14.0 --extra-ldflags=-mmacosx-version-min=14.0 \
   --enable-shared --disable-static --enable-pic --disable-autodetect --disable-gpl --disable-nonfree \
   --disable-network --disable-programs --disable-doc --disable-debug --disable-indevs --disable-outdevs \
-  --disable-encoders --enable-encoder=mpeg4 --disable-muxers --enable-muxer=mp4 --disable-filters
+  --disable-encoders --enable-encoder=mpeg4,h264_videotoolbox --enable-videotoolbox \
+  --disable-muxers --enable-muxer=mp4 --disable-filters
 # Reused scratch directories must not link objects from a newer deployment OS.
 make clean
 make -j8

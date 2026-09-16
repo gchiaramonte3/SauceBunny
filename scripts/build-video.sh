@@ -25,7 +25,7 @@ PIP_DISABLE_PIP_VERSION_CHECK=1 "${BUILD_PYTHON}" -m pip install --force-reinsta
 export VIDEO_BUILD_DIR
 bash "${ROOT_DIR}/scripts/build-video-decoder.sh"
 bash "${ROOT_DIR}/scripts/build-video-pyav.sh"
-(cd "${ROOT_DIR}/video-sidecar" && "${BUILD_PYTHON}" -m unittest test_worker)
+(cd "${ROOT_DIR}/video-sidecar" && VIDEO_TEST_H264_PROXY=1 "${BUILD_PYTHON}" -m unittest discover -p 'test_*.py')
 "${BUILD_PYTHON}" "${ROOT_DIR}/video-sidecar/collect_notices.py" "${VIDEO_BUILD_DIR}/notices"
 export PYINSTALLER_CONFIG_DIR="${VIDEO_BUILD_DIR}/pyinstaller-cache"
 COMMON=(--noconfirm --clean --console --target-architecture arm64 --onedir --name saucebunny-video

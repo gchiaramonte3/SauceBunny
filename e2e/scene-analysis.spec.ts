@@ -50,6 +50,18 @@ test.describe("reviewed full-frame fixture", () => {
       return { result, reads, largestRead };
     });
     expect(result.result.source.frameCount).toBe(705);
+    expect(result.result.source.ptsSha256).toMatch(/^[a-f0-9]{64}$/);
+    if (process.env.SCENE_PROXY_MANIFEST) {
+      const manifest = JSON.parse(readFileSync(process.env.SCENE_PROXY_MANIFEST, "utf8"));
+      expect(result.result.source.ptsSha256).toBe(manifest.pts_sha256);
+      const evidence = await page.evaluate(async ({ manifest, detection }) => {
+        const url = "/src/lib/scene-analysis/evidence.ts";
+        const { createSceneEvidence }: typeof import("../src/lib/scene-analysis/evidence") = await import(url);
+        const result = await createSceneEvidence(manifest, detection, []);
+        return { shots: result.shots.length, start: result.shots[0].start_us, end: result.shots.at(-1)!.end_us };
+      }, { manifest, detection: result.result });
+      expect(evidence).toEqual({ shots: 12, start: 0, end: 23500000 });
+    }
     expect(result.result.boundaries.map(cut => cut.afterFrameIndex)).toEqual(expectedCuts);
     expect(result.result.analysis.config.sensitivity).toBe(95);
     expect(result.result.analysis.libraryVersion).toBe("1.52.3");

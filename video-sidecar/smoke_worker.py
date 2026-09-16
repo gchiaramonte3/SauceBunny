@@ -84,6 +84,22 @@ def main():
     assert found["hits"] and all(hit["path"] == str(movie.resolve()) for hit in found["hits"])
     answer = request({"operation": "reason", "query": "What color fills these frames?", "segments": [found["hits"][0]["id"]], "transcripts": {}}, "reason")
     assert answer["answers"] and "blue" in answer["answers"][0]["text"].lower()
+    proxy = request({"operation": "prepare-shot-proxy", "path": str(movie.resolve())}, "shot_proxy")["scene_proxy"]
+    inspection = request({"operation": "inspect-video", "path": str(movie.resolve())}, "shot_source")["analysis_source"]
+    assert proxy["source"] == inspection and proxy["frame_count"] == 336
+    # This generated fixture changes color at source frame 24 (1.001 s).
+    # The browser fixture tests separately establish the real cut detector.
+    shots = [{"id": 1, "start_us": 0, "end_us": 1_001_000, "transcript": "A supplied test line."},
+             {"id": 2, "start_us": 1_001_000, "end_us": inspection["duration_us"], "transcript": ""}]
+    described = request({"operation": "analyze-shots", "path": str(movie.resolve()),
+                         "source_sha256": inspection["sha256"], "analysis_id": "a" * 64,
+                         "query": "What color fills each supplied shot? Keep supplied text separate from visual observations.",
+                         "shots": shots}, "shot_descriptions")["shot_analysis"]
+    assert described["audio_analyzed"] is False and len(described["shots"]) == 2
+    for supplied, result, color in zip(shots, described["shots"], ["red", "blue"]):
+        assert all(result[key] == value for key, value in supplied.items())
+        assert color in result["text"].lower()
+        assert all(supplied["start_us"] <= pts < supplied["end_us"] for pts in result["frame_pts_us"])
     args.output.joinpath("evidence.json").write_text(json.dumps(evidence, indent=2))
     print(json.dumps({key: value.get("seconds") for key, value in evidence.items()}, indent=2))
 

@@ -70,6 +70,8 @@ export type PanelSnapshot = {
   /** AI Summary: chosen model + output style, mirrored so the popped-out
    *  panel's AI tab uses the same model/style as the docked view. */
   aiModelId: string;
+  aiVideoPath: string | null;
+  aiForegroundBusy: boolean;
   aiStyle: {
     format: "bullets" | "numbered" | "prose";
     length: "brief" | "standard" | "detailed";
@@ -100,6 +102,7 @@ export type PanelHandlers = {
   onTranscriptEdited: () => void;
   /** Panel asked to manage AI models — main opens Settings → AI Summary. */
   onOpenAiSettings: () => void;
+  onOpenVideoSettings?: () => void;
   /** Panel generated/deleted chapters (already saved to the shared
    *  localStorage) — main re-reads so its timeline markers update. */
   onChaptersChanged: () => void;
@@ -145,6 +148,8 @@ export function coercePanelSnapshot(parsed: unknown): PanelSnapshot {
     // Both are read straight through by children, so neither may arrive as
     // undefined or as the wrong kind of thing.
     queue: Array.isArray(p.queue) ? p.queue : INITIAL_SNAPSHOT.queue,
+    aiVideoPath: !p.programInputActive && typeof p.aiVideoPath === "string" ? p.aiVideoPath : null,
+    aiForegroundBusy: p.aiForegroundBusy === true,
     aiStyle: p.aiStyle && typeof p.aiStyle === "object"
       ? { ...INITIAL_SNAPSHOT.aiStyle, ...p.aiStyle }
       : INITIAL_SNAPSHOT.aiStyle,
@@ -171,6 +176,8 @@ export function panelSnapshotsEqual(a: PanelSnapshot, b: PanelSnapshot): boolean
     a.canRegenerate === b.canRegenerate &&
     a.hasSource === b.hasSource &&
     a.aiModelId === b.aiModelId &&
+    a.aiVideoPath === b.aiVideoPath &&
+    a.aiForegroundBusy === b.aiForegroundBusy &&
     a.aiStyle.format === b.aiStyle.format &&
     a.aiStyle.length === b.aiStyle.length &&
     a.chapterSourceKey === b.chapterSourceKey &&
@@ -214,6 +221,8 @@ export const INITIAL_SNAPSHOT: PanelSnapshot = {
   canRegenerate: false,
   hasSource: false,
   aiModelId: "qwen3-4b-instruct",
+  aiVideoPath: null,
+  aiForegroundBusy: false,
   aiStyle: { format: "bullets", length: "standard" },
   chapterSourceKey: null,
   durationSec: null,
@@ -405,6 +414,8 @@ export function usePanelBus({
           () => handlersRef.current.onTranscriptEdited()),
         listen("panel:action:openAiSettings",
           () => handlersRef.current.onOpenAiSettings()),
+        listen("panel:action:openVideoSettings",
+          () => handlersRef.current.onOpenVideoSettings?.()),
         listen("panel:action:chaptersChanged",
           () => handlersRef.current.onChaptersChanged()),
       ]);

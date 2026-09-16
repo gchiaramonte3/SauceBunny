@@ -61,6 +61,8 @@ export interface SceneAnalysisResult {
     width: number;
     height: number;
     frameCount: number;
+    /** SHA-256 of every decoded PTS as signed little-endian 64-bit µs. */
+    ptsSha256: string;
   };
   analysis: {
     library: 'mediabunny';
@@ -244,6 +246,12 @@ export async function analyzeSceneBoundaries({
     throwIfAborted(signal);
     onProgress?.({ phase: 'detect', progress: 0.96, label: 'Finalizing boundaries' });
     const detection = detector.finalize();
+    const ptsBytes = new ArrayBuffer(framePtsUs.length * 8);
+    const ptsView = new DataView(ptsBytes);
+    framePtsUs.forEach((pts, index) => ptsView.setBigInt64(index * 8, BigInt(pts), true));
+    const ptsDigest = new Uint8Array(await crypto.subtle.digest('SHA-256', ptsBytes));
+    throwIfAborted(signal);
+    const ptsSha256 = Array.from(ptsDigest, byte => byte.toString(16).padStart(2, '0')).join('');
     const elapsedMs = performance.now() - startedAt;
     const elapsedSeconds = Math.max(0.001, elapsedMs / 1_000);
 
@@ -263,6 +271,7 @@ export async function analyzeSceneBoundaries({
         width,
         height,
         frameCount: processed,
+        ptsSha256,
       },
       analysis: {
         library: 'mediabunny',

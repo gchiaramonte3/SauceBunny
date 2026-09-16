@@ -134,6 +134,9 @@ type Props = {
   aiStyle?: SummaryStyle;
   /** Open Settings → AI Summary (manage/download/switch the model). */
   onOpenAiSettings?: () => void;
+  aiVideoPath?: string | null;
+  aiForegroundBusy?: boolean;
+  onOpenVideoSettings?: () => void;
   /** Auto-chapters: source identity to persist under (main's reviewSourceKey —
    *  the panel receives it through the bus snapshot). */
   chapterSourceKey?: string | null;
@@ -274,7 +277,7 @@ export function QueueDrawer({
   onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
   transcriptHasSource, onTranscriptEdited,
-  aiModelId, aiStyle, onOpenAiSettings,
+  aiModelId, aiStyle, onOpenAiSettings, aiVideoPath, aiForegroundBusy, onOpenVideoSettings,
   chapterSourceKey, chapterDurationSec, onChaptersChanged, sourceDescription,
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
@@ -1092,6 +1095,9 @@ export function QueueDrawer({
           selectedModelId={aiModelId}
           style={aiStyle}
           onOpenSettings={onOpenAiSettings}
+          videoPath={aiVideoPath ?? null}
+          videoForegroundBusy={aiForegroundBusy}
+          onOpenVideoSettings={onOpenVideoSettings}
           onSeek={onTranscriptSeek}
           sourceKey={chapterSourceKey ?? null}
           sourceDescription={sourceDescription ?? null}

@@ -192,16 +192,79 @@ SCENE_BROWSER=webkit SCENE_REVIEWED_FIXTURE=/absolute/path/to/the-reviewed-fixtu
 The fixture cases are explicitly skipped when that path is absent; the ordinary
 suite still runs the malformed-media worker case. No user library is scanned.
 
-### Rollout status: incomplete, not exposed to users yet
+### Connected preview path, September 16
 
-The worker and native `inspect-video` / `analyze-shots` operations are implemented,
-but the AI Summary Text / Advanced Intelligence switch is not connected yet.
-Required next work is standardized 360p–540p proxy production with a verified,
-versioned source-time map, immutable machine-result persistence, panel/source
-ownership, transcript-to-shot association, and the actual UI. A model description
-must never invent the supplied shot boundary or move playback to an invented
-timestamp. The resident text model must not be silently evicted. Explicit model
-downloads and playback/transcription priority remain in effect.
+The small Text / Advanced Intelligence switch now connects to the actual
+detector and native shot reasoning operation. Existing text conversation and
+draft state stay mounted; a mode change aborts text prompt pre-warming, but does
+not silently unload the resident text model. Model readiness is checked before
+proxy preparation, and missing weights require an explicit download in Models.
+Source changes, transcript replacements, unmount, and Stop invalidate callbacks
+across every asynchronous phase. Detached panels receive the completed local
+source path through the existing panel bus; live program inputs withhold it.
+
+`prepare-shot-proxy` produces H.264/yuv420p at at most 960×540, without upscaling.
+Apple's VideoToolbox encoder runs in the owned Python process through the pinned
+LGPL media libraries; there is no child encoder to orphan on Stop. Every frame
+uses its actual source-relative integer-microsecond PTS, including VFR. A second
+full decode must match the original frame count and SHA-256 of every signed
+little-endian int64 PTS. The browser computes that same digest over its complete
+MediaBunny iterator before accepting the versioned mapping. This protects the
+bridge against differences in demuxing as well as encoder drops or duplication.
+The source is content-hashed again before model analysis. A nonzero first frame
+relative to the declared origin is rejected explicitly; complex edit lists are
+not silently approximated. The implementation follows PyAV's documented
+[rational stream/codec clocks](https://pyav.org/docs/stable/api/time.html).
+
+Proxies are content/version-addressed under the owned `scene-proxies` directory.
+Only a verified complete directory is published. Proxy size is bounded at 2 GiB
+and frame metadata at 3,000,000 frames. PTS hashing adds eight bytes per decoded
+frame temporarily to the browser's existing timing array; this is not constant
+total memory. A hard-killed process may leave an unpublished staging directory;
+it is never reused. Cache-wide quota/cleanup and long-form soak remain open.
+
+Immutable detector evidence, proxy identity and time-map version are committed
+to the `sauce-scene-evidence` IndexedDB store before model descriptions start.
+Editable/model text cannot mutate that evidence. Cues crossing a cut appear in
+both adjacent shots without invented word timings. Full supplied text is kept;
+per-shot model context is explicitly marked when limited to 12 KB. Requests are
+batched under both the 64-shot and native JSON-size ceilings. Native answers must
+return the same IDs, ranges, transcript and source identity. Eleven detector cuts
+therefore mean twelve shots regardless of anything the model writes.
+
+The generated 540p reviewed fixture passed in real Chrome and Playwright WebKit:
+705 frames, the exact eleven reviewed indices, matching native/browser PTS
+digests, twelve mapped shots, typed failure checks and Stop under one second.
+The compact 440px panel test verifies draft/conversation retention, no implicit
+download, and live-input exclusion. Native proxy tests include actual fractional
+frame rates; VFR/nonzero-origin coverage is in the explicit hardware test gate.
+
+The rebuilt frozen worker also passed the network-denied generated-footage
+smoke with existing model weights and `/usr/bin:/bin` only. It prepared a
+336-frame proxy, re-inspected its source, and described two supplied shots with
+Qwen while preserving IDs, source-relative ranges and supplied transcript text.
+Observed once on this development Mac: proxy 0.45 s, source inspection 0.14 s,
+two-shot reasoning 5.48 s, cold-load process Stop 4.4 ms. These are single smoke
+observations, not p95 targets, minimum-hardware results or WKWebView certification.
+All 36 native worker tests passed with actual H.264 hardware tests enabled,
+including VFR and a nonzero source origin. The recipe and 201 bundled Mach-O
+files passed self-containment, signature and macOS 14 deployment-floor checks.
+
+Full frontend rerun: 4,301 passed, 2 skipped. Full Rust rerun: 746 passed, 28
+ignored. The first complete verification run exposed new styling-contract
+violations (corrected) and an unrelated OBS pipe-EOF race (`WouldBlock`); that
+untouched native test passed in the full rerun. The full browser suite passed
+453 tests, with its opt-in cases reported separately. This records the actual
+sequence rather than claiming the first full verification invocation was green.
+
+### Rollout status: incomplete, internal opt-in only
+
+The switch is hidden by default. Internal validation enables
+`localStorage["saucebunny.shotIntelligence.preview"] = "1"` before opening the
+panel; this is not a new end-user settings workflow. Remove that key to retain
+the original text-only UI. The newly pinned native runtime must be rebuilt with
+`scripts/build-video.sh`; an older frozen worker cannot serve the new operation.
+Model descriptions are currently session results, not a durable report export.
 
 Do not enable the user-facing path before its source-change/Stop races and
 packaged WKWebView behavior are verified. Minimum-laptop p95 throughput,

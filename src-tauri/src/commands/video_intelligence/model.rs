@@ -15,12 +15,13 @@ pub enum VideoRequest {
     Search { query: String, scope: Vec<String>, rerank: bool },
     Reason { query: String, segments: Vec<u32>, transcripts: std::collections::HashMap<String, String> },
     InspectVideo { path: String },
+    PrepareShotProxy { path: String },
     AnalyzeShots { path: String, source_sha256: String, analysis_id: String, query: String, shots: Vec<VideoShot> },
 }
 impl VideoRequest {
     pub fn read_only(&self) -> bool { matches!(self, Self::Models {} | Self::Sources {}) }
     pub fn reasoning(&self) -> bool { matches!(self, Self::Reason { .. } | Self::AnalyzeShots { .. }) }
-    pub fn heavy(&self) -> bool { self.reasoning() || matches!(self, Self::Index { .. } | Self::Search { .. }) }
+    pub fn heavy(&self) -> bool { self.reasoning() || matches!(self, Self::Index { .. } | Self::Search { .. } | Self::PrepareShotProxy { .. }) }
     pub fn saved_work_note(&self) -> &'static str {
         if matches!(self, Self::Index { .. }) { " Completed index segments are saved." } else { "" }
     }
@@ -41,7 +42,7 @@ impl VideoRequest {
             Self::Reason { query, segments, transcripts } => valid_query(query) && !segments.is_empty()
                 && segments.len() <= 4 && segments.iter().all(|id| *id > 0)
                 && transcripts.len() <= 4 && transcripts.values().all(|text| text.len() <= 12000),
-            Self::InspectVideo { path } => valid_path(path),
+            Self::InspectVideo { path } | Self::PrepareShotProxy { path } => valid_path(path),
             Self::AnalyzeShots { path, source_sha256, analysis_id, query, shots } => valid_path(path)
                 && valid_key(source_sha256) && !source_sha256.bytes().any(|b| b.is_ascii_uppercase())
                 && valid_key(analysis_id) && !analysis_id.bytes().any(|b| b.is_ascii_uppercase())
@@ -84,6 +85,24 @@ pub struct VideoAnalysisSource {
     pub path: String, pub sha256: String,
     #[ts(type = "number")] pub duration_us: u64,
     #[ts(type = "number")] pub origin_us: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct VideoProxyTimeSpan {
+    #[ts(type = "number")] pub analysis_start_us: u64,
+    #[ts(type = "number")] pub analysis_end_us: u64,
+    #[ts(type = "number")] pub source_start_us: u64,
+    #[ts(type = "number")] pub source_end_us: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct VideoSceneProxy {
+    pub schema_version: String, pub proxy_version: String, pub time_map_version: String,
+    pub source: VideoAnalysisSource, pub path: String, pub sha256: String,
+    #[ts(type = "number")] pub frame_count: u64,
+    pub pts_sha256: String, pub time_map: Vec<VideoProxyTimeSpan>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -143,6 +162,8 @@ pub struct VideoResponse {
     #[ts(optional)] pub analysis_source: Option<VideoAnalysisSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)] pub shot_analysis: Option<VideoShotAnalysis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)] pub scene_proxy: Option<VideoSceneProxy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

@@ -164,6 +164,9 @@ def dispatch(root: Path, request: dict):
         raise ValueError("Invalid local inference memory limit")
     if operation == "inspect-video":
         return inspect_source(local_path(request.get("path")))
+    if operation == "prepare-shot-proxy":
+        from scene_proxy import prepare_proxy
+        return prepare_proxy(root, local_path(request.get("path")), progress)
     if operation == "analyze-shots":
         return analyze_shots(local_path(request.get("path")), request,
                              lambda: load_model(models, REASONING, memory), progress)

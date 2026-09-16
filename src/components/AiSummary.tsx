@@ -14,6 +14,8 @@ import { useMenuKeys } from "../hooks/use-menu-keys";
 import { IconAiSummary } from "./Icons";
 import { Markdown } from "./Markdown";
 import { AiChapters } from "./AiChapters";
+import { ShotIntelligence } from "./ShotIntelligence";
+import { shotIntelligenceEnabled } from "../lib/scene-analysis/rollout";
 import type { LlmModel } from "../bindings/LlmModel";
 import { buildSourcePrefix } from "../lib/prompt-prefix";
 import type { LlmServerInfo } from "../bindings/LlmServerInfo";
@@ -50,6 +52,10 @@ type Props = {
   style?: SummaryStyle;
   /** Open Settings → AI Summary (manage / switch / download models). */
   onOpenSettings?: () => void;
+  /** Completed local source only. Never a live input or unverified playback proxy. */
+  videoPath?: string | null;
+  onOpenVideoSettings?: () => void;
+  videoForegroundBusy?: boolean;
   /** Seek playback to a timestamp (seconds) — makes summary [m:ss] clickable. */
   onSeek?: (seconds: number) => void;
   /** Auto-chapters: source identity to persist under (App's reviewSourceKey). */
@@ -161,10 +167,38 @@ export function buildTaskInstruction(
   ].filter(Boolean).join("\n");
 }
 
-export function AiSummary({
+export function AiSummary(props: Props) {
+  const [videoEnabled] = useState(shotIntelligenceEnabled);
+  const [advanced, setAdvanced] = useState(false);
+  const [visitedAdvanced, setVisitedAdvanced] = useState(false);
+  const [textBusy, setTextBusy] = useState(false);
+  const [videoBusy, setVideoBusy] = useState(false);
+  if (!videoEnabled) return <TextSummary {...props} active onBusyChange={setTextBusy} />;
+  return <div className="cp-ai-modes">
+    <div className="cp-ai-mode-switch">
+      <span>Text</span>
+      <button type="button" role="switch" aria-label="Advanced Intelligence" aria-checked={advanced}
+        disabled={textBusy || videoBusy} onClick={() => { setAdvanced(value => !value); setVisitedAdvanced(true); }}>
+        <span />
+      </button>
+      <span>Advanced Intelligence</span>
+    </div>
+    <div className="cp-ai-mode-body" hidden={advanced}>
+      <TextSummary {...props} active={!advanced} warmable={props.warmable && !advanced} onBusyChange={setTextBusy} />
+    </div>
+    {visitedAdvanced && <div className="cp-ai-mode-body" hidden={!advanced}>
+      <ShotIntelligence videoPath={props.videoPath ?? null} transcriptPath={props.transcriptPath}
+        foregroundBusy={props.videoForegroundBusy}
+        sourceKey={props.sourceKey} reloadToken={props.reloadToken} onSeek={props.onSeek}
+        onOpenSettings={props.onOpenVideoSettings} onBusyChange={setVideoBusy} />
+    </div>}
+  </div>;
+}
+
+function TextSummary({
   transcriptPath, reloadToken, warmable, selectedModelId, style, onOpenSettings, onSeek,
-  sourceKey, sourceDescription, durationSec, onChaptersChanged,
-}: Props) {
+  sourceKey, sourceDescription, durationSec, onChaptersChanged, active, onBusyChange,
+}: Props & { active: boolean; onBusyChange: (busy: boolean) => void }) {
   // ── Transcript text (timestamped, model-friendly) ────────────────
   const [raw, setRaw] = useState<string | null>(null);
   const loadKey = transcriptPath ? `${transcriptPath}#${reloadToken ?? 0}` : null;
@@ -280,6 +314,10 @@ export function AiSummary({
   // on `chatBusy`, and this mirrors its busy state back so the composer can't
   // fire a second request at the single llama-server mid-detection.
   const [chaptersBusy, setChaptersBusy] = useState(false);
+  useEffect(() => {
+    onBusyChange(streaming || chaptersBusy || !!downloadingId);
+    return () => onBusyChange(false);
+  }, [streaming, chaptersBusy, downloadingId, onBusyChange]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   /** Which slash suggestion the keyboard is on. */
@@ -396,6 +434,11 @@ export function AiSummary({
   // mounting IS the intent signal. Cloud providers have nothing to warm.
   const primedRef = useRef<string | null>(null);
   const primeAbortRef = useRef<AbortController | null>(null);
+  // Mode changes preserve the conversation, but cannot leave a text warm-up
+  // competing with video analysis. This does not unload the resident model.
+  useEffect(() => {
+    if (!active) { primeAbortRef.current?.abort(); primedRef.current = null; }
+  }, [active]);
   // Read inside the effect WITHOUT depending on it. transcriptForModel is a
   // useMemo keyed on `server?.ctx`, and the warm-up itself sets `server` - so
   // depending on the object made the effect re-run the instant the server came

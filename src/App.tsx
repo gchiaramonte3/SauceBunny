@@ -4511,6 +4511,8 @@ export default function App() {
     return () => window.removeEventListener(CHAPTERS_CHANGED_EVENT, onChanged);
   }, [reviewSourceKey]);
 
+  const aiVideoPath = privateInspectionVisible || ndiProgram || ndiRoomSource || screenProgramActive
+    ? null : sourceKind === "file" ? localFilePath : webPlayback.cachePath;
   const { handlePopOut: handlePopOutPanel } = usePanelBus({
     panelDetached,
     setPanelDetached,
@@ -4530,6 +4532,8 @@ export default function App() {
       canRegenerate: hasSource && !!selectedModel?.downloaded && !ndiProgram && !ndiRoomSource,
       hasSource: hasSource && !ndiProgram && !ndiRoomSource,
       aiModelId: defaults.llmSummarizationModel,
+      aiVideoPath,
+      aiForegroundBusy: isPlaying || transcriptState === "running" || queueRunning,
       aiStyle: { format: defaults.summaryFormat, length: defaults.summaryLength },
       chapterSourceKey: ndiProgram || ndiRoomSource ? null : reviewSourceKey,
       durationSec: ndiProgram || ndiRoomSource ? null : sourceDurationSec,
@@ -4554,6 +4558,7 @@ export default function App() {
       onImportTranscript: () => { void handleImportTranscript(); },
       onTranscriptEdited: () => setTranscriptArrivedTick((n) => n + 1),
       onOpenAiSettings: () => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); },
+      onOpenVideoSettings: () => { setSettingsInitialTab("video-intelligence"); setSettingsOpen(true); },
       // The panel saved chapters to the SHARED localStorage; re-dispatch the
       // same-window change event so the chapter-markers effect re-reads.
       onChaptersChanged: () => {
@@ -5697,6 +5702,9 @@ export default function App() {
                 aiModelId={defaults.llmSummarizationModel}
                 aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
                 onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
+                aiVideoPath={aiVideoPath}
+                aiForegroundBusy={isPlaying || transcriptState === "running" || queueRunning}
+                onOpenVideoSettings={() => { setSettingsInitialTab("video-intelligence"); setSettingsOpen(true); }}
                 chapterSourceKey={ndiPictureVisible ? null : reviewSourceKey}
                 sourceDescription={ndiPictureVisible ? null : metadata?.description ?? null}
                 chapterDurationSec={ndiPictureVisible ? null : sourceDurationSec}
