@@ -1,5 +1,5 @@
 import type { AafDocument } from "../bindings/AafDocument";
-import { trackOwner, transcriptRows, sequenceTimecode } from "./multitrack";
+import { audioTrackLabel, trackOwner, transcriptRows, sequenceTimecode } from "./multitrack";
 import { avidMarkerRowsToTxt } from "./markers";
 
 export type MultitrackPerson = { id: string; name: string; trackIds: string[]; color: string | null };
@@ -32,19 +32,26 @@ export function multitrackExportName(name: string): string {
 }
 
 /** One point per cue start, in original sequence timecode, without floating seconds.
- * V1 matches the existing transcript exporter: AAF slot IDs are NOT Avid track numbers.
- * Same-frame passages from this person merge rather than being moved to invented frames.
+ * AAF slot IDs are NOT Avid track numbers. Keep the original audio-lane mapping.
+ * Same-frame passages merge only on the same track, never across microphones.
  * Untimed text remains in plain-text exports; it never becomes a fabricated marker.
  */
 export function multitrackAvidMarkers(document: AafDocument): string {
+  const lanes = new Set<string>();
+  for (const source of document.manifest.tracks) {
+    const lane = audioTrackLabel(document, source.id);
+    if (lanes.has(lane)) throw new Error(`More than one source track maps to ${lane}. Re-import an AAF with distinct audio-track numbers before exporting markers.`);
+    lanes.add(lane);
+  }
   const markers = new Map<string, { speaker: string; timecode: string; track: string; text: string }>();
   for (const cue of transcriptRows(document)) {
     if (!Number.isFinite(cue.startFrame) || cue.startFrame < 0 || cue.startFrame >= document.manifest.duration_frames || !cue.text.trim()) continue;
     const timecode = sequenceTimecode(document.manifest, cue.startFrame);
     if (!/^\d{2}:\d{2}:\d{2}[:;]\d{2}$/.test(timecode)) throw new Error("This sequence's frame rate cannot be exported as Avid timecode.");
-    const key = `${cue.startFrame}:${cue.owner}`, previous = markers.get(key);
+    const track = audioTrackLabel(document, cue.trackId);
+    const key = `${cue.startFrame}:${track}`, previous = markers.get(key);
     if (previous) previous.text += ` | ${cue.text}`;
-    else markers.set(key, { speaker: cue.owner, timecode, track: "V1", text: cue.text });
+    else markers.set(key, { speaker: cue.owner, timecode, track, text: cue.text });
   }
   return markers.size ? avidMarkerRowsToTxt([...markers.values()]) : "";
 }

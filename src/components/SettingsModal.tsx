@@ -48,11 +48,12 @@ import { SAUCE_BUNNY } from "../lib/open-source";
 import { getVersion } from "@tauri-apps/api/app";
 import { countHiddenNotices, restoreHiddenNotices } from "../lib/hidden-notices";
 import { EXPECTED_BACKEND_BUILD_ID } from "../lib/build-id";
+import { VideoIntelligenceSettings } from "./VideoIntelligenceSettings";
 import { newJobId } from "../lib/job-id";
 import { DEFAULT_STUN_URL } from "../lib/ice-servers";
 import { clearHidden as clearHiddenLibrary, hiddenCount as hiddenLibraryCount } from "../lib/library-hidden";
 
-type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "ai-apis" | "integrations" | "commands" | "about" | "credits";
+type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "video-intelligence" | "ai-apis" | "integrations" | "commands" | "about" | "credits";
 
 export type Defaults = {
   folder: string | null;
@@ -250,6 +251,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "youtube",       label: "Web sources" },
   { id: "transcription", label: "Transcription" },
   { id: "ai-summary",    label: "AI Summary" },
+  { id: "video-intelligence", label: "Video Intelligence" },
   { id: "ai-apis",       label: "AI APIs" },
   { id: "integrations",  label: "Integrations" },
   { id: "commands",      label: "Shortcuts" },
@@ -1863,13 +1865,12 @@ export function SettingsModal(props: Props) {
               </section>
             )}
 
+            {tab === "video-intelligence" && <VideoIntelligenceSettings />}
             {tab === "ai-summary" && (
               <section>
                 <h3 className="cp-pane-title">AI Summary</h3>
                 <p className="cp-pane-sub">
-                  Summarize and chat with transcripts using a local AI model. Runs entirely on
-                  your Mac via llama.cpp (Metal); nothing leaves the machine.
-                  Pick the model that fits your Mac's memory.
+                  Summarize and chat with transcripts. Processed on your Mac.
                 </p>
 
                 <CollapsibleSection id="ai-model" label="Model" open={sectionOpen("ai-model")} onToggle={() => toggleSection("ai-model")}>

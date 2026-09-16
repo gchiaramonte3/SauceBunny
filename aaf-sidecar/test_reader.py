@@ -84,8 +84,24 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(data['start_frame'],1613255)
         self.assertEqual(data['edit_rate'],{'numerator':24000,'denominator':1001})
         self.assertEqual(data['tracks'][0]['name'],'ALPHA')
+        self.assertEqual(data['tracks'][0]['physical_track_number'],1)
+        self.assertNotEqual(data['tracks'][0]['id'],'1')
         self.assertEqual([c['kind'] for c in data['tracks'][0]['clips']],['audio','gap','audio'])
         self.assertEqual(data['tracks'][0]['clips'][0]['source_start_sample'],4004)
+
+    def test_physical_track_number_is_not_slot_id_or_audio_order(self):
+        with aaf2.open(str(self.aaf), 'rw') as file:
+            next(file.content.toplevel()).slot_at(int(self.track_id))['PhysicalTrackNumber'].value = 7
+        result = self.command('inspect', '--input', str(self.aaf))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['tracks'][0]['physical_track_number'], 7)
+
+    def test_missing_track_number_is_unknown_not_slot_id(self):
+        with aaf2.open(str(self.aaf), 'rw') as file:
+            del next(file.content.toplevel()).slot_at(int(self.track_id))['PhysicalTrackNumber']
+        result = self.command('inspect', '--input', str(self.aaf))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(json.loads(result.stdout)['tracks'][0]['physical_track_number'])
 
     def test_index_extents_reproduce_pcm_and_keep_exact_positions(self):
         result = self.command('index','--input',str(self.aaf))

@@ -301,7 +301,9 @@ class Timeline:
             append_warning(warnings_list, 'This track contains different microphone names. Clip names are preserved; no speaker identity is assumed.')
         name = next(iter(owners)) if len(owners)==1 else clean_name(slot.name,f'Track {value(slot,"PhysicalTrackNumber",slot.slot_id)}')
         hz, width = next(iter(formats)) if formats else (48000,3)
-        return {'id':str(slot.slot_id),'name':name,'clips':clips,'warnings':warnings_list,
+        number = value(slot, 'PhysicalTrackNumber')
+        number = number if isinstance(number, int) and number > 0 else None
+        return {'id':str(slot.slot_id),'name':name,'physical_track_number':number,'clips':clips,'warnings':warnings_list,
                 'sample_rate':hz,'sample_width':width,'duration_frames':self.duration}
 
     def manifest(self, source_fingerprint):

@@ -191,6 +191,7 @@ pub fn run() {
         .manage(commands::JobRegistry::default())
         .manage(commands::recording::Recorder::default())
         .manage(commands::LlmServer::default())
+        .manage(commands::VideoIntelligenceState::default())
         .manage(commands::SessionManager::default())
         .manage(commands::PendingReviewLink::default())
         .invoke_handler(tauri::generate_handler![
@@ -254,6 +255,8 @@ pub fn run() {
             commands::start_llm_server,
             commands::stop_llm_server,
             commands::llm_server_status,
+            commands::video_intelligence_run,
+            commands::video_set_foreground_busy,
             commands::set_api_key,
             commands::delete_api_key,
             commands::has_api_key,
@@ -291,6 +294,9 @@ pub fn run() {
             commands::rename_transcript_folder,
             commands::delete_transcript_folder,
             commands::copy_library_file,
+            commands::library_organization_load,
+            commands::library_organization_save,
+            commands::library_reference_status,
             commands::move_library_file,
             commands::move_transcript_to_folder,
             commands::save_transcript_analysis,
@@ -312,6 +318,7 @@ pub fn run() {
             commands::set_clear_cache_on_quit,
             commands::enforce_media_cache_cap,
             commands::write_text_to_path,
+            commands::print_transcript,
             commands::write_raw_to_path,
             commands::screen_capture_access,
             commands::list_share_sources,

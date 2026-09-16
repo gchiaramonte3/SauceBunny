@@ -71,6 +71,7 @@ type Props = {
   onMoveToFolder?: (dest: string, paths: readonly string[]) => void;
   /** "Move to folder…" was chosen from a card's menu — open the picker. */
   onRequestMove?: (path: string) => void;
+  onRequestProject?: (path: string) => void;
   /** The keyboard moved onto `path`; apply the same rule a click would. */
   onKeyboardSelect?: (path: string, mods: { shift: boolean; meta: boolean }) => void;
   /**
@@ -118,7 +119,7 @@ const LIB_COL_SPECS: readonly ColSpec<LibColKey>[] = [
 export function LibraryBrowserPane({
   folders = EMPTY_FOLDERS, onOpenFolder,
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, onTagsChanged, posterVersions, requestThumb,
-  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onRemoveItems, onTranscribeItem, transcribeLabel, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, onMoveToFolder, onRequestMove, onKeyboardSelect, cardDrag, emptyText,
+  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onRemoveItems, onTranscribeItem, transcribeLabel, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, onMoveToFolder, onRequestMove, onRequestProject, onKeyboardSelect, cardDrag, emptyText,
   sort, dir, onSort,
 }: Props) {
 
@@ -310,6 +311,7 @@ export function LibraryBrowserPane({
             // behind LibraryCardMenu's `onMove` all along; the Library was the
             // one pane that never passed it.
             onMove={onMoveToFolder ? () => onRequestMove?.(it.path) : undefined}
+            onAddToProject={onRequestProject ? () => onRequestProject(it.path) : undefined}
             onSelect={(e) => onSelectItem(it, e)}
             onContextSelect={() => onContextSelectItem?.(it)}
             onRename={onRenameItem ? () => onRenameItem(it) : undefined}
@@ -401,6 +403,7 @@ export function LibraryBrowserPane({
               selectedPaths?.has(it.path) ? [...selectedPaths] : [it.path],
             ) : undefined}
             onMove={onMoveToFolder ? () => onRequestMove?.(it.path) : undefined}
+            onAddToProject={onRequestProject ? () => onRequestProject(it.path) : undefined}
             onOpen={() => onOpen(it.path)}
             onReview={onReview ? () => onReview(it.path) : undefined}
             requestThumb={requestThumb}

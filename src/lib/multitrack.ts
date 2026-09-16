@@ -20,6 +20,16 @@ export function trackOwner(document: AafDocument, trackId: string): string {
     || document.manifest.tracks.find((track) => track.id === trackId)?.name || trackId;
 }
 
+/** Physical AAF audio lane when present; legacy documents retain their displayed
+ * lane order. Never derive an Avid track from a MobSlot ID or a filtered list. */
+export function audioTrackLabel(document: AafDocument, trackId: string): string {
+  const index = document.manifest.tracks.findIndex((track) => track.id === trackId);
+  if (index < 0) throw new Error("The transcript's source audio track is missing from this sequence.");
+  const number = document.manifest.tracks[index].physical_track_number;
+  if (number != null && (!Number.isSafeInteger(number) || number < 1)) throw new Error("The source audio track number is invalid.");
+  return `A${number ?? index + 1}`;
+}
+
 export function transcriptRows(document: AafDocument) {
   return document.transcripts.flatMap((transcript) => transcript.cues.map((cue) => ({
     ...cue, trackId: transcript.track_id, owner: trackOwner(document, transcript.track_id),
@@ -72,10 +82,10 @@ export function exportMultitrack(document: AafDocument, format: "csv" | "txt"): 
   const untimed = untimedTranscriptRows(document);
   if (format === "csv") return [
     ["sequence", "track", "speaker", "start_tc", "end_tc", "text", "source_file", "start_seconds", "end_seconds", "engine", "model", "attribution", "timing"],
-    ...rows.map((cue) => [document.manifest.name, cue.trackId, cue.owner, sequenceTimecode(document.manifest, cue.startFrame), sequenceTimecode(document.manifest, cue.endFrame), cue.text, document.source_path.split(/[\\/]/).pop() ?? "", cue.startSeconds, cue.endSeconds, cue.engine, cue.model, "Mic owner label, not verified speaker", "ASR timing unverified"]),
-    ...untimed.map((cue) => [document.manifest.name, cue.trackId, cue.owner, "", "", cue.text, document.source_path.split(/[\\/]/).pop() ?? "", "", "", cue.engine, cue.model, "Mic owner label, not verified speaker", `Timing needs review: ${cue.reason} Reported: ${cue.reported_timing}`]),
+    ...rows.map((cue) => [document.manifest.name, audioTrackLabel(document, cue.trackId), cue.owner, sequenceTimecode(document.manifest, cue.startFrame), sequenceTimecode(document.manifest, cue.endFrame), cue.text, document.source_path.split(/[\\/]/).pop() ?? "", cue.startSeconds, cue.endSeconds, cue.engine, cue.model, "Mic owner label, not verified speaker", "ASR timing unverified"]),
+    ...untimed.map((cue) => [document.manifest.name, audioTrackLabel(document, cue.trackId), cue.owner, "", "", cue.text, document.source_path.split(/[\\/]/).pop() ?? "", "", "", cue.engine, cue.model, "Mic owner label, not verified speaker", `Timing needs review: ${cue.reason} Reported: ${cue.reported_timing}`]),
   ].map((row) => row.map(csvCell).join(",")).join("\r\n");
   return [document.manifest.name, "Mic owners are labels, not verified speakers. ASR timing is unverified.", "", ...rows.map((cue) =>
-    `${sequenceTimecode(document.manifest, cue.startFrame)}  ${cue.owner} (${cue.trackId})\n${cue.text}\n`), ...untimed.map((cue) =>
-    `Timing needs review  ${cue.owner} (${cue.trackId})\n${cue.text}\n${cue.reason} Reported: ${cue.reported_timing}\n`)].join("\n");
+    `${sequenceTimecode(document.manifest, cue.startFrame)}  ${cue.owner} (${audioTrackLabel(document, cue.trackId)})\n${cue.text}\n`), ...untimed.map((cue) =>
+    `Timing needs review  ${cue.owner} (${audioTrackLabel(document, cue.trackId)})\n${cue.text}\n${cue.reason} Reported: ${cue.reported_timing}\n`)].join("\n");
 }

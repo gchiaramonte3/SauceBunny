@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
-import { clampFrame, sequenceTimecode, trackOwner, transcriptRows } from "../lib/multitrack";
+import { audioTrackLabel, clampFrame, sequenceTimecode, trackOwner, transcriptRows } from "../lib/multitrack";
 import { MultitrackWaveform } from "./MultitrackWaveform";
 import { MultitrackLevel } from "./MultitrackLevel";
 import { multitrackTextLayout } from "../lib/multitrack-text-layout";
@@ -72,13 +72,13 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
     </div>
     <div className="cp-multitrack-lanes">
       <div className="cp-multitrack-ruler-row"><div className="cp-multitrack-lane-heading">Track / mic owner</div><div ref={rulerRef} className="cp-multitrack-ruler" aria-hidden="true">{ruler.map((timecode, index) => <span key={index}>{timecode}</span>)}</div></div>
-      {document.manifest.tracks.map((track, index) => {
+      {document.manifest.tracks.map((track) => {
         const detailPeaks = detail?.start === viewStart && detail.span === span ? detail.peaks[track.id] : undefined;
         const peaks = detailPeaks ?? waveforms[track.id], detailed = !!detailPeaks;
         const cues = cuesByTrack.get(track.id) ?? [];
         return <div className={`cp-multitrack-lane${solo.has(track.id) ? " is-solo" : solo.size ? " is-unsoloed" : ""}${muted.has(track.id) ? " is-muted" : ""}${textTracks.has(track.id) ? " has-text" : ""}`} key={track.id}
           onContextMenu={onTrackMenu ? (event) => { event.preventDefault(); const trigger = event.currentTarget.querySelector<HTMLButtonElement>(".cp-multitrack-track-menu-trigger"); trigger?.focus(); onTrackMenu(track.id, event.clientX, event.clientY); } : undefined}>
-          <div className="cp-multitrack-lane-label"><label className="cp-multitrack-check" title="Include in transcription"><input type="checkbox" checked={selected.has(track.id)} onChange={() => onSelect(track.id)} aria-label={`Transcribe ${track.name}`} /><span>A{index + 1}</span></label>
+          <div className="cp-multitrack-lane-label"><label className="cp-multitrack-check" title="Include in transcription"><input type="checkbox" checked={selected.has(track.id)} onChange={() => onSelect(track.id)} aria-label={`Transcribe ${track.name}`} /><span>{audioTrackLabel(document, track.id)}</span></label>
             <TrackLabel key={trackOwner(document, track.id)} document={document} trackId={track.id} onRename={onRename} />
             <div className="cp-multitrack-track-switches"><button className="btn btn-ghost cp-multitrack-solo" aria-pressed={solo.has(track.id)} aria-label={`Solo ${track.name}`} title={`Solo ${trackOwner(document, track.id)}`} onClick={() => onSolo?.(track.id)}>S</button>
               <button className="btn btn-ghost cp-multitrack-solo" aria-pressed={muted.has(track.id)} aria-label={`Mute ${track.name}`} title={`Mute ${trackOwner(document, track.id)}`} onClick={() => onMute?.(track.id)}>M</button>
@@ -93,7 +93,7 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
             onPointerCancel={(event) => endGesture(event.pointerId, true)} onLostPointerCapture={(event) => endGesture(event.pointerId, true)} onPointerLeave={() => setHover(null)}
             onKeyDown={(event) => { const targets: Record<string, number> = { ArrowLeft: frame - (event.shiftKey ? 10 : 1), ArrowRight: frame + (event.shiftKey ? 10 : 1), Home: 0, End: duration - 1 }; if (event.key in targets) { event.preventDefault(); event.stopPropagation(); onSeek(clampFrame(targets[event.key], duration)); } }}>
             {clipsByTrack.get(track.id)?.map((style, clipIndex) => <span className="cp-multitrack-clip" key={clipIndex} style={style} />)}
-            {showWaveforms && (peaks ? <MultitrackWaveform peaks={peaks} from={detailed ? 0 : viewStart / duration} to={detailed ? 1 : viewEnd / duration} /> : <span className="cp-multitrack-waveform-note">{waveformErrors[track.id] ? "Waveform unavailable" : "Preparing waveform…"}</span>)}
+            {showWaveforms && (peaks ? <MultitrackWaveform peaks={peaks} from={detailed ? 0 : viewStart / duration} to={detailed ? 1 : viewEnd / duration} gain={levels[track.id] ?? 1} /> : <span className="cp-multitrack-waveform-note">{waveformErrors[track.id] ? "Waveform unavailable" : "Preparing waveform…"}</span>)}
             {textTracks.has(track.id) && <div className="cp-multitrack-text-overlay">{cues.length ? cues.map((cue) => <span className={cue.summary ? "cp-multitrack-text-summary" : undefined} key={cue.id} title={cue.title} style={cue.style}>{cue.text}</span>) : <span className="cp-multitrack-no-text">No transcript in this view</span>}</div>}
             {hover !== null && <span className="cp-multitrack-cursor" style={{ left: `${(hover - viewStart) / span * 100}%` }} />}
             {frame >= viewStart && frame < viewEnd && <span className="cp-multitrack-playhead" style={{ left: `${(frame - viewStart) / span * 100}%` }} />}

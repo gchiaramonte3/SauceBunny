@@ -22,8 +22,29 @@ it("bulk Avid export writes one unique atomic file per person and no empty files
   const { result } = renderHook(() => useMultitrackExport(fixture()));
   await act(async () => result.current.downloadPeople());
   expect(mocks.invoke).toHaveBeenCalledTimes(2);
-  for (const [command, args] of mocks.invoke.mock.calls) { expect(command).toBe("write_text_to_path"); expect(args).toMatchObject({ atomic: true, unique: true }); expect(args.text).toContain("\t01:00:09:23\tV1\tred\t"); }
-  expect(result.current.status).toBe("2 files saved in /exports");
+  for (const [index, [command, args]] of mocks.invoke.mock.calls.entries()) { expect(command).toBe("write_text_to_path"); expect(args).toMatchObject({ atomic: true, unique: true }); expect(args.text).toContain(`\t01:00:09:23\tA${index + 1}\tred\t`); }
+  expect(result.current.status).toContain("2 files saved in /exports");
+  expect(result.current.status).toContain("Older import");
+});
+it.each(["txt", "csv", "srt", "avid"] as const)("exports the entire transcript as %s and honors save cancellation", async (format) => {
+  const { result } = renderHook(() => useMultitrackExport(fixture()));
+  await act(async () => result.current.download(format));
+  const text = mocks.invoke.mock.calls[0][1].text;
+  expect(text).toContain("This is the first answer"); expect(text).toContain("Sam's reply");
+  expect(text).toContain("A1"); expect(text).toContain("A2"); expect(text).not.toContain("V1");
+  expect(mocks.save.mock.calls[0][0].filters[0].extensions).toEqual([format === "avid" ? "txt" : format]);
+  mocks.save.mockResolvedValueOnce(null); mocks.invoke.mockClear();
+  await act(async () => result.current.download(format)); expect(mocks.invoke).not.toHaveBeenCalled();
+});
+it("opens an escaped PDF print preview and does not claim to have saved a PDF", async () => {
+  const { result } = renderHook(() => useMultitrackExport(fixture()));
+  await act(async () => result.current.download("pdf"));
+  expect(mocks.invoke.mock.calls[0][0]).toBe("print_transcript");
+  expect(mocks.invoke.mock.calls[0][1].html).toContain("Sam&#39;s reply");
+  expect(mocks.invoke.mock.calls[0][1].html).toContain("This is the first answer");
+  expect(mocks.save).not.toHaveBeenCalled(); expect(result.current.status).toContain("Nothing is saved until you confirm");
+  mocks.invoke.mockRejectedValueOnce(new Error("Print unavailable"));
+  await act(async () => result.current.download("pdf")); expect(result.current.error).toBe("Print unavailable");
 });
 it("cancel writes nothing, duplicate clicks share the operation, and partial failure is explicit", async () => {
   mocks.open.mockResolvedValueOnce(null);

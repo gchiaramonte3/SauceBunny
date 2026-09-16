@@ -91,6 +91,7 @@ pub async fn aaf_transcribe_track(app: AppHandle, document_id: String, track_id:
 {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let document = store::load(&store::root(&app)?, &document_id)?;
+    super::video_intelligence::yield_video_background(&app);
     transcribe::transcribe(&app, &document, &track_id, start_frame, duration_frames, engine, &model_id, &language, fast, &job_id).await
 }
 

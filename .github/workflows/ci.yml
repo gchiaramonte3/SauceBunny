@@ -47,6 +47,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: npm run test:aaf
+      - run: npm run test:video
       # CLAUDE.md's dependency rule allows permissive and weak copyleft and
       # rules out GPL/AGPL, because strong copyleft would reach the app's own
       # MIT source. That rule was written down and nothing checked it: a

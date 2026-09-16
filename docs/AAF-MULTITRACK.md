@@ -31,6 +31,12 @@ level, not another PCM extraction. Up to eight recent views are retained in the
 frontend; dragging cancels optional refinement and keeps the overview visible.
 The lanes reuse Clip's DPR-aware canvas, with purple ink scoped to Multitrack.
 Canvas rendering is memoized independently from playhead and hover updates.
+Each track's audition gain scales its painted min/max envelope, including
+zoom-detail replacements, without changing or rereading the cached source peaks.
+Attenuation shrinks it, silence leaves the centre axis, and boosts are bounded
+visually at the lane's full-scale edges. The waveform represents per-track gain,
+not master monitoring volume or the mix's track-count attenuation. Solo/Mute
+keep their existing tint/opacity treatment rather than erasing the waveform.
 
 Audition schedules the enabled microphones together on one AudioContext clock,
 not twenty independent media-element clocks. Python resolves the AAF graph and
@@ -55,6 +61,19 @@ Transcription works in bounded chunks rather than making a second full copy of
 every track in advance.
 
 ## Track-first controls
+
+The transcript arrow occupies a fixed 28 px column beside the person tabs,
+never over them. **Search with AI** is off by default. Text mode filters
+immediately; AI mode searches by meaning after Enter or Search, using the
+installed local model selected for AI Summary (with its installed fallback).
+It never downloads a model or sends transcript text to a cloud provider.
+Search covers the selected person's mics, or all mics in All voices, including
+text needing timing review. Large transcripts are searched section by section;
+Stop/error reports partial coverage rather than claiming an exhaustive result.
+Results retain original wording and timing, and untimed text stays unseekable.
+Editing the query, switching person/document/model, leaving Multitrack or
+disabling AI cancels obsolete work. Exports still cover the selected transcript,
+not just the current search results.
 
 Timecode and transport sit centered above the tracks. Audio scrub defaults on;
 waveforms and per-track ASR text overlays can be toggled. Small/Medium/Large lane
@@ -94,21 +113,72 @@ Explicit cast identity groups assigned microphones; otherwise equal assigned
 owner labels group, while unassigned microphones stay separate. These are mic
 assignments, not verified speaker identities.
 
-Export supports the current person, the whole transcript, or one Avid marker
-file per person in a chosen folder. Individual text downloads include text
-needing timing review. Avid exports omit those unplaced passages and disclose
-the count. Bulk files use atomic, unique writes, so existing exports are not
-overwritten; partial failure reports which folder contains the saved files.
+Export supports the current person or the whole transcript in plain text, CSV,
+Avid markers, SRT captions, and PDF / Print. **Entire transcript** honors the
+selected format, independently of search, Solo, or the currently viewed person.
+Text, CSV and PDF include text needing timing review. Avid and SRT omit those
+unplaced passages and disclose the count. Avid files by person writes one file
+per person in a chosen folder. Bulk files use atomic, unique writes, so existing
+exports are not overwritten; partial failure reports the destination folder.
 
 Avid TXT uses the existing shared serializer: username, source-sequence timecode,
-V1, color, and comment, separated by tabs with no header or BOM. The mic owner
+audio track, color, and comment, separated by tabs with no header or BOM. The mic owner
 is the username. Rational cue-start samples are converted to source frames and
-offset by the AAF's sequence start; same-owner passages on the same frame merge
+offset by the AAF's sequence start; passages on the same track and frame merge
 instead of being moved. This is estimated ASR segment timing, not word-perfect
-alignment. V1 matches the app's existing transcript export; AAF slot IDs are not
-treated as Avid audio-track numbers. Import into the matching sequence in Avid's
+alignment. New imports preserve `PhysicalTrackNumber` as optional
+`physical_track_number`. MobSlot IDs are **not** audio-track numbers (the supplied
+AAF has slots 10/11 for A1/A2). Older documents retain their original full-manifest
+lane order, with that fallback disclosed after export. Filtering by person never
+renumbers tracks. No source AAF or saved document is rewritten. Import into the matching sequence in Avid's
 Markers window. The format follows the
 [Avid Media Composer editing guide](https://resources.avid.com/SupportFiles/attach/Media_Composer/Media_Composer_v2025.x_Editing_Guide.pdf).
+
+SRT starts at sequence-relative zero, not record timecode or the first spoken
+word. Sample timestamps round to milliseconds. A boundary sweep combines
+simultaneous mic-owner lines into non-overlapping captions, since SRT has one
+caption lane. Untimed text never receives invented timing.
+
+PDF / Print reuses the escaped transcript print template, original sequence
+timecode and audio-lane labels. A separate script-disabled native webview opens
+the macOS print dialog: choose **PDF > Save as PDF**. It has no IPC capability,
+external navigation or network content. Opening it does not claim a file was
+saved, and nothing is sent to a printer without confirmation.
+
+Export verification (2026-09-15): the full verification gate passed (4,230
+frontend tests, 723 native unit tests, 437 Chromium cases, with the existing
+skips/ignored cases retained), plus 25 reader tests and two focused WebKit
+export cases. Permanent regressions cover original/gapped audio-lane numbers,
+legacy imports, person filtering, same-frame microphones, fractional/drop-frame
+timecode, format selection, cancellation, HTML escaping and overlapping SRT
+captions. An isolated native WKWebView asynchronous print test produced a
+seven-page generated PDF; all 60 timed passages, 20 lanes and one untimed passage
+survived extraction and visual review. No printer submission, real Avid marker
+import, installed-app replacement or DMG packaging was performed in this pass.
+
+Follow-up export recheck (2026-09-15): a read-only inspection of the supplied
+20-track AAF confirms MobSlots 10–29 map to A1–A20, with BOMBETTE on A1 and
+NATHANIEL on A2. A permanent synthetic regression also reverses the manifest
+and transcript order and verifies that full/person-only exports retain those
+physical lanes. All 30 focused frontend checks, 25 reader checks and two WebKit
+export cases passed, along with all 437 Chromium cases (four existing skips).
+TypeScript, lint and native production compilation passed. At that checkpoint,
+separate unfinished Library-organization code failed three frontend source
+contracts and referenced an unavailable `tempfile` crate in native tests.
+
+Earlier focused recheck (2026-09-15): 30 frontend export tests, 25 reader tests,
+30 native AAF tests (four fixture-dependent cases ignored), the native print
+restriction test, and both WebKit export interactions pass. TypeScript passes.
+The Library path/store contracts and native compilation now pass, but three
+unconnected Library components still fail the component-reachability contract.
+The export implementation is verified in source; the whole worktree is not yet
+release-certified. No installed application, source AAF, or DMG was changed.
+
+Subsequent Library integration resolved those source-contract failures and
+passed the full verification gate, including the existing export tests. Saved
+Multitrack references now open the existing workspace without interrupting an
+active operation. See [LIBRARY-ORGANIZATION.md](LIBRARY-ORGANIZATION.md) for the
+final acceptance evidence and the unchanged packaged-app testing boundary.
 
 ## Names and speech accuracy
 

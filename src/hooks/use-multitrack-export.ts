@@ -5,8 +5,14 @@ import type { AafDocument } from "../bindings/AafDocument";
 import { exportMultitrack, untimedTranscriptRows } from "../lib/multitrack";
 import { multitrackAvidMarkers, multitrackExportName, multitrackPeople, multitrackScope } from "../lib/multitrack-person";
 import { formatError } from "../lib/error-format";
+import { multitrackPrintDoc, multitrackSrt } from "../lib/multitrack-export";
 
-export type MultitrackExportFormat = "txt" | "csv" | "avid";
+export type MultitrackExportFormat = "txt" | "csv" | "avid" | "srt" | "pdf";
+function exportNotes(document: AafDocument, format: MultitrackExportFormat): string {
+  const skipped = format === "avid" || format === "srt" ? untimedTranscriptRows(document).length : 0;
+  const legacy = format === "avid" && document.transcripts.some((item) => document.manifest.tracks.find((track) => track.id === item.track_id)?.physical_track_number == null);
+  return `${skipped ? `. ${skipped} untimed passages remain in text, CSV and PDF exports.` : ""}${legacy ? ". Older import: markers use the audio-lane numbers shown in Sauce Bunny." : ""}${format === "srt" ? ". SRT timing starts at sequence zero; simultaneous voices share captions." : ""}`;
+}
 export function useMultitrackExport(document: AafDocument) {
   const [phase, setPhase] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [status, setStatus] = useState(""), [error, setError] = useState<string | null>(null);
@@ -20,14 +26,18 @@ export function useMultitrackExport(document: AafDocument) {
     finally { busy.current = false; }
   };
   const download = (format: MultitrackExportFormat, trackIds?: string[], name = "All voices") => run(async () => {
-    const scoped = multitrackScope(document, trackIds), avid = format === "avid", extension = format === "csv" ? "csv" : "txt";
-    const text = avid ? multitrackAvidMarkers(scoped) : exportMultitrack(scoped, format);
-    if (!text) throw new Error("No timed passages are available for markers. Download plain text to keep text needing timing review.");
-    const path = await save({ defaultPath: `${multitrackExportName(document.manifest.name)} - ${multitrackExportName(name)}${avid ? " - Avid markers" : ""}.${extension}`, filters: [{ name: avid ? "Avid markers" : format === "csv" ? "CSV spreadsheet" : "Plain text", extensions: [extension] }] });
+    const scoped = multitrackScope(document, trackIds), avid = format === "avid";
+    if (format === "pdf") {
+      await invoke("print_transcript", { html: multitrackPrintDoc(scoped, name) });
+      return "Print preview opened. Choose PDF → Save as PDF in the print dialog. Nothing is saved until you confirm.";
+    }
+    const extension = avid ? "txt" : format;
+    const text = avid ? multitrackAvidMarkers(scoped) : format === "srt" ? multitrackSrt(scoped) : exportMultitrack(scoped, format);
+    if (!text) throw new Error("No timed passages are available for this export. Download plain text to keep text needing timing review.");
+    const path = await save({ defaultPath: `${multitrackExportName(document.manifest.name)} - ${multitrackExportName(name)}${avid ? " - Avid markers" : ""}.${extension}`, filters: [{ name: avid ? "Avid markers" : format === "csv" ? "CSV spreadsheet" : format === "srt" ? "SRT captions" : "Plain text", extensions: [extension] }] });
     if (!path || !mounted.current) return null;
     await invoke("write_text_to_path", { path, text, atomic: true });
-    const skipped = avid ? untimedTranscriptRows(scoped).length : 0;
-    return `Saved to ${path}${skipped ? `. ${skipped} untimed passages remain in plain-text exports.` : ""}`;
+    return `Saved to ${path}${exportNotes(scoped, format)}`;
   });
   const downloadPeople = () => run(async () => {
     const files = multitrackPeople(document).map((person) => ({ person, text: multitrackAvidMarkers(multitrackScope(document, person.trackIds)) })).filter((file) => file.text);
@@ -42,8 +52,7 @@ export function useMultitrackExport(document: AafDocument) {
         await invoke("write_text_to_path", { path: `${folder.replace(/\/$/, "")}/${name}`, text: file.text, atomic: true, unique: true }); ++saved;
       }
     } catch (cause) { throw new Error(`${saved} of ${files.length} files saved in ${folder}. Export stopped: ${formatError(cause)}. Saved files are intact.`); }
-    const skipped = untimedTranscriptRows(document).length;
-    return `${saved} files saved in ${folder}${skipped ? `. ${skipped} untimed passages remain in plain-text exports.` : ""}`;
+    return `${saved} files saved in ${folder}${exportNotes(document, "avid")}`;
   });
   return { phase, status, error, download, downloadPeople, clearResolution: () => setPhase("idle") };
 }

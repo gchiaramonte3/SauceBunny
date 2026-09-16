@@ -227,14 +227,14 @@ describe("every file store consults the version it writes", () => {
     expect(bad, "writes a bare version number instead of STORE_SCHEMA_VERSION").toEqual([]);
   });
 
-  it("covers the five stores that exist today, so the sweep is not vacuous", () => {
+  it("covers the stores that exist today, so the sweep is not vacuous", () => {
     const dir = fileURLToPath(new URL(".", import.meta.url));
     const wired = readdirSync(dir).filter(
       (n) => n.endsWith(".ts") && !n.includes(".test.") && n !== "store-schema.ts"
         && readFileSync(join(dir, n), "utf8").includes("futureVersionIn"),
     );
     expect(wired.sort()).toEqual([
-      "cast-store.ts", "review-store.ts", "screening-store.ts",
+      "cast-store.ts", "library-organization.ts", "review-store.ts", "screening-store.ts",
       "transcript-project-store.ts", "web-collection-store.ts",
     ]);
   });

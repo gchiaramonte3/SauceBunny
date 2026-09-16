@@ -52,9 +52,12 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
     const unlisten = listen<AafProgress>("aaf-progress", ({ payload }) => {
       const current = run.current;
       if (!valid || sourceId.current !== document.id || !current || current.cancelled || current.jobId !== payload.job_id) return;
-      const part = payload.total_frames > 0 ? Math.max(0, Math.min(1, payload.completed_frames / payload.total_frames)) : null;
-      setProgress(part === null ? null : (current.index + part) / current.count * 100);
-      setStatus(`${current.index + 1} of ${current.count} tracks · ${payload.phase}`);
+      const part = payload.total_frames > 0 && Number.isFinite(payload.total_frames) && Number.isFinite(payload.completed_frames)
+        ? Math.max(0, Math.min(1, payload.completed_frames / payload.total_frames)) : 0;
+      const completed = (current.index + part) / current.count * 100;
+      // Each bounded audio chunk alternates preparation and recognition. Those
+      // worker phases are not new runs: keep one label and a forward-only fill.
+      setProgress((previous) => Math.max(previous ?? 0, completed));
     });
     return () => {
       valid = false; mounted.current = false;
@@ -76,14 +79,16 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
     const selectedEngine = choice?.engine ?? engine, selectedModel = choice?.modelId ?? modelId;
     if (choice && (selectedEngine === "parakeet" ? !parakeetReady : !models.some((model) => model.id === selectedModel))) { setError("The selected model is not installed."); return; }
     const current = { cancelled: false, jobId: newJobId() as string | null, index: 0, count: trackIds.length };
-    run.current = current; setLoading(true); setResolution(null); setError(null); setProgress(null); setReport(null);
+    run.current = current; setLoading(true); setResolution(null); setError(null); setProgress(0); setReport(null);
     const ownsRun = () => mounted.current && run.current === current && sourceId.current === document.id;
     const outcome: MultitrackRunReport = { requested: trackIds.length, saved: 0, review: 0, empty: 0, stopped: false, failures: [] };
     try {
       for (const [index, trackId] of trackIds.entries()) {
         if (current.cancelled || !ownsRun()) break;
         current.index = index; if (index) current.jobId = newJobId();
-        setStatus(`${index + 1} of ${trackIds.length} tracks · Preparing audio`);
+        setStatus(`Transcribing ${index + 1} of ${trackIds.length}`);
+        const completed = index / trackIds.length * 100;
+        setProgress((previous) => Math.max(previous ?? 0, completed));
         try {
           const result = await invoke<AafTrackTranscript>("aaf_transcribe_track", { documentId: document.id, trackId, startFrame, durationFrames, engine: selectedEngine, modelId: selectedEngine === "parakeet" ? "parakeet-tdt-0.6b-v3" : selectedModel, language: "en", fast: false, jobId: current.jobId });
           // Native success is a committed result, even when Stop arrived while

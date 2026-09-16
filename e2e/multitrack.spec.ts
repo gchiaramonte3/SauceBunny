@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { EXPECTED_BACKEND_BUILD_ID } from "../src/lib/build-id";
 import { multitrackFixture, multitrackTranscript } from "../src/test/multitrack-fixture";
 import { tauriMockInit } from "./tauri-mock";
@@ -30,6 +30,7 @@ async function boot(page: Page, trackCount = 3) {
       if (command === "plugin:dialog|open") return Promise.resolve((args.options as { directory?: boolean })?.directory ? "/exports" : fixture.source_path);
       if (command === "plugin:dialog|save") return Promise.resolve("/exports/transcript.txt");
       if (command === "write_text_to_path") return Promise.resolve(args.path);
+      if (command === "print_transcript") return Promise.resolve();
       if (command === "aaf_import" || command === "aaf_open") return Promise.resolve(fixture);
       if (command === "aaf_save_labels") { fixture.labels = args.labels as typeof fixture.labels; return Promise.resolve(fixture); }
       if (command === "aaf_waveform") return Promise.resolve({ track_id: args.trackId, peaks: Array.from({ length: 400 }, (_, index) => { const height = (index % 19) / 20; return [-height, height]; }) });
@@ -44,6 +45,161 @@ async function boot(page: Page, trackCount = 3) {
   await expect(page.locator(".cp-view-home")).toBeVisible();
   await page.locator(".cp-nav-item").filter({ hasText: "Multitrack" }).click();
   await expect(page.getByRole("heading", { name: "Multitrack", exact: true })).toBeVisible();
+}
+
+test("Entire transcript exports every source lane in the selected format despite person/search filters", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 850 }); await boot(page);
+  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+  await region.getByRole("button", { name: "Generate 3 tracks" }).click();
+  await expect(region.getByRole("status").filter({ hasText: "Selected range saved for every track" })).toBeVisible();
+  await region.getByRole("combobox", { name: "Choose transcript" }).selectOption({ label: "Sam mic" });
+  await region.getByRole("searchbox", { name: "Search track transcripts" }).fill("no matching words");
+  const format = region.getByRole("combobox", { name: "Transcript export format" });
+  for (const selected of ["avid", "csv", "txt", "srt", "pdf"]) {
+    await format.selectOption(selected);
+    await region.getByRole("button", { name: "Entire transcript", exact: true }).click();
+    await expect(format).toBeEnabled();
+    const call = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter((item) => ["write_text_to_path", "print_transcript"].includes(item.command)).at(-1));
+    const text = String(call!.args[selected === "pdf" ? "html" : "text"]);
+    for (const lane of ["A1", "A2", "A3"]) expect(text).toContain(lane);
+    expect(text).toContain("Alex"); expect(text).toContain("Sam mic"); expect(text).toContain("Room");
+    expect(text).not.toContain("V1");
+    if (selected === "srt") expect(text).toContain("00:00:10,000 --> 00:00:13,000");
+    if (selected === "pdf") expect(call!.command).toBe("print_transcript");
+    expect(await region.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  }
+  await page.screenshot({ path: test.info().outputPath("multitrack-export-formats.png") });
+});
+
+for (const width of [1100, 1680]) {
+  test(`Transcript picker stays compact and fixed beside overflowing tabs at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 }); await boot(page, 20);
+    if (width === 1100) await page.evaluate(() => document.documentElement.style.setProperty("--text-md", "15px"));
+    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+    const picker = region.getByRole("combobox", { name: "Choose transcript" }), tabs = region.getByRole("tablist", { name: "Transcripts by person" });
+    const before = (await picker.boundingBox())!, list = (await tabs.boundingBox())!;
+    expect(before.width).toBe(28); expect(before.height).toBeGreaterThanOrEqual(24);
+    expect(list.x + list.width).toBeCloseTo(before.x, 1);
+    await picker.selectOption({ label: "Mic 20" });
+    await expect(region.getByRole("tab", { name: "Mic 20", exact: true })).toBeInViewport();
+    expect((await picker.boundingBox())!).toEqual(before);
+    expect(await picker.evaluate((element) => { const box = element.getBoundingClientRect(); return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) === element; })).toBe(true);
+    await region.getByRole("tab", { name: "Mic 20", exact: true }).press("Home");
+    await expect(region.getByRole("tab", { name: "All voices" })).toBeFocused();
+    expect((await picker.boundingBox())!).toEqual(before);
+    await picker.focus(); expect(await picker.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("solid");
+    const checkbox = region.getByRole("checkbox", { name: "Search with AI" });
+    await checkbox.focus(); await checkbox.press("Space"); await expect(checkbox).toBeChecked();
+    await expect(region.getByRole("button", { name: "Search", exact: true })).toBeDisabled();
+    expect(await region.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: test.info().outputPath("multitrack-compact-picker.png") });
+  });
+}
+
+test("Local AI transcript search uses the existing bar, preserves original results and leaves text mode available", async ({ page }) => {
+  await page.setViewportSize({ width: 1680, height: 1020 }); await boot(page);
+  const requests: { messages: { role: string; content: string }[] }[] = [];
+  await page.route("http://127.0.0.1:51235/v1/chat/completions", async (route) => {
+    requests.push(route.request().postDataJSON());
+    await route.fulfill({ contentType: "text/event-stream", headers: { "access-control-allow-origin": "*" }, body: 'data: {"choices":[{"delta":{"content":"{\\"matches\\":[0]}"}}]}\n\ndata: [DONE]\n\n' });
+  });
+  await page.evaluate(() => {
+    const app = window as unknown as { __TAURI_INTERNALS__: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> } };
+    const original = app.__TAURI_INTERNALS__.invoke;
+    app.__TAURI_INTERNALS__.invoke = (command, args) => {
+      if (command === "list_llm_models") return Promise.resolve([{ id: "qwen3-4b-instruct", downloaded: true, recommended: true }]);
+      if (command === "llm_server_status") return Promise.resolve({ model_id: "qwen3-4b-instruct", ctx: 8192, base_url: "http://127.0.0.1:51235", api_key: "generated-browser-fixture" });
+      return original(command, args);
+    };
+  });
+  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+  await region.getByRole("button", { name: "Generate 3 tracks" }).click();
+  await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
+  await region.getByRole("tab", { name: "All voices" }).click();
+  const field = region.getByRole("searchbox", { name: "Search track transcripts" });
+  await region.getByRole("checkbox", { name: "Search with AI" }).check();
+  await field.fill("opening response"); expect(requests).toHaveLength(0);
+  await field.press("Enter");
+  await expect(region.getByText("1 matching passage · Local AI")).toBeVisible();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].messages[0].content).toContain("Sam mic");
+  expect(requests[0].messages[1].content).toContain("opening response");
+  const cue = region.getByRole("button", { name: /This is the first answer/ }); await expect(cue).toHaveCount(1);
+  await cue.click(); await expect(cue).toHaveClass(/is-current/);
+  await page.screenshot({ path: test.info().outputPath("multitrack-ai-search.png") });
+  await region.getByRole("checkbox", { name: "Search with AI" }).uncheck();
+  await expect(region.getByText("No matching transcript text.")).toBeVisible();
+  await field.fill("Sam"); await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
+  expect(requests).toHaveLength(1);
+});
+
+for (const width of [1100, 1920]) {
+  test(`Transcription bar stays on one line through repeated chunk phases at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 1100 ? 740 : 1080 }); await boot(page, 20);
+    await page.evaluate(({ transcript, largeText }) => {
+      if (largeText) document.documentElement.style.setProperty("--text-md", "15px");
+      const app = window as unknown as {
+        __TAURI_INTERNALS__: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> };
+        __TAURI_MOCK__: { emitTauriEvent: (event: string, payload: unknown) => void };
+        __progressTest: { emit: (phase: string, frames: number, total: number) => void; finish: () => void };
+      };
+      const original = app.__TAURI_INTERNALS__.invoke;
+      let pending: { args: Record<string, unknown>; resolve: (value: unknown) => void; reject: (error: Error) => void } | null = null;
+      app.__TAURI_INTERNALS__.invoke = (command, args = {}) => {
+        if (command === "aaf_transcribe_track") return new Promise((resolve, reject) => { pending = { args, resolve, reject }; });
+        if (command === "cancel_job") { pending?.reject(new Error("Cancelled")); return Promise.resolve(); }
+        return original(command, args);
+      };
+      app.__progressTest = {
+        emit: (phase, frames, total) => app.__TAURI_MOCK__.emitTauriEvent("aaf-progress", { job_id: pending?.args.jobId, track_id: pending?.args.trackId, phase, completed_frames: frames, total_frames: total }),
+        finish: () => pending?.resolve({ ...transcript, track_id: pending.args.trackId }),
+      };
+    }, { transcript: multitrackTranscript(), largeText: width === 1100 });
+    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+    const generate = region.getByRole("button", { name: "Generate 20 tracks", exact: true });
+    const controls = region.locator(".cp-multitrack-generation .cp-multitrack-options");
+    const idle = (await generate.boundingBox())!, toolbar = (await controls.boundingBox())!;
+    expect(idle.width).toBe(240);
+    expect(idle.x + idle.width).toBeCloseTo(toolbar.x + toolbar.width, 1);
+    await generate.click();
+    const button = region.locator(".cp-gen-btn"), label = button.locator(".cp-gen-load"), fill = button.locator(".cp-gen-fill");
+    await expect(button).toHaveAttribute("aria-label", "Transcribing 1 of 20");
+    const initial = (await button.boundingBox())!;
+    const stop = (await region.getByRole("button", { name: "Stop", exact: true }).boundingBox())!;
+    const settings = (await region.getByRole("button", { name: "Deselect all", exact: true }).boundingBox())!;
+    expect(initial.width).toBe(240);
+    expect(stop.x - initial.x - initial.width).toBeCloseTo(12, 1);
+    expect(stop.x + stop.width).toBeCloseTo(toolbar.x + toolbar.width, 1);
+    if (Math.abs(settings.y - initial.y) < 12) expect(initial.x - settings.x - settings.width).toBeGreaterThanOrEqual(24);
+    for (const frames of [0, 6000, 12000, 18000, 24000]) {
+      for (const phase of ["preparing-audio", "transcribing"]) {
+        await page.evaluate(({ phase, frames }) => (window as unknown as { __progressTest: { emit: (phase: string, frames: number, total: number) => void } }).__progressTest.emit(phase, frames, 24000), { phase, frames });
+        await expect(label).toHaveText("Transcribing 1 of 20");
+        await expect(fill).toHaveCount(1);
+        expect(parseFloat(await fill.evaluate((element) => (element as HTMLElement).style.width))).toBeCloseTo(frames / 24000 * 5);
+        const box = (await button.boundingBox())!;
+        expect(box.height).toBeCloseTo(initial.height, 3);
+        // The shared button's existing hover lift is 1px; chunk updates must
+        // not introduce a line-height/layout jump beyond that decoration.
+        expect(Math.abs(box.y - initial.y)).toBeLessThanOrEqual(1);
+        expect(await label.evaluate((element) => {
+          const text = document.createRange(); text.selectNodeContents(element);
+          return text.getClientRects().length === 1 && element.scrollWidth <= element.clientWidth;
+        })).toBe(true);
+      }
+    }
+    await page.evaluate(() => (window as unknown as { __progressTest: { finish: () => void } }).__progressTest.finish());
+    await expect(label).toHaveText("Transcribing 2 of 20");
+    expect((await button.boundingBox())!.height).toBeCloseTo(initial.height, 3);
+    await page.screenshot({ path: test.info().outputPath("multitrack-steady-progress.png") });
+    await region.getByRole("button", { name: "Stop", exact: true }).click();
+    await expect(region.getByRole("status").filter({ hasText: "Stopped. 1 tracks saved." })).toBeVisible();
+    await expect(button).toHaveAttribute("aria-busy", "false");
+  });
 }
 
 for (const viewport of [{ width: 1100, height: 740 }, { width: 1680, height: 1020 }]) {
@@ -220,7 +376,7 @@ test("Person navigation, per-track levels, context regeneration and safe exports
   await expect(region.getByRole("status").filter({ hasText: "20 files saved in /exports" })).toBeVisible();
   const writes = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter((call) => call.command === "write_text_to_path"));
   expect(writes).toHaveLength(20); expect(writes.every((call) => call.args.unique === true && call.args.atomic === true)).toBe(true);
-  expect(writes[0].args.text).toContain("Alex\t01:00:09:23\tV1\tred\t");
+  expect(writes[0].args.text).toContain("Alex\t01:00:09:23\tA1\tred\t");
   await expect(region.locator(".cp-multitrack-editor-content > [role=alert]")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("multitrack-person-workspace.png") });
 });
@@ -243,6 +399,18 @@ for (const width of [1100, 1920]) {
     const popup = page.getByRole("group", { name: "Mic 20 volume controls" }), slider = popup.getByRole("slider"), number = popup.getByRole("textbox");
     await expect(slider).toBeFocused(); await expect(slider).toHaveAttribute("aria-orientation", "vertical");
     const bounds = (await popup.boundingBox())!, fader = (await slider.boundingBox())!, readout = (await number.boundingBox())!;
+    await test.info().attach("gain-popover-geometry", { body: JSON.stringify({ bounds, fader, readout }), contentType: "application/json" });
+    // Keep roughly half the former footprint without shrinking text or hit targets.
+    // Baselines were measured with the same 100% / 125% text fixtures.
+    const previousArea = 168 * (width === 1100 ? 378 : 371);
+    expect(bounds.width).toBe(120);
+    expect(bounds.width * bounds.height).toBeLessThanOrEqual(previousArea * 0.55);
+    const reset = (await popup.getByRole("button", { name: "Reset to 0 dB" }).boundingBox())!;
+    for (const control of [fader, readout, reset]) {
+      expect(control.width).toBeGreaterThanOrEqual(24); expect(control.height).toBeGreaterThanOrEqual(24);
+      expect(control.x).toBeGreaterThan(bounds.x); expect(control.x + control.width).toBeLessThan(bounds.x + bounds.width);
+    }
+    expect(await popup.evaluate(element => element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight)).toBe(true);
     expect(bounds.y).toBeGreaterThanOrEqual(8); expect(bounds.y + bounds.height).toBeLessThanOrEqual(page.viewportSize()!.height - 8);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(width - 8); expect(readout.y).toBeGreaterThan(fader.y + fader.height);
     expect(await number.evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe("rgb(255, 255, 255)");
@@ -275,6 +443,63 @@ for (const width of [1100, 1920]) {
     await slider.press("Escape"); await expect(region.getByRole("button", { name: "Alex volume: 0 dB", exact: true })).toHaveCount(1);
   });
 }
+
+async function waveformInk(canvas: Locator) {
+  return canvas.evaluate((element) => {
+    const node = element as HTMLCanvasElement, context = node.getContext("2d")!;
+    const { data } = context.getImageData(0, 0, node.width, node.height);
+    let pixels = 0, top = node.height, bottom = -1;
+    for (let y = 0; y < node.height; y++) for (let x = 0; x < node.width; x++) {
+      // Ignore the faint centre axis; measure the actual peak envelope.
+      if (data[(y * node.width + x) * 4 + 3] > 128) { pixels++; top = Math.min(top, y); bottom = Math.max(bottom, y); }
+    }
+    return { pixels, top, bottom, height: node.height, image: node.toDataURL() };
+  });
+}
+
+test("Track gain redraws cached waveforms at every density and zoom without changing other tracks", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 }); await boot(page, 20);
+  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+  const canvases = region.locator("canvas.cp-track-wave"), first = canvases.first();
+  await expect(canvases).toHaveCount(20);
+  const waveformCalls = () => page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string }[] }).__multitrackCalls.filter(call => call.command === "aaf_waveform").length);
+  const initialCalls = await waveformCalls();
+  for (const density of ["small", "medium", "large"]) {
+    await region.getByRole("combobox", { name: "Track size" }).selectOption(density);
+    await expect.poll(async () => (await waveformInk(first)).pixels).toBeGreaterThan(0);
+    const baseline = await waveformInk(first), other = await waveformInk(canvases.nth(1));
+    await region.getByRole("button", { name: "Alex volume: 0 dB", exact: true }).click();
+    const popup = page.getByRole("group", { name: "Alex volume controls" }), fader = popup.getByRole("slider");
+    await fader.fill("12");
+    await expect.poll(async () => (await waveformInk(first)).pixels).toBeGreaterThan(baseline.pixels);
+    await fader.fill("-12");
+    await expect.poll(async () => (await waveformInk(first)).pixels).toBeLessThan(baseline.pixels);
+    await fader.press("End");
+    const boosted = await waveformInk(first);
+    expect(boosted.pixels).toBeGreaterThan(baseline.pixels);
+    expect(boosted.top).toBeGreaterThan(0); expect(boosted.bottom).toBeLessThan(boosted.height - 1);
+    if (density === "large") await page.screenshot({ path: test.info().outputPath("waveform-gain-boost.png") });
+    await fader.press("Home");
+    await expect.poll(async () => (await waveformInk(first)).pixels).toBe(0);
+    await popup.getByRole("textbox").fill("+6 dB"); await popup.getByRole("textbox").press("Enter");
+    await expect.poll(async () => (await waveformInk(first)).pixels).toBeGreaterThan(baseline.pixels);
+    await popup.getByRole("button", { name: "Reset to 0 dB" }).click();
+    expect((await waveformInk(first)).image).toBe(baseline.image);
+    expect((await waveformInk(canvases.nth(1))).image).toBe(other.image);
+    await fader.press("Escape");
+    expect(await waveformCalls()).toBe(initialCalls);
+  }
+  await region.getByRole("button", { name: "Zoom in", exact: true }).click();
+  await expect.poll(waveformCalls).toBe(initialCalls + 20);
+  const detailed = await waveformInk(first), callsAfterZoom = await waveformCalls();
+  await region.getByRole("button", { name: "Alex volume: 0 dB", exact: true }).click();
+  const popup = page.getByRole("group", { name: "Alex volume controls" });
+  await popup.getByRole("slider").fill("12");
+  await expect.poll(async () => (await waveformInk(first)).pixels).toBeGreaterThan(detailed.pixels);
+  await popup.getByRole("slider").press("Escape");
+  expect(await waveformCalls()).toBe(callsAfterZoom);
+});
 
 test("Full workspace stays usable with enlarged text at 1100px", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 740 }); await boot(page, 20);

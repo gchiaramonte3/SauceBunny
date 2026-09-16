@@ -142,6 +142,8 @@ test("Move to folder… is in the menu, and files the file without a drag", asyn
   await expect(dialog).toBeVisible();
   const dest = await page.locator(".cp-lib-pane .cp-lib-lrow-folder").first().getAttribute("data-drop");
   await dialog.getByRole("button", { name: "Interviews" }).click();
+  expect(await moves(page)).toEqual([]);
+  await dialog.getByRole("button", { name: "Move here", exact: true }).click();
 
   await expect.poll(() => moves(page)).toEqual([{ srcPath: src, destDir: dest }]);
 });
@@ -383,14 +385,14 @@ test("a new folder can be made from inside the move dialog", async ({ page }) =>
   await file.click({ button: "right" });
   await page.getByRole("menuitem", { name: /Move to folder/ }).click();
 
-  const field = page.locator("#cp-move-newfolder");
+  const field = page.getByRole("textbox", { name: "Folder name", exact: true });
   await expect(field, "the dialog offers no way to make the folder it asks for").toBeVisible();
 
   // The refusal path, because the validation is the load-bearing half: a
   // separator would escape the folder being browsed.
   await field.fill("../escape");
   await page.getByRole("button", { name: /Create and move/ }).click();
-  await expect(page.locator(".cp-rowmenu-warn").filter({ hasText: "plain folder name" })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "plain folder name" })).toBeVisible();
 
   // A real name closes the dialog, which is the whole gesture: name it, and
   // the files are filed.

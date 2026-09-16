@@ -21,6 +21,8 @@
     "build:dictate": "bash scripts/build-dictate.sh",
     "build:capture": "bash scripts/build-capture.sh",
     "build:aaf": "bash scripts/build-aaf.sh",
+    "build:video": "bash scripts/build-video.sh",
+    "test:video": "bash scripts/test-video.sh",
     "test:aaf": "bash scripts/test-aaf.sh",
     "refresh:sidecars": "bash scripts/refresh-sidecars.sh",
     "verify:sidecars": "bash scripts/verify-sidecars.sh",

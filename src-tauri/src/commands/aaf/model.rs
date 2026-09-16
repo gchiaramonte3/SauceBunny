@@ -33,6 +33,10 @@ pub struct AafClip {
 pub struct AafTrack {
     pub id: String,
     pub name: String,
+    // Composition audio lane, not the MobSlot ID. Missing in older imports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub physical_track_number: Option<u32>,
     pub clips: Vec<AafClip>,
     pub warnings: Vec<String>,
 }
@@ -201,7 +205,8 @@ pub fn validate_manifest(manifest: &AafManifest) -> Result<(), AppError> {
     }
     let mut ids = std::collections::HashSet::new();
     for track in &manifest.tracks {
-        if track.id.is_empty() || !ids.insert(&track.id) || track.clips.len() > 10_000 {
+        if track.id.is_empty() || !ids.insert(&track.id) || track.clips.len() > 10_000
+            || track.physical_track_number == Some(0) {
             return Err(AppError::invalid("Invalid AAF track identity or clip count"));
         }
         let mut previous_end = 0;
@@ -220,6 +225,17 @@ pub fn validate_manifest(manifest: &AafManifest) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn audio_track_number_is_optional_for_legacy_documents_and_roundtrips() {
+        let legacy = serde_json::json!({"id": "slot-11", "name": "Nathaniel", "clips": [], "warnings": []});
+        let mut track: AafTrack = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(track.physical_track_number, None);
+        assert_eq!(serde_json::to_value(&track).unwrap(), legacy);
+        track.physical_track_number = Some(2);
+        let saved = serde_json::to_value(&track).unwrap();
+        assert_eq!(saved["physical_track_number"], 2);
+        assert_eq!(serde_json::from_value::<AafTrack>(saved).unwrap().physical_track_number, Some(2));
+    }
     #[test]
     fn fractional_rate_mapping_is_rational_not_rounded_fps() {
         let rate = AafRate { numerator: 24000, denominator: 1001 };

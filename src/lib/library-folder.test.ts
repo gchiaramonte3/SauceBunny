@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { newFolderPath } from "./library-folder";
+import { diskFolderTargets, mergeFolderBranches, newFolderPath } from "./library-folder";
+import type { LibraryFolder } from "../types";
+import { pathKey } from "./repath";
 
 describe("naming a new library folder", () => {
   it("joins onto the folder being browsed", () => {
@@ -38,4 +40,16 @@ describe("naming a new library folder", () => {
   it("says so when there is no folder open to create inside", () => {
     expect(newFolderPath("", "Selects")).toEqual({ error: "Open a folder first." });
   });
+});
+
+it("merges lazy descendants without mutating Home's scan or losing deeper reads", () => {
+  const node = (path: string, folders: LibraryFolder[] = [], deeper = false): LibraryFolder => ({ name: path.split("/").pop()!, path, folders, items: [], deeper });
+  const base = node("/Media", [node("/Media/Deep", [], true)]);
+  const branches = new Map([
+    [pathKey("/Media/Deep"), node("/Media/Deep", [node("/Media/Deep/More", [], true)])],
+    [pathKey("/Media/Deep/More"), node("/Media/Deep/More", [node("/Media/Deep/More/End")])],
+  ]);
+  const merged = mergeFolderBranches([base], branches);
+  expect(diskFolderTargets(merged).map((f) => f.path)).toEqual(["/Media", "/Media/Deep", "/Media/Deep/More", "/Media/Deep/More/End"]);
+  expect(base.folders[0]).toMatchObject({ folders: [], deeper: true });
 });

@@ -164,7 +164,7 @@ mod tests {
             manifest: AafManifest { schema_version: 1, name: "Test".into(), source_fingerprint: "b".repeat(64),
                 edit_rate: AafRate { numerator: 24000, denominator: 1001 }, start_frame: 0, duration_frames: 240,
                 timecode_fps: 24, drop_frame: false,
-                tracks: vec![AafTrack { id: "10".into(), name: "Café".into(), clips: vec![AafClip {
+                tracks: vec![AafTrack { id: "10".into(), name: "Café".into(), physical_track_number: None, clips: vec![AafClip {
                     start_frame: 0, duration_frames: 240, kind: "gap".into(), master_id: None, source_id: None,
                     source_start_sample: None, sample_rate: None, warnings: vec![] }], warnings: vec![] }], warnings: vec![] },
             labels: vec![AafTrackLabel { track_id: "10".into(), owner_name: "Café".into(), cast_member_id: None, color: None }],

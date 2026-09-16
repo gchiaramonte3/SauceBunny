@@ -55,6 +55,7 @@ import { webPosterFor, setWebPoster } from "./lib/web-poster-store";
 import { migrateCaptionFont } from "./lib/caption-font";
 import { isMissingCommandError, staleBinaryMessage } from "./lib/stale-backend";
 import { newJobId } from "./lib/job-id";
+import { useVideoForegroundPriority } from "./hooks/use-video-intelligence";
 import { DEFAULT_STUN_URL } from "./lib/ice-servers";
   // Cookie access is checked in Web sources or for an explicit authenticated
   // retry. Opening cached/public media never opens system permission settings.
@@ -654,6 +655,7 @@ export default function App() {
   const screenProgramActive = useSyncExternalStore(reviewSession.subscribeProgram,
     () => reviewSession.getProgramSource()?.kind === "screen");
   const [isPlaying, setIsPlaying] = useState(false);
+  useVideoForegroundPriority(isPlaying);
   const ndiInput = useNdiInput();
   const ndiProgram = ndiInput.program;
   const ndiRoomSource = ndiInput.roomSource;
@@ -688,6 +690,7 @@ export default function App() {
     void getCurrentWindow().show().then(() => getCurrentWindow().setFocus()).catch(() => {});
   });
   const [sessionsRequestTick,setSessionsRequestTick] = useState(0);
+  const [multitrackOpenRequest, setMultitrackOpenRequest] = useState<{ id: string; tick: number } | null>(null);
   const previewStatus = ndiInput.previewState.phase === "error" ? "Preview needs attention · Not shared with room"
     : ndiInput.snapshot.candidate?.decodedReady && ndiInput.snapshot.candidate.encodedReady ? "Preview ready · Not shared with room" : "Preview connecting · Not shared with room";
   const ndiMonitorRef = useRef<ReviewProgramSurfacesHandle>(null);
@@ -1001,6 +1004,7 @@ export default function App() {
    * value before touching state — drops stale writes from previous loads.
    */
   const sourceSeqRef = useRef(0);
+  const videoMomentRef = useRef<{ sequence: number; path: string; seconds: number } | null>(null);
   /**
    * Cancel-token for the in-flight mediabunny local export. The token is
    * a tiny mutable object the export loop polls every ~150ms; flipping
@@ -1190,7 +1194,7 @@ export default function App() {
     if (!import.meta.env.DEV) return false;
     try { return localStorage.getItem("saucebunny.devPeerStream") === "1"; } catch { return false; }
   });
-  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "commands" | "about" | "integrations">("general");
+  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "video-intelligence" | "commands" | "about" | "integrations">("general");
 
   // ====== Media info modal ======
   // Deep inspector over the ORIGINAL local source file (never the ffmpeg
@@ -1752,6 +1756,12 @@ export default function App() {
     webOnPlayerReady();
     // Player is up → drop the resolving/buffering overlay (r62).
     setPlayerReady(true);
+    const videoMoment = videoMomentRef.current;
+    if (videoMoment && videoMoment.sequence !== sourceSeqRef.current) videoMomentRef.current = null;
+    else if (videoMoment && videoMoment.path === localFilePath) {
+      videoMomentRef.current = null;
+      void playbackController.seekTo(videoMoment.seconds);
+    }
     // RC4 position handoff: the download fallback carried the playhead the
     // stream died at through the machine (downloading → cached). The cached
     // LocalMediaPlayer boots at 0 — seek it back before the user notices.
@@ -1793,7 +1803,7 @@ export default function App() {
         return { ...prev, duration: dur };
       });
     }
-  }, [volume, muted, playbackRate, playbackController, webOnPlayerReady, webConsumeResume]);
+  }, [volume, muted, playbackRate, playbackController, webOnPlayerReady, webConsumeResume, localFilePath]);
 
   // ====== Actions ======
   /**
@@ -2714,6 +2724,13 @@ export default function App() {
   }, [handleOpenRecentSource, navigateView]);
   const handleLibraryOpenLocalPath = useCallback((path: string) => {
     void loadLocalPath(path); // navigates via openSourceView
+  }, [loadLocalPath]);
+  const handleVideoMoment = useCallback((path: string, seconds: number) => {
+    if (!Number.isFinite(seconds) || seconds < 0) return;
+    const opening = loadLocalPath(path);
+    const pending = { sequence: sourceSeqRef.current, path, seconds };
+    videoMomentRef.current = pending;
+    void opening.then((failure) => { if (failure && videoMomentRef.current === pending) videoMomentRef.current = null; });
   }, [loadLocalPath]);
 
   const handleLibraryOpenRecent = useCallback((entry: RecentSource) => {
@@ -4697,6 +4714,8 @@ export default function App() {
           <div ref={libraryViewRef} tabIndex={-1} className="cp-view cp-view-library" hidden={activeView !== "library"}>
             <LibraryBrowser
               sessionsRequestTick={sessionsRequestTick}
+              transcriptLibrary={defaults.transcriptLibrary}
+              onOpenMultitrack={(id) => { setMultitrackOpenRequest((previous) => ({ id, tick: (previous?.tick ?? 0) + 1 })); setActiveView("multitrack"); }}
               onReviewLocalPath={handleReviewLocalPath}
               onOpenWebUrl={(u: string) => { setUrl(u); void handleFetch(u); }}
               roots={lib.roots}
@@ -4719,6 +4738,8 @@ export default function App() {
               selection={null}
               selectionTick={0}
               onOpenLocalPath={handleLibraryOpenLocalPath}
+              onOpenVideoMoment={handleVideoMoment}
+              onVideoSettings={() => { setSettingsInitialTab("video-intelligence"); setSettingsOpen(true); }}
               onOpenTranscriptHistory={handleLibraryOpenTranscript}
               onBatchTranscribe={startBatchTranscribe}
               batchLine={batch.progress.running ? batchSummary(batch.progress) : null}
@@ -4810,7 +4831,9 @@ export default function App() {
               Keep the workspace mounted so navigation cannot discard work. */}
           <div ref={multitrackViewRef} tabIndex={-1} className="cp-view cp-view-multitrack" hidden={activeView !== "multitrack"}>
             <MultitrackPage
+              openRequest={multitrackOpenRequest}
               active={activeView === "multitrack"}
+              aiModelId={defaults.llmSummarizationModel}
               onOpenSettings={() => { setSettingsInitialTab("transcription"); setSettingsOpen(true); }}
             />
           </div>

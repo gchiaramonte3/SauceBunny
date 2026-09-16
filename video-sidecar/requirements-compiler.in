@@ -1,0 +1,4 @@
+cython==3.1.8
+pkgconf==3.0.1.post0
+setuptools==84.0.0
+wheel==0.48.0

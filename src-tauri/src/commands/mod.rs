@@ -44,10 +44,14 @@ pub mod aaf;
 pub use aaf::*;
 pub mod transcript_trash;
 pub use transcript_trash::*;
+pub mod transcript_print;
+pub use transcript_print::*;
 pub mod llm;
 pub use llm::*;
 pub mod cloud_ai;
 pub use cloud_ai::*;
+pub mod video_intelligence;
+pub use video_intelligence::*;
 pub mod session_key;
 pub use session_key::*;
 pub mod review_link;
@@ -67,6 +71,8 @@ pub mod recording;
 pub use recording::*;
 pub mod library;
 pub use library::*;
+pub mod library_organization;
+pub use library_organization::*;
 
 
 

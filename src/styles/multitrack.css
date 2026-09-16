@@ -82,7 +82,12 @@
 .cp-multitrack-transcript-head h2 { margin: 0; color: var(--fg-1); font-size: var(--text-xl); font-weight: var(--weight-semibold); }
 .cp-multitrack-transcript-head > span { color: var(--fg-3); font-size: var(--text-base); }
 .cp-multitrack-search { padding: 0 20px; }
-.cp-multitrack-search input { width: 100%; }
+.cp-multitrack-search input[type=search] { width: 100%; }
+.cp-multitrack-search-options { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.cp-multitrack-search-options label { display: flex; align-items: center; gap: 6px; min-height: 26px; color: var(--fg-3); font-size: var(--text-base); cursor: pointer; }
+.cp-multitrack-search-options input { width: auto; flex: none; margin: 0; }
+.cp-multitrack-search-options .btn { min-height: 26px; padding: 2px 8px; font-size: var(--text-base); white-space: nowrap; }
+.cp-multitrack-search > p { margin: 6px 0 0; overflow-wrap: anywhere; }
 .cp-multitrack-transcript-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 16px; }
 .cp-multitrack-transcript-empty { margin: 48px 12px; text-align: center; }
 .cp-multitrack-transcript-empty h3 { color: var(--fg-2); font-size: var(--text-lg); font-weight: var(--weight-semibold); }
@@ -164,17 +169,18 @@
 .cp-multitrack-track-switches .btn { min-width: 24px; width: 24px; min-height: 24px; max-height: 24px; height: 24px; box-sizing: border-box; line-height: var(--leading-none); padding: 0; font-size: var(--text-base); }
 .cp-multitrack-track-switches .cp-multitrack-text-toggle { width: 36px; }
 .cp-multitrack-track-switches .cp-multitrack-level { width: 24px; height: 24px; flex-shrink: 0; }
-.cp-multitrack-level-popover { position: fixed; z-index: var(--z-popover); display: grid; justify-items: center; gap: 12px; width: 168px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; box-sizing: border-box; padding: 12px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); color: var(--fg-2); font-size: var(--text-base); }
+.cp-multitrack-level-popover { position: fixed; z-index: var(--z-popover); display: grid; justify-items: center; gap: 6px; width: 120px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; box-sizing: border-box; padding: 8px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); color: var(--fg-2); font-size: var(--text-base); }
 .cp-multitrack-level-heading { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cp-multitrack-fader { display: flex; align-items: stretch; gap: 12px; height: 208px; padding-block: 8px; }
-.cp-multitrack-level-popover .cp-multitrack-gain-slider { writing-mode: vertical-lr; direction: rtl; width: 28px; height: 208px; padding: 0; margin: 0; accent-color: var(--fg-2); cursor: ns-resize; }
-.cp-multitrack-gain-ticks { position: relative; width: 48px; margin-block: 8px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.cp-multitrack-fader { display: flex; align-items: stretch; gap: 8px; height: 132px; }
+.cp-multitrack-level-popover .cp-multitrack-gain-slider { writing-mode: vertical-lr; direction: rtl; width: 28px; height: 132px; padding: 0; margin: 0; accent-color: var(--fg-2); cursor: ns-resize; }
+.cp-multitrack-gain-ticks { position: relative; width: 40px; margin-block: 8px; color: var(--fg-3); font-variant-numeric: tabular-nums; line-height: var(--leading-none); }
 .cp-multitrack-gain-ticks > span { position: absolute; transform: translateY(-50%); white-space: nowrap; }
 .cp-multitrack-gain-ticks > span::before { content: ""; display: inline-block; width: 6px; margin-right: 6px; border-top: 1px solid var(--line-3); vertical-align: middle; }
 .cp-multitrack-gain-ticks .cp-multitrack-gain-unity { color: var(--fg-1); font-weight: var(--weight-semibold); }
-.cp-multitrack-level-popover .cp-multitrack-gain-value { width: 100%; min-width: 0; min-height: 28px; box-sizing: border-box; text-align: center; font-family: var(--font-ui); font-size: var(--text-md); font-variant-numeric: tabular-nums; }
+.cp-multitrack-level-popover .cp-multitrack-gain-value { width: 100%; min-width: 0; height: 26px; min-height: 26px; box-sizing: border-box; text-align: center; font-family: var(--font-ui); font-size: var(--text-md); font-variant-numeric: tabular-nums; }
 .cp-multitrack-gain-value.is-boosted { color: var(--warning); }
-.cp-multitrack-gain-hint { color: var(--fg-3); font-size: var(--text-sm); }
+.cp-multitrack-gain-hint { color: var(--fg-3); font-size: var(--text-sm); line-height: var(--leading-tight); text-align: center; }
+.cp-multitrack-level-popover > .btn { height: 26px; min-height: 26px; padding: 0 6px; font-size: var(--text-base); }
 .cp-multitrack-track-switches [aria-pressed=true] { background: var(--bg-5); color: var(--fg-1); border-color: var(--line-3); }
 .cp-multitrack-lane-audio { cursor: default; touch-action: none; user-select: none; }
 .cp-multitrack-clip, .cp-multitrack-lane.is-solo .cp-multitrack-clip { top: 2px; bottom: 2px; background: color-mix(in srgb, var(--novella-violet) 12%, var(--bg-2)); border-radius: var(--r-2xs); border-left: 1px solid var(--line-2); }
@@ -203,7 +209,15 @@
 .cp-multitrack-options label { flex-direction: row; align-items: center; gap: 6px; }
 .cp-multitrack-options .cp-select { min-width: 100px; max-width: 160px; }
 .cp-multitrack-options > .btn { margin-left: 0; }
-.cp-multitrack-generate-row { min-width: 200px; flex: 1; }
+.cp-multitrack-generate-row { min-width: 0; max-width: 100%; flex: 0 1 auto; margin-left: auto; padding-left: 14px; }
+.cp-multitrack-generate-row > .cp-gen-btn { flex: 0 1 240px; width: 240px; min-width: 0; }
+.cp-multitrack-generate-row > .btn { flex-shrink: 0; }
+/* Both labels contribute to the same line's width. The shared CTA otherwise
+   positions its loading label inside the shorter idle label's rectangle. */
+.cp-multitrack-generate-row .cp-gen-txt { display: grid; min-width: 0; max-width: calc(100% - 23px); font-variant-numeric: tabular-nums; }
+.cp-multitrack-generate-row .cp-gen-idle,
+.cp-multitrack-generate-row .cp-gen-load { grid-area: 1 / 1; position: static; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-multitrack-generate-row .cp-gen-load { display: block; }
 .cp-multitrack-settings { width: min(560px, calc(100vw - 48px)); max-height: calc(100vh - 64px); overflow: auto; padding: 20px; border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--shadow-modal); background: var(--bg-1); color: var(--fg-2); font-size: var(--text-md); line-height: var(--leading-normal); }
 .cp-multitrack-settings header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .cp-multitrack-settings h2 { margin: 0; font-size: var(--text-3xl); font-weight: var(--weight-semibold); }
@@ -249,10 +263,12 @@
 .cp-multitrack-export-all { display: flex; gap: 8px; flex-wrap: wrap; }
 .cp-multitrack-export-all .btn { flex: 1; white-space: nowrap; min-height: 28px; padding: 4px 8px; font-size: var(--text-base); }
 .cp-multitrack-export > p { margin: 0; max-height: 64px; overflow: auto; overflow-wrap: anywhere; }
-.cp-multitrack-person-nav { display: flex; min-width: 0; border-bottom: 1px solid var(--line-1); margin-bottom: 12px; padding: 0 8px; gap: 4px; }
+.cp-multitrack-person-nav { display: grid; grid-template-columns: minmax(0, 1fr) 28px; min-width: 0; border-bottom: 1px solid var(--line-1); margin-bottom: 12px; padding: 0 8px; }
 .cp-multitrack-person-tabs { display: flex; flex: 1; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
 .cp-multitrack-person-tabs .cp-tab { flex: none; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 8px 10px; }
-.cp-multitrack-person-nav .cp-multitrack-person-picker { width: 44px; flex: 0 0 44px; min-width: 0; color: transparent; padding-inline: 8px; background-position: center; }
+.cp-multitrack-person-nav .cp-multitrack-person-picker { width: 28px; min-width: 0; height: 100%; color: transparent; padding: 0; border: 0; border-left: 1px solid var(--line-1); border-radius: 0; background-color: var(--bg-1); background-position: center; box-shadow: none; }
+.cp-multitrack-person-nav .cp-multitrack-person-picker:hover { background-color: var(--bg-3); }
+.cp-multitrack-person-nav .cp-multitrack-person-picker:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -2px; }
 .cp-multitrack-person-picker option { color: var(--fg-1); background-color: var(--bg-2); }
 .cp-multitrack-person-color { display: inline-block; width: 8px; height: 8px; border-radius: var(--r-pill); margin-right: 6px; }
 .cp-multitrack-track-menu { position: fixed; z-index: var(--z-popover); width: 260px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 6px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); color: var(--fg-2); font-size: var(--text-md); }

@@ -6,10 +6,37 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- Library Projects organize references to local media, web links, transcripts
+  and saved Multitrack sequences in nested in-app folders. Favorites, smart
+  rules, keyboard/pointer filing and scoped undo/redo persist without moving
+  originals. Explicit relinking and rename continuity retain item identities;
+  failed or conflicting writes do not replace saved organization. The disk
+  browser exposes all scanned files in pages, loads deeper folders on demand,
+  and provides a full move-destination picker. Home remains unchanged.
+- Multitrack exports now keep source audio lanes in Avid markers (A1, A2, etc.)
+  instead of V1, including person-only exports and simultaneous microphones.
+  New AAF imports preserve physical track numbers; older imports use the lane
+  numbers already shown. Entire transcript honors the selected format: Avid
+  markers, CSV, plain text, SRT captions, or PDF through the native print dialog.
+  SRT uses sequence-relative timing and combines simultaneous voices; text,
+  CSV and PDF retain passages needing timing review.
+- Multitrack transcript tabs keep a compact, fixed dropdown beside the scrolling
+  names. An optional Search with AI checkbox searches original passages by
+  meaning through the shared local model runtime, with cancellable, bounded
+  sections, original seek timing and ordinary text search preserved.
+- Multitrack transcription keeps a steady track-count label and forward-only
+  progress across audio chunks, without alternating worker-phase text or
+  wrapping the loading label inside the Generate bar. The action is compact
+  and right-aligned, with separation from the settings and Stop beside it.
 - Multitrack audition levels use the existing speaker icon and a vertical dB
   fader with an editable readout, attenuation, silence, and boost up to +36 dB.
   Signed values with an optional dB suffix replace the selected readout; Reset
   restores 0 dB. Gain changes affect live audition only, not AAF media or ASR.
+  Track waveforms now grow or shrink with that gain, reusing cached peaks at
+  every zoom and lane size. Silence leaves the centre line; boosted peaks stay
+  inside the lane. Master monitoring volume and Solo/Mute retain their behavior.
+  The gain popover takes roughly half the previous space while retaining readable
+  labels, the editable dB value, and keyboard/pointer controls.
 - In-development Multitrack workspace reads embedded-audio AAF sequences into
   aligned microphone lanes with Clip-style canvas waveforms, additive Solo/Mute,
   editable cast labels, source timecode, and local Whisper/Parakeet transcription.

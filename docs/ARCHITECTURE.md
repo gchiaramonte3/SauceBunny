@@ -81,6 +81,35 @@ probes have already overturned.
 
 ## Data flow
 
+### Library organization
+
+`LibraryBrowser` integrates a reference-only Projects/Favorites sidebar alongside
+the existing disk browser. `library-organization.ts` validates the versioned
+folder tree, identities, membership and smart rules; `LibraryOrganizationStore`
+serializes acknowledged writes and owns scoped undo/redo. The native
+`library_organization` commands write `Documents/Sauce Bunny/Library/organization.json`
+atomically, with expected-text compare-and-save and a stable sibling file lock
+across app processes. Failed or unknown-format reads never authorize a reset.
+
+Project items are references to local paths, web URLs, transcript paths or saved
+Multitrack document IDs. Removal/reparenting never deletes originals. Media
+rename/repath updates stable asset IDs; organization undo preserves those newer
+paths. Metadata dialogs merge their changes with current membership instead of
+restoring a stale snapshot. Explicit Relink is available for local references.
+
+`library-project-catalog.ts` combines known scanned files, cached web metadata,
+transcript inventory/history and saved AAF documents using read-only commands.
+Smart results use current facts, with unknown access kept distinct from offline.
+Availability/tag reads are capped at 500 paths per batch; obsolete refreshes stop
+before scheduling further batches. Existing Clip/transcript routes are reused;
+saved Multitrack requests are deferred when that workspace has an active job.
+
+The file browser paginates rather than discarding items above 300. Deeper folders
+are scanned one level at a time into a browser-local overlay, leaving Home's
+shared scan and registered roots unchanged. Disk moves remain explicit native
+operations, with a navigable destination dialog and Browse for external locations.
+See [LIBRARY-ORGANIZATION.md](LIBRARY-ORGANIZATION.md) for acceptance coverage.
+
 ### Multitrack documents
 
 `MultitrackPage` owns its document, track selection, single-clock PCM audition, and
@@ -91,6 +120,29 @@ versioned model/store, cancellable processes, bounded audio preparation, and
 ASR result handling. The bundled `saucebunny-aaf` process resolves source spans
 and reads embedded PCM; existing FFmpeg, Whisper, and Parakeet sidecars provide
 resampling and recognition. No diarization or cloud service is involved.
+
+The transcript pane keeps its overflow selector in a fixed, compact grid column
+outside the scrolling person tabs. Optional **Search with AI** uses the same
+installed model preference, local llama-server and streaming chat client as
+AI Summary. `local-ai-server.ts` shares Summary/search cold starts and stops a
+load only when its last waiter cancels. Each completed request rechecks native
+server identity rather than trusting a stale frontend server handle.
+`ai-transcript-search.ts` scans bounded sections without sampling away passages;
+model-returned IDs are validated against that section and mapped to original
+rows. No generated quotation or timestamp becomes a seek target. The search
+hook cancels stale queries and document/person changes, with no work on playback
+ticks or keystrokes. Search results are transient; saved transcripts and exports
+are unchanged. Search is local even when Summary has an opt-in cloud provider.
+
+Multitrack exports share the full manifest's audio-lane mapping. New AAF imports
+retain optional `PhysicalTrackNumber`; legacy imports keep displayed lane order.
+Filtered transcripts never renumber lanes. Avid serialization stays in the
+shared marker writer. `multitrack-export.ts` owns the SRT overlap sweep and adapts
+all saved passages to the existing escaped print template. The read-only
+`print_transcript` command creates a local data-URL webview with JavaScript off,
+restrictive CSP, navigation/new-window blocking and no capability grants. It
+opens the native print dialog after page load; the user chooses Save as PDF.
+There is no automatic print submission or claim of a saved PDF.
 
 ### Clip and Review media
 
@@ -215,9 +267,14 @@ is the entire design:
   sends it byte-for-byte identically. Nothing that varies may enter it — not
   the summary style, not the source description, not the question.
 - **Task instructions ride in the user turn**, after it.
-- **The transcript is windowed one way** (`fitTranscript`, sampled evenly
+- **Summary context is windowed one way** (`fitTranscript`, sampled evenly
   across the runtime). Two different windowings of one transcript are two
   different prompts and share nothing.
+
+Multitrack semantic search is intentionally exhaustive instead: it uses the same
+prefix builder on bounded, unsampled sections and sequentially searches every
+section. Its cue-ID records differ from the summary's timestamped input, so it
+does not claim cross-feature KV-cache reuse for that different representation.
 
 Measured on one server, 28,335 tokens, three consecutive features: **60.92 s**
 for the first, then **0.13 s** and **0.15 s**.
@@ -817,6 +874,18 @@ repeat open skips yt-dlp entirely when possible:
   pipeline from that pipeline's OWN response header — never from a
   previous pipeline's mode (a failed probe legitimately flips a rebuild
   to `rebased`, which asserts baseTime = seek target instead).
+
+## Local video intelligence (September 2026)
+
+Settings manages explicitly downloaded video models; Library owns selected
+source scope. `use-video-intelligence` dispatches typed, cancellable requests to
+`commands/video_intelligence.rs`. Rust owns one heavy worker and gives existing
+playback, ASR and text AI priority. `video-sidecar/worker.py` runs one request per
+process: bounded PyAV frame decoding, native MLX-VLM embeddings/reranking/video
+descriptions, durable SQLite checkpoints and disposable usearch HNSW indexes.
+Inference has no server or implicit download. Source navigation uses decoded
+timestamps, never model-authored timecodes. See [Video Intelligence](VIDEO-INTELLIGENCE.md)
+for resource bounds, build locks, runtime verification and current limitations.
 
 ## Tone-card design grammar (shell v3)
 

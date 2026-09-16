@@ -5,6 +5,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { parseSrt, groupIntoTurns, fmtTime } from "../lib/srt";
 import { loadSpeakerOverrides, prepareCues, resolveSpeakerName, SPEAKERS_CHANGED_EVENT } from "./transcript/helpers";
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
+import { ensureLocalAiServer, selectLocalAiModel } from "../lib/local-ai-server";
 import { loadAiProvider, cloudChat } from "../lib/ai-provider";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
@@ -247,38 +248,19 @@ export function AiSummary({
   // The model to run: the Settings-chosen one if downloaded, else the
   // recommended/first downloaded as a fallback.
   const activeModel = useMemo(
-    () =>
-      downloaded.find((m) => m.id === selectedModelId)
-      ?? downloaded.find((m) => m.recommended)
-      ?? downloaded[0],
+    () => selectLocalAiModel(downloaded, selectedModelId),
     [downloaded, selectedModelId],
   );
-  // Track which model the resident server is actually running, so switching the
-  // choice in Settings restarts the sidecar onto the new model.
-  const serverModelRef = useRef<string | null>(null);
-
   // Bring the server up for the active model (idempotent backend-side; restarts
   // when the chosen model changed).
   const ensureServer = useCallback(async (signal?: AbortSignal): Promise<LlmServerInfo | null> => {
     const model = activeModel;
     if (!model) return null;
-    if (server && serverModelRef.current === model.id) return server;
     setPhase("starting");
     setPhaseMsg(`Loading ${model.name} into memory…`);
-    // Loading a multi-GB model into memory is the longest wait these features
-    // impose, and it was the one thing Stop could not touch: an abort signal
-    // only ever reached the token stream, which has not started yet. Shutting
-    // the server down IS the cancel - `start_llm_server` polls for exactly
-    // this state between health checks and returns "server start cancelled".
-    // That path was written and then never called by anything.
-    const cancelStart = () => { void invoke("stop_llm_server").catch(() => { /* already gone */ }); };
-    signal?.addEventListener("abort", cancelStart, { once: true });
     try {
-      const info = await invoke<LlmServerInfo>("start_llm_server", { modelId: model.id });
-      // Won the race: the server came up after the user stopped. Put it back
-      // down rather than leaving GBs resident for a run nobody wants.
-      if (signal?.aborted) { cancelStart(); setPhase("idle"); setPhaseMsg(null); return null; }
-      serverModelRef.current = model.id;
+      const info = await ensureLocalAiServer(model.id, signal);
+      if (signal?.aborted) { setPhase("idle"); setPhaseMsg(null); return null; }
       setServer(info); setPhase("ready"); setPhaseMsg(null);
       return info;
     } catch (e) {
@@ -286,10 +268,8 @@ export function AiSummary({
       if (signal?.aborted) { setPhase("idle"); setPhaseMsg(null); return null; }
       setPhase("error"); setPhaseMsg(formatError(e));
       return null;
-    } finally {
-      signal?.removeEventListener("abort", cancelStart);
     }
-  }, [server, activeModel]);
+  }, [activeModel]);
 
   // ── Chat ─────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -863,4 +843,3 @@ export function AiSummary({
     </div>
   );
 }
-

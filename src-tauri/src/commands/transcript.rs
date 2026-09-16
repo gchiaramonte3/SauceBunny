@@ -1247,6 +1247,7 @@ pub async fn generate_transcript(
     // whisper-cli reads the WAV. Decoupling these steps means a yt-dlp
     // failure won't masquerade as an ffmpeg "Invalid data" error.
     let raw_prefix = format!("{}-raw", args.job_id);
+    super::video_intelligence::yield_video_background(&app);
     let raw_template = cache
         .join(format!("{}.%(ext)s", raw_prefix))
         .to_string_lossy()

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useVideoForegroundPriority } from "../hooks/use-video-intelligence";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { AafTrackTranscript } from "../bindings/AafTrackTranscript";
 import { useMultitrackAudition } from "../hooks/use-multitrack-audition";
@@ -22,8 +23,9 @@ type Props = {
   document: AafDocument; active: boolean; waveforms: Record<string, number[][]>; waveformErrors: Record<string, string>;
   labelStatus: string; onRename: (trackId: string, owner: string, memberId?: string | null, color?: string | null) => void; onTranscript: (transcript: AafTrackTranscript) => void;
   onOpenSettings?: () => void; onJobState?: (running: boolean) => void; settingsOpen?: boolean; onCloseSettings?: () => void;
+  aiModelId?: string | null;
 };
-export function MultitrackWorkspace({ document, active, waveforms, waveformErrors, labelStatus, onRename, onTranscript, onOpenSettings, onJobState, settingsOpen, onCloseSettings }: Props) {
+export function MultitrackWorkspace({ document, active, waveforms, waveformErrors, labelStatus, onRename, onTranscript, onOpenSettings, onJobState, settingsOpen, onCloseSettings, aiModelId }: Props) {
   const [selected, setSelected] = useState(() => new Set(document.manifest.tracks.map((track) => track.id)));
   const [showWaveforms, setShowWaveforms] = useState(true);
   const [trackMenu, setTrackMenu] = useState<MultitrackMenuTarget | null>(null), [regenerate, setRegenerate] = useState<string | null>(null);
@@ -46,6 +48,7 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
   const onView = useCallback((start: number, span: number, enabled: boolean) => setView((prior) => prior.start === start && prior.span === span && prior.enabled === enabled ? prior : { start, span, enabled }), []);
   const detail = useMultitrackDetail(document, view.start, view.span, active && view.enabled);
   const audio = useMultitrackAudition(document, active);
+  useVideoForegroundPriority(audio.playing || audio.busy);
   const transcription = useMultitrackTranscription(document, onTranscript, active);
   useMultitrackKeyboard(active && !settingsOpen, audio);
   useEffect(() => { onJobState?.(transcription.loading); }, [onJobState, transcription.loading]);
@@ -92,7 +95,7 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
     {regenerate && active && <MultitrackRegenerate owner={trackOwner(document, regenerate)} initial={{ engine: transcription.engine, modelId: transcription.modelId }} models={transcription.models} parakeetReady={transcription.parakeetReady} onClose={() => setRegenerate(null)} onStart={(choice) => { const id = regenerate; setRegenerate(null); void transcription.start([id], 0, duration, choice); }} />}
     <div className="cp-multitrack-transcript-pane">
       <div className={`cp-multitrack-resize cp-resize-handle vertical${pane.resizing ? " dragging" : ""}`} role="separator" aria-label="Resize track transcripts" aria-orientation="vertical" aria-valuemin={pane.min} aria-valuemax={pane.max} aria-valuenow={pane.width} tabIndex={0} onMouseDown={pane.onMouseDown} onKeyDown={pane.onKeyDown} onDoubleClick={() => pane.setWidth(340)} title="Drag to resize · arrow keys to nudge · Home to reset" />
-      <MultitrackTranscript document={document} frame={audio.frame} solo={audio.solo} onSeek={seek} report={transcription.report} error={transcription.error} loading={transcription.loading} />
+      <MultitrackTranscript document={document} frame={audio.frame} solo={audio.solo} onSeek={seek} report={transcription.report} error={transcription.error} loading={transcription.loading} active={active} aiModelId={aiModelId} />
     </div>
     {settingsOpen && active && <MultitrackSettings document={document} waveformErrors={waveformErrors} onClose={() => onCloseSettings?.()} />}
   </div>;

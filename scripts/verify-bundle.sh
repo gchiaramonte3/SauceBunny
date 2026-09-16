@@ -47,6 +47,15 @@ BIN="${APP}/Contents/MacOS/sauce-bunny"
 RES="${APP}/Contents/Resources"
 PLIST="${APP}/Contents/Info.plist"
 
+# A source-only test does not prove that the frozen MLX worker was packaged.
+if [ "${ALLOW_STUBS}" -eq 1 ]; then
+  warn "Video Intelligence runtime not certified in stub-sidecar CI builds"
+elif python3 "${ROOT_DIR}/video-sidecar/runtime_manifest.py" verify "${RES}/video-runtime/saucebunny-video" --repo "${ROOT_DIR}"; then
+  pass "Video Intelligence runtime matches its source recipe and macOS 14 floor"
+else
+  fail "Video Intelligence runtime is missing, stale or incompatible; run scripts/build-video.sh"
+fi
+
 # ── 1. The executable exists and is the right architecture ──────────
 if [ -x "${BIN}" ]; then
   BIN_ARCH="$(file -b "${BIN}" 2>/dev/null || true)"
