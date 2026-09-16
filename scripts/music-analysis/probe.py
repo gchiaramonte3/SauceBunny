@@ -22,7 +22,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 REVISION = "a0b4534a14f58e20944452dff00a22a06ce629d1"
 WEIGHTS_HASH = "5c289311f4a030d768af7ffbfdecd01b008aa64824211899a4e59f4f9d154fd1"
 SAMPLE_RATE = 48_000
-WINDOW_SAMPLES = SAMPLE_RATE * 10  # Model's documented ten-second context.
+WINDOW_SECONDS = 10  # Model's documented ten-second context.
+WINDOW_SAMPLES = SAMPLE_RATE * WINDOW_SECONDS
 LABELS = {
     "content": [
         "Only a person speaking. There is no music.",
@@ -43,7 +44,7 @@ LABELS = {
 }
 
 
-def audio_windows(path: Path, ffmpeg: Path):
+def audio_windows(path: Path, ffmpeg: Path, *, sample_rate: int = SAMPLE_RATE):
     import numpy as np
 
     # Sequential bounded extraction for this proof. A production adapter must
@@ -53,11 +54,11 @@ def audio_windows(path: Path, ffmpeg: Path):
     with tempfile.TemporaryFile() as errors:
         process = subprocess.Popen([str(ffmpeg), "-v", "error", "-nostdin", "-threads", "2",
             "-protocol_whitelist", "file", "-i", str(path), "-map", "0:a:0", "-vn",
-            "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "f32le", "pipe:1"],
+            "-ac", "1", "-ar", str(sample_rate), "-f", "f32le", "pipe:1"],
             stdout=subprocess.PIPE, stderr=errors)
         try:
             index = 0
-            while chunk := process.stdout.read(WINDOW_SAMPLES * 4):
+            while chunk := process.stdout.read(sample_rate * WINDOW_SECONDS * 4):
                 if len(chunk) % 4:
                     raise ValueError("Incomplete PCM sample")
                 yield index, np.frombuffer(chunk, dtype="<f4")

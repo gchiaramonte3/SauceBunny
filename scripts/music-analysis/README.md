@@ -89,9 +89,9 @@ buffers are listed in its conversion receipt. It writes safetensors plus a hash
 receipt and refuses to overwrite an existing `converted/` directory. It is based
 on the Apache-2.0
 [Hugging Face conversion mapping](https://github.com/huggingface/transformers/blob/v4.35.0/src/transformers/models/clap/convert_clap_original_pytorch_to_hf.py),
-with strict missing/extra-key checks. Numerical equivalence to LAION's original
-inference implementation still needs a separate comparison; shape-complete
-weight conversion is not that proof.
+with strict missing/extra-key checks. `compare_original.py` now separately checks
+numerical equivalence against pinned LAION inference components; shape-complete
+weight conversion alone is not that proof. See the follow-up below.
 
 From the repository root, replace the example paths with the scratch environment
 and the explicitly approved fixture. No automatic media discovery occurs:
@@ -131,6 +131,90 @@ These cover reproducible controls, PCM chunk/tail fidelity, malformed samples,
 extraction failure and child cleanup on an early-closed generator. They do not
 measure classifier accuracy, native cancellation or production source timing.
 
+## Reference parity and supervised candidate follow-up
+
+`compare_original.py` checks the original HTSAT implementation at LAION CLAP
+commit `1fd4c37df5ffbfcfbad5415c170bc66cf94c9994`, its exact preparation functions
+and the original RoBERTa/projection weights. It deliberately bypasses the training
+package's automatic downloads. It verifies source and converted hashes, rejects
+modified upstream tracked sources, and feeds identical int16-quantized PCM to
+both paths. The tested stack additionally used librosa 1.0.0, torchlibrosa 0.1.0,
+soundfile 0.14.0, numba 0.67.0 and llvmlite 0.49.0 in an isolated environment.
+
+Eight generated/scene windows and 16 public-audio windows passed the `1e-4`
+normalized-embedding/cosine-score absolute tolerance. Maximum public-audio score
+difference was `7.4834e-5`; text embeddings matched exactly. This verifies these
+components, not the full upstream package, classification accuracy or readiness
+for production. The same prompts often mislabeled jazz/trumpet as speech and
+forced music styles onto speech and birdsong. Do not adopt this prompt policy.
+
+```sh
+python scripts/music-analysis/compare_original.py \
+  --upstream /absolute/scratch/CLAP --work-dir /absolute/scratch/music \
+  --ffmpeg /absolute/bundled-ffmpeg --audio /absolute/approved-fixture.wav \
+  --output /absolute/scratch/clap-parity.json
+```
+
+The alternative supervised candidate is
+[`MIT/ast-finetuned-audioset-10-10-0.4593`](https://huggingface.co/MIT/ast-finetuned-audioset-10-10-0.4593),
+revision `f826b80d28226b62986cc218e5cec390b1096902`. Download only
+`model.safetensors`, `config.json`, `preprocessor_config.json` and the model card
+in a separate, explicit preparation step. The 346,404,948-byte weight file has
+SHA-256 `ae0c1e2ad4e1381d851fa9bf298ba13ebc9c5a914cdee2dbe427a6583869924d`.
+The MLX adapter verifies all three inference artifact hashes (including labels
+and preprocessing). The model card identifies BSD-3-Clause for the checkpoint;
+the adapted Transformers implementation retains Apache-2.0 attribution and license.
+No weights or audio files are committed or automatically downloaded here.
+
+`ast_probe.py` evaluates all 527 independent sigmoid scores on genuinely
+resampled 16 kHz audio. `ast_mlx_compare.py` compares the candidate
+`video-sidecar/audio_ast.py` against the pinned PyTorch reference offline.
+The candidate uses NumPy/Kaldi preprocessing and MLX operations, not PyTorch.
+It is deliberately **not** registered in the app model catalog or dispatcher.
+
+```sh
+python scripts/music-analysis/ast_probe.py --model-dir /absolute/scratch/ast \
+  --ffmpeg /absolute/bundled-ffmpeg --audio /absolute/approved-fixture.wav \
+  --output /absolute/scratch/ast-results.json
+python scripts/music-analysis/ast_mlx_compare.py --model-dir /absolute/scratch/ast \
+  --ffmpeg /absolute/bundled-ffmpeg --audio /absolute/approved-fixture.wav \
+  --output /absolute/scratch/ast-parity.json
+```
+
+Repeat `--audio` to include multiple files. With MLX 0.32.2 and Transformers
+5.17.0, all 24 tested windows had identical preprocessing and passed absolute
+tolerances of `1e-3` for logits and `1e-4` for scores. Warm MLX inference was
+roughly 40–45 ms per window in single observations, with about 1.25 GB peak Metal
+allocation. Those are neither p95 nor minimum-laptop or packaged-app guarantees.
+A separate fresh-process smoke produced 527 finite scores from generated silence
+without importing PyTorch. Four lightweight adapter tests cover invalid PCM,
+checkpoint rejection before GPU loading, feature shape and stable independent
+sigmoid scores; they do not replace the real-weight parity check.
+
+The small corpus used the five generated controls, the approved scene fixture
+and these public librosa example assets (retrieved with its checksum registry):
+
+| Example | Attribution | SHA-256 of HQ Ogg |
+| --- | --- | --- |
+| `vibeace` | Kevin MacLeod, Vibe Ace | `73d6443ef90a7c022f164e5aa90e56c2291585930b39b1656d0765abbc1f1779` |
+| `brahms` | Brahms, Hungarian Dance No. 5; US Army Strings | `8e93ff0182a93168b15346c497b164cb49d2a97bf1e987a1149ea579e914532e` |
+| `trumpet` | Mihai Sorohan, Solo Trumpet 06 | `beb954ae2c9c16919b5ca6973d6d5196cdcb196b46a3c2a201dd8861e7e324de` |
+| `libri1` | The Ashiel Mystery, Garth Comira; LibriSpeech | `f09254a0daf4b14b292868d46dc2e3c8e158d19fafff739ad4c3931e2ce7b1b0` |
+| `robin` | InspectorJ, Bird Whistling, Robin, Single, 13 | `a3b3ecf749befde43bdf35f839fdcb8d399a4deb5666de6f399c35ce12936baa` |
+
+Retain each asset's attribution/terms from the
+[librosa registry](https://github.com/librosa/librosa/tree/main/librosa/util/example_data)
+and linked `librosa.org/data/audio/` metadata before reuse. Current TOML metadata
+identifies CC-BY-4.0 for the four non-Brahms examples and public domain for Brahms;
+some older text files say CC-BY-3.0. No audio is redistributed here. `fishin` was
+excluded because its metadata disagreed and included noncommercial terms.
+
+AST ranked speech for narration, birds for birdsong and trumpet/brass for the
+trumpet example. Music scores were higher on the musical controls than speech
+alone, but digital silence still scored Music at about `0.272`. Signal energy,
+short-window uncertainty and representative held-out calibration remain necessary.
+This smoke comparison establishes a candidate, not a production decision rule.
+
 ## Integration consequences and remaining gates
 
 The later native evidence transport is documented in
@@ -152,10 +236,10 @@ unverified evidence. Music-presence policy and style inference remain unvalidate
 - Retain the selected audio stream, nonzero origins, gaps, resampler delay and
   source microsecond intervals. This proof's FFmpeg extraction assumes contiguous
   zero-origin audio; it is not a production time-map adapter.
-- Use native music-presence/instrument evidence plus optional CLAP style
-  candidates, **not** Qwen's image-only output. Verify on reviewed real music,
+- Evaluate native evidence and the supervised AST candidate, **not** Qwen's
+  image-only output or the current CLAP prompt policy. Verify on reviewed real music,
   mixed dialogue, effects, silence and short clips before choosing a policy.
-  CLAP needs a production packaging, memory and licensing review; no weights or
+  Model inference needs a production packaging, memory and licensing review; no weights or
   Python test dependencies are added to the app by this directory.
 - A clean AI Summary should distinguish "Music detected, style unclear", a
   tentative style with supporting source ranges, "No audio track", "Not analyzed"

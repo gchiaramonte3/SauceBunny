@@ -73,6 +73,15 @@ Python's incorporated notices and the PyInstaller bootloader exception.
 Downloaded Qwen repositories include their model licenses; their exact
 revisions and artifact hashes are in `video-sidecar/models.json`.
 
+The experimental, currently unregistered `video-sidecar/audio_ast.py` adapts
+Transformers' Audio Spectrogram Transformer inference to MLX/NumPy. Its upstream
+copyright and Apache-2.0 notice are retained in the file; the complete license
+is in [`licenses/TRANSFORMERS-APACHE-2.0.txt`](licenses/TRANSFORMERS-APACHE-2.0.txt).
+The adaptation replaces PyTorch model operations and uses pinned local
+safetensors only. It is not part of the dispatched worker or model catalog.
+The separately downloaded MIT AST checkpoint is not included in this repository;
+see the pinned provenance in `scripts/music-analysis/README.md` before packaging.
+
 This worker dynamically links an **LGPL-2.1-or-later-only FFmpeg 8.0.3 build**,
 not the application's separate GPL FFmpeg command-line sidecar. GPL/nonfree
 features and external codec autodetection are disabled. PyAV is compiled from

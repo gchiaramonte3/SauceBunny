@@ -918,6 +918,13 @@ window ranges and unverified classifier suggestions, not inferred music genres.
 Music calibration, durable audio results and packaged validation remain rollout
 gates.
 
+An unregistered AST candidate (`video-sidecar/audio_ast.py`) performs local
+MLX/NumPy classification against checksum-pinned AudioSet weights. Developer-only
+parity scripts live in `scripts/music-analysis/`; neither the worker dispatcher
+nor the model catalog loads it. Numerical parity is verified on smoke fixtures,
+not music accuracy. Its source-timed decoding, cancellation, model management,
+interpretation policy and packaging still need integration.
+
 ## Tone-card design grammar (shell v3)
 
 Panels (sidebar, queue drawer, library tree/detail, the co-review participant rail) are uniform

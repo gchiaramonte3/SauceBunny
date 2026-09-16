@@ -63,6 +63,16 @@ class ProbeTests(unittest.TestCase):
                 list(audio_windows(Path("fixture.wav"), Path("ffmpeg")))
         self.assertTrue(child.stdout.closed)
 
+    def test_sixteen_khz_windows_keep_the_same_duration_and_request_real_resampling(self):
+        audio = np.arange(160_000 + 13, dtype="<f4")
+        child = Child(audio.tobytes())
+        with patch("probe.subprocess.Popen", return_value=child) as spawn:
+            windows = list(audio_windows(Path("fixture.wav"), Path("ffmpeg"), sample_rate=16_000))
+        self.assertEqual([len(data) for _, data in windows], [160_000, 13])
+        np.testing.assert_array_equal(np.concatenate([data for _, data in windows]), audio)
+        command = spawn.call_args.args[0]
+        self.assertEqual(command[command.index("-ar") + 1], "16000")
+
     def test_nonzero_child_exit_is_not_success(self):
         child = Child(b"", status=1)
         with patch("probe.subprocess.Popen", return_value=child):

@@ -286,10 +286,14 @@ classification policy.
 
 The [reproducible music-analysis diagnostics](../scripts/music-analysis/README.md)
 record pinned checkpoint hashes, conversion, actual audio controls, measurements,
-decoder limitations and remaining integration gates. The candidate path is native
-music-presence/instrument evidence plus tentative CLAP style descriptions, with
-explicit uncertainty and source-time coverage. No audio model or dependency was
-added to the installed app; music integration and packaged validation remain open.
+decoder limitations and remaining integration gates. Follow-up comparison matched
+the converted CLAP model to the pinned original inference components, but its
+current prompts still performed poorly on tested public audio. A supervised
+AudioSet AST candidate separated these smoke controls more usefully. Its
+unregistered MLX adapter matched the PyTorch reference over 24 windows, with
+identical preprocessing; this is numerical parity, not classification accuracy.
+No audio model or dependency was added to the installed app; source-time coverage,
+classification policy, music integration and packaged validation remain open.
 
 ### Native audio evidence transport (internal, September 16)
 
