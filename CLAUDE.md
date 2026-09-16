@@ -583,7 +583,7 @@ All sidecars are bundled binaries invoked through `tauri-plugin-shell`. Each lon
 | llama-server | Local LLM chat for the AI Summary tab | `npm run build:llama` (builds llama.cpp from source, static + Metal) |
 | saucebunny-dictate | Live on-device dictation for review comments (Apple Speech, partial results while you speak) | `npm run build:dictate` (builds from `swift-sidecar/`) |
 | saucebunny-capture | ScreenCaptureKit engine for co-review screen sharing (display list + capture) | `npm run build:capture` (builds from `swift-sidecar/`) |
-| saucebunny-audio-analysis | Optional local-file sound evidence (system AVFoundation + SoundAnalysis, no capture); AI Summary adoption is not enabled yet | `npm run build:audio-analysis` (resource helper under `audio-runtime/`) |
+| saucebunny-audio-analysis | Optional local-file sound evidence (system AVFoundation + SoundAnalysis, no capture); used by the feature-flagged Advanced Intelligence preview, not a calibrated music verdict | `npm run build:audio-analysis` (resource helper under `audio-runtime/`) |
 | saucebunny-aaf | Read-only AAF inspection, timeline-aligned PCM extraction and waveforms | `npm run build:aaf` (freezes `aaf-sidecar/` with pinned pyaaf2 and a bundled Python runtime) |
 
 **Not in git**: sidecar binaries are assembled locally by `npm run setup`

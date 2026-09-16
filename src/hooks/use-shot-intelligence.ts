@@ -2,17 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useVideoIntelligence } from "./use-video-intelligence";
 import { startSceneAnalysis, type SceneJob } from "../lib/scene-analysis/client";
-import { createSceneEvidence, saveSceneEvidence, shotBatches, validateShotAnswers, type SceneEvidence } from "../lib/scene-analysis/evidence";
+import { createAudioEvidence, createSceneEvidence, saveSceneEvidence, shotBatches, validateShotAnswers, type AudioEvidence, type SceneEvidence } from "../lib/scene-analysis/evidence";
 import { parseSrt } from "../lib/srt";
 import { formatError } from "../lib/error-format";
 import type { VideoShotAnswer } from "../bindings/VideoShotAnswer";
 
 const QUESTION = "Describe what is visibly happening in this supplied shot. Then summarize what the supplied transcript says, if any. Keep visual observations and supplied speech distinct. Do not infer music or other sounds, invent cuts, or change shot boundaries.";
 type Run = { key: string; stopped: boolean; detector?: SceneJob };
+export type ShotAudioState = { status: "not-started" | "analyzing" | "stopped" }
+  | { status: "ready"; evidence: AudioEvidence }
+  | { status: "unavailable"; error: string };
 type State = { key: string; busy: boolean; stopping: boolean; phase: string; progress: number | null;
-  evidence: SceneEvidence | null; answers: VideoShotAnswer[]; error: string; complete: boolean };
+  evidence: SceneEvidence | null; answers: VideoShotAnswer[]; audio: ShotAudioState; error: string; complete: boolean };
 const empty = (key: string): State => ({ key, busy: false, stopping: false, phase: "", progress: null,
-  evidence: null, answers: [], error: "", complete: false });
+  evidence: null, answers: [], audio: { status: "not-started" }, error: "", complete: false });
 
 export function useShotIntelligence(path: string | null, transcriptPath: string | null, sourceKey?: string | null, reloadToken = 0, foregroundBusy = false) {
   const key = JSON.stringify([path, transcriptPath, sourceKey, reloadToken]);
@@ -91,6 +94,21 @@ export function useShotIntelligence(path: string | null, transcriptPath: string 
         update({ answers: [...answers], phase: `Described ${answers.length} of ${evidence.shots.length} shots`,
           progress: answers.length / evidence.shots.length * 100 });
       }
+      // Sound is read from the verified original, never inferred from image
+      // descriptions or the transcript. It is optional: retain useful visual
+      // results if this decoder/classifier cannot analyze the source.
+      update({ audio: { status: "analyzing" }, phase: "Analyzing source audio…", progress: null });
+      try {
+        const response = await nativeRun({ operation: "analyze-audio", path: proxy.source.path,
+          source_sha256: proxy.source.sha256, analysis_id: evidence.id,
+          origin_us: proxy.source.origin_us, duration_us: proxy.source.duration_us, audio_track_index: 0 });
+        assertCurrent();
+        update({ audio: response?.audio_analysis
+          ? { status: "ready", evidence: createAudioEvidence(evidence, response.audio_analysis) }
+          : { status: "unavailable", error: "" } });
+      } catch (cause) {
+        if (current()) update({ audio: { status: "unavailable", error: formatError(cause) } });
+      }
       update({ complete: true });
     } catch (cause) {
       if (current()) update({ error: formatError(cause) });
@@ -98,13 +116,20 @@ export function useShotIntelligence(path: string | null, transcriptPath: string 
       if (active.current === job) {
         active.current = null;
         if (mounted.current) setState(value => currentKey.current === job.key
-          ? { ...value, busy: false, stopping: false } : empty(currentKey.current));
+          ? { ...value, busy: false, stopping: false,
+            audio: value.audio.status === "analyzing" ? { status: "stopped" } : value.audio } : empty(currentKey.current));
       }
     }
   }, [key, path, transcriptPath, nativeRun, foregroundBusy]);
 
   // A new source hides the old result in its first render, before effects run.
   const visible = state.key === key ? state : empty(key);
-  return { ...visible, start, stop, nativeError: state.key === key ? native.error : "",
+  const nativeError = state.key === key ? native.error : "";
+  const audioStage = visible.audio.status !== "not-started";
+  const audioProgress = visible.audio.status === "analyzing" && native.progress?.phase === "analyzing-audio"
+    && native.progress.total > 0 ? native.progress.completed / native.progress.total * 100 : null;
+  return { ...visible, start, stop, progress: audioStage ? audioProgress : visible.progress,
+    nativeError: audioStage ? "" : nativeError,
+    audioError: audioStage ? (visible.audio.status === "unavailable" ? visible.audio.error : "") || nativeError : "",
     draining: !!active.current && active.current.key !== key };
 }

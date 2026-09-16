@@ -1,6 +1,7 @@
 import type { VideoSceneProxy } from "../../bindings/VideoSceneProxy";
 import type { VideoShot } from "../../bindings/VideoShot";
 import type { VideoShotAnalysis } from "../../bindings/VideoShotAnalysis";
+import type { VideoAudioAnalysis } from "../../bindings/VideoAudioAnalysis";
 import type { Cue } from "../srt";
 import type { SceneAnalysisResult } from "./mediabunny-scene-analysis";
 
@@ -14,6 +15,19 @@ export type SceneEvidence = Immutable<{
   detection: SceneAnalysisResult;
   shots: DetectedShot[];
 }>;
+export type AudioEvidence = Immutable<VideoAudioAnalysis>;
+
+/** The native collector validates PCM coverage/scores. This boundary binds its
+ * completed response to this exact visual analysis before showing any sound. */
+export function createAudioEvidence(evidence: SceneEvidence, audio: VideoAudioAnalysis): AudioEvidence {
+  const source = evidence.proxy.source;
+  if (audio.analysis_id !== evidence.id || audio.source.sha256 !== source.sha256
+    || audio.source.path !== source.path || audio.source.origin_us !== source.origin_us
+    || audio.source.duration_us !== source.duration_us || audio.audio_track_index !== 0) {
+    throw new Error("Audio analysis returned unrelated source evidence");
+  }
+  return freeze(structuredClone(audio));
+}
 
 function freeze<T>(value: T): Immutable<T> {
   if (value && typeof value === "object") {

@@ -138,7 +138,8 @@ The later native evidence transport is documented in
 It uses AVAssetReader plus bounded SNAudioStreamAnalyzer windows, not this
 file-analyzer probe. It preserves edit-mapped output PTS and rejects the generated
 AAC gap case when native decoding changes source timing. Raw evidence transport
-is implemented; policy, style inference and AI Summary adoption are not.
+is implemented and the feature-flagged AI Summary preview displays its raw,
+unverified evidence. Music-presence policy and style inference remain unvalidated.
 
 - The minimal PyAV/FFmpeg build inside the video sidecar lacks `aformat` and
   `aresample`. `av.AudioResampler` fails there. Reuse the existing app-bundled

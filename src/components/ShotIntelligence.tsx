@@ -3,6 +3,7 @@ import { useShotIntelligence } from "../hooks/use-shot-intelligence";
 import { formatTimestamp } from "../lib/scene-analysis/detector-core";
 import { GenerateButton } from "./GenerateButton";
 import { Markdown } from "./Markdown";
+import { ShotAudioEvidence } from "./ShotAudioEvidence";
 
 export function ShotIntelligence({ videoPath, transcriptPath, sourceKey, reloadToken, foregroundBusy, onSeek, onOpenSettings, onBusyChange }: {
   videoPath: string | null; transcriptPath: string | null; sourceKey?: string | null; reloadToken?: number;
@@ -13,19 +14,19 @@ export function ShotIntelligence({ videoPath, transcriptPath, sourceKey, reloadT
   useEffect(() => { onBusyChange(analysis.busy); return () => onBusyChange(false); }, [analysis.busy, onBusyChange]);
   return <section className="cp-shot-analysis" aria-label="Advanced Intelligence">
     <div className="cp-ai-bar">
-      <span>Picture + transcript · on this Mac</span>
+      <span>Picture + transcript + audio · on this Mac</span>
       {onOpenSettings && <button type="button" className="btn btn-ghost" onClick={onOpenSettings}>Models…</button>}
     </div>
     <div className="cp-ai-thread">
       {!analysis.evidence && <div className="cp-shot-intro">
         <p>Understand the cut, shot by shot.</p>
-        <p className="cp-muted">Detect hard cuts, describe the picture, and place supplied dialogue beside each shot.</p>
+        <p className="cp-muted">Detect hard cuts, describe the picture, place supplied dialogue beside each shot, and inspect source audio.</p>
         {!videoPath && <p className="cp-muted">Open a local video or finish downloading its local copy first. Live inputs are not analyzed.</p>}
         {foregroundBusy && <p className="cp-muted">Pause playback and finish transcription before analyzing video.</p>}
       </div>}
       {analysis.evidence && <>
         <p className="cp-shot-count">{analysis.evidence.shots.length} shots · {analysis.evidence.detection.boundaries.length} detected cuts</p>
-        <p className="cp-muted">Music and other audio have not been analyzed.</p>
+        <ShotAudioEvidence audio={analysis.audio} error={analysis.audioError} busy={analysis.busy} onSeek={onSeek} />
         <ol className="cp-shot-list">
           {analysis.evidence.shots.map(shot => {
             const answer = analysis.answers.find(item => item.id === shot.id);

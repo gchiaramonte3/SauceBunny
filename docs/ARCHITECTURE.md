@@ -910,9 +910,13 @@ The optional `analyze-audio` request uses the same Rust job owner but starts
 Python worker. AVFoundation decodes local audio into three-second PCM windows;
 SoundAnalysis returns raw scores with actual source-time coverage. Rust adopts
 the collected evidence only after matching source identity and a clean worker
-completion. It does not capture a device or download a model. AI Summary does
-not request this operation yet: music calibration, UI adoption and packaged
-validation remain separate rollout gates.
+completion. It does not capture a device or download a model. The feature-flagged
+Advanced Intelligence controller requests it after visual descriptions and
+keeps those descriptions when optional audio analysis fails. Source/run identity
+is rechecked before freezing the response. A compact disclosure shows actual
+window ranges and unverified classifier suggestions, not inferred music genres.
+Music calibration, durable audio results and packaged validation remain rollout
+gates.
 
 ## Tone-card design grammar (shell v3)
 

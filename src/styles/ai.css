@@ -23,6 +23,13 @@
 .cp-shot-heading > button { font-variant-numeric: tabular-nums; }
 .cp-shot-list summary { cursor: pointer; min-height: 24px; }
 .cp-shot-transcript { white-space: pre-wrap; }
+.cp-shot-audio { overflow-wrap: anywhere; }
+.cp-shot-audio p { margin: 0 0 var(--s-2); }
+.cp-shot-audio summary { cursor: pointer; min-height: 24px; }
+.cp-shot-audio-windows { list-style: none; margin: var(--s-2) 0; padding: 0; }
+.cp-shot-audio-windows > li { padding: var(--s-2) 0; border-top: 1px solid var(--line-1); }
+.cp-shot-audio-windows > li > button { white-space: normal; text-align: left; max-width: 100%; }
+.cp-shot-audio-windows > li > p { margin-top: var(--s-1); }
 .cp-shot-actions { display: flex; align-items: center; gap: 8px; padding: 12px; border-top: 1px solid var(--line-1); }
 .cp-shot-actions .cp-gen-btn { flex: 1; min-width: 0; }
 

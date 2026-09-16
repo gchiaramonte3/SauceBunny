@@ -295,8 +295,9 @@ added to the installed app; music integration and packaged validation remain ope
 
 `VideoRequest.analyze-audio` now runs a first-party Swift worker under the same
 Rust job owner, Stop handling, foreground priority and child-exit validation as
-video analysis. It is **not yet called by AI Summary**, and it does not return a
-genre or calibrated music-presence verdict. The installed app was not rebuilt.
+video analysis. The feature-flagged AI Summary preview now requests it after
+visual descriptions. It does not return a genre or calibrated music-presence
+verdict. The installed app was not rebuilt.
 
 - The request carries the inspected source SHA-256, analysis ID, source origin,
   duration and explicit audio-track index. Content is verified before and after
@@ -328,7 +329,40 @@ generated AAC origins/gaps (CI's sidecar stubs cannot encode those fixtures).
 Normal app builds now include it, and bundle verification checks its source
 receipt, Mach-O build identity, system linkage and macOS 14 floor.
 
+### AI Summary audio evidence (internal, September 16)
+
+The existing Advanced Intelligence preview reads the first audio track of the
+verified source after completing visual descriptions. Nothing runs on mount or
+mode selection. Late results after Stop, source/transcript changes or unmount
+are rejected; playback/transcription still own foreground priority. Audio errors
+retain completed shot descriptions and supplied text, with the native reason in
+a quiet optional disclosure rather than a fatal visual-analysis error.
+
+The response is source/run-bound and deeply frozen before display. The compact
+Audio evidence disclosure shows actual window ranges, digital silence and
+unclassified short tails. It labels raw ranked suggestions as unverified, never
+as detected genres or confidence percentages. Windows may cross multiple cuts;
+their ranges are not copied into shot boundaries or represented as word/shot
+timing. All original scores remain in memory; only three are shown per window.
+Audio results are session-only, like the current visual descriptions.
+
+The opt-in browser test accepts `SCENE_AUDIO_HELPER` alongside
+`SCENE_PROXY_MANIFEST` to run the actual native decoder/classifier on that exact
+reviewed source. The browser uses the real detector/controller, but visual-model
+answers and the Tauri bridge remain test substitutes; it is not a packaged
+WKWebView certification. No capture, playback or model download is involved.
+
+Checkpoint verification: the full automated gate passed (4,315 frontend tests,
+756 Rust tests and 453 browser tests, with the existing fixture-dependent skips).
+The opt-in reviewed-fixture run also passed all four checks in both Chrome and
+Playwright WebKit with the real native audio helper. It displayed 12 shots from
+11 cuts and eight audio windows, including the explicitly unclassified 2.5-second
+tail. The disclosure was checked at 360/440 px and normal/125% text sizes. These
+checks establish transport and UI behavior, not music-label accuracy or packaged
+app performance.
+
 Remaining: reviewed real-audio calibration (including pure tones, dialogue over
 music and sound effects), tentative style-model packaging, persistent audio
-evidence, UI association with shots, and packaged WKWebView validation. The music
-feature and overall scene-analysis/AI Summary goal remain incomplete.
+evidence, validated per-shot music interpretation, and packaged WKWebView
+validation. The music feature and overall scene-analysis/AI Summary goal remain
+incomplete.

@@ -3,22 +3,26 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useShotIntelligence } from "./use-shot-intelligence";
 
-const mocks = vi.hoisted(() => ({ run: vi.fn(), stop: vi.fn(), start: vi.fn(), cancel: vi.fn(), invoke: vi.fn(), save: vi.fn(), create: vi.fn(), validate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ run: vi.fn(), stop: vi.fn(), start: vi.fn(), cancel: vi.fn(), invoke: vi.fn(), save: vi.fn(), create: vi.fn(), validate: vi.fn(), audioCreate: vi.fn(), nativeError: "" }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
-vi.mock("./use-video-intelligence", () => ({ useVideoIntelligence: () => ({ run: mocks.run, stop: mocks.stop, error: "" }) }));
+vi.mock("./use-video-intelligence", () => ({ useVideoIntelligence: () => ({ run: mocks.run, stop: mocks.stop, error: mocks.nativeError }) }));
 vi.mock("../lib/scene-analysis/client", () => ({ startSceneAnalysis: mocks.start }));
-vi.mock("../lib/scene-analysis/evidence", () => ({ createSceneEvidence: mocks.create, saveSceneEvidence: mocks.save,
+vi.mock("../lib/scene-analysis/evidence", () => ({ createSceneEvidence: mocks.create, createAudioEvidence: mocks.audioCreate, saveSceneEvidence: mocks.save,
   shotBatches: () => [[{ id: 1, start_us: 0, end_us: 1000, transcript: "hello" }]], validateShotAnswers: mocks.validate }));
 const source = { path: "/clip.mp4", sha256: "a".repeat(64), duration_us: 1000, origin_us: 0 };
 const proxy = { path: "/proxy.mp4", source };
 const evidence = { id: "b".repeat(64), shots: [{ id: 1 }], proxy };
 const answer = { shots: [{ id: 1, text: "A visible frame" }] };
 const models = { models: [{ id: "qwen3.5-9b-video", ready: true }] };
+const audio = { analysis_id: evidence.id, source, audio_track_index: 0, status: "no-audio", windows: [] };
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.nativeError = "";
   mocks.run.mockImplementation(async ({ operation }) => operation === "models" ? models : operation === "prepare-shot-proxy"
-    ? { scene_proxy: proxy } : operation === "inspect-video" ? { analysis_source: source } : { shot_analysis: answer });
+    ? { scene_proxy: proxy } : operation === "inspect-video" ? { analysis_source: source }
+      : operation === "analyze-audio" ? { audio_analysis: audio } : { shot_analysis: answer });
+  mocks.audioCreate.mockImplementation((_evidence, audio) => audio);
   mocks.start.mockReturnValue({ result: Promise.resolve({ boundaries: [] }), cancel: mocks.cancel });
   mocks.create.mockResolvedValue(evidence); mocks.save.mockResolvedValue(undefined);
   mocks.invoke.mockResolvedValue("1\n00:00:00,000 --> 00:00:01,000\nhello\n");
@@ -35,9 +39,13 @@ describe("shot analysis ownership", () => {
     await act(() => result.current.start());
     expect(mocks.create.mock.calls[0][2][0].text).toBe("hello");
     expect(mocks.save).toHaveBeenCalledWith(evidence);
-    expect(mocks.run.mock.calls.map(call => call[0].operation)).toEqual(["models", "prepare-shot-proxy", "inspect-video", "analyze-shots"]);
+    expect(mocks.run.mock.calls.map(call => call[0].operation)).toEqual(["models", "prepare-shot-proxy", "inspect-video", "analyze-shots", "analyze-audio"]);
     expect(mocks.validate).toHaveBeenCalledWith(evidence, expect.any(Array), answer);
     expect(result.current.complete).toBe(true); expect(result.current.answers).toEqual(answer.shots);
+    expect(mocks.run).toHaveBeenLastCalledWith({ operation: "analyze-audio", path: source.path,
+      source_sha256: source.sha256, analysis_id: evidence.id, origin_us: source.origin_us, duration_us: source.duration_us, audio_track_index: 0 });
+    expect(mocks.audioCreate).toHaveBeenCalledWith(evidence, audio);
+    expect(result.current.audio).toEqual({ status: "ready", evidence: audio });
   });
   it("refuses missing weights before preparing video, without automatic download", async () => {
     mocks.run.mockResolvedValue({ models: [] });
@@ -107,5 +115,71 @@ describe("shot analysis ownership", () => {
     expect(result.current.error).toContain("priority"); expect(mocks.save).not.toHaveBeenCalled();
     await act(() => result.current.start());
     expect(mocks.start).toHaveBeenCalledOnce();
+  });
+});
+
+describe("optional source audio", () => {
+  function holdAudio() {
+    const gate = deferred<unknown>();
+    const original = mocks.run.getMockImplementation()!;
+    mocks.run.mockImplementation(request => request.operation === "analyze-audio" ? gate.promise : original(request));
+    return gate;
+  }
+  it("native audio failure retains complete visuals and exposes its actual reason only as audio feedback", async () => {
+    const gate = holdAudio();
+    const { result } = renderHook(() => useShotIntelligence("/clip.mp4", null));
+    let operation!: Promise<void>;
+    act(() => { operation = result.current.start(); });
+    await waitFor(() => expect(result.current.audio.status).toBe("analyzing"));
+    expect(result.current.answers).toEqual(answer.shots);
+    mocks.nativeError = "Native audio decoding changed source timing";
+    await act(async () => { gate.resolve(null); await operation; });
+    expect(result.current.audio.status).toBe("unavailable");
+    expect(result.current.audioError).toBe(mocks.nativeError);
+    expect(result.current.nativeError).toBe(""); expect(result.current.error).toBe("");
+    expect(result.current.evidence).toBe(evidence); expect(result.current.answers).toEqual(answer.shots);
+    expect(result.current.complete).toBe(true); expect(result.current.busy).toBe(false);
+  });
+  it("rejects audio that fails source association without discarding shot descriptions", async () => {
+    mocks.audioCreate.mockImplementation(() => { throw new Error("Unrelated audio source"); });
+    const { result } = renderHook(() => useShotIntelligence("/clip.mp4", null));
+    await act(() => result.current.start());
+    expect(result.current.audio.status).toBe("unavailable"); expect(result.current.audioError).toContain("Unrelated audio source");
+    expect(result.current.answers).toEqual(answer.shots); expect(result.current.complete).toBe(true);
+  });
+  it("Stop rejects a late successful audio response but preserves already completed visual work", async () => {
+    const gate = holdAudio();
+    const { result } = renderHook(() => useShotIntelligence("/clip.mp4", null));
+    let operation!: Promise<void>;
+    act(() => { operation = result.current.start(); });
+    await waitFor(() => expect(result.current.audio.status).toBe("analyzing"));
+    act(() => result.current.stop());
+    await act(async () => { gate.resolve({ audio_analysis: audio }); await operation; });
+    expect(mocks.stop).toHaveBeenCalledOnce(); expect(mocks.audioCreate).not.toHaveBeenCalled();
+    expect(result.current.audio.status).toBe("stopped"); expect(result.current.complete).toBe(false);
+    expect(result.current.answers).toEqual(answer.shots); expect(result.current.busy).toBe(false);
+  });
+  it.each(["source", "revision", "transcript"])("a changed %s cannot borrow pending audio", async kind => {
+    const gate = holdAudio();
+    const { result, rerender } = renderHook(({ path, revision, transcript }) => useShotIntelligence(path, transcript, "source-a", revision),
+      { initialProps: { path: "/clip.mp4", revision: 0, transcript: "/clip.srt" } });
+    let operation!: Promise<void>;
+    act(() => { operation = result.current.start(); });
+    await waitFor(() => expect(result.current.audio.status).toBe("analyzing"));
+    rerender({ path: kind === "source" ? "/other.mp4" : "/clip.mp4", revision: kind === "revision" ? 1 : 0,
+      transcript: kind === "transcript" ? "/new.srt" : "/clip.srt" });
+    expect(result.current.audio.status).toBe("not-started"); expect(result.current.draining).toBe(true);
+    await act(async () => { gate.resolve({ audio_analysis: audio }); await operation; });
+    expect(mocks.audioCreate).not.toHaveBeenCalled(); expect(result.current.evidence).toBeNull();
+    expect(result.current.answers).toEqual([]); expect(result.current.draining).toBe(false);
+  });
+  it("unmount during audio requests Stop and never adopts its output", async () => {
+    const gate = holdAudio();
+    const { result, unmount } = renderHook(() => useShotIntelligence("/clip.mp4", null));
+    let operation!: Promise<void>;
+    act(() => { operation = result.current.start(); });
+    await waitFor(() => expect(result.current.audio.status).toBe("analyzing"));
+    unmount(); gate.resolve({ audio_analysis: audio }); await operation;
+    expect(mocks.stop).toHaveBeenCalledOnce(); expect(mocks.audioCreate).not.toHaveBeenCalled();
   });
 });

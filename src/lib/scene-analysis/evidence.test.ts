@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { webcrypto } from "node:crypto";
 import type { VideoSceneProxy } from "../../bindings/VideoSceneProxy";
 import type { SceneAnalysisResult } from "./mediabunny-scene-analysis";
-import { createSceneEvidence, shotBatches, sourceTime, validateShotAnswers } from "./evidence";
+import { createAudioEvidence, createSceneEvidence, shotBatches, sourceTime, validateShotAnswers } from "./evidence";
+import type { VideoAudioAnalysis } from "../../bindings/VideoAudioAnalysis";
 import { DEFAULT_DETECTOR_CONFIG } from "./detector-core";
 
 Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: true });
@@ -28,6 +29,22 @@ export function fixtures(cuts = 11) {
 }
 
 describe("source-bound shot evidence", () => {
+  it("binds actual audio to the exact detection and freezes a separate snapshot", async () => {
+    const { proxy, detection } = fixtures();
+    const scene = await createSceneEvidence(proxy, detection, []);
+    const audio: VideoAudioAnalysis = { analysis_id: scene.id, source: proxy.source, audio_track_index: 0,
+      classifier: "apple-soundanalysis-version1", os: "test", preprocessing_version: "pcm48k-mono-3s-nonoverlap-v1", status: "decoded",
+      windows: [{ start_us: 0, end_us: 3e6, rms: .1, peak: .2, status: "classified", classifications: [{ identifier: "music", score: .8 }] }] };
+    const result = createAudioEvidence(scene, audio);
+    audio.windows[0].classifications[0].score = .1;
+    expect(result.windows[0].classifications[0].score).toBe(.8);
+    expect(Object.isFrozen(result.windows[0].classifications[0])).toBe(true);
+    for (const wrong of [{ ...audio, analysis_id: "x" }, { ...audio, audio_track_index: 1 },
+      ...[{ path: "/other.mp4" }, { sha256: "c".repeat(64) }, { origin_us: 0 }, { duration_us: 10 }]
+        .map(change => ({ ...audio, source: { ...audio.source, ...change } }))]) {
+      expect(() => createAudioEvidence(scene, wrong)).toThrow(/unrelated source/);
+    }
+  });
   it("11 cuts create exactly 12 immutable shots, with overlapping speech kept verbatim", async () => {
     const { proxy, detection } = fixtures();
     const evidence = await createSceneEvidence(proxy, detection, [{ index: 1, start: .8, end: 1.2, speaker: "Alex", text: "Across the cut." }]);
