@@ -251,6 +251,18 @@ Generate transcript:
                              rename, search, history popover)
 ```
 
+## Full-frame scene analysis (integration in progress)
+
+`src/lib/scene-analysis/client.ts` owns a cancellable module worker. The worker
+retains MediaBunny Input, decoded samples, canvas and detector features; the
+window only serves compressed native filesystem ranges through the existing
+typed IPC commands. Terminal messages acknowledge cleanup, and run IDs isolate
+late results. The reference detector is distinct from the native video worker's
+sampled semantic-retrieval index: only full-frame boundaries may establish a
+shot count. AI Summary wiring, standardized proxy/time-map production and durable
+evidence adoption are not complete. See `docs/VIDEO-INTELLIGENCE.md` for tested
+browser surfaces and rollout gates.
+
 ## Local AI: one transcript ingestion, shared by every feature
 
 `llama-server` runs as a sidecar and the AI Summary, the auto-chapters and the

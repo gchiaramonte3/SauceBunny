@@ -135,3 +135,92 @@ the complete application in WKWebView.
 - https://github.com/Blaizzy/mlx-vlm
 - https://ml-explore.github.io/mlx/build/html/install.html
 - https://ffmpeg.org/legal.html
+
+## Full-frame shot analysis integration, September 16
+
+This is a separate path from the sampled retrieval index. The supplied Ella
+detector is ported under `src/lib/scene-analysis/`; its scoring, thresholds,
+full-frame iterator and sensitivity 95 are unchanged. Sensitivity is a detector
+setting, not an accuracy percentage. Neither embedding windows nor model prose
+may supply a cut count.
+
+`startSceneAnalysis` creates a module worker and returns cancellation ownership
+before awaiting native file metadata. A typed PROBE precedes START. The worker
+uses MediaBunny `CustomSource` to request compressed byte ranges; the main window
+only relays existing `get_file_size` / `read_file_range` commands and transfers
+the resulting buffers. It never fetches the whole original into a Blob.
+MediaBunny Input, every decoded VideoSample, canvas, pixels and features remain
+inside the worker. Stop rejects outstanding reads, disposes Input, then sends a
+terminal acknowledgement. Stale run messages and reads cannot complete a new run.
+
+Intentional reference deviations:
+
+- Sauce Bunny retains its installed MediaBunny 1.52.3 rather than the reference
+  1.52.2. Ella's separate integration uses its existing 1.55.1. The reviewed
+  fixture is tested in each integration, not assumed identical by version.
+- START additionally accepts a native-file descriptor and the protocol includes
+  compressed byte-range requests/results. There is no decoding or feature work
+  on the UI thread. Cache size remains the reference's 8 MiB; this is not a cap
+  on total decoder/feature memory.
+- The exact hardware-preferred decoder configuration is probed, rather than
+  only the codec's default configuration. Unsupported configurations produce
+  `UNSUPPORTED_CODEC`; there is no reduced-rate or HTML-video fallback.
+- Pipeline errors preserve the underlying failure message. Decoder cleanup
+  precedes the terminal worker message.
+- The ten reference unit tests use Vitest here; their assertions are unchanged.
+
+### Browser checks
+
+| Surface | Observed result | What it does not prove |
+| --- | --- | --- |
+| Installed Chrome, real worker and range bridge | 705 decoded frames, 11 cuts, exact reviewed indices; Stop under 1 second; malformed bytes and unsupported codec are typed failures | Packaged app performance or long-form memory |
+| Playwright WebKit, real worker and range bridge | Same fixture and failure/Stop checks pass | Installed Safari or packaged WKWebView certification |
+| Playwright headless Chromium | Default codec probe may pass while the hardware-preferred H.264 configuration is unavailable; now explicitly rejected | H.264 support on other Chromium distributions |
+| Edge / Firefox | Not tested in the Sauce integration | No support claim |
+
+Expected cut indices are `26, 61, 90, 121, 166, 340, 355, 374, 390, 513, 621`.
+The 11 boundaries partition the full clip into 12 shots, not 11.
+
+```sh
+npx vitest run src/lib/scene-analysis
+SCENE_REVIEWED_FIXTURE=/absolute/path/to/the-reviewed-fixture.mp4 \
+  npx playwright test e2e/scene-analysis.spec.ts --workers=1
+SCENE_BROWSER=webkit SCENE_REVIEWED_FIXTURE=/absolute/path/to/the-reviewed-fixture.mp4 \
+  npx playwright test e2e/scene-analysis.spec.ts --workers=1
+```
+
+The fixture cases are explicitly skipped when that path is absent; the ordinary
+suite still runs the malformed-media worker case. No user library is scanned.
+
+### Rollout status: incomplete, not exposed to users yet
+
+The worker and native `inspect-video` / `analyze-shots` operations are implemented,
+but the AI Summary Text / Advanced Intelligence switch is not connected yet.
+Required next work is standardized 360p–540p proxy production with a verified,
+versioned source-time map, immutable machine-result persistence, panel/source
+ownership, transcript-to-shot association, and the actual UI. A model description
+must never invent the supplied shot boundary or move playback to an invented
+timestamp. The resident text model must not be silently evicted. Explicit model
+downloads and playback/transcription priority remain in effect.
+
+Do not enable the user-facing path before its source-change/Stop races and
+packaged WKWebView behavior are verified. Minimum-laptop p95 throughput,
+long-form memory soak, and the wider edit-list/VFR/rotation fixture matrix remain
+open rollout gates. The full objective is not complete.
+
+Music is not analyzed by Qwen's visual frames or supplied transcript text.
+Actual-audio music classification remains a separate integration, not an inferred
+claim in shot descriptions; native results currently report `audio_analyzed:false`.
+
+Research candidate, checked September 16: LAION's
+[music-trained CLAP checkpoint](https://huggingface.co/laion/larger_clap_music)
+supports zero-shot audio classification by comparing actual audio to candidate
+text descriptions. The [official implementation](https://github.com/LAION-AI/CLAP)
+is the reference for input preprocessing. The proposed app path is to extract
+bounded audio windows locally, score a reviewed vocabulary of music styles,
+moods and instruments, and associate results with source-time intervals.
+Similarity rankings are not calibrated confidence, song identification, or proof
+that background music is separable from dialogue. Show uncertain/insufficient
+evidence rather than force a genre. CPU/Apple Silicon behavior, packaging and
+dialogue-over-music accuracy still need testing; no weights were downloaded or
+classification claimed in this pass.
