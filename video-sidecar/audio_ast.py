@@ -19,11 +19,14 @@ The caller must provide source-timed PCM and preserve actual window coverage.
 from __future__ import annotations
 
 import hashlib
+import gc
 import json
 from pathlib import Path
 
 import numpy as np
 
+MODEL_ID = "ast-audioset"
+MODEL_REVISION = "f826b80d28226b62986cc218e5cec390b1096902"
 FILES = {
     "model.safetensors": "ae0c1e2ad4e1381d851fa9bf298ba13ebc9c5a914cdee2dbe427a6583869924d",
     "config.json": "a93d525511d77e8ecc933d09674b85099815bbbb417c228a4edd655e252fb9ff",
@@ -54,7 +57,7 @@ def prepare_features(pcm: np.ndarray, config: dict) -> np.ndarray:
 
 
 class AudioSpectrogramClassifier:
-    def __init__(self, directory: Path):
+    def __init__(self, directory: Path, memory_bytes: int | None = None):
         for filename, digest in FILES.items():
             with (directory / filename).open("rb") as stream:
                 if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
@@ -62,12 +65,20 @@ class AudioSpectrogramClassifier:
         import mlx.core as mx
 
         self.mx = mx
+        if memory_bytes is not None:
+            mx.set_memory_limit(memory_bytes)
+            mx.set_cache_limit(min(memory_bytes // 8, 512 * 1024 * 1024))
         self.config = json.loads((directory / "config.json").read_text())
         self.preprocessing = json.loads((directory / "preprocessor_config.json").read_text())
         self.labels = self.config["id2label"]
         self.weights = mx.load(str(directory / "model.safetensors"))
         self.prefix = "audio_spectrogram_transformer."
         self._used_weights: set[str] = set()
+
+    def close(self):
+        self.weights.clear()
+        gc.collect()
+        self.mx.clear_cache()
 
     def weight(self, key: str):
         self._used_weights.add(key)
@@ -111,7 +122,9 @@ class AudioSpectrogramClassifier:
         if self._used_weights != self.weights.keys():
             raise ValueError("Unused AST checkpoint parameters")
         mx.eval(logits)
-        return np.array(logits)
+        result = np.array(logits)
+        mx.clear_cache()
+        return result
 
     def classify(self, pcm: np.ndarray):
         logits = self.logits(prepare_features(pcm, self.preprocessing))

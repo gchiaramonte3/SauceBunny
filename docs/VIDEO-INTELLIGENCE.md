@@ -292,8 +292,17 @@ current prompts still performed poorly on tested public audio. A supervised
 AudioSet AST candidate separated these smoke controls more usefully. Its
 unregistered MLX adapter matched the PyTorch reference over 24 windows, with
 identical preprocessing; this is numerical parity, not classification accuracy.
-No audio model or dependency was added to the installed app; source-time coverage,
-classification policy, music integration and packaged validation remain open.
+The experimental `audio_pcm.py` / `music_analysis.py` path now decodes a selected
+audio stream in-process, preserves source anchors and gaps, and feeds bounded
+ten-second PCM windows into the AST candidate. Coarse packet timestamps are
+validated before normalization to a region-relative sample clock; real gaps
+flush the resampler instead of being joined. Generated AAC edit-list/gap cases,
+fractional origins, cancellation and source-replacement tests cover this path.
+The reviewed 23.5-second scene fixture produced three actual-audio AST windows;
+their scores remain uncalibrated evidence, not a genre verdict.
+No audio model or dependency was added to the installed app. Worker dispatch,
+model management, classification policy, music integration and packaged
+validation remain open.
 
 ### Native audio evidence transport (internal, September 16)
 

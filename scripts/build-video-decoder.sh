@@ -18,7 +18,9 @@ cd "${DECODER_DIR}/ffmpeg-8.0.3"
   --enable-shared --disable-static --enable-pic --disable-autodetect --disable-gpl --disable-nonfree \
   --disable-network --disable-programs --disable-doc --disable-debug --disable-indevs --disable-outdevs \
   --disable-encoders --enable-encoder=mpeg4,h264_videotoolbox --enable-videotoolbox \
-  --disable-muxers --enable-muxer=mp4 --disable-filters
+  --disable-muxers --enable-muxer=mp4 --disable-filters --enable-filter=aformat,aresample,abuffer,abuffersink
+# PyAV's AudioResampler uses aformat with auto-inserted aresample. Keep the
+# existing in-process decoder owner rather than adding a second audio process.
 # Reused scratch directories must not link objects from a newer deployment OS.
 make clean
 make -j8

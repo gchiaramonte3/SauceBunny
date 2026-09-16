@@ -922,8 +922,15 @@ An unregistered AST candidate (`video-sidecar/audio_ast.py`) performs local
 MLX/NumPy classification against checksum-pinned AudioSet weights. Developer-only
 parity scripts live in `scripts/music-analysis/`; neither the worker dispatcher
 nor the model catalog loads it. Numerical parity is verified on smoke fixtures,
-not music accuracy. Its source-timed decoding, cancellation, model management,
-interpretation policy and packaging still need integration.
+not music accuracy. `audio_pcm.py` now supplies bounded ten-second, 16 kHz mono
+windows through PyAV's in-process resampler. Decoded PTS validate each contiguous
+region before an exact sample clock removes container quantization; original
+anchors, gaps and unpadded tails remain source-timed. `music_analysis.py` owns the
+decoder and model, streams evidence, and emits completion only after a second
+source hash. Failure or cancellation closes both without a completion packet.
+The LGPL decoder recipe enables the required audio filters. Dispatcher/model
+management, interpretation policy and packaged lifecycle validation remain open;
+the experimental path is not activated in the app.
 
 ## Tone-card design grammar (shell v3)
 

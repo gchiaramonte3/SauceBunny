@@ -225,10 +225,20 @@ AAC gap case when native decoding changes source timing. Raw evidence transport
 is implemented and the feature-flagged AI Summary preview displays its raw,
 unverified evidence. Music-presence policy and style inference remain unvalidated.
 
-- The minimal PyAV/FFmpeg build inside the video sidecar lacks `aformat` and
-  `aresample`. `av.AudioResampler` fails there. Reuse the existing app-bundled
-  FFmpeg audio extraction, under the Rust job owner, not an accidental Homebrew
-  dependency or an untracked subprocess.
+- The earlier minimal PyAV/FFmpeg build lacked the audio filters needed by
+  `av.AudioResampler`. The decoder recipe now enables `aformat`, `aresample`,
+  `abuffer` and `abuffersink`, keeping decoding in the owned Python process.
+  `video-sidecar/audio_pcm.py` preserves decoded source anchors, quantized packet
+  PTS, real gaps and unpadded tails in bounded ten-second, 16 kHz mono windows.
+  `music_analysis.py` closes the decoder/model on failure or cancellation and
+  requires a final matching source hash before completion. Focused tests cover
+  these contracts, including generated real AAC with edit lists and a gap.
+  Run them with `npm run test:video`; provide `AUDIO_TEST_FFMPEG` to enable the
+  real AAC fixtures. A rebuilt scratch LGPL runtime analyzed the reviewed
+  23.5-second scene fixture into windows [0, 10), [10, 20), [20, 23.5) seconds.
+  This path is not yet dispatched by the app or registered in its model catalog.
+  Existing frozen runtimes must be rebuilt against the changed decoder recipe;
+  scratch success is not packaged-app validation.
 - `SNAudioFileAnalyzer` raised an uncaught Objective-C exception on the MP4
   fixture. PCM WAV succeeded. The prototype's extension guard is not an
   untrusted-file validator; production needs validated extraction and owned
