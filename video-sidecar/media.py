@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 from pathlib import Path
 
 WINDOW_SECONDS = 8.0
@@ -36,7 +37,8 @@ class Video:
             raise ValueError("This file has no video track")
         self.stream = self.container.streams.video[0]
         self.stream.thread_count = 2
-        self.origin = float((self.stream.start_time or 0) * self.stream.time_base)
+        self._origin_pts = (self.stream.start_time or 0) * self.stream.time_base
+        self.origin = float(self._origin_pts)
         self.duration = (float(self.stream.duration * self.stream.time_base)
                          if self.stream.duration is not None else float(self.container.duration or 0) / av.time_base)
         try:
@@ -90,12 +92,12 @@ class Video:
             target_us = start_us + (end_us - start_us) * index // 8
             if timestamps_us and target_us <= timestamps_us[-1]:
                 continue
-            self.container.seek(int((self.origin + target_us / 1_000_000) / float(self.stream.time_base)),
+            self.container.seek(int((self._origin_pts + Fraction(target_us, 1_000_000)) / self.stream.time_base),
                                 stream=self.stream, backward=True)
             for frame in self.container.decode(self.stream):
                 if frame.pts is None:
                     continue
-                position_us = round((frame.pts * frame.time_base - self.origin) * 1_000_000)
+                position_us = round((frame.pts * frame.time_base - self._origin_pts) * 1_000_000)
                 if position_us >= end_us:
                     break
                 if position_us < target_us:

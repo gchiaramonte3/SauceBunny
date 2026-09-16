@@ -14,4 +14,4 @@ if ! "${VIDEO_TEST_PYTHON}" -c 'import av, numpy, PIL, usearch; from importlib.m
   VIDEO_TEST_PYTHON="${VIDEO_TEST_ENV}/bin/python"
   PIP_DISABLE_PIP_VERSION_CHECK=1 "${VIDEO_TEST_PYTHON}" -m pip install --require-hashes --only-binary=:all: --no-deps -r "${ROOT_DIR}/video-sidecar/requirements-test.txt"
 fi
-PYTHONDONTWRITEBYTECODE=1 "${VIDEO_TEST_PYTHON}" -m unittest discover -s "${ROOT_DIR}/video-sidecar" -p test_worker.py
+PYTHONDONTWRITEBYTECODE=1 "${VIDEO_TEST_PYTHON}" -m unittest discover -s "${ROOT_DIR}/video-sidecar" -p 'test_*.py'
