@@ -151,6 +151,19 @@ class IndexTests(unittest.TestCase):
         self.assertNotEqual(self.source(), key)
         self.assertEqual(self.store.db.execute("SELECT count(*) FROM segments").fetchone()[0], 0)
 
+    def test_old_sampling_is_not_available_or_searchable_and_reindex_gets_a_new_key(self):
+        with patch("index_store.SAMPLING_VERSION", "windows-8s-step-6s-1fps-384-v1"):
+            old = self.source()
+            self.store.save_segment(old, 0, 0, 8, [0], vector())
+            self.assertEqual(len(self.store.search(vector(), "test", [old])), 1)
+        self.assertFalse(self.store.sources()[0]["available"])
+        self.assertEqual(self.store.search(vector(), "test", [old]), [])
+        fresh = self.source()
+        self.assertNotEqual(fresh, old)
+        self.assertEqual(self.store.ordinals(fresh), set())
+        self.store.save_segment(fresh, 0, 0, 8, [0], vector())
+        self.assertEqual(len(self.store.search(vector(), "test", [fresh])), 1)
+
     def test_identical_files_remain_separately_scoped(self):
         first = self.source()
         copy = self.root / "copy.mp4"

@@ -218,6 +218,18 @@ not silently approximated. The implementation follows PyAV's documented
 [rational stream/codec clocks](https://pyav.org/docs/stable/api/time.html).
 
 Proxies are content/version-addressed under the owned `scene-proxies` directory.
+The `h264-vt-540p-display-frames-v2` proxy bakes the source display orientation
+into its pixels. Retrieval and shot-description samples use the same full
+display matrix, including mirrored orientations; they do not feed sideways
+coded pixels to the model. Unsupported affine/perspective transforms and
+midstream geometry changes fail explicitly. The unrotated encoding path still
+uses native PyAV scaling; transformed frames require an RGB transpose first.
+Sampling versions and search-cache revisions exclude older derived results
+until the source is explicitly reindexed. Originals are never modified.
+The opt-in `VIDEO_TEST_H264_PROXY=1` tests compare all eight orthogonal
+orientations against FFmpeg's independently autorotated pixels, then verify
+actual VideoToolbox proxy output and preserved presentation timestamps.
+
 Only a verified complete directory is published. Proxy size is bounded at 2 GiB
 and frame metadata at 3,000,000 frames. PTS hashing adds eight bytes per decoded
 frame temporarily to the browser's existing timing array; this is not constant

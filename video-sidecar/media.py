@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import struct
 from fractions import Fraction
 from pathlib import Path
 
@@ -9,6 +10,46 @@ WINDOW_SECONDS = 8.0
 STEP_SECONDS = 6.0
 FRAME_INTERVAL = 1.0
 MAX_FRAME_SIDE = 384
+
+
+def display_transform(frame):
+    """Read the full display matrix, including mirrors; rotation alone loses them.
+
+    PyAV returns coded pixels. These eight orthogonal transforms cover the
+    container's standard camera orientations without resampling. Fail explicitly
+    on affine/perspective transforms we cannot faithfully present yet.
+    """
+    from PIL import Image
+
+    matrix = next((data for data in frame.side_data if data.type.name == "DISPLAYMATRIX"), None)
+    if matrix is None:
+        return None
+    raw = bytes(matrix)
+    if len(raw) != 36:
+        raise ValueError("Invalid video display matrix")
+    a, b, u, c, d, v, x, y, w = struct.unpack("=9i", raw)
+    if (u, v, x, y, w) != (0, 0, 0, 0, 1 << 30):
+        raise ValueError("This video display transform is not supported for analysis")
+    unit = 1 << 16  # FFmpeg's display-matrix 16.16 coefficients.
+    transforms = {
+        (unit, 0, 0, unit): None,
+        (0, -unit, unit, 0): Image.Transpose.ROTATE_90,
+        (-unit, 0, 0, -unit): Image.Transpose.ROTATE_180,
+        (0, unit, -unit, 0): Image.Transpose.ROTATE_270,
+        (-unit, 0, 0, unit): Image.Transpose.FLIP_LEFT_RIGHT,
+        (unit, 0, 0, -unit): Image.Transpose.FLIP_TOP_BOTTOM,
+        (0, unit, unit, 0): Image.Transpose.TRANSPOSE,
+        (0, -unit, -unit, 0): Image.Transpose.TRANSVERSE,
+    }
+    if (a, b, c, d) not in transforms:
+        raise ValueError("This video display transform is not supported for analysis")
+    return transforms[(a, b, c, d)]
+
+
+def display_image(frame):
+    transform = display_transform(frame)
+    image = frame.to_image().convert("RGB")
+    return image if transform is None else image.transpose(transform)
 
 
 def windows(duration: float) -> list[tuple[float, float]]:
@@ -66,7 +107,7 @@ class Video:
                 break
             if position + 1e-7 < target or position < 0:
                 continue
-            image = frame.to_image().convert("RGB")
+            image = display_image(frame)
             image.thumbnail((MAX_FRAME_SIDE, MAX_FRAME_SIDE))
             images.append(image)
             timestamps.append(position)
@@ -102,7 +143,7 @@ class Video:
                     break
                 if position_us < target_us:
                     continue
-                image = frame.to_image().convert("RGB")
+                image = display_image(frame)
                 image.thumbnail((MAX_FRAME_SIDE, MAX_FRAME_SIDE))
                 images.append(image)
                 timestamps_us.append(position_us)

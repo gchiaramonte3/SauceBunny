@@ -13,14 +13,15 @@ import os
 import struct
 import tempfile
 from fractions import Fraction
+from itertools import chain
 from pathlib import Path
 
 from index_store import source_identity, source_unchanged
-from media import Video
+from media import Video, display_transform
 from shot_analysis import source_metadata
 
 SCHEMA = "sauce.scene-proxy.v1"
-PROXY_VERSION = "h264-vt-540p-all-frames-v1"
+PROXY_VERSION = "h264-vt-540p-display-frames-v2"
 TIME_MAP_VERSION = "relative-pts-us-v1"
 TIME_BASE = Fraction(1, 1_000_000)
 MAX_PROXY_BYTES = 2 * 1024**3
@@ -73,13 +74,22 @@ def verify_proxy(path, expected):
 
 def encode_proxy(source, path, on_progress):
     import av
+    from PIL import Image
 
     if "h264_videotoolbox" not in av.codecs_available:
         raise ValueError("This build needs the updated local H.264 analysis runtime")
     timing = TimingEvidence()
     with contextlib.closing(Video(Path(source["path"]))) as video:
         metadata = source_metadata(source, video)
-        width, height = proxy_dimensions(video.stream.width, video.stream.height)
+        frames = video.container.decode(video.stream)
+        first = next(frames, None)
+        if first is None:
+            raise ValueError("No presentation frames were decoded")
+        transform = display_transform(first)
+        swap = transform in (Image.Transpose.ROTATE_90, Image.Transpose.ROTATE_270,
+                             Image.Transpose.TRANSPOSE, Image.Transpose.TRANSVERSE)
+        dimensions = (first.height, first.width) if swap else (first.width, first.height)
+        width, height = proxy_dimensions(*dimensions)
         with av.open(str(path), "w", format="mp4", options={"movflags": "+faststart",
                      "video_track_timescale": "1000000"}) as output:
             # Frame rate is an encoder hint only. PTS comes from each source
@@ -91,7 +101,7 @@ def encode_proxy(source, path, on_progress):
             stream.codec_context.max_b_frames = 0
             stream.bit_rate = 4_000_000
             stream.options = {"realtime": "1", "allow_sw": "0"}
-            for frame in video.container.decode(video.stream):
+            for frame in chain((first,), frames):
                 if frame.pts is None:
                     raise ValueError("A source frame has no presentation timestamp")
                 pts = round((frame.pts * frame.time_base - video._origin_pts) * 1_000_000)
@@ -99,7 +109,12 @@ def encode_proxy(source, path, on_progress):
                 if pts >= metadata["duration_us"]:
                     raise ValueError("Source frame extends beyond its declared video duration")
                 duration_us = round(frame.duration * frame.time_base * 1_000_000)
-                resized = frame.reformat(width=width, height=height, format="yuv420p")
+                if display_transform(frame) != transform or (frame.width, frame.height) != (first.width, first.height):
+                    raise ValueError("The source display geometry changed during analysis")
+                # Bake orientation into pixels and omit the source matrix from
+                # the normalized proxy. The untransformed path stays in PyAV.
+                picture = frame if transform is None else av.VideoFrame.from_image(frame.to_image().transpose(transform))
+                resized = picture.reformat(width=width, height=height, format="yuv420p")
                 resized.pts, resized.time_base = pts, TIME_BASE
                 # Keep source frame duration too, including VFR / the final
                 # frame. Never synthesize it from the nominal frame rate.

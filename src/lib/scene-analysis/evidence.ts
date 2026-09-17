@@ -76,7 +76,7 @@ export function sourceTime(pts: number, proxy: Immutable<VideoSceneProxy>): numb
 
 export async function createSceneEvidence(proxy: VideoSceneProxy, detection: SceneAnalysisResult, cues: Cue[]): Promise<SceneEvidence> {
   if (proxy.schema_version !== "sauce.scene-proxy.v1" || proxy.time_map_version !== "relative-pts-us-v1"
-    || proxy.proxy_version !== "h264-vt-540p-all-frames-v1"
+    || proxy.proxy_version !== "h264-vt-540p-display-frames-v2"
     || detection.profile !== "mediabunny-full-frame" || detection.schemaVersion !== "ella.scene-analysis.v1"
     || !/^[a-f0-9]{64}$/.test(proxy.source.sha256) || !/^[a-f0-9]{64}$/.test(proxy.sha256)
     || !/^[a-f0-9]{64}$/.test(proxy.pts_sha256)

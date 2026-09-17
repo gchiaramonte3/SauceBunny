@@ -75,7 +75,7 @@ class ShotAnalysisTests(unittest.TestCase):
 
         time_base = Fraction(1, 6_000_000)
         stream = SimpleNamespace(start_time=20_000_000, time_base=time_base, duration=6_000_000)
-        frame = SimpleNamespace(pts=20_250_005, time_base=time_base,
+        frame = SimpleNamespace(pts=20_250_005, time_base=time_base, side_data=[],
                                 to_image=lambda: Image.new("RGB", (16, 16)))
         container = Mock(streams=SimpleNamespace(video=[stream]))
         container.decode.side_effect = lambda *_: iter([frame])
@@ -96,7 +96,7 @@ class ShotAnalysisTests(unittest.TestCase):
         self.assertEqual(response["analysis_id"], self.request["analysis_id"])
         self.assertEqual(response["model_id"], "qwen3.5-9b-video")
         self.assertTrue(response["model_revision"])
-        self.assertEqual(response["sampling_version"], "shot-spread-8frames-384-v1")
+        self.assertEqual(response["sampling_version"], "shot-spread-8frames-384-display-v2")
         for supplied, answer, call in zip(self.request["shots"], response["shots"], engine.reason.call_args_list):
             self.assertEqual({key: answer[key] for key in supplied}, supplied)
             self.assertEqual(call.args[3], supplied["transcript"])

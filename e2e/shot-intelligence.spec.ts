@@ -147,7 +147,7 @@ test("verified native proxy travels through the actual controller to exactly twe
         if (request.operation === "prepare-shot-proxy") return Promise.resolve({ scene_proxy: manifest });
         if (request.operation === "inspect-video") return Promise.resolve({ analysis_source: manifest.source });
         if (request.operation === "analyze-shots") return Promise.resolve({ shot_analysis: { analysis_id: request.analysis_id,
-          source: manifest.source, model_id: "qwen3.5-9b-video", model_revision: "test", sampling_version: "shot-spread-8frames-384-v1", audio_analyzed: false,
+          source: manifest.source, model_id: "qwen3.5-9b-video", model_revision: "test", sampling_version: "shot-spread-8frames-384-display-v2", audio_analyzed: false,
           shots: request.shots.map(shot => ({ ...shot, frame_pts_us: [shot.start_us], text: `Visible description for shot ${shot.id}.` })) } });
         if (request.operation === "analyze-music" && recordedMusic) {
           // The recording predates this browser's scene-evidence ID. Only the

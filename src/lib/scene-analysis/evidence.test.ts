@@ -10,7 +10,7 @@ import { DEFAULT_DETECTOR_CONFIG } from "./detector-core";
 Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: true });
 export function fixtures(cuts = 11) {
   const proxy: VideoSceneProxy = {
-    schema_version: "sauce.scene-proxy.v1", proxy_version: "h264-vt-540p-all-frames-v1", time_map_version: "relative-pts-us-v1",
+    schema_version: "sauce.scene-proxy.v1", proxy_version: "h264-vt-540p-display-frames-v2", time_map_version: "relative-pts-us-v1",
     source: { path: "/source.mp4", sha256: "a".repeat(64), duration_us: (cuts + 1) * 1e6, origin_us: 7e6 },
     path: "/proxy.mp4", sha256: "b".repeat(64), pts_sha256: "c".repeat(64), frame_count: (cuts + 1) * 30,
     time_map: [{ analysis_start_us: 0, analysis_end_us: (cuts + 1) * 1e6, source_start_us: 0, source_end_us: (cuts + 1) * 1e6 }],
@@ -89,6 +89,10 @@ describe("source-bound shot evidence", () => {
     }
     await expect(createSceneEvidence(proxy, { ...detection, boundaries: [...detection.boundaries].reverse() }, [])).rejects.toThrow();
   });
+  it("refuses cached proxies made before display orientation was preserved", async () => {
+    const { proxy, detection } = fixtures();
+    await expect(createSceneEvidence({ ...proxy, proxy_version: "h264-vt-540p-all-frames-v1" }, detection, [])).rejects.toThrow();
+  });
   it("maps integer proxy PTS through a continuous rational map without FPS", () => {
     const { proxy } = fixtures(0);
     proxy.time_map = [{ analysis_start_us: 0, analysis_end_us: 333333, source_start_us: 0, source_end_us: 1e6 }];
@@ -114,7 +118,7 @@ describe("source-bound shot evidence", () => {
     const evidence = await createSceneEvidence(proxy, detection, []);
     const requested = shotBatches(evidence)[0];
     const answer = { analysis_id: evidence.id, source: proxy.source, model_id: "qwen", model_revision: "pinned",
-      sampling_version: "shot-spread-8frames-384-v1", audio_analyzed: false,
+      sampling_version: "shot-spread-8frames-384-display-v2", audio_analyzed: false,
       shots: requested.map(shot => ({ ...shot, text: "Visible scene", frame_pts_us: [0, 33333] })) };
     expect(() => validateShotAnswers(evidence, requested, answer)).not.toThrow();
     for (const wrong of [{ ...answer, audio_analyzed: true }, { ...answer, analysis_id: "x" },

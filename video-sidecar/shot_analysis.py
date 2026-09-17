@@ -14,7 +14,7 @@ from media import Video
 
 MAX_SHOTS_PER_REQUEST = 64
 MAX_DURATION_US = 24 * 3600 * 1_000_000
-SAMPLING_VERSION = "shot-spread-8frames-384-v1"
+SAMPLING_VERSION = "shot-spread-8frames-384-display-v2"
 REASONING = "qwen3.5-9b-video"
 
 

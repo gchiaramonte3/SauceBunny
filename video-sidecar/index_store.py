@@ -17,7 +17,7 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 DIMENSIONS = 2048
 MAX_SEGMENTS = 100_000  # Under 1 GB of float32 vectors; bound HNSW memory too.
-SAMPLING_VERSION = "windows-8s-step-6s-1fps-384-v1"
+SAMPLING_VERSION = "windows-8s-step-6s-1fps-384-display-v2"
 
 
 def source_identity(path: Path) -> dict:
@@ -150,7 +150,7 @@ class IndexStore:
     def sources(self) -> list[dict]:
         rows = self.db.execute("""SELECT sources.*, count(segments.id) AS segments
             FROM sources LEFT JOIN segments ON segments.source_key=sources.key GROUP BY sources.key""")
-        return [{**dict(row), "available": source_unchanged(dict(row))} for row in rows]
+        return [{**dict(row), "available": row["sampling"] == SAMPLING_VERSION and source_unchanged(dict(row))} for row in rows]
 
     def forget(self, key: str):
         # Only the derived index is removed. Source media is never deleted.
@@ -168,7 +168,7 @@ class IndexStore:
         model_key = hashlib.sha256(model.encode()).hexdigest()[:24]
         path = self.root / f"{model_key}.usearch"
         stamp = self.root / f"{model_key}.revision"
-        expected = f"{SCHEMA_VERSION}:{revision}:{DIMENSIONS}"
+        expected = f"{SCHEMA_VERSION}:{revision}:{DIMENSIONS}:{SAMPLING_VERSION}"
         try:
             if path.is_file() and stamp.is_file() and stamp.read_text() == expected:
                 restored = Index.restore(str(path), view=True)
@@ -178,7 +178,7 @@ class IndexStore:
             pass  # Derived cache corruption never destroys durable vectors.
         index = Index(ndim=DIMENSIONS, metric="cos", dtype="f32", connectivity=16)
         rows = self.db.execute("""SELECT segments.id,vector FROM segments JOIN sources
-            ON sources.key=source_key WHERE model=? ORDER BY segments.id""", (model,))
+            ON sources.key=source_key WHERE model=? AND sampling=? ORDER BY segments.id""", (model, SAMPLING_VERSION))
         while batch := rows.fetchmany(128):
             keys = np.asarray([row["id"] for row in batch], dtype=np.uint64)
             vectors = np.stack([np.frombuffer(row["vector"], dtype=np.float32) for row in batch])
