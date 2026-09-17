@@ -230,6 +230,20 @@ The opt-in `VIDEO_TEST_H264_PROXY=1` tests compare all eight orthogonal
 orientations against FFmpeg's independently autorotated pixels, then verify
 actual VideoToolbox proxy output and preserved presentation timestamps.
 
+The September 16 orientation checkpoint was frozen again from the existing
+pinned dependencies, without installing models. Its current-recipe manifest,
+201 bundled Mach-O signatures/linkage and macOS 14 deployment floor passed.
+That verified runtime is staged in the development bundle; this does not
+replace the installed app or certify packaged WKWebView. A network-denied
+smoke on generated footage passed indexing, resume, search/reranking, visual
+reasoning, proxy preparation and source-bound shot descriptions. Individual
+observations on the development M4 Max: indexing 6.79 s, two-shot descriptions
+4.63 s, cold-load cancellation 2.8 ms. The separate real-audio fixture run
+returned all 527 labels over three windows in 1.39 s; model-load/inference
+Stop took 1.7/7.0 ms, and restart completed. The Rust collector accepted that
+actual recorded output only after its terminal success. These are smoke
+observations, not accuracy calibration or percentile performance claims.
+
 Only a verified complete directory is published. Proxy size is bounded at 2 GiB
 and frame metadata at 3,000,000 frames. PTS hashing adds eight bytes per decoded
 frame temporarily to the browser's existing timing array; this is not constant
