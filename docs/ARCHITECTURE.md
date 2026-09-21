@@ -121,6 +121,15 @@ ASR result handling. The bundled `saucebunny-aaf` process resolves source spans
 and reads embedded PCM; existing FFmpeg, Whisper, and Parakeet sidecars provide
 resampling and recognition. No diarization or cloud service is involved.
 
+The native schema-2 AAF document remains authoritative for labels, recording-date
+provenance/overrides and per-track results, including committed empty results.
+Native writes emit `saucebunny:multitrack-changed` only after atomic saving.
+`useMultitrackLibrary` reconciles typed document entries on disk into the
+Transcripts > Multitrack shelf; no SRT alias or second transcript payload is
+created. Entries use source filenames and disambiguate preserved duplicates.
+Unchanged reimports reopen an existing document; changed versions remain distinct.
+Cast preferences are copied into document labels rather than live-linked.
+
 The transcript pane keeps its overflow selector in a fixed, compact grid column
 outside the scrolling person tabs. Optional **Search with AI** uses the same
 installed model preference, local llama-server and streaming chat client as
@@ -138,11 +147,13 @@ Multitrack exports share the full manifest's audio-lane mapping. New AAF imports
 retain optional `PhysicalTrackNumber`; legacy imports keep displayed lane order.
 Filtered transcripts never renumber lanes. Avid serialization stays in the
 shared marker writer. `multitrack-export.ts` owns the SRT overlap sweep and adapts
-all saved passages to the existing escaped print template. The read-only
-`print_transcript` command creates a local data-URL webview with JavaScript off,
-restrictive CSP, navigation/new-window blocking and no capability grants. It
-opens the native print dialog after page load; the user chooses Save as PDF.
-There is no automatic print submission or claim of a saved PDF.
+all saved passages to the existing escaped print template. Native Save As names
+TXT/PDF destinations. `export_transcript_pdf` loads restricted HTML directly into
+a script-disabled WebKit view with a unique private base URL, blocked navigation
+and no capability grants. Asynchronous AppKit pagination writes a private staging
+PDF; only a completed, validated PDF is atomically copied to the chosen path.
+The separate `print_transcript` command opens the native print dialog and does not
+claim that a file was saved. Neither route uses Tauri's data-URL HTML rewrite.
 
 ### Clip and Review media
 
@@ -266,6 +277,12 @@ Versioned proxy/source mapping and immutable detector evidence are saved before
 model reasoning. `useShotIntelligence` owns source/transcript generations and
 Stop across preparation, detection, persistence and bounded native shot batches.
 The existing text conversation stays mounted across the compact mode switch.
+The remembered, verified picture-model ID (9B default, optional 4B) passes through
+the typed request into each native run and its result provenance. Selection is
+frozen while running; embeddings and audio classification remain separate.
+Picture inference receives frames without dialogue; supplied transcript text has
+its own response field. Pinned software AV1 decoding extends the existing runtime
+without changing the source identity or presentation-time mapping.
 This is not yet enabled by default. See `docs/VIDEO-INTELLIGENCE.md` for tested
 browser surfaces and remaining rollout gates.
 

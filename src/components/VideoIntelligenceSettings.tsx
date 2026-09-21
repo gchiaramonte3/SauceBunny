@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { formatError } from "../lib/error-format";
 import type { VideoModel } from "../bindings/VideoModel";
 import { useVideoIntelligence } from "../hooks/use-video-intelligence";
@@ -39,6 +40,7 @@ export function VideoIntelligenceSettings() {
       if (refreshed) setModels(refreshed.models);
     }
     setActiveModel(null);
+    void emit("panel:video-models-changed").catch(() => { /* Rechecked before Analyze. */ });
   }
   return <section>
     <h3 className="cp-pane-title">Video Intelligence</h3>

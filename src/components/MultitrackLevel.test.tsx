@@ -23,8 +23,22 @@ it("uses an icon, focuses its vertical slider, boosts to +36 dB and resets", () 
   expect(document.activeElement).toBe(slider); expect(slider.getAttribute("aria-orientation")).toBe("vertical");
   fireEvent.change(slider, { target: { value: "36" } });
   expect(changed).toHaveBeenLastCalledWith(TRACK_GAIN_MAX); expect(input.value).toBe("+36 dB");
+  const reset = screen.getByRole("button", { name: "Reset to 0 dB" });
+  expect(reset.textContent).toBe(""); expect(reset.querySelector("svg")).not.toBeNull();
+  expect(reset.closest(".cp-multitrack-gain-unity")).not.toBeNull();
+  expect(reset.getAttribute("title")).toBe("Reset to 0 dB");
+  expect(screen.queryByText("Above +12 dB can clip.")).toBeNull();
+  expect(input.hasAttribute("aria-describedby")).toBe(false);
+  fireEvent.click(reset);
+  expect(changed).toHaveBeenLastCalledWith(1); expect(input.value).toBe("0 dB");
+});
+it("reset discards a pending gain draft so dismissal cannot restore it", async () => {
+  const { input, changed } = mount(TRACK_GAIN_MAX);
+  fireEvent.change(input, { target: { value: "+10" } });
   fireEvent.click(screen.getByRole("button", { name: "Reset to 0 dB" }));
   expect(changed).toHaveBeenLastCalledWith(1); expect(input.value).toBe("0 dB");
+  await waitFor(() => { fireEvent.mouseDown(document.body); expect(screen.queryByRole("group")).toBeNull(); });
+  expect(changed).toHaveBeenCalledTimes(1);
 });
 it.each(["+10", "+10 dB", "-2.5", ".5"])("selects the old number and commits %s only on Enter", text => {
   const { changed, input } = mount();

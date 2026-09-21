@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { webcrypto } from "node:crypto";
 import type { VideoSceneProxy } from "../../bindings/VideoSceneProxy";
 import type { SceneAnalysisResult } from "./mediabunny-scene-analysis";
-import { createAudioEvidence, createSceneEvidence, shotBatches, sourceTime, validateShotAnswers } from "./evidence";
+import { createAudioEvidence, createSceneEvidence, sceneCutMarkers, shotBatches, sourceTime, validateShotAnswers } from "./evidence";
 import type { VideoAudioAnalysis } from "../../bindings/VideoAudioAnalysis";
 import type { VideoMusicAnalysis } from "../../bindings/VideoMusicAnalysis";
 import { DEFAULT_DETECTOR_CONFIG } from "./detector-core";
@@ -30,6 +30,18 @@ export function fixtures(cuts = 11) {
 }
 
 describe("source-bound shot evidence", () => {
+  it("maps only shot changes to cut markers without adding container origin or a marker at zero", async () => {
+    const { proxy, detection } = fixtures(1);
+    proxy.source.duration_us = 3_000_003;
+    proxy.time_map[0].source_end_us = 3_000_003;
+    const evidence = await createSceneEvidence(proxy, detection, []);
+    const cuts = sceneCutMarkers(evidence);
+    expect(cuts).toEqual([{ time: 1.500002 }]);
+    cuts[0].time = 2;
+    expect(sceneCutMarkers(evidence)[0].time).toBe(1.500002);
+    expect(evidence.shots[1].start_us).toBe(1_500_002);
+    expect(evidence.proxy.time_map_version).toBe("relative-pts-us-v1");
+  });
   it("freezes the music vocabulary and full score vectors independently of worker output", async () => {
     const { proxy, detection } = fixtures();
     const scene = await createSceneEvidence(proxy, detection, []);
@@ -122,6 +134,8 @@ describe("source-bound shot evidence", () => {
       shots: requested.map(shot => ({ ...shot, text: "Visible scene", frame_pts_us: [0, 33333] })) };
     expect(() => validateShotAnswers(evidence, requested, answer)).not.toThrow();
     for (const wrong of [{ ...answer, audio_analyzed: true }, { ...answer, analysis_id: "x" },
+      { ...answer, source: { ...answer.source, path: "/another-source.mp4" } },
+      { ...answer, source: { ...answer.source, origin_us: answer.source.origin_us + 1 } },
       { ...answer, shots: [{ ...answer.shots[0], end_us: 99 }] }, { ...answer, shots: [...answer.shots, ...answer.shots] },
       { ...answer, shots: [{ ...answer.shots[0], frame_pts_us: [1000000] }] }]) {
       expect(() => validateShotAnswers(evidence, requested, wrong)).toThrow();

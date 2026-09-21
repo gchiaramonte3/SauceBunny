@@ -71,8 +71,13 @@ class Video:
 
         if not path.is_absolute() or not path.is_file():
             raise ValueError("Choose a local video file")
-        self.container = av.open(str(path), options={"protocol_whitelist": "file",
-            "format_whitelist": "mov,matroska,avi,mxf,mpegts,mpeg"})
+        self.path = path
+        try:
+            self.container = av.open(str(path), options={"protocol_whitelist": "file",
+                "format_whitelist": "mov,matroska,avi,mxf,mpegts,mpeg"})
+        except av.error.FFmpegError as error:
+            raise ValueError(f"Source: {path.name}. Codec: unknown. Stage: open source. "
+                             f"Check that the local file is complete and playable. Technical detail: {error}") from error
         if not self.container.streams.video:
             self.close()
             raise ValueError("This file has no video track")
@@ -91,6 +96,27 @@ class Video:
     def close(self):
         self.container.close()
 
+    def frames(self, stage="decode video"):
+        import av
+        try:
+            yield from self.container.decode(self.stream)
+        except av.error.FFmpegError as error:
+            codec = self.stream.codec_context.name
+            raise ValueError(f"Source: {self.path.name}. Codec: {codec}. Stage: {stage}. "
+                             f"Use the current Sauce Bunny runtime or a supported local transcode. "
+                             f"The original file is unchanged. Technical detail: {error}") from error
+
+    def preflight(self):
+        """Decode one presentation frame before model loading, then rewind.
+
+        No retiming or substitute frames: all subsequent mapping still uses
+        the original stream PTS. The decoder is owned by this process on Stop.
+        """
+        if next(self.frames("decoder preflight"), None) is None:
+            raise ValueError(f"Source: {self.path.name}. Codec: {self.stream.codec_context.name}. "
+                             "Stage: decoder preflight. No video frame could be read.")
+        self.container.seek(int(self._origin_pts / self.stream.time_base), stream=self.stream, backward=True)
+
     def sample(self, start: float, end: float):
         if not (math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= self.duration + 0.001):
             raise ValueError("Invalid video range")
@@ -99,7 +125,7 @@ class Video:
         self.container.seek(int((self.origin + start) / float(self.stream.time_base)), stream=self.stream, backward=True)
         images, timestamps = [], []
         target = start
-        for frame in self.container.decode(self.stream):
+        for frame in self.frames("sample frames"):
             if frame.pts is None:
                 continue
             position = float(frame.pts * frame.time_base) - self.origin
@@ -135,7 +161,7 @@ class Video:
                 continue
             self.container.seek(int((self._origin_pts + Fraction(target_us, 1_000_000)) / self.stream.time_base),
                                 stream=self.stream, backward=True)
-            for frame in self.container.decode(self.stream):
+            for frame in self.frames("sample shot"):
                 if frame.pts is None:
                     continue
                 position_us = round((frame.pts * frame.time_base - self._origin_pts) * 1_000_000)

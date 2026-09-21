@@ -13,15 +13,17 @@ pub enum VideoRequest {
     Forget { source_key: String },
     Index { paths: Vec<String> },
     Search { query: String, scope: Vec<String>, rerank: bool },
-    Reason { query: String, segments: Vec<u32>, transcripts: std::collections::HashMap<String, String> },
+    Reason { #[serde(default = "default_picture_model")] model_id: String, query: String, segments: Vec<u32>, transcripts: std::collections::HashMap<String, String> },
     InspectVideo { path: String },
     PrepareShotProxy { path: String },
-    AnalyzeShots { path: String, source_sha256: String, analysis_id: String, query: String, shots: Vec<VideoShot> },
+    AnalyzeShots { model_id: String, path: String, source_sha256: String, analysis_id: String, query: String, shots: Vec<VideoShot> },
     AnalyzeAudio { path: String, source_sha256: String, analysis_id: String,
         #[ts(type = "number")] origin_us: i64, #[ts(type = "number")] duration_us: u64, audio_track_index: u32 },
     AnalyzeMusic { path: String, source_sha256: String, analysis_id: String,
         #[ts(type = "number")] origin_us: i64, #[ts(type = "number")] duration_us: u64, audio_track_index: u32 },
 }
+fn default_picture_model() -> String { "qwen3.5-9b-video".into() }
+fn picture_model(id: &str) -> bool { matches!(id, "qwen3.5-9b-video" | "qwen3.5-4b-video") }
 impl VideoRequest {
     pub fn read_only(&self) -> bool { matches!(self, Self::Models {} | Self::Sources {}) }
     pub fn reasoning(&self) -> bool { matches!(self, Self::Reason { .. } | Self::AnalyzeShots { .. }) }
@@ -38,17 +40,17 @@ impl VideoRequest {
         let valid = match self {
             Self::Models {} | Self::Sources {} => true,
             Self::Download { model_id } | Self::DeleteModel { model_id } => matches!(model_id.as_str(),
-                "qwen3-vl-embedding-2b" | "qwen3-vl-reranker-2b" | "qwen3.5-9b-video" | "ast-audioset"),
+                "qwen3-vl-embedding-2b" | "qwen3-vl-reranker-2b" | "qwen3.5-9b-video" | "qwen3.5-4b-video" | "ast-audioset"),
             Self::Forget { source_key } => valid_key(source_key),
             Self::Index { paths } => !paths.is_empty() && paths.len() <= 2000 && paths.iter().all(|path|
                 path.len() <= 4096 && std::path::Path::new(path).is_absolute() && std::path::Path::new(path).is_file()),
             Self::Search { query, scope, .. } => valid_query(query) && !scope.is_empty()
                 && scope.len() <= 2000 && scope.iter().all(|key| valid_key(key)),
-            Self::Reason { query, segments, transcripts } => valid_query(query) && !segments.is_empty()
+            Self::Reason { model_id, query, segments, transcripts } => picture_model(model_id) && valid_query(query) && !segments.is_empty()
                 && segments.len() <= 4 && segments.iter().all(|id| *id > 0)
                 && transcripts.len() <= 4 && transcripts.values().all(|text| text.len() <= 12000),
             Self::InspectVideo { path } | Self::PrepareShotProxy { path } => valid_path(path),
-            Self::AnalyzeShots { path, source_sha256, analysis_id, query, shots } => valid_path(path)
+            Self::AnalyzeShots { model_id, path, source_sha256, analysis_id, query, shots } => picture_model(model_id) && valid_path(path)
                 && valid_key(source_sha256) && !source_sha256.bytes().any(|b| b.is_ascii_uppercase())
                 && valid_key(analysis_id) && !analysis_id.bytes().any(|b| b.is_ascii_uppercase())
                 && valid_query(query) && valid_shots(shots),
@@ -123,6 +125,8 @@ pub struct VideoShotAnswer {
     #[ts(type = "number")] pub end_us: u64,
     #[ts(type = "number[]")] pub frame_pts_us: Vec<u64>,
     pub transcript: String, pub text: String,
+    #[serde(default)] #[ts(optional)] pub picture_description: Option<String>,
+    #[serde(default)] #[ts(optional)] pub transcript_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -254,7 +258,7 @@ mod tests {
     #[test]
     fn accepts_only_explicit_bounded_analysis() {
         assert!(VideoRequest::Search { query: "red car".into(), scope: vec!["a".repeat(64)], rerank: true }.validate().is_ok());
-        assert!(VideoRequest::Reason { query: "What happens?".into(), segments: vec![1,2,3,4,5], transcripts: Default::default() }.validate().is_err());
+        assert!(VideoRequest::Reason { model_id: default_picture_model(), query: "What happens?".into(), segments: vec![1,2,3,4,5], transcripts: Default::default() }.validate().is_err());
     }
     #[test]
     fn shot_ranges_preserve_integer_time_and_reject_ambiguous_evidence() {
@@ -271,7 +275,7 @@ mod tests {
     }
     #[test]
     fn shot_analysis_uses_reasoning_budget_and_never_claims_unsaved_work_is_saved() {
-        let request = VideoRequest::AnalyzeShots { path: "/not-a-video".into(), source_sha256: "a".repeat(64),
+        let request = VideoRequest::AnalyzeShots { model_id: default_picture_model(), path: "/not-a-video".into(), source_sha256: "a".repeat(64),
             analysis_id: "b".repeat(64), query: "Describe this shot".into(),
             shots: vec![VideoShot { id: 1, start_us: 0, end_us: 1, transcript: String::new() }] };
         assert!(request.heavy() && request.reasoning() && !request.read_only());

@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,7 @@ import aaf2
 import reader
 
 
-def fixture(path, *, rate='24000/1001', gap=True, origin=0, drop=False, raw=False):
+def fixture(path, *, rate='24000/1001', gap=True, origin=0, drop=False, raw=False, bwf_date=None):
     fps = Fraction(rate)
     sample_count = reader.round_sample(Fraction(12,1)*48000/fps)
     pcm = b''.join(((i % 2000)-1000).to_bytes(3,'little',signed=True) for i in range(sample_count))
@@ -25,6 +26,11 @@ def fixture(path, *, rate='24000/1001', gap=True, origin=0, drop=False, raw=Fals
         wav.setnchannels(1); wav.setsampwidth(3); wav.setframerate(48000)
         wav.writeframes(pcm)
     blob = buf.getvalue()
+    if bwf_date is not None:
+        bext = bytearray(602); bext[320:330] = bwf_date.encode('ascii')
+        chunk = b'bext' + struct.pack('<I', len(bext)) + bytes(bext)
+        blob = blob[:36] + chunk + blob[36:]
+        blob = blob[:4] + struct.pack('<I', len(blob)-8) + blob[8:]
     with aaf2.open(str(path),'w') as file:
         source = file.create.SourceMob('Synthetic essence')
         file.content.mobs.append(source)
@@ -88,6 +94,28 @@ class ReaderTests(unittest.TestCase):
         self.assertNotEqual(data['tracks'][0]['id'],'1')
         self.assertEqual([c['kind'] for c in data['tracks'][0]['clips']],['audio','gap','audio'])
         self.assertEqual(data['tracks'][0]['clips'][0]['source_start_sample'],4004)
+
+    def test_recording_metadata_is_not_the_aaf_creation_or_file_date(self):
+        for supplied, expected in [('2026-08-01', '2026-08-01'), ('2024:02:29', '2024-02-29'), ('2026-02-29', None), ('0000-00-00', None)]:
+            with self.subTest(supplied=supplied):
+                path = self.root / f'{supplied.replace(":", "-")}.aaf'
+                fixture(path, bwf_date=supplied)
+                result = self.command('inspect', '--input', str(path))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                dates = json.loads(result.stdout)['recording_dates']
+                self.assertEqual([item['date'] for item in dates], [expected] if expected else [])
+                if dates: self.assertEqual(dates[0]['provenance'], 'bwf-origination-date')
+        self.assertEqual(json.loads(self.command('inspect', '--input', str(self.aaf)).stdout)['recording_dates'], [])
+
+    def test_explicit_source_recording_comment_has_separate_provenance(self):
+        with aaf2.open(str(self.aaf), 'rw') as file:
+            for mob in file.content.mobs:
+                if isinstance(mob, aaf2.mobs.SourceMob): mob.comments['RecordingDate'] = '2026-08-02'
+        result = self.command('inspect', '--input', str(self.aaf))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = json.loads(result.stdout)['recording_dates']
+        self.assertEqual(metadata[0]['date'], '2026-08-02')
+        self.assertEqual(metadata[0]['provenance'], 'explicit-recording-date')
 
     def test_physical_track_number_is_not_slot_id_or_audio_order(self):
         with aaf2.open(str(self.aaf), 'rw') as file:

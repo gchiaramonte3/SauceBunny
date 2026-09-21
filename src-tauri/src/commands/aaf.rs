@@ -10,7 +10,7 @@ mod transcribe;
 
 use crate::{commands::JobRegistry, AppError};
 use model::*;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Emitter};
 
 #[tauri::command]
 pub async fn aaf_import(app: AppHandle, path: String, job_id: String) -> Result<AafDocument, AppError> {
@@ -28,17 +28,18 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String) -> Result<
     let manifest: AafManifest = serde_json::from_str(&result.stdout)
         .map_err(|e| AppError::invalid(format!("AAF reader returned an invalid manifest: {e}")))?;
     validate_manifest(&manifest)?;
+    let root = store::root(&app)?;
     let labels = manifest.tracks.iter().map(|track| AafTrackLabel {
         track_id: track.id.clone(), owner_name: if track.name.trim().is_empty() { format!("Track {}", track.id) } else { track.name.clone() },
-        cast_member_id: None, color: None,
+        cast_member_id: None, color: None, gender: None, marker_color: None,
     }).collect();
     let id = blake3::hash(crate::stream_proxy::mint_token()?.as_bytes()).to_hex().to_string();
-    let document = AafDocument { schema_version: SCHEMA_VERSION, id,
+    let document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, id,
         source_path: source.to_string_lossy().into_owned(), source_size: metadata.len(),
         source_modified_ms: store::modified_ms(&metadata), manifest, labels, transcripts: Vec::new() };
     store::source_ready(&document)?;
-    let root = store::root(&app)?;
-    app.state::<JobRegistry>().while_active(&job_id, || store::create(&root, &document))?;
+    let document = app.state::<JobRegistry>().while_active(&job_id, || store::import(&root, document))?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document.id);
     Ok(document)
 }
 
@@ -54,7 +55,33 @@ pub async fn aaf_list(app: AppHandle) -> Result<Vec<AafDocumentSummary>, AppErro
 
 #[tauri::command]
 pub async fn aaf_save_labels(app: AppHandle, document_id: String, labels: Vec<AafTrackLabel>) -> Result<AafDocument, AppError> {
-    store::labels(&store::root(&app)?, &document_id, labels)
+    let document = store::labels(&store::root(&app)?, &document_id, labels)?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+    Ok(document)
+}
+
+#[tauri::command]
+pub async fn aaf_save_shoot_date(app: AppHandle, document_id: String, shoot_date: Option<String>) -> Result<AafDocument, AppError> {
+    let document = store::metadata(&store::root(&app)?, &document_id, shoot_date, None)?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+    Ok(document)
+}
+
+#[tauri::command]
+pub async fn aaf_read_recording_dates(app: AppHandle, document_id: String, job_id: String) -> Result<AafDocument, AppError> {
+    let _job = process::JobGuard::begin(&app, &job_id)?;
+    let root = store::root(&app)?;
+    let document = store::load(&root, &document_id)?;
+    store::source_ready(&document)?;
+    let result = process::run(&app, &job_id, "inspect", "saucebunny-aaf", vec!["inspect".into(), "--input".into(), document.source_path.clone()]).await?;
+    result.require_success("saucebunny-aaf")?;
+    let manifest: AafManifest = serde_json::from_str(&result.stdout)?;
+    validate_manifest(&manifest)?;
+    store::source_ready(&document)?;
+    if manifest.source_fingerprint != document.manifest.source_fingerprint { return Err(AppError::invalid("The AAF changed. Import it again.")); }
+    let document = app.state::<JobRegistry>().while_active(&job_id, || store::metadata(&root, &document_id, None, Some(manifest.recording_dates.unwrap_or_default())) )?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+    Ok(document)
 }
 
 #[tauri::command]
@@ -108,7 +135,7 @@ mod native_reader_tests {
         let manifest: AafManifest = serde_json::from_slice(&result.stdout).unwrap();
         validate_manifest(&manifest).unwrap();
         let metadata = std::fs::metadata(&source).unwrap();
-        store::source_ready(&AafDocument { schema_version: 1, id: "f".repeat(64), source_path: source.clone(),
+        store::source_ready(&AafDocument { schema_version: 1, shoot_date_override: None, id: "f".repeat(64), source_path: source.clone(),
             source_size: metadata.len(), source_modified_ms: store::modified_ms(&metadata),
             manifest: manifest.clone(), labels: Vec::new(), transcripts: Vec::new() }).unwrap();
         let track = manifest.tracks.first().expect("test must inspect at least one track");

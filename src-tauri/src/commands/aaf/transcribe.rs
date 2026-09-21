@@ -189,6 +189,7 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
             "Recognition uses bounded audio chunks with one second of context. Whisper VAD is not used in this multitrack path.".into()] };
     let root = store::root(app)?;
     app.state::<JobRegistry>().while_active(job, || store::save_transcript(&root, &document.id, transcript.clone()))?;
+    let _ = tauri::Emitter::emit(app, "saucebunny:multitrack-changed", &document.id);
     Ok(transcript)
 }
 

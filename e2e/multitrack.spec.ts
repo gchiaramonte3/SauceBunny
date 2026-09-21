@@ -30,13 +30,17 @@ async function boot(page: Page, trackCount = 3) {
       if (command === "plugin:dialog|open") return Promise.resolve((args.options as { directory?: boolean })?.directory ? "/exports" : fixture.source_path);
       if (command === "plugin:dialog|save") return Promise.resolve("/exports/transcript.txt");
       if (command === "write_text_to_path") return Promise.resolve(args.path);
-      if (command === "print_transcript") return Promise.resolve();
+      if (command === "print_transcript" || command === "export_transcript_pdf") return Promise.resolve();
       if (command === "aaf_import" || command === "aaf_open") return Promise.resolve(fixture);
       if (command === "aaf_save_labels") { fixture.labels = args.labels as typeof fixture.labels; return Promise.resolve(fixture); }
       if (command === "aaf_waveform") return Promise.resolve({ track_id: args.trackId, peaks: Array.from({ length: 400 }, (_, index) => { const height = (index % 19) / 20; return [-height, height]; }) });
       if (command === "parakeet_model_downloaded") return Promise.resolve(true);
       if (command === "list_whisper_models") return Promise.resolve([{ id: "large-v3", name: "Large v3", downloaded: true }]);
-      if (command === "aaf_transcribe_track") return Promise.resolve({ ...transcript, track_id: args.trackId, start_frame: args.startFrame, duration_frames: args.durationFrames });
+      if (command === "aaf_transcribe_track") {
+        const committed = { ...transcript, track_id: args.trackId as string, start_frame: args.startFrame as number, duration_frames: args.durationFrames as number };
+        fixture.transcripts = [...fixture.transcripts.filter(t => t.track_id !== committed.track_id), committed];
+        return Promise.resolve(committed);
+      }
       if (command === "aaf_prepare_audio") return Promise.resolve({ path: `/e2e-mock/solo-${args.durationFrames}.wav`, start_frame: args.startFrame, duration_frames: args.durationFrames, sample_rate: 16000, sample_count: Math.ceil(Number(args.durationFrames) * 1001 / 24000 * 16000), peaks: [] });
       return original(command, args);
     };
@@ -60,13 +64,13 @@ test("Entire transcript exports every source lane in the selected format despite
     await format.selectOption(selected);
     await region.getByRole("button", { name: "Entire transcript", exact: true }).click();
     await expect(format).toBeEnabled();
-    const call = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter((item) => ["write_text_to_path", "print_transcript"].includes(item.command)).at(-1));
+    const call = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter((item) => ["write_text_to_path", "export_transcript_pdf"].includes(item.command)).at(-1));
     const text = String(call!.args[selected === "pdf" ? "html" : "text"]);
     for (const lane of ["A1", "A2", "A3"]) expect(text).toContain(lane);
     expect(text).toContain("Alex"); expect(text).toContain("Sam mic"); expect(text).toContain("Room");
     expect(text).not.toContain("V1");
     if (selected === "srt") expect(text).toContain("00:00:10,000 --> 00:00:13,000");
-    if (selected === "pdf") expect(call!.command).toBe("print_transcript");
+    if (selected === "pdf") expect(call!.command).toBe("export_transcript_pdf");
     expect(await region.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
   }
   await page.screenshot({ path: test.info().outputPath("multitrack-export-formats.png") });
@@ -382,7 +386,7 @@ test("Person navigation, per-track levels, context regeneration and safe exports
 });
 
 for (const width of [1100, 1920]) {
-  test(`Compact gain fader, replacement typing and bottom-row popup at ${width}px`, async ({ page }) => {
+  test(`Compact gain fader, replacement typing and bottom-row popup at ${width}px`, async ({ page, browserName }) => {
     await page.setViewportSize({ width, height: width === 1100 ? 740 : 1080 }); await boot(page, 20);
     if (width === 1100) await page.evaluate(() => {
       for (const [token, size] of Object.entries({ sm: 12.5, base: 13.75, md: 15 })) document.documentElement.style.setProperty(`--text-${token}`, `${size}px`);
@@ -405,7 +409,13 @@ for (const width of [1100, 1920]) {
     const previousArea = 168 * (width === 1100 ? 378 : 371);
     expect(bounds.width).toBe(120);
     expect(bounds.width * bounds.height).toBeLessThanOrEqual(previousArea * 0.55);
-    const reset = (await popup.getByRole("button", { name: "Reset to 0 dB" }).boundingBox())!;
+    const resetButton = popup.getByRole("button", { name: "Reset to 0 dB" });
+    await expect(resetButton).toHaveText(""); await expect(resetButton.locator("svg")).toHaveCount(1);
+    await expect(popup.getByText("Above +12 dB can clip.")).toHaveCount(0);
+    const reset = (await resetButton.boundingBox())!, zero = (await popup.locator(".cp-multitrack-gain-unity").boundingBox())!;
+    expect(reset.width).toBe(24); expect(reset.height).toBe(24);
+    expect(reset.x).toBeGreaterThanOrEqual(zero.x + zero.width + 4);
+    expect(Math.abs(reset.y + reset.height / 2 - (zero.y + zero.height / 2))).toBeLessThan(1);
     for (const control of [fader, readout, reset]) {
       expect(control.width).toBeGreaterThanOrEqual(24); expect(control.height).toBeGreaterThanOrEqual(24);
       expect(control.x).toBeGreaterThan(bounds.x); expect(control.x + control.width).toBeLessThan(bounds.x + bounds.width);
@@ -422,6 +432,10 @@ for (const width of [1100, 1920]) {
     await slider.press("End"); await expect(number).toHaveValue("+36 dB");
     await slider.press("ArrowDown"); await expect(number).toHaveValue("+35 dB");
     await slider.press("ArrowUp"); await expect(number).toHaveValue("+36 dB");
+    // WebKit's default macOS Tab mode skips buttons; Option-Tab includes them.
+    await slider.press(browserName === "webkit" ? "Alt+Tab" : "Tab"); await expect(resetButton).toBeFocused();
+    await resetButton.press("Enter"); await expect(number).toHaveValue("0 dB");
+    await slider.press("End");
     await number.click(); await expect(number).toBeFocused();
     expect(await number.evaluate(element => { const field = element as HTMLInputElement; return [field.selectionStart, field.selectionEnd]; })).toEqual([0, 6]);
     await number.pressSequentially("+10 dB"); await expect(number).toHaveValue("+10 dB"); await number.press("Enter");
@@ -433,7 +447,7 @@ for (const width of [1100, 1920]) {
     await number.click(); await number.pressSequentially("+12"); await number.press("Escape");
     await expect(popup).toBeHidden();
     const updated = region.getByRole("button", { name: "Mic 20 volume: -2.5 dB", exact: true }); await expect(updated).toBeFocused();
-    await updated.click(); await popup.getByRole("button", { name: "Reset to 0 dB" }).click();
+    await updated.click(); await resetButton.click(); await expect(number).toHaveValue("0 dB");
     // A real pointer drag must run vertically, with the boost end at the top.
     await page.mouse.move(fader.x + fader.width / 2, fader.y + fader.height / 2); await page.mouse.down();
     await page.mouse.move(fader.x + fader.width / 2, fader.y, { steps: 6 }); await page.mouse.up();
@@ -519,7 +533,7 @@ test("Full workspace stays usable with enlarged text at 1100px", async ({ page }
     expect(box.y).toBeGreaterThanOrEqual(bounds.y); expect(box.y + box.height).toBeLessThanOrEqual(bounds.y + bounds.height);
     expect(box.x).toBeGreaterThanOrEqual(bounds.x); expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width);
   }
-  for (const button of await region.locator(".cp-multitrack-generate-row button, .cp-multitrack-export button").all()) {
+  for (const button of await region.locator(".cp-multitrack-generate-row button:visible, .cp-multitrack-export button:visible").all()) {
     await button.scrollIntoViewIfNeeded();
     expect(await button.evaluate((element) => { const box = element.getBoundingClientRect(); return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)); })).toBe(true);
   }

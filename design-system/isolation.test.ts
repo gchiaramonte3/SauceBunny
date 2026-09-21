@@ -58,6 +58,8 @@ const allowedProduction = new Set([
   // Controlled AAF lanes: React, type-only bindings, pure time/CSV geometry.
   // The page, stores, worker hooks and audio element are deliberately absent.
   "src/components/MultitrackTimeline", "src/lib/multitrack", "src/lib/marker-time",
+  // Pure export metadata formatting and canonical path strings, no store or IPC.
+  "src/lib/multitrack-metadata", "src/lib/repath",
   // Controlled track-gain popup and pure viewport text aggregation; no audio,
   // export, persistence or native command dependencies are imported.
   "src/components/MultitrackLevel", "src/lib/multitrack-text-layout",

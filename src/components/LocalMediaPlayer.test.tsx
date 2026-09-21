@@ -55,7 +55,12 @@ it("uses metadata preload and exposes confirmed buffered readiness for native ca
   Object.defineProperties(el, { readyState: { configurable: true, value: 3 }, videoWidth: { value: 1920 },
     duration: { value: 149 }, buffered: { value: { length: 1, start: () => 9, end: () => 13 } } });
   await act(async () => { await ref.current!.seekTo(10); });
-  expect(ref.current!.getPlaybackReadiness!()).toMatchObject({ confirmedSeconds: 10, bufferedAheadSeconds: 3,
+  // jsdom does not quantize currentTime onto a native media clock.
+  expect(el.currentTime).toBeGreaterThan(10);
+  expect(el.currentTime).toBeCloseTo(10, 12);
+  expect(ref.current!.getPlaybackReadiness!().confirmedSeconds).toBeCloseTo(10, 12);
+  expect(ref.current!.getPlaybackReadiness!().bufferedAheadSeconds).toBeCloseTo(3, 12);
+  expect(ref.current!.getPlaybackReadiness!()).toMatchObject({
     seeking: false, failed: false, hasFutureData: true });
   const generation = ref.current!.getPlaybackReadiness!().generation;
   view.rerender(<LocalMediaPlayer ref={ref} path="/tmp/b.mp4" {...props} />);

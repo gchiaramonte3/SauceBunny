@@ -1,4 +1,5 @@
 import type { AafDocument } from "../bindings/AafDocument";
+import type { AafMarkerColor } from "../bindings/AafMarkerColor";
 import { audioTrackLabel, trackOwner, transcriptRows, sequenceTimecode } from "./multitrack";
 import { avidMarkerRowsToTxt } from "./markers";
 
@@ -43,7 +44,7 @@ export function multitrackAvidMarkers(document: AafDocument): string {
     if (lanes.has(lane)) throw new Error(`More than one source track maps to ${lane}. Re-import an AAF with distinct audio-track numbers before exporting markers.`);
     lanes.add(lane);
   }
-  const markers = new Map<string, { speaker: string; timecode: string; track: string; text: string }>();
+  const markers = new Map<string, { speaker: string; timecode: string; track: string; text: string; color?: AafMarkerColor }>();
   for (const cue of transcriptRows(document)) {
     if (!Number.isFinite(cue.startFrame) || cue.startFrame < 0 || cue.startFrame >= document.manifest.duration_frames || !cue.text.trim()) continue;
     const timecode = sequenceTimecode(document.manifest, cue.startFrame);
@@ -51,7 +52,7 @@ export function multitrackAvidMarkers(document: AafDocument): string {
     const track = audioTrackLabel(document, cue.trackId);
     const key = `${cue.startFrame}:${track}`, previous = markers.get(key);
     if (previous) previous.text += ` | ${cue.text}`;
-    else markers.set(key, { speaker: cue.owner, timecode, track, text: cue.text });
+    else markers.set(key, { speaker: cue.owner, timecode, track, text: cue.text, color: document.labels.find((label) => label.track_id === cue.trackId)?.marker_color ?? undefined });
   }
   return markers.size ? avidMarkerRowsToTxt([...markers.values()]) : "";
 }

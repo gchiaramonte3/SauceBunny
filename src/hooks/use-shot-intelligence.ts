@@ -6,18 +6,19 @@ import { createAudioEvidence, createSceneEvidence, saveSceneEvidence, shotBatche
 import { parseSrt } from "../lib/srt";
 import { formatError } from "../lib/error-format";
 import type { VideoShotAnswer } from "../bindings/VideoShotAnswer";
+import type { PictureModelId } from "../lib/picture-model";
 
-const QUESTION = "Describe what is visibly happening in this supplied shot. Then summarize what the supplied transcript says, if any. Keep visual observations and supplied speech distinct. Do not infer music or other sounds, invent cuts, or change shot boundaries.";
+const QUESTION = "Describe only what is visibly happening in this supplied shot. No dialogue or audio was supplied for picture analysis. Do not infer speech, music or other sounds, invent cuts, or change shot boundaries.";
 type Run = { key: string; stopped: boolean; detector?: SceneJob };
 export type ShotAudioState = { status: "not-started" | "analyzing" | "stopped" }
   | { status: "ready"; evidence: AudioEvidence }
   | { status: "unavailable"; error: string };
 type State = { key: string; busy: boolean; stopping: boolean; phase: string; progress: number | null;
-  evidence: SceneEvidence | null; answers: VideoShotAnswer[]; audio: ShotAudioState; error: string; complete: boolean };
+  evidence: SceneEvidence | null; answers: VideoShotAnswer[]; audio: ShotAudioState; error: string; complete: boolean; modelUsed?: string };
 const empty = (key: string): State => ({ key, busy: false, stopping: false, phase: "", progress: null,
   evidence: null, answers: [], audio: { status: "not-started" }, error: "", complete: false });
 
-export function useShotIntelligence(path: string | null, transcriptPath: string | null, sourceKey?: string | null, reloadToken = 0, foregroundBusy = false) {
+export function useShotIntelligence(path: string | null, transcriptPath: string | null, sourceKey?: string | null, reloadToken = 0, foregroundBusy = false, modelId: PictureModelId = "qwen3.5-9b-video") {
   const key = JSON.stringify([path, transcriptPath, sourceKey, reloadToken]);
   const currentKey = useRef(key); currentKey.current = key;
   const mounted = useRef(true);
@@ -53,11 +54,11 @@ export function useShotIntelligence(path: string | null, transcriptPath: string 
     const current = () => mounted.current && active.current === job && !job.stopped && currentKey.current === job.key;
     const assertCurrent = () => { if (!current()) throw new Error("Analysis cancelled"); };
     const update = (changes: Partial<State>) => { if (current()) setState(value => ({ ...value, ...changes })); };
-    setState({ ...empty(key), busy: true, phase: "Preparing analysis video…" });
+    setState({ ...empty(key), busy: true, phase: "Preparing analysis video…", modelUsed: modelId });
     try {
       const models = await nativeRun({ operation: "models" });
       assertCurrent();
-      if (!models?.models.some(model => model.id === "qwen3.5-9b-video" && model.ready)) {
+      if (!models?.models.some(model => model.id === modelId && model.ready)) {
         throw new Error("Download the local video reasoning model in Models before analyzing. No download starts automatically.");
       }
       const musicModelReady = models.models.some(model => model.id === "ast-audioset" && model.ready);
@@ -86,11 +87,12 @@ export function useShotIntelligence(path: string | null, transcriptPath: string 
       const answers: VideoShotAnswer[] = [];
       for (const shots of shotBatches(evidence)) {
         assertCurrent();
-        const response = await nativeRun({ operation: "analyze-shots", path, source_sha256: proxy.source.sha256,
+        const response = await nativeRun({ operation: "analyze-shots", model_id: modelId, path, source_sha256: proxy.source.sha256,
           analysis_id: evidence.id, query: QUESTION, shots });
         assertCurrent();
         if (!response?.shot_analysis) throw new Error("Shot descriptions did not finish. The detected shots remain available.");
         validateShotAnswers(evidence, shots, response.shot_analysis);
+        if (response.shot_analysis.model_id !== modelId) throw new Error("The worker used a different picture model. Run the analysis again.");
         answers.push(...response.shot_analysis.shots);
         update({ answers: [...answers], phase: `Described ${answers.length} of ${evidence.shots.length} shots`,
           progress: answers.length / evidence.shots.length * 100 });
@@ -122,7 +124,7 @@ export function useShotIntelligence(path: string | null, transcriptPath: string 
             audio: value.audio.status === "analyzing" ? { status: "stopped" } : value.audio } : empty(currentKey.current));
       }
     }
-  }, [key, path, transcriptPath, nativeRun, foregroundBusy]);
+  }, [key, path, transcriptPath, nativeRun, foregroundBusy, modelId]);
 
   // A new source hides the old result in its first render, before effects run.
   const visible = state.key === key ? state : empty(key);

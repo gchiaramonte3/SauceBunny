@@ -99,7 +99,9 @@ class ShotAnalysisTests(unittest.TestCase):
         self.assertEqual(response["sampling_version"], "shot-spread-8frames-384-display-v2")
         for supplied, answer, call in zip(self.request["shots"], response["shots"], engine.reason.call_args_list):
             self.assertEqual({key: answer[key] for key in supplied}, supplied)
-            self.assertEqual(call.args[3], supplied["transcript"])
+            self.assertEqual(call.args[3], "")  # dialogue cannot contaminate picture observations
+            self.assertEqual(answer["picture_description"], "A visible red frame.")
+            self.assertIsNone(answer["transcript_summary"])
             self.assertEqual(call.kwargs, {"visual_only": True})
             self.assertTrue(all(supplied["start_us"] <= pts < supplied["end_us"] for pts in answer["frame_pts_us"]))
         factory.assert_called_once()

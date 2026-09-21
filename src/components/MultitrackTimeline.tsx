@@ -12,18 +12,20 @@ type Props = {
   solo: Set<string>; muted?: Set<string>; onSolo?: (id: string) => void; onMute?: (id: string) => void;
   levels?: Record<string, number>; onLevel?: (id: string, value: number) => void;
   onTrackMenu?: (id: string, x: number, y: number) => void;
+  onOwnerMenu?: (id: string) => void;
   frame: number; onSeek: (frame: number, trackId?: string) => void; onScrub?: (frame: number) => void;
   onScrubEnd?: (frame: number, resume: boolean) => void; playing?: boolean; showWaveforms?: boolean; transport?: ReactNode;
 };
-function TrackLabel({ document, trackId, onRename }: Pick<Props, "document" | "onRename"> & { trackId: string }) {
+function TrackLabel({ document, trackId, onRename, onOwnerMenu }: Pick<Props, "document" | "onRename" | "onOwnerMenu"> & { trackId: string }) {
   const owner = trackOwner(document, trackId), [draft, setDraft] = useState(owner);
   const cancelled = useRef(false);
   return <input className="cp-multitrack-owner" aria-label={`Mic owner for ${trackId}`} value={draft} title={owner}
+    onContextMenu={onOwnerMenu ? (event) => { event.preventDefault(); event.stopPropagation(); event.currentTarget.blur(); onOwnerMenu(trackId); } : undefined}
     onChange={(event) => setDraft(event.target.value)} maxLength={120}
     onBlur={() => { if (!cancelled.current && draft.trim() !== owner) onRename(trackId, draft); cancelled.current = false; }}
     onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { cancelled.current = true; setDraft(owner); event.currentTarget.blur(); } }} />;
 }
-export function MultitrackTimeline({ document, waveforms, waveformErrors, selected, onSelect, onRename, solo, muted = new Set(), onSolo, onMute, levels = {}, onLevel, onTrackMenu, frame, onSeek, onScrub, onScrubEnd, playing = false, showWaveforms = true, transport, detail, onView }: Props) {
+export function MultitrackTimeline({ document, waveforms, waveformErrors, selected, onSelect, onRename, solo, muted = new Set(), onSolo, onMute, levels = {}, onLevel, onTrackMenu, onOwnerMenu, frame, onSeek, onScrub, onScrubEnd, playing = false, showWaveforms = true, transport, detail, onView }: Props) {
   const [zoom, setZoom] = useState(1), [start, setStart] = useState(0), [density, setDensity] = useState("small");
   const [textTracks, setTextTracks] = useState(new Set<string>()), [dragging, setDragging] = useState(false), [hover, setHover] = useState<number | null>(null);
   const gesture = useRef<{ pointer: number; resume: boolean; frame: number } | null>(null);
@@ -79,7 +81,7 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
         return <div className={`cp-multitrack-lane${solo.has(track.id) ? " is-solo" : solo.size ? " is-unsoloed" : ""}${muted.has(track.id) ? " is-muted" : ""}${textTracks.has(track.id) ? " has-text" : ""}`} key={track.id}
           onContextMenu={onTrackMenu ? (event) => { event.preventDefault(); const trigger = event.currentTarget.querySelector<HTMLButtonElement>(".cp-multitrack-track-menu-trigger"); trigger?.focus(); onTrackMenu(track.id, event.clientX, event.clientY); } : undefined}>
           <div className="cp-multitrack-lane-label"><label className="cp-multitrack-check" title="Include in transcription"><input type="checkbox" checked={selected.has(track.id)} onChange={() => onSelect(track.id)} aria-label={`Transcribe ${track.name}`} /><span>{audioTrackLabel(document, track.id)}</span></label>
-            <TrackLabel key={trackOwner(document, track.id)} document={document} trackId={track.id} onRename={onRename} />
+            <TrackLabel key={trackOwner(document, track.id)} document={document} trackId={track.id} onRename={onRename} onOwnerMenu={onOwnerMenu} />
             <div className="cp-multitrack-track-switches"><button className="btn btn-ghost cp-multitrack-solo" aria-pressed={solo.has(track.id)} aria-label={`Solo ${track.name}`} title={`Solo ${trackOwner(document, track.id)}`} onClick={() => onSolo?.(track.id)}>S</button>
               <button className="btn btn-ghost cp-multitrack-solo" aria-pressed={muted.has(track.id)} aria-label={`Mute ${track.name}`} title={`Mute ${trackOwner(document, track.id)}`} onClick={() => onMute?.(track.id)}>M</button>
               <button className="btn btn-ghost cp-multitrack-text-toggle" aria-pressed={textTracks.has(track.id)} aria-label={`Text overlay ${track.name}`} title="Show transcript segments above the waveform" onClick={() => setTextTracks((prior) => { const next = new Set(prior); if (next.has(track.id)) next.delete(track.id); else next.add(track.id); return next; })}>Text</button>

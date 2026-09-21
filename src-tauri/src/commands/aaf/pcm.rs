@@ -213,7 +213,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var("SB_AAF_BENCH_DIR").unwrap());
         let manifest: AafManifest = serde_json::from_slice(&std::fs::read(std::env::var("SB_AAF_REAL_INDEX").unwrap()).unwrap()).unwrap();
         let metadata = std::fs::metadata(&source).unwrap();
-        let document = AafDocument { schema_version: 1, id: "f".repeat(64), source_path: source.clone(), source_size: metadata.len(), source_modified_ms: store::modified_ms(&metadata), manifest, labels: vec![], transcripts: vec![] };
+        let document = AafDocument { schema_version: 1, shoot_date_override: None, id: "f".repeat(64), source_path: source.clone(), source_size: metadata.len(), source_modified_ms: store::modified_ms(&metadata), manifest, labels: vec![], transcripts: vec![] };
         index.validate(&document).unwrap(); store::source_ready(&document).unwrap();
         let reader = Reader { index, file: Mutex::new(File::open(&source).unwrap()) };
         let track = reader.index.track("10").unwrap();

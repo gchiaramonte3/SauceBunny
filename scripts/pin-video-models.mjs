@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 
 const models = [
+  { id: "qwen3.5-4b-video", role: "reasoning", name: "Qwen3.5 4B", repo: "mlx-community/Qwen3.5-4B-4bit", revision: "0e7ffd5c629ef7719d4cbc04069232580bfa9d9c" },
   { id: "qwen3-vl-embedding-2b", role: "embedding", name: "Qwen3-VL Embedding 2B", repo: "mlx-community/Qwen3-VL-Embedding-2B-4bit", revision: "c713a965783416b9467b419f2d14ca6445847455" },
   { id: "qwen3-vl-reranker-2b", role: "reranker", name: "Qwen3-VL Reranker 2B", repo: "mlx-community/Qwen3-VL-Reranker-2B-4bit", revision: "374a7dc08e7c3b553c8b2730a425e53c7a926510" },
   { id: "qwen3.5-9b-video", role: "reasoning", name: "Qwen3.5 9B", repo: "mlx-community/Qwen3.5-9B-4bit", revision: "8b2b98c00a6b4d291155e4890773ca8f769aee53" },
@@ -14,7 +15,9 @@ async function checked(url) {
   return response;
 }
 
-for (const model of models) {
+const selected = process.argv[2] ? models.filter(model => model.id === process.argv[2]) : models;
+if (!selected.length) throw new Error("Unknown model ID");
+for (const model of selected) {
   const metadata = await (await checked(`https://huggingface.co/api/models/${model.repo}/revision/${model.revision}?blobs=true`)).json();
   if (metadata.sha !== model.revision) throw new Error("Model revision mismatch");
   model.files = [];
@@ -34,4 +37,4 @@ for (const model of models) {
   }
   model.bytes = model.files.reduce((sum, file) => sum + file.bytes, 0);
 }
-process.stdout.write(`${JSON.stringify({ schema_version: 1, models }, null, 2)}\n`);
+process.stdout.write(`${JSON.stringify({ schema_version: 1, models: selected }, null, 2)}\n`);

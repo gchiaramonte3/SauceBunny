@@ -148,6 +148,7 @@ type Props = {
    *  this over the bus so main's timeline markers re-read. Omit when docked
    *  (the same-window CHAPTERS_CHANGED_EVENT already covers it). */
   onChaptersChanged?: () => void;
+  onCutMarkersChanged?: () => void;
   /** Review tab: stable id for the current source (local path / URL), or null. */
   reviewSourceKey?: string | null;
   /** Review tab: human label for the source (title/filename). */
@@ -278,7 +279,7 @@ export function QueueDrawer({
   onImportTranscript, sourceKind, onFixCaptionTiming,
   transcriptHasSource, onTranscriptEdited,
   aiModelId, aiStyle, onOpenAiSettings, aiVideoPath, aiForegroundBusy, onOpenVideoSettings,
-  chapterSourceKey, chapterDurationSec, onChaptersChanged, sourceDescription,
+  chapterSourceKey, chapterDurationSec, onChaptersChanged, onCutMarkersChanged, sourceDescription,
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
   onOpenReviewSource, onReviewLinkAsVersion, onReviewUnlinkVersion, reviewSourcePath, onReviewRangeDraft, onRegisterRangeHotkeys, reviewSession, onUndo, onRedo,
@@ -1098,11 +1099,15 @@ export function QueueDrawer({
           videoPath={aiVideoPath ?? null}
           videoForegroundBusy={aiForegroundBusy}
           onOpenVideoSettings={onOpenVideoSettings}
-          onSeek={onTranscriptSeek}
+          /* Shot/evidence times are source PTS, not nominal timecode frames.
+             Preserve fractional-rate cut boundaries (e.g. 1.001s at 23.976).
+             Detached panels already relay exact seconds through their bus. */
+          onSeek={reviewSession ? (seconds) => { void reviewSession.jumpToComment(seconds); } : onTranscriptSeek}
           sourceKey={chapterSourceKey ?? null}
           sourceDescription={sourceDescription ?? null}
           durationSec={chapterDurationSec ?? null}
           onChaptersChanged={onChaptersChanged}
+          onCutMarkersChanged={onCutMarkersChanged}
         />
         </div>
       )}

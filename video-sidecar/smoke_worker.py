@@ -43,6 +43,8 @@ def main():
         args.output.joinpath("evidence.json").write_text(json.dumps(evidence, indent=2))
         if result.returncode:
             raise RuntimeError(f"{name}: {result.stdout}\n{result.stderr[-4000:]}")
+        if "resource_tracker" in result.stderr or "the following arguments are required: --root" in result.stderr:
+            raise RuntimeError(f"{name}: frozen multiprocessing helper failed: {result.stderr[-4000:]}")
         return next(packet for packet in packets if packet["type"] == "result")
 
     request({"operation": "models"}, "models")

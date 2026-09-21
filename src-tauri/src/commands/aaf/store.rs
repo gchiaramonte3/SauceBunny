@@ -38,33 +38,88 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, AppEr
 }
 
 pub fn load(root: &Path, id: &str) -> Result<AafDocument, AppError> {
-    let document: AafDocument = read_json(&document_path(root, id)?)?;
-    if document.schema_version != SCHEMA_VERSION {
+    let mut document: AafDocument = read_json(&document_path(root, id)?)?;
+    if !(1..=DOCUMENT_SCHEMA_VERSION).contains(&document.schema_version) {
         return Err(AppError::invalid("This multitrack document was saved by an unsupported version. Update Sauce Bunny."));
     }
     if document.id != id { return Err(AppError::invalid("Multitrack document identity does not match its filename")); }
     validate_manifest(&document.manifest)?;
+    document.schema_version = DOCUMENT_SCHEMA_VERSION;
     Ok(document)
 }
 
 fn write(root: &Path, document: &AafDocument) -> Result<(), AppError> {
-    if document.schema_version != SCHEMA_VERSION { return Err(AppError::invalid("Unsupported multitrack schema version")); }
+    if !(1..=DOCUMENT_SCHEMA_VERSION).contains(&document.schema_version) { return Err(AppError::invalid("Unsupported multitrack schema version")); }
+    let mut document = document.clone();
+    document.schema_version = DOCUMENT_SCHEMA_VERSION;
     validate_manifest(&document.manifest)?;
     let path = document_path(root, &document.id)?;
     if path.exists() {
         // Refuse newer files before overwrite, even if the in-memory copy is older.
         let _: AafDocument = load(root, &document.id)?;
     }
-    let json = serde_json::to_vec_pretty(document)?;
+    let json = serde_json::to_vec_pretty(&document)?;
     if json.len() as u64 > MAX_DOCUMENT_BYTES { return Err(AppError::invalid("Multitrack document exceeds the save limit")); }
     crate::commands::system::write_bytes_impl(&path.to_string_lossy(), &json, false, false, true)?;
     Ok(())
 }
 
+#[cfg(test)]
 pub fn create(root: &Path, document: &AafDocument) -> Result<(), AppError> {
     let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("Multitrack save lock unavailable"))?;
     if document_path(root, &document.id)?.exists() { return Err(AppError::invalid("Multitrack document already exists")); }
     write(root, document)
+}
+
+pub fn import(root: &Path, document: AafDocument) -> Result<AafDocument, AppError> {
+    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("Multitrack save lock unavailable"))?;
+    if let Some(mut existing) = reopen(root, Path::new(&document.source_path), &document.manifest.source_fingerprint)? {
+        if document.manifest.recording_dates.is_some() { existing.manifest.recording_dates = document.manifest.recording_dates; }
+        write(root, &existing)?;
+        return Ok(existing);
+    }
+    if document_path(root, &document.id)?.exists() { return Err(AppError::invalid("Multitrack document already exists")); }
+    write(root, &document)?;
+    Ok(document)
+}
+
+/// Reopen an unchanged source without deleting or combining historical imports.
+/// Prefer the most complete saved document, then the most recently written one.
+pub fn reopen(root: &Path, source: &Path, fingerprint: &str) -> Result<Option<AafDocument>, AppError> {
+    let mut candidates = Vec::new();
+    for item in list(root)? {
+        if Path::new(&item.source_path) != source { continue; }
+        let doc = load(root, &item.id)?;
+        if doc.manifest.source_fingerprint == fingerprint {
+            candidates.push((doc.transcripts.len(), item.modified_ms.unwrap_or(0), doc));
+        }
+    }
+    candidates.sort_by_key(|(count, modified, _)| (*count, *modified));
+    Ok(candidates.pop().map(|(_, _, doc)| doc))
+}
+
+pub fn metadata(root: &Path, id: &str, override_date: Option<String>, dates: Option<Vec<AafRecordingDate>>) -> Result<AafDocument, AppError> {
+    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("Multitrack save lock unavailable"))?;
+    let mut document = load(root, id)?;
+    if let Some(dates) = dates { document.manifest.recording_dates = Some(dates); }
+    else { document.shoot_date_override = override_date; }
+    if document.shoot_date_override.as_ref().is_some_and(|value| !value.is_empty() && !valid_date(value)) {
+        return Err(AppError::invalid("Enter a valid shoot date as YYYY-MM-DD"));
+    }
+    write(root, &document)?;
+    Ok(document)
+}
+
+pub fn valid_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-'
+        || bytes.iter().enumerate().any(|(i, c)| i != 4 && i != 7 && !c.is_ascii_digit()) { return false; }
+    let year = value[..4].parse::<u32>().unwrap_or(0);
+    let month = value[5..7].parse::<usize>().unwrap_or(0);
+    let day = value[8..].parse::<u32>().unwrap_or(0);
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    year > 0 && (1..=12).contains(&month) && day > 0
+        && day <= [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
 }
 
 pub fn labels(root: &Path, id: &str, labels: Vec<AafTrackLabel>) -> Result<AafDocument, AppError> {
@@ -106,7 +161,8 @@ pub fn list(root: &Path) -> Result<Vec<AafDocumentSummary>, AppError> {
         let document = load(root, id)?;
         results.push(AafDocumentSummary { id: document.id, name: document.manifest.name,
             track_count: document.manifest.tracks.len() as u32,
-            transcribed_tracks: document.transcripts.len() as u32, source_path: document.source_path });
+            transcribed_tracks: document.transcripts.len() as u32, source_path: document.source_path,
+            modified_ms: Some(modified_ms(&std::fs::metadata(&path)?)) });
     }
     results.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(results)
@@ -159,15 +215,15 @@ pub fn cache_key(document: &AafDocument, track: &str, purpose: &str) -> String {
 mod tests {
     use super::*;
     fn fixture() -> AafDocument {
-        AafDocument { schema_version: 1, id: "a".repeat(64), source_path: "/tmp/source.aaf".into(),
+        AafDocument { schema_version: 1, shoot_date_override: None, id: "a".repeat(64), source_path: "/tmp/source.aaf".into(),
             source_size: 1, source_modified_ms: 0,
-            manifest: AafManifest { schema_version: 1, name: "Test".into(), source_fingerprint: "b".repeat(64),
+            manifest: AafManifest { schema_version: 1, recording_dates: None, name: "Test".into(), source_fingerprint: "b".repeat(64),
                 edit_rate: AafRate { numerator: 24000, denominator: 1001 }, start_frame: 0, duration_frames: 240,
                 timecode_fps: 24, drop_frame: false,
                 tracks: vec![AafTrack { id: "10".into(), name: "Café".into(), physical_track_number: None, clips: vec![AafClip {
                     start_frame: 0, duration_frames: 240, kind: "gap".into(), master_id: None, source_id: None,
                     source_start_sample: None, sample_rate: None, warnings: vec![] }], warnings: vec![] }], warnings: vec![] },
-            labels: vec![AafTrackLabel { track_id: "10".into(), owner_name: "Café".into(), cast_member_id: None, color: None }],
+            labels: vec![AafTrackLabel { track_id: "10".into(), owner_name: "Café".into(), cast_member_id: None, color: None, gender: None, marker_color: None }],
             transcripts: vec![] }
     }
 
@@ -181,7 +237,7 @@ mod tests {
             engine: AafEngine::Parakeet, model_id: "test".into(), status: AafTranscriptStatus::Review,
             sample_rate: 16000, cues: vec![AafCue { id: "cue".into(), start_sample: 16016, end_sample: 24024, text: "Hello, Café".into(), boundary_review: false }], timing_issues: vec![AafTimingIssue { id: "untimed".into(), text: "Kept without invented timing".into(), reported_timing: "00:00:10,000 --> 00:00:10,000".into(), chunk_start_frame: 24, reason: "Empty time range".into() }], warnings: vec![] };
         save_transcript(&root, &doc.id, transcript).unwrap();
-        let updated = labels(&root, &doc.id, vec![AafTrackLabel { track_id: "10".into(), owner_name: "かが Élodie".into(), cast_member_id: None, color: None }]).unwrap();
+        let updated = labels(&root, &doc.id, vec![AafTrackLabel { track_id: "10".into(), owner_name: "かが Élodie".into(), cast_member_id: None, color: None, gender: None, marker_color: None }]).unwrap();
         assert_eq!(updated.transcripts.len(), 1);
         let reopened = load(&root, &doc.id).unwrap();
         assert_eq!(reopened.labels[0].owner_name, "かが Élodie");
@@ -195,7 +251,7 @@ mod tests {
         legacy["transcripts"][0]["status"] = "completed".into();
         assert!(serde_json::from_value::<AafDocument>(legacy).unwrap().transcripts[0].timing_issues.is_empty());
         let mut future = reopened;
-        future.schema_version = 2;
+        future.schema_version = DOCUMENT_SCHEMA_VERSION + 1;
         let path = document_path(&root, &doc.id).unwrap();
         let bytes = serde_json::to_vec(&future).unwrap();
         std::fs::write(&path, &bytes).unwrap();
@@ -225,5 +281,47 @@ mod tests {
         for bad in ["../doc", "", "/tmp/doc", "abcdef"] {
             assert!(document_path(Path::new("/tmp/store"), bad).is_err());
         }
+    }
+
+    #[test]
+    fn unchanged_import_preserves_all_historical_versions_and_committed_empty_results() {
+        let root = std::env::temp_dir().join(format!("aaf-reimport-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let mut original = fixture();
+        original.transcripts.push(AafTrackTranscript { track_id: "10".into(), engine: AafEngine::Parakeet,
+            model_id: "test".into(), start_frame: 0, duration_frames: 240, status: AafTranscriptStatus::Empty,
+            sample_rate: 16000, cues: vec![], timing_issues: vec![], warnings: vec![] });
+        create(&root, &original).unwrap();
+        let mut duplicate = fixture(); duplicate.id = "c".repeat(64); create(&root, &duplicate).unwrap();
+        let mut fresh = fixture(); fresh.id = "d".repeat(64);
+        assert_eq!(import(&root, fresh.clone()).unwrap().id, original.id);
+        assert_eq!(list(&root).unwrap().len(), 2);
+        assert_eq!(load(&root, &original.id).unwrap().transcripts.len(), 1);
+        fresh.manifest.source_fingerprint = "e".repeat(64);
+        assert_eq!(import(&root, fresh).unwrap().id, "d".repeat(64));
+        assert_eq!(list(&root).unwrap().len(), 3);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn metadata_and_manual_preferences_migrate_without_discarding_saved_content() {
+        let root = std::env::temp_dir().join(format!("aaf-date-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap(); let doc = fixture(); create(&root, &doc).unwrap();
+        let dates = vec![AafRecordingDate { source_id: "one".into(), date: "2026-08-01".into(), provenance: "bwf-origination-date".into() },
+            AafRecordingDate { source_id: "two".into(), date: "2026-08-02".into(), provenance: "bwf-origination-date".into() }];
+        metadata(&root, &doc.id, None, Some(dates.clone())).unwrap();
+        metadata(&root, &doc.id, Some("2026-08-03".into()), None).unwrap();
+        let mut prefs = doc.labels; prefs[0].gender = Some(AafGender::Woman); prefs[0].marker_color = Some(AafMarkerColor::Pink);
+        let saved = labels(&root, &doc.id, prefs).unwrap();
+        assert_eq!(saved.shoot_date_override.as_deref(), Some("2026-08-03"));
+        assert_eq!(saved.manifest.recording_dates.unwrap().len(), 2);
+        let saved = metadata(&root, &doc.id, None, Some(dates)).unwrap();
+        assert!(matches!(saved.labels[0].marker_color, Some(AafMarkerColor::Pink)));
+        assert_eq!(saved.shoot_date_override.as_deref(), Some("2026-08-03"));
+        assert!(metadata(&root, &doc.id, Some("2026-02-29".into()), None).is_err());
+        assert!(metadata(&root, &doc.id, None, None).unwrap().shoot_date_override.is_none());
+        assert_eq!(load(&root, &doc.id).unwrap().schema_version, DOCUMENT_SCHEMA_VERSION);
+        for (date, expected) in [("2024-02-29", true), ("1900-02-29", false), ("2000-02-29", true), ("0000-01-01", false), ("2026-13-01", false)] { assert_eq!(valid_date(date), expected); }
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

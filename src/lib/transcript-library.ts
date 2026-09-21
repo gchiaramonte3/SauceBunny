@@ -18,9 +18,23 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { pathKey } from "./repath";
 import type { TranscriptFile } from "../bindings/TranscriptFile";
 import { getHistory, type TranscriptHistoryEntry } from "./transcript-history";
 import { withoutHidden } from "./library-hidden";
+import type { AafDocumentSummary } from "../bindings/AafDocumentSummary";
+
+/** Managed documents are not SRTs: their ID opens the authoritative AAF store. */
+export type MultitrackLibraryEntry = { kind: "multitrack"; id: string; title: string; summary: AafDocumentSummary };
+export type TranscriptLibraryEntry = LibraryTranscript | MultitrackLibraryEntry;
+
+export function multitrackLibraryEntries(documents: AafDocumentSummary[]): MultitrackLibraryEntry[] {
+  const completed = documents.filter(doc => doc.transcribed_tracks > 0);
+  const name = (doc: AafDocumentSummary) => pathKey(doc.source_path).split("/").pop() || doc.name;
+  return completed.map(summary => ({ kind: "multitrack" as const, id: summary.id, summary,
+    title: name(summary) + (completed.filter(other => name(other) === name(summary)).length > 1 ? ` · ${summary.id.slice(0, 8)}` : "") }))
+    .sort((a, b) => (b.summary.modified_ms ?? 0) - (a.summary.modified_ms ?? 0) || a.id.localeCompare(b.id));
+}
 
 /** One transcript in the library view. `entry` is real or synthesized and is
  *  always safe to pass to App's transcript-open handler. */

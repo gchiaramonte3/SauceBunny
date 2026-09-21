@@ -21,7 +21,7 @@ export function MultitrackTrackActions({ document: doc, target, disabled, onClos
   const owner = trackOwner(doc, target.id), transcript = doc.transcripts.find((item) => item.track_id === target.id), busy = output.phase === "loading";
   return createPortal(<div ref={menu} className="cp-multitrack-track-menu" role="menu" aria-label={`Actions for ${owner}`} style={position}>
     <div className="cp-multitrack-track-menu-title">{owner}</div>
-    <button role="menuitem" disabled={disabled || busy} onClick={() => { onClose(); onRegenerate(target.id); }}>Regenerate…</button>
+    <button role="menuitem" disabled={disabled || busy} onClick={() => { onClose(); onRegenerate(target.id); }}>{transcript ? "Regenerate…" : "Generate…"}</button>
     <button role="menuitem" disabled={busy || !(transcript?.cues.length || transcript?.timing_issues?.length)} onClick={() => void output.download("txt", [target.id], owner)}>Download text file…</button>
     <button role="menuitem" disabled={busy || !transcript?.cues.length} onClick={() => void output.download("avid", [target.id], owner)}>Export Avid markers…</button>
     {busy && <p role="status">Exporting…</p>}{output.status && <p role="status">{output.status}</p>}{output.error && <p role="alert">{output.error}</p>}

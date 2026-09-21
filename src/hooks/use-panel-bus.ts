@@ -106,6 +106,7 @@ export type PanelHandlers = {
   /** Panel generated/deleted chapters (already saved to the shared
    *  localStorage) — main re-reads so its timeline markers update. */
   onChaptersChanged: () => void;
+  onCutMarkersChanged?: () => void;
 };
 
 /** Shared key the main window mirrors the snapshot to on every publish.
@@ -418,6 +419,8 @@ export function usePanelBus({
           () => handlersRef.current.onOpenVideoSettings?.()),
         listen("panel:action:chaptersChanged",
           () => handlersRef.current.onChaptersChanged()),
+        listen("panel:action:cutMarkersChanged",
+          () => handlersRef.current.onCutMarkersChanged?.()),
       ]);
       if (cancelled) { off.forEach((u) => u()); return; }
       unlistens = off;

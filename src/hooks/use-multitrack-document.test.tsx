@@ -6,6 +6,7 @@ import { useMultitrackDocument } from "./use-multitrack-document";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), open: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.open }));
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 beforeEach(() => {
@@ -57,6 +58,25 @@ describe("multitrack document ownership", () => {
     act(() => result.current.rename("track-1", "Newest Owner"));
     await act(async () => { staleRead.resolve(old); await reopening; });
     expect(result.current.document?.labels.find(label => label.track_id === "track-1")?.owner_name).toBe("Newest Owner");
+  });
+
+  it("a legacy metadata inspection cannot restore labels older than an overlapping save", async () => {
+    let disk = multitrackFixture(); const metadata = deferred<ReturnType<typeof multitrackFixture>>();
+    const base = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((command, args) => {
+      if (command === "aaf_open") return Promise.resolve(structuredClone(disk));
+      if (command === "aaf_read_recording_dates") return metadata.promise;
+      if (command === "aaf_save_labels") { disk = { ...disk, labels: structuredClone(args.labels) }; return Promise.resolve(structuredClone(disk)); }
+      return base(command, args);
+    });
+    const { result } = renderHook(() => useMultitrackDocument(true)); await act(async () => result.current.load());
+    delete disk.manifest.recording_dates;
+    const stale = structuredClone(disk); let reopening!: Promise<void>;
+    act(() => { reopening = result.current.load(disk.id); });
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("aaf_read_recording_dates", expect.anything()));
+    act(() => result.current.rename("track-1", "Saved during inspection", undefined, undefined, { gender: "woman", marker_color: "pink" }));
+    await act(async () => { metadata.resolve(stale); await reopening; });
+    expect(result.current.document?.labels[0]).toMatchObject({ owner_name: "Saved during inspection", gender: "woman", marker_color: "pink" });
   });
 
   it("Stop cancels a reopen waiting for labels without cancelling the save", async () => {

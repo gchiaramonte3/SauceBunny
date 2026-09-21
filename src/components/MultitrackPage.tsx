@@ -4,7 +4,7 @@ import { IconPlus, IconSettings } from "./Icons";
 import { IconMultitrack } from "./IconMultitrack";
 import { MultitrackWorkspace } from "./MultitrackWorkspace";
 
-export function MultitrackPage({ active, onOpenSettings, aiModelId, openRequest }: { active: boolean; onOpenSettings?: () => void; aiModelId?: string | null; openRequest?: { id: string; tick: number } | null }) {
+export function MultitrackPage({ active, onOpenSettings, aiModelId, openRequest }: { active: boolean; onOpenSettings?: () => void; aiModelId?: string | null; openRequest?: { id: string; tick: number; frame?: number; trackId?: string } | null }) {
   const state = useMultitrackDocument(active);
   const [jobRunning, setJobRunning] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -29,7 +29,7 @@ export function MultitrackPage({ active, onOpenSettings, aiModelId, openRequest 
     {pendingOpen && <p className="cp-multitrack-note">Finish or stop the current operation before opening the Library sequence. <button className="btn btn-ghost" disabled={cannotImport} onClick={() => { void load(pendingOpen); setPendingOpen(null); }}>Open selected sequence</button><button className="btn btn-ghost" onClick={() => setPendingOpen(null)}>Dismiss</button></p>}
     {state.error && <p className="cp-multitrack-error cp-multitrack-page-error" role="alert">{state.error}</p>}
     {state.loading && <div className="cp-multitrack-importing" role="status"><span>Reading the AAF sequence…</span><button className="btn btn-ghost" onClick={state.cancelImport}>Stop</button></div>}
-    {state.document ? <MultitrackWorkspace key={state.document.id} document={state.document} active={active && !state.loading} waveforms={state.waveforms} waveformErrors={state.waveformErrors} labelStatus={state.labelStatus} onRename={state.rename} onTranscript={state.acceptTranscript} onOpenSettings={onOpenSettings} onJobState={setJobRunning} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} aiModelId={aiModelId} />
+    {state.document ? <MultitrackWorkspace key={state.document.id} document={state.document} active={active && !state.loading} openRequest={pendingOpen ? null : openRequest} waveforms={state.waveforms} waveformErrors={state.waveformErrors} labelStatus={state.labelStatus} onRename={state.rename} onTranscript={state.acceptTranscript} onOpenSettings={onOpenSettings} onJobState={setJobRunning} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} aiModelId={aiModelId} />
       : <div className="cp-multitrack-empty"><IconMultitrack size={32} /><h2>Read the room, mic by mic</h2><p>Import an AAF to see its audio tracks together. Solo a mic, label its owner, and generate a searchable transcript.</p><button className="btn btn-ghost" disabled={state.loading} onClick={() => void state.load()}>Import AAF…</button><span>Local processing · Your original AAF stays untouched</span></div>}
   </section>;
 }

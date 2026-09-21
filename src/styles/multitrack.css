@@ -55,6 +55,17 @@
 .cp-multitrack-tc { min-width: 100px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cp-multitrack-generation { border-top: 1px solid var(--line-1); }
 .cp-multitrack-confirm { margin-bottom: 16px; }
+.cp-multitrack-reader { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.cp-multitrack-date { font-size: var(--text-base); width: 100%; }
+.cp-multitrack-date summary { cursor: pointer; min-height: 26px; padding: 4px 0; }
+.cp-multitrack-date-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.cp-multitrack-date-controls label { display: grid; gap: 4px; }
+.cp-multitrack-date-controls input { min-height: 30px; color: var(--fg-1); background: var(--bg-0); border: 1px solid var(--line-2); border-radius: var(--r-md); padding: 4px 8px; font: inherit; }
+.cp-multitrack-reader > .cp-multitrack-transcript { flex: 1; min-height: 0; width: auto; }
+.cp-multitrack-reader-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px; border-bottom: 1px solid var(--line-1); }
+.cp-multitrack-reader-head > span { min-width: 0; overflow-wrap: anywhere; }
+.cp-multitrack-reader-head .btn { flex-shrink: 0; }
+.cp-multitrack-library-heading { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .cp-multitrack-cast { margin-top: 8px; font-size: var(--text-base); color: var(--fg-3); }
 .cp-multitrack-cast summary { cursor: pointer; }
 .cp-multitrack-cast-actions { display: flex; align-items: center; gap: 8px; }
@@ -173,14 +184,13 @@
 .cp-multitrack-level-heading { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-multitrack-fader { display: flex; align-items: stretch; gap: 8px; height: 132px; }
 .cp-multitrack-level-popover .cp-multitrack-gain-slider { writing-mode: vertical-lr; direction: rtl; width: 28px; height: 132px; padding: 0; margin: 0; accent-color: var(--fg-2); cursor: ns-resize; }
-.cp-multitrack-gain-ticks { position: relative; width: 40px; margin-block: 8px; color: var(--fg-3); font-variant-numeric: tabular-nums; line-height: var(--leading-none); }
+.cp-multitrack-gain-ticks { position: relative; width: 56px; margin-block: 8px; color: var(--fg-3); font-variant-numeric: tabular-nums; line-height: var(--leading-none); }
 .cp-multitrack-gain-ticks > span { position: absolute; transform: translateY(-50%); white-space: nowrap; }
 .cp-multitrack-gain-ticks > span::before { content: ""; display: inline-block; width: 6px; margin-right: 6px; border-top: 1px solid var(--line-3); vertical-align: middle; }
 .cp-multitrack-gain-ticks .cp-multitrack-gain-unity { color: var(--fg-1); font-weight: var(--weight-semibold); }
+.cp-multitrack-gain-reset { position: absolute; left: calc(100% + 4px); top: 50%; transform: translateY(-50%); width: 24px; height: 24px; }
 .cp-multitrack-level-popover .cp-multitrack-gain-value { width: 100%; min-width: 0; height: 26px; min-height: 26px; box-sizing: border-box; text-align: center; font-family: var(--font-ui); font-size: var(--text-md); font-variant-numeric: tabular-nums; }
 .cp-multitrack-gain-value.is-boosted { color: var(--warning); }
-.cp-multitrack-gain-hint { color: var(--fg-3); font-size: var(--text-sm); line-height: var(--leading-tight); text-align: center; }
-.cp-multitrack-level-popover > .btn { height: 26px; min-height: 26px; padding: 0 6px; font-size: var(--text-base); }
 .cp-multitrack-track-switches [aria-pressed=true] { background: var(--bg-5); color: var(--fg-1); border-color: var(--line-3); }
 .cp-multitrack-lane-audio { cursor: default; touch-action: none; user-select: none; }
 .cp-multitrack-clip, .cp-multitrack-lane.is-solo .cp-multitrack-clip { top: 2px; bottom: 2px; background: color-mix(in srgb, var(--novella-violet) 12%, var(--bg-2)); border-radius: var(--r-2xs); border-left: 1px solid var(--line-2); }
@@ -281,3 +291,8 @@
   .cp-multitrack-editor, .cp-multitrack-transcript-pane, .cp-multitrack-transcript { display: flex; flex-direction: column; }
   .cp-multitrack-transcript-content { flex: 1; }
 }
+.cp-multitrack-cast-preferences { max-height: 280px; overflow: auto; margin-block: 12px; }
+.cp-multitrack-cast-preference { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(220px, 1.4fr); gap: 12px; align-items: center; padding: 4px 0; }
+.cp-multitrack-cast-preference > span { overflow: hidden; text-overflow: ellipsis; }
+.cp-cast-marker-fields { display: flex; gap: 8px; min-width: 0; }
+.cp-cast-marker-fields > select { flex: 1; min-width: 0; }

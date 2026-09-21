@@ -8,7 +8,9 @@ import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 
-const binary = resolve('swift-sidecar/.build/debug/saucebunny-audio-analysis');
+// Opt in to the actual mounted-DMG helper for packaged acceptance; ordinary
+// development runs retain the debug helper. Fixtures stay generated/local.
+const binary = resolve(process.env.AUDIO_TEST_HELPER || 'swift-sidecar/.build/debug/saucebunny-audio-analysis');
 let directory;
 before(async () => { directory = await mkdtemp(join(tmpdir(), 'sauce-audio-evidence-test-')); });
 after(async () => { if (directory) await rm(directory, { recursive: true }); });

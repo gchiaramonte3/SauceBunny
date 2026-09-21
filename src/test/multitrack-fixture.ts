@@ -5,7 +5,7 @@ export function multitrackFixture(): AafDocument {
   return {
     schema_version: 1, id: "sequence-test", source_path: "/fixtures/Interview.aaf", source_size: 1000, source_modified_ms: 1,
     manifest: { schema_version: 1, name: "Interview", source_fingerprint: "a".repeat(64), edit_rate: { numerator: 24000, denominator: 1001 }, start_frame: 86400, duration_frames: 24000, timecode_fps: 24, drop_frame: false,
-      tracks: ["Alex mic", "Sam mic", "Room"].map((name, index) => ({ id: `track-${index + 1}`, name, warnings: [], clips: [{ start_frame: 0, duration_frames: 24000, kind: "audio", master_id: null, source_id: null, source_start_sample: 0, sample_rate: 48000, warnings: [] }] })), warnings: [] },
+      recording_dates: [], tracks: ["Alex mic", "Sam mic", "Room"].map((name, index) => ({ id: `track-${index + 1}`, name, warnings: [], clips: [{ start_frame: 0, duration_frames: 24000, kind: "audio", master_id: null, source_id: null, source_start_sample: 0, sample_rate: 48000, warnings: [] }] })), warnings: [] },
     labels: [{ track_id: "track-1", owner_name: "Alex", cast_member_id: null, color: null }], transcripts: [],
   };
 }

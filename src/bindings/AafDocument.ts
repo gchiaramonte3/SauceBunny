@@ -3,4 +3,8 @@ import type { AafManifest } from "./AafManifest";
 import type { AafTrackLabel } from "./AafTrackLabel";
 import type { AafTrackTranscript } from "./AafTrackTranscript";
 
-export type AafDocument = { schema_version: number, id: string, source_path: string, source_size: number, source_modified_ms: number, manifest: AafManifest, labels: Array<AafTrackLabel>, transcripts: Array<AafTrackTranscript>, };
+export type AafDocument = { schema_version: number, id: string, source_path: string, source_size: number, source_modified_ms: number, manifest: AafManifest, labels: Array<AafTrackLabel>, transcripts: Array<AafTrackTranscript>,
+/**
+ * None uses source metadata; Some("") explicitly clears an unknown date.
+ */
+shoot_date_override?: string, };

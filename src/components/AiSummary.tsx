@@ -15,6 +15,7 @@ import { IconAiSummary } from "./Icons";
 import { Markdown } from "./Markdown";
 import { AiChapters } from "./AiChapters";
 import { ShotIntelligence } from "./ShotIntelligence";
+import { IconSettings } from "./Icons";
 import { shotIntelligenceEnabled } from "../lib/scene-analysis/rollout";
 import type { LlmModel } from "../bindings/LlmModel";
 import { buildSourcePrefix } from "../lib/prompt-prefix";
@@ -68,6 +69,7 @@ type Props = {
   /** Auto-chapters: notify the host after a generate/delete — the popped-out
    *  panel forwards this over the panel bus so main's timeline re-reads. */
   onChaptersChanged?: () => void;
+  onCutMarkersChanged?: () => void;
 };
 
 import { matchPrompts, slashQuery } from "../lib/transcript-prompts";
@@ -177,11 +179,10 @@ export function AiSummary(props: Props) {
   return <div className="cp-ai-modes">
     <div className="cp-ai-mode-switch">
       <span>Text</span>
-      <button type="button" role="switch" aria-label="Advanced Intelligence" aria-checked={advanced}
-        disabled={textBusy || videoBusy} onClick={() => { setAdvanced(value => !value); setVisitedAdvanced(true); }}>
-        <span />
-      </button>
+      <button type="button" className={`cp-toggle-switch${advanced ? " on" : ""}`} role="switch" aria-label="Advanced Intelligence" aria-checked={advanced}
+        disabled={textBusy || videoBusy} onClick={() => { setAdvanced(value => !value); setVisitedAdvanced(true); }} />
       <span>Advanced Intelligence</span>
+      {advanced && props.onOpenVideoSettings && <button type="button" className="btn btn-ghost cp-ai-model-settings" aria-label="Advanced Intelligence settings" title="Advanced Intelligence settings" disabled={videoBusy} onClick={props.onOpenVideoSettings}><IconSettings size={16} /></button>}
     </div>
     <div className="cp-ai-mode-body" hidden={advanced}>
       <TextSummary {...props} active={!advanced} warmable={props.warmable && !advanced} onBusyChange={setTextBusy} />
@@ -190,6 +191,7 @@ export function AiSummary(props: Props) {
       <ShotIntelligence videoPath={props.videoPath ?? null} transcriptPath={props.transcriptPath}
         foregroundBusy={props.videoForegroundBusy}
         sourceKey={props.sourceKey} reloadToken={props.reloadToken} onSeek={props.onSeek}
+        onCutMarkersChanged={props.onCutMarkersChanged}
         onOpenSettings={props.onOpenVideoSettings} onBusyChange={setVideoBusy} />
     </div>}
   </div>;

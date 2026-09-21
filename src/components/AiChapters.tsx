@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { streamChat } from "../lib/ai-chat";
 import { formatError } from "../lib/error-format";
 import { hasCreatorChapters,
+  CHAPTERS_CHANGED_EVENT,
   type Chapter, loadChapters, saveChapters, parseChapters,
   buildChapterPrompt, chaptersToYouTube, chapterTimestamp,
 } from "../lib/chapters";
@@ -78,6 +79,7 @@ export function AiChapters({
   };
   // Any deletion since the last generate → Regenerate asks before replacing.
   const editedRef = useRef(false);
+  const committingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
 
   // (Re)load the persisted list when the source changes.
@@ -87,12 +89,27 @@ export function AiChapters({
     editedRef.current = false;
   }, [sourceKey]);
 
+  // This view stays mounted while hidden. Observe explicit chapter edits
+  // elsewhere without confusing them with Advanced Intelligence's cut markers.
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      if (committingRef.current) return;
+      if ((event as CustomEvent<{ sourceKey: string }>).detail?.sourceKey !== sourceKey) return;
+      setChapters(sourceKey ? loadChapters(sourceKey) : []);
+      editedRef.current = true;
+    };
+    window.addEventListener(CHAPTERS_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(CHAPTERS_CHANGED_EVENT, refresh);
+  }, [sourceKey]);
+
   // Abort an in-flight detection on unmount / source change.
   useEffect(() => () => abortRef.current?.abort(), [sourceKey]);
 
   const commit = (next: Chapter[]) => {
     setChapters(next);
-    if (sourceKey) saveChapters(sourceKey, next);
+    committingRef.current = true;
+    try { if (sourceKey) saveChapters(sourceKey, next); }
+    finally { committingRef.current = false; }
     onChaptersChanged?.();
   };
 

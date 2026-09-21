@@ -3,6 +3,7 @@ use crate::AppError;
 use serde::{Deserialize, Serialize};
 
 pub const SCHEMA_VERSION: u32 = 1;
+pub const DOCUMENT_SCHEMA_VERSION: u32 = 2;
 pub const ASR_RATE: i64 = 16_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -47,6 +48,9 @@ pub struct AafManifest {
     pub schema_version: u32,
     pub name: String,
     pub source_fingerprint: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub recording_dates: Option<Vec<AafRecordingDate>>,
     pub edit_rate: AafRate,
     #[ts(type = "number")]
     pub start_frame: i64,
@@ -65,7 +69,27 @@ pub struct AafTrackLabel {
     pub owner_name: String,
     pub cast_member_id: Option<String>,
     pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub gender: Option<AafGender>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub marker_color: Option<AafMarkerColor>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub enum AafGender { Unspecified, Man, Woman, Nonbinary, Other }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub enum AafMarkerColor { Red, Green, Blue, Cyan, Yellow, Magenta, White, Black, Purple, Violet, Pink, Denim, Forest, Orange, Gold, Grey }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafRecordingDate { pub source_id: String, pub date: String, pub provenance: String }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
@@ -134,6 +158,10 @@ pub struct AafDocument {
     pub manifest: AafManifest,
     pub labels: Vec<AafTrackLabel>,
     pub transcripts: Vec<AafTrackTranscript>,
+    /// None uses source metadata; Some("") explicitly clears an unknown date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shoot_date_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -144,6 +172,9 @@ pub struct AafDocumentSummary {
     pub track_count: u32,
     pub transcribed_tracks: u32,
     pub source_path: String,
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub modified_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -189,6 +220,11 @@ pub fn frame_samples(frame: i64, rate: &AafRate) -> Result<i64, AppError> {
 }
 
 pub fn validate_manifest(manifest: &AafManifest) -> Result<(), AppError> {
+    if manifest.recording_dates.as_ref().is_some_and(|dates| dates.len() > 640_000 || dates.iter().any(|date|
+        date.source_id.is_empty() || date.source_id.len() > 256 || !super::store::valid_date(&date.date)
+            || !matches!(date.provenance.as_str(), "bwf-origination-date" | "explicit-recording-date"))) {
+        return Err(AppError::invalid("Invalid recording-date metadata"));
+    }
     if manifest.schema_version != SCHEMA_VERSION {
         return Err(AppError::invalid("This AAF document version is not supported. Update Sauce Bunny."));
     }

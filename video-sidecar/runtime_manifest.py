@@ -75,7 +75,8 @@ def main():
     expected = {"schema": 1, "minimum_macos": "14.0", "recipe": recipe(repo), "files": entries}
     audit_native(root, entries)
     for required in ("_internal/models.json", "_internal/mlx.metallib", "_internal/licenses/dependencies/dependency-inventory.json",
-                     "_internal/licenses/ffmpeg/COPYING.LGPLv2.1", "_internal/licenses/ffmpeg/ffmpeg-8.0.3.tar.xz"):
+                     "_internal/licenses/ffmpeg/COPYING.LGPLv2.1", "_internal/licenses/ffmpeg/ffmpeg-8.0.3.tar.xz",
+                     "_internal/licenses/ffmpeg/dav1d-1.5.3.tar.xz", "_internal/licenses/ffmpeg/dav1d-COPYING"):
         if required not in entries:
             raise ValueError(f"Runtime material is missing: {required}")
     if digest(root / "_internal/models.json") != digest(repo / "video-sidecar/models.json"):

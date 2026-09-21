@@ -8,6 +8,7 @@ import { pathKey } from "../lib/repath";
 import { findForSource } from "../lib/transcript-history";
 import { fmtTime, parseSrt } from "../lib/srt";
 import { formatError } from "../lib/error-format";
+import { savedPictureModel } from "../lib/picture-model";
 import "../styles/video-intelligence.css";
 
 const phases: Record<string, string> = { "loading-model": "Loading local model…", inspecting: "Checking videos…",
@@ -89,7 +90,7 @@ export function LibraryVideoSearch({ paths, scopeLabel, onOpenMoment, onSettings
     }
     if (expected !== generation.current) return;
     contextPending.current = false; setReadingContext(false);
-    const result = await run({ operation: "reason", query: question.trim() ? `Describe this moment in relation to: ${question}`.slice(0, 1000) : "Describe this moment.", segments: [hit.id], transcripts });
+    const result = await run({ operation: "reason", model_id: savedPictureModel(), query: question.trim() ? `Describe this moment in relation to: ${question}`.slice(0, 1000) : "Describe this moment.", segments: [hit.id], transcripts });
     if (result && expected === generation.current) setAnswers((old) => [...old.filter((answer) => answer.id !== hit.id), ...result.answers]);
   }
   async function forget() {

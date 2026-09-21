@@ -12,7 +12,7 @@ vi.mock("../lib/scene-analysis/evidence", () => ({ createSceneEvidence: mocks.cr
 const source = { path: "/clip.mp4", sha256: "a".repeat(64), duration_us: 1000, origin_us: 0 };
 const proxy = { path: "/proxy.mp4", source };
 const evidence = { id: "b".repeat(64), shots: [{ id: 1 }], proxy };
-const answer = { shots: [{ id: 1, text: "A visible frame" }] };
+const answer = { model_id: "qwen3.5-9b-video", shots: [{ id: 1, text: "A visible frame", picture_description: "A visible frame", transcript_summary: null }] };
 const models = { models: [{ id: "qwen3.5-9b-video", ready: true }] };
 const audio = { analysis_id: evidence.id, source, audio_track_index: 0, status: "no-audio", windows: [] };
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }

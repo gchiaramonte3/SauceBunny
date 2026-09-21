@@ -248,14 +248,14 @@ export function transcriptToAvidTxt(
 
 /** Shared Avid serialization for seconds-based media and frame-based AAF cues. */
 export function avidMarkerRowsToTxt(
-  cues: Array<{ speaker: string; timecode: string; track: string; text: string }>, color: CanonicalColor = "red",
+  cues: Array<{ speaker: string; timecode: string; track: string; text: string; color?: import("../bindings/AafMarkerColor").AafMarkerColor }>, color: CanonicalColor = "red",
 ): string {
   const lines: string[] = [];
   for (const c of cues) {
     const comment = inlineClean(c.text);
     if (!comment) continue;
     const name = inlineClean(c.speaker) || "Speaker";
-    lines.push(`${name}\t${inlineClean(c.timecode)}\t${inlineClean(c.track)}\t${color}\t${comment}`);
+    lines.push(`${name}\t${inlineClean(c.timecode)}\t${inlineClean(c.track)}\t${c.color ?? color}\t${comment}`);
   }
   return lines.join("\n") + "\n";
 }

@@ -7,7 +7,7 @@ import { multitrackAvidMarkers, multitrackExportName, multitrackPeople, multitra
 import { formatError } from "../lib/error-format";
 import { multitrackPrintDoc, multitrackSrt } from "../lib/multitrack-export";
 
-export type MultitrackExportFormat = "txt" | "csv" | "avid" | "srt" | "pdf";
+export type MultitrackExportFormat = "txt" | "csv" | "avid" | "srt" | "pdf" | "print";
 function exportNotes(document: AafDocument, format: MultitrackExportFormat): string {
   const skipped = format === "avid" || format === "srt" ? untimedTranscriptRows(document).length : 0;
   const legacy = format === "avid" && document.transcripts.some((item) => document.manifest.tracks.find((track) => track.id === item.track_id)?.physical_track_number == null);
@@ -26,17 +26,22 @@ export function useMultitrackExport(document: AafDocument) {
     finally { busy.current = false; }
   };
   const download = (format: MultitrackExportFormat, trackIds?: string[], name = "All voices") => run(async () => {
-    const scoped = multitrackScope(document, trackIds), avid = format === "avid";
-    if (format === "pdf") {
+    let scoped = multitrackScope(document, trackIds);
+    const avid = format === "avid";
+    if (format === "print") {
       await invoke("print_transcript", { html: multitrackPrintDoc(scoped, name) });
-      return "Print preview opened. Choose PDF → Save as PDF in the print dialog. Nothing is saved until you confirm.";
+      return "Print dialog opened. Confirm printing in the dialog.";
     }
     const extension = avid ? "txt" : format;
-    const text = avid ? multitrackAvidMarkers(scoped) : format === "srt" ? multitrackSrt(scoped) : exportMultitrack(scoped, format);
-    if (!text) throw new Error("No timed passages are available for this export. Download plain text to keep text needing timing review.");
-    const path = await save({ defaultPath: `${multitrackExportName(document.manifest.name)} - ${multitrackExportName(name)}${avid ? " - Avid markers" : ""}.${extension}`, filters: [{ name: avid ? "Avid markers" : format === "csv" ? "CSV spreadsheet" : format === "srt" ? "SRT captions" : "Plain text", extensions: [extension] }] });
+    const path = await save({ defaultPath: `${multitrackExportName(document.manifest.name)} - ${multitrackExportName(name)}${avid ? " - Avid markers" : ""}.${extension}`, filters: [{ name: avid ? "Avid markers" : format === "csv" ? "CSV spreadsheet" : format === "srt" ? "SRT captions" : format === "pdf" ? "PDF document" : "Plain text", extensions: [extension] }] });
     if (!path || !mounted.current) return null;
-    await invoke("write_text_to_path", { path, text, atomic: true });
+    // A track/date can finish saving while Save As is open. Export the native
+    // committed document, not a render captured before the dialog appeared.
+    scoped = multitrackScope(await invoke<AafDocument>("aaf_open", { documentId: document.id }), trackIds);
+    const text = format === "pdf" ? multitrackPrintDoc(scoped, name) : avid ? multitrackAvidMarkers(scoped) : format === "srt" ? multitrackSrt(scoped) : exportMultitrack(scoped, format);
+    if (!text) throw new Error("No timed passages are available for this export. Download plain text to keep text needing timing review.");
+    if (format === "pdf") await invoke("export_transcript_pdf", { path, html: text });
+    else await invoke("write_text_to_path", { path, text, atomic: true });
     return `Saved to ${path}${exportNotes(scoped, format)}`;
   });
   const downloadPeople = () => run(async () => {

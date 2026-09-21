@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { AafDocumentSummary } from "../bindings/AafDocumentSummary";
 import type { AafTrackTranscript } from "../bindings/AafTrackTranscript";
 import type { AafWaveform } from "../bindings/AafWaveform";
+import type { AafTrackLabel } from "../bindings/AafTrackLabel";
 import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
 import { mergeTrackTranscript } from "../lib/multitrack";
@@ -56,12 +58,46 @@ export function useMultitrackDocument(active: boolean) {
           if (pending === saves.current.get(documentId)) break;
         }
       } else next = await invoke<AafDocument>("aaf_import", { path, jobId });
+      const labelsBeforeMetadata = saves.current.get(next.id);
+      if (next.manifest.recording_dates == null && token === revision.current && mounted.current) {
+        try { next = await invoke<AafDocument>("aaf_read_recording_dates", { documentId: next.id, jobId }); }
+        catch { /* Saved text remains readable when the original media is offline. */ }
+      }
+      // A metadata inspection or unchanged-source import can overlap another
+      // label edit too. Reconcile behind that document's complete write queue.
+      if ((!documentId && saves.current.has(next.id)) || labelsBeforeMetadata !== saves.current.get(next.id)) {
+        for (;;) {
+          const pending = saves.current.get(next.id);
+          await pending;
+          if (token !== revision.current || !mounted.current) return;
+          next = await invoke<AafDocument>("aaf_open", { documentId: next.id });
+          if (pending === saves.current.get(next.id)) break;
+        }
+      }
       if (token === revision.current && mounted.current) { current.current = next; setDocument(next); setLabelStatus(""); }
     } catch (cause) { if (token === revision.current && mounted.current) setError(formatError(cause)); }
     finally { if (token === revision.current && mounted.current) { importJob.current = null; setLoading(false); } }
   }, []);
 
   const documentId = document?.id;
+  useEffect(() => {
+    let disposed = false;
+    const onSaucebunnyMultitrackChanged = async (event: { payload: string }) => {
+      if (event.payload !== documentId) return;
+      const before = current.current;
+      try {
+        await saves.current.get(event.payload);
+        const saved = await invoke<AafDocument>("aaf_open", { documentId: event.payload });
+        if (!disposed && before && current.current === before) {
+          const next = { ...saved, manifest: { ...before.manifest, recording_dates: saved.manifest.recording_dates } };
+          current.current = next; setDocument(next);
+        }
+      } catch (cause) { if (!disposed) setError(formatError(cause)); }
+    };
+    const subscription = listen<string>("saucebunny:multitrack-changed", onSaucebunnyMultitrackChanged);
+    void subscription.catch(cause => { if (!disposed) setError(formatError(cause)); });
+    return () => { disposed = true; void subscription.then(unlisten => unlisten()).catch(() => {}); };
+  }, [documentId]);
   const tracks = document?.manifest.tracks;
   const waveformCache = useRef<Record<string, number[][]>>({});
   useEffect(() => { waveformCache.current = {}; setWaveforms({}); setWaveformErrors({}); }, [documentId]);
@@ -84,10 +120,14 @@ export function useMultitrackDocument(active: boolean) {
     return () => { cancelled = true; if (jobId) void invoke("cancel_job", { jobId }).catch(() => {}); };
   }, [active, loading, documentId, tracks]);
 
-  const rename = useCallback((trackId: string, ownerName: string, castMemberId: string | null = null, color: string | null = null) => {
+  const rename = useCallback((trackId: string, ownerName: string, castMemberId?: string | null, color?: string | null, preferences?: Pick<AafTrackLabel, "gender" | "marker_color">) => {
     const before = current.current;
     if (!before) return;
-    const labels = [...before.labels.filter((label) => label.track_id !== trackId), { track_id: trackId, owner_name: ownerName.trim().normalize("NFC"), cast_member_id: castMemberId, color }];
+    const existing = before.labels.find(label => label.track_id === trackId);
+    const labels = [...before.labels.filter((label) => label.track_id !== trackId), { ...existing,
+      ...(preferences?.gender !== undefined ? { gender: preferences.gender } : {}),
+      ...(preferences?.marker_color !== undefined ? { marker_color: preferences.marker_color } : {}),
+      track_id: trackId, owner_name: ownerName.trim().normalize("NFC"), cast_member_id: castMemberId === undefined ? existing?.cast_member_id ?? null : castMemberId, color: color === undefined ? existing?.color ?? null : color }];
     const next = { ...before, labels }; current.current = next; setDocument(next); setLabelStatus("Saving labels…");
     // Serialize writes so an older blur cannot overwrite a newer mic label.
     const save = (saves.current.get(before.id) ?? Promise.resolve()).then(async () => {

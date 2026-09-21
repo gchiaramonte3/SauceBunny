@@ -15,7 +15,7 @@ if not backup.exists() and destination.exists():
     shutil.move(str(destination), backup)
 destination.mkdir(exist_ok=True)
 libraries = sorted(path for path in (installed / "lib").glob("*.dylib") if not path.is_symlink())
-assert len(libraries) == 7, f"Unexpected FFmpeg library set: {libraries}"
+assert len(libraries) == 8 and any(p.name.startswith("libdav1d.") for p in libraries), f"Unexpected decoder library set: {libraries}"
 for library in libraries:
     shutil.copy2(library, destination / library.name)
 
@@ -29,7 +29,7 @@ for binary in [*destination.glob("*.dylib"), *package.rglob("*.so")]:
         args += ["-id", "@loader_path/" + binary.name]
     for dependency in dependencies(binary):
         name = Path(dependency).name
-        if name.startswith(("libav", "libsw")):
+        if name.startswith(("libav", "libsw", "libdav1d")):
             # Use the precise library build that compiled these extensions.
             abi = ".".join(name.split(".")[:2])
             matches = [library for library in libraries if library.name.startswith(abi + ".")]

@@ -4,6 +4,7 @@ import type { VideoShotAnalysis } from "../../bindings/VideoShotAnalysis";
 import type { VideoAudioAnalysis } from "../../bindings/VideoAudioAnalysis";
 import type { VideoMusicAnalysis } from "../../bindings/VideoMusicAnalysis";
 import type { Cue } from "../srt";
+import type { CutMarker } from "../cut-markers";
 import type { SceneAnalysisResult } from "./mediabunny-scene-analysis";
 
 type Immutable<T> = T extends readonly (infer U)[] ? readonly Immutable<U>[]
@@ -17,6 +18,12 @@ export type SceneEvidence = Immutable<{
   shots: DetectedShot[];
 }>;
 export type AudioEvidence = Immutable<VideoAudioAnalysis | VideoMusicAnalysis>;
+
+/** The first shot is the opening, not a cut. Later starts are verified,
+ * source-relative microseconds; never add container origin or infer FPS. */
+export function sceneCutMarkers(evidence: SceneEvidence): CutMarker[] {
+  return evidence.shots.slice(1).map(shot => ({ time: shot.start_us / 1_000_000 }));
+}
 
 /** The native collector validates PCM coverage/scores. This boundary binds its
  * completed response to this exact visual analysis before showing any sound. */
@@ -138,6 +145,7 @@ export function shotBatches(evidence: SceneEvidence): VideoShot[][] {
 
 export function validateShotAnswers(evidence: SceneEvidence, requested: VideoShot[], answer: VideoShotAnalysis) {
   if (answer.analysis_id !== evidence.id || answer.source.sha256 !== evidence.proxy.source.sha256
+    || answer.source.path !== evidence.proxy.source.path || answer.source.origin_us !== evidence.proxy.source.origin_us
     || answer.source.duration_us !== evidence.proxy.source.duration_us || answer.audio_analyzed
     || answer.shots.length !== requested.length) throw new Error("Video analysis returned unrelated source evidence");
   answer.shots.forEach((shot, index) => {
@@ -162,10 +170,22 @@ export async function saveSceneEvidence(evidence: SceneEvidence): Promise<void> 
   try {
     await new Promise<void>((resolve, reject) => {
       const transaction = db.transaction("detections", "readwrite");
-      transaction.objectStore("detections").add(evidence);
+      const store = transaction.objectStore("detections");
+      // The lookup and add share one serialized transaction. A retry must not
+      // overwrite machine evidence, nor fail solely because it already exists.
+      let conflict: Error | null = null;
+      const existing = store.get(evidence.id);
+      existing.onsuccess = () => {
+        if (existing.result === undefined) store.add(evidence);
+        else if (JSON.stringify(existing.result) !== JSON.stringify(evidence)) {
+          conflict = new Error("Conflicting shot evidence already exists; the saved result was preserved");
+          transaction.abort();
+        }
+      };
       transaction.oncomplete = () => resolve();
-      transaction.onabort = () => reject(transaction.error ?? new Error("Could not save shot evidence"));
-      transaction.onerror = () => reject(transaction.error);
+      // onerror bubbles before transaction.error is populated. Wait for abort
+      // so callers receive the actual failure, never a rejection with null.
+      transaction.onabort = () => reject(conflict ?? transaction.error ?? new Error("Could not save shot evidence"));
     });
   } finally { db.close(); }
 }

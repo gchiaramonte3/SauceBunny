@@ -7,6 +7,7 @@ import { PeerStageVideo } from "./components/PeerStageVideo"; import { MediaSpik
 import { SourceShareMenu, type ShareOption } from "./components/SourceShareMenu"; import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "./lib/import-extensions"; import {   findForSource, touchEntry, renameEntryPath as renameTranscriptEntryPath, notifyTranscriptsChanged, getHistory as getTranscriptHistory, type TranscriptHistoryEntry, } from "./lib/transcript-history"; import { prepareCues, renameSpeakerOverridesPath } from "./components/transcript/helpers"; import {   deriveOnboardingSteps, onboardingComplete, loadOnboardingDismissed, saveOnboardingDismissed, type OnboardingStepId, } from "./lib/onboarding"; import type { Command } from "./lib/commands"; import { buildCommands } from "./lib/commands"; import { markRangeFromSeconds as markRange } from "./lib/mark-range"; import { useBatchTranscribe } from "./hooks/use-batch-transcribe"; import { TranscriptSearchModal } from "./components/TranscriptSearchModal"; import { batchSummary } from "./lib/batch-queue"; import {   loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides, } from "./lib/keybindings"; import { migrateLegacyStorageKeys } from "./lib/migrate-storage"; import { sanitizePlaybackRate, stepPlaybackRate } from "./lib/playback-rate"; import { parseSrt } from "./lib/srt"; import { speakerLanes } from "./lib/speaker-stats"; import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers"; import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity"; import { MediaInfoModal } from "./components/MediaInfoModal"; import { loadReview, saveReview, ensureVersion, setActiveVersion, removeVersion, unlinkFingerprint, canUnlinkVersion, carriedComments, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, receivedReviewKey,  AUTHOR_KEY,
 } from "./lib/review";
 import { loadChapters, adoptSourceChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
+import { loadCutMarkers, CUT_MARKERS_CHANGED_EVENT, type CutMarker } from "./lib/cut-markers";
 import { appUndo } from "./lib/undo";
 import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage";
 import { useClipExportListeners } from "./hooks/use-clip-export-listeners";
@@ -690,7 +691,7 @@ export default function App() {
     void getCurrentWindow().show().then(() => getCurrentWindow().setFocus()).catch(() => {});
   });
   const [sessionsRequestTick,setSessionsRequestTick] = useState(0);
-  const [multitrackOpenRequest, setMultitrackOpenRequest] = useState<{ id: string; tick: number } | null>(null);
+  const [multitrackOpenRequest, setMultitrackOpenRequest] = useState<{ id: string; tick: number; frame?: number; trackId?: string } | null>(null);
   const previewStatus = ndiInput.previewState.phase === "error" ? "Preview needs attention · Not shared with room"
     : ndiInput.snapshot.candidate?.decodedReady && ndiInput.snapshot.candidate.encodedReady ? "Preview ready · Not shared with room" : "Preview connecting · Not shared with room";
   const ndiMonitorRef = useRef<ReviewProgramSurfacesHandle>(null);
@@ -4511,6 +4512,19 @@ export default function App() {
     return () => window.removeEventListener(CHAPTERS_CHANGED_EVENT, onChanged);
   }, [reviewSourceKey]);
 
+  const [cutMarkers, setCutMarkers] = useState<CutMarker[]>([]);
+  useEffect(() => {
+    if (!reviewSourceKey) { setCutMarkers([]); return; }
+    const reload = () => setCutMarkers(loadCutMarkers(reviewSourceKey));
+    reload();
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ sourceKey?: string }>).detail;
+      if (!detail || detail.sourceKey === reviewSourceKey) reload();
+    };
+    window.addEventListener(CUT_MARKERS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(CUT_MARKERS_CHANGED_EVENT, onChanged);
+  }, [reviewSourceKey]);
+
   const aiVideoPath = privateInspectionVisible || ndiProgram || ndiRoomSource || screenProgramActive
     ? null : sourceKind === "file" ? localFilePath : webPlayback.cachePath;
   const { handlePopOut: handlePopOutPanel } = usePanelBus({
@@ -4563,6 +4577,9 @@ export default function App() {
       // same-window change event so the chapter-markers effect re-reads.
       onChaptersChanged: () => {
         try { window.dispatchEvent(new CustomEvent(CHAPTERS_CHANGED_EVENT)); } catch { /* non-DOM */ }
+      },
+      onCutMarkersChanged: () => {
+        window.dispatchEvent(new CustomEvent(CUT_MARKERS_CHANGED_EVENT));
       },
     },
   });
@@ -4760,6 +4777,7 @@ export default function App() {
               self-hides via hasSource=false since the reader can't regenerate. */}
           <div ref={readerViewRef} tabIndex={-1} className="cp-view cp-view-reader" hidden={activeView !== "reader"}>
             <TranscriptReader
+              onOpenMultitrack={(id, frame, trackId) => { setMultitrackOpenRequest((previous) => ({ id, frame, trackId, tick: (previous?.tick ?? 0) + 1 })); setActiveView("multitrack"); }}
               onImportTranscript={() => { void handleImportTranscript(); }}
               onGoToClip={handleSwitchToClip}
               transcriptLibraryPath={defaults.transcriptLibrary}
@@ -5537,6 +5555,8 @@ export default function App() {
                     }}
                     commentMarkers={reviewMarkers}
                     chapterMarkers={chapterMarkers}
+                    cutMarkers={cutMarkers}
+                    onCutSeek={seconds => { void reviewSession.jumpToComment(seconds); }}
                     reviewRangeDraft={reviewRangeDraft}
                     filmstripPath={sourceKind === "file" ? (playbackPath ?? localFilePath) : null}
                     waveformOn={waveformVisible}

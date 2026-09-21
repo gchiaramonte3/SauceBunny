@@ -54,6 +54,20 @@ function mount(over: Partial<Parameters<typeof Timeline>[0]> = {}) {
   return { onSeek, playhead: screen.getByRole("slider", { name: "Playhead" }) };
 }
 
+it("keeps cut-marker source seconds precise and out of the scrub/chapters path", () => {
+  const onCutSeek = vi.fn(), onScrubStart = vi.fn();
+  const { onSeek } = mount({ fps: 24000 / 1001, cutMarkers: [{ time: 1.500002 }],
+    chapterMarkers: [{ time: 1.500002, title: "Creator chapter" }], onCutSeek, onScrubStart });
+  const cut = screen.getByRole("button", { name: "Cut at 1.500 seconds" });
+  fireEvent.mouseDown(cut);
+  fireEvent.click(cut);
+  expect(onCutSeek).toHaveBeenCalledWith(1.500002);
+  expect(onSeek).not.toHaveBeenCalled();
+  expect(onScrubStart).not.toHaveBeenCalled();
+  expect(document.querySelectorAll(".cp-track-chapter")).toHaveLength(1);
+  expect(screen.getByText("Creator chapter")).toBeTruthy();
+});
+
 it("reports the rendered timeline footprint and ignores hidden zero-size observations", () => {
   let measure!: () => void;
   vi.stubGlobal("ResizeObserver", class {

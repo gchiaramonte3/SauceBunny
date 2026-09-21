@@ -64,7 +64,7 @@ def verify_proxy(path, expected):
     with contextlib.closing(Video(path)) as video:
         if video.stream.codec_context.name != "h264" or video.origin != 0:
             raise ValueError("The analysis proxy is not a normalized H.264 video")
-        for frame in video.container.decode(video.stream):
+        for frame in video.frames("verify analysis proxy"):
             if frame.pts is None:
                 raise ValueError("An analysis frame has no presentation timestamp")
             observed.add(round(frame.pts * frame.time_base * 1_000_000))
@@ -80,8 +80,9 @@ def encode_proxy(source, path, on_progress):
         raise ValueError("This build needs the updated local H.264 analysis runtime")
     timing = TimingEvidence()
     with contextlib.closing(Video(Path(source["path"]))) as video:
+        video.preflight()
         metadata = source_metadata(source, video)
-        frames = video.container.decode(video.stream)
+        frames = video.frames("prepare analysis proxy")
         first = next(frames, None)
         if first is None:
             raise ValueError("No presentation frames were decoded")

@@ -1,7 +1,7 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useDismiss } from "../hooks/use-dismiss";
-import { IconVolume, IconVolumeMuted } from "./Icons";
+import { IconRefresh, IconVolume, IconVolumeMuted } from "./Icons";
 import { formatTrackGain, parseTrackGain, trackDbToGain, trackGainToDb, TRACK_GAIN_MAX_DB, TRACK_GAIN_OFF } from "../lib/multitrack-gain";
 
 const ticks = [36, 12, 0, -24, -48, TRACK_GAIN_OFF];
@@ -54,17 +54,19 @@ export function MultitrackLevel({ owner, value, onChange }: { owner: string; val
       <div className="cp-multitrack-fader">
         <input ref={slider} className="cp-multitrack-gain-slider" aria-label={`${owner} gain`} aria-valuetext={label} aria-orientation="vertical" type="range"
           min={TRACK_GAIN_OFF} max={TRACK_GAIN_MAX_DB} step={1} value={db} onKeyDown={faderKey} onChange={(event) => { writeDraft(null); onChange(trackDbToGain(Number(event.target.value))); }} />
-        <div className="cp-multitrack-gain-ticks" aria-hidden="true">{ticks.map((tick) => <span key={tick} className={tick === 0 ? "cp-multitrack-gain-unity" : undefined}
-          style={{ top: `${(TRACK_GAIN_MAX_DB - tick) / (TRACK_GAIN_MAX_DB - TRACK_GAIN_OFF) * 100}%` }}>{tick === TRACK_GAIN_OFF ? "−∞" : `${tick > 0 ? "+" : ""}${tick}`}</span>)}</div>
+        <div className="cp-multitrack-gain-ticks">{ticks.map((tick) => <span key={tick} className={tick === 0 ? "cp-multitrack-gain-unity" : undefined}
+          style={{ top: `${(TRACK_GAIN_MAX_DB - tick) / (TRACK_GAIN_MAX_DB - TRACK_GAIN_OFF) * 100}%` }}>
+          <span aria-hidden="true">{tick === TRACK_GAIN_OFF ? "−∞" : `${tick > 0 ? "+" : ""}${tick}`}</span>
+          {tick === 0 && <button type="button" className="cp-icon-btn cp-multitrack-gain-reset" aria-label="Reset to 0 dB" title="Reset to 0 dB"
+            onClick={() => { writeDraft(null); onChange(1); }}><IconRefresh size={13} /></button>}
+        </span>)}</div>
       </div>
-      <input className={`cp-input cp-multitrack-gain-value${db > 12 ? " is-boosted" : ""}`} aria-label={`${owner} gain in decibels`} aria-describedby={`${id}-hint`}
+      <input className={`cp-input cp-multitrack-gain-value${db > 12 ? " is-boosted" : ""}`} aria-label={`${owner} gain in decibels`}
         type="text" inputMode="decimal" autoComplete="off" spellCheck={false} value={draft ?? label}
         onMouseDown={(event) => { event.preventDefault(); event.currentTarget.focus(); event.currentTarget.select(); }}
         onFocus={(event) => event.currentTarget.select()} onClick={(event) => event.currentTarget.select()}
         onChange={(event) => { if (/^\s*[+-]?\d*(?:\.\d*)?\s*(?:d(?:b)?)?\s*$/i.test(event.target.value)) writeDraft(event.target.value); }}
         onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); event.currentTarget.blur(); slider.current?.focus(); } }} />
-      <div id={`${id}-hint`} className="cp-multitrack-gain-hint">Above +12 dB can clip.</div>
-      <button className="btn btn-ghost" onClick={() => { writeDraft(null); onChange(1); }}>Reset to 0 dB</button>
     </div>, document.body)}
   </>;
 }

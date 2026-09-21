@@ -56,7 +56,8 @@ type ActionKind =
   | "transcriptEdited"
   | "openAiSettings"
   | "openVideoSettings"
-  | "chaptersChanged";
+  | "chaptersChanged"
+  | "cutMarkersChanged";
 
 function sendAction(kind: ActionKind, payload?: unknown) {
   // Fire-and-forget: main subscribes once at startup and we don't need
@@ -226,6 +227,7 @@ export default function PanelApp() {
         chapterSourceKey={state.chapterSourceKey}
         chapterDurationSec={state.durationSec}
         onChaptersChanged={() => sendAction("chaptersChanged")}
+        onCutMarkersChanged={() => sendAction("cutMarkersChanged")}
         /* `onPopOut` intentionally undefined — the pop-out button
            shouldn't appear inside the popped-out window. */
       />

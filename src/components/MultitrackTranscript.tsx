@@ -10,14 +10,14 @@ import { useAiTranscriptSearch } from "../hooks/use-ai-transcript-search";
 
 const passageKey = (kind: string, trackId: string, id: string) => JSON.stringify([kind, trackId, id]);
 
-export function MultitrackTranscript({ document, frame, solo, onSeek, report, error, loading, active = true, aiModelId }: {
+export function MultitrackTranscript({ document, frame, solo, onSeek, report, error, loading, active = true, aiModelId, initialAll = false }: {
   document: AafDocument; frame: number; solo: Set<string>; onSeek: (frame: number, trackId: string) => void;
   report?: MultitrackRunReport | null; error?: string | null; loading?: boolean;
-  active?: boolean; aiModelId?: string | null;
+  active?: boolean; aiModelId?: string | null; initialAll?: boolean;
 }) {
   const [limit, setLimit] = useState(200);
   const people = useMemo(() => multitrackPeople(document), [document]);
-  const [choice, setChoice] = useState("");
+  const [choice, setChoice] = useState(initialAll ? "all" : "");
   const firstWithText = people.find((person) => document.transcripts.some((track) => person.trackIds.includes(track.track_id) && (track.cues.length || track.timing_issues?.length)));
   const selected = choice === "all" ? "all" : people.find((person) => person.id === choice)?.id ?? firstWithText?.id ?? people[0]?.id ?? "all";
   const person = people.find((item) => item.id === selected), panelId = useId();

@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const packagedFrontend = process.env.SAUCE_PACKAGED_FRONTEND === "1";
+
 /**
  * UI smoke harness (CLAUDE.md refactor item 5). Serves the frontend with the
  * dev-mode Vite server and runs the e2e/ specs in Chromium with the Tauri IPC
@@ -26,9 +28,13 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "SAUCE_BROWSER_TEST=1 npx vite --port 51730",
+    // Opt-in checks exercise the exact dist/ about to ship; IPC is still
+    // mocked, so this is not a native WKWebView certification.
+    command: packagedFrontend
+      ? "npx vite preview --port 51730 --strictPort"
+      : "SAUCE_BROWSER_TEST=1 npx vite --port 51730",
     url: "http://localhost:51730",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: !packagedFrontend && !process.env.CI,
     timeout: 60_000,
   },
 });

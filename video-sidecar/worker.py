@@ -1,6 +1,12 @@
 """One owned request per process; stdout is a bounded JSON-lines protocol."""
 from __future__ import annotations
 
+# PyInstaller reuses this executable for resource-tracker/spawn helpers. Divert
+# those invocations before importing model infrastructure or parsing --root.
+if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
+
 import argparse
 import contextlib
 import fcntl
@@ -13,7 +19,7 @@ from pathlib import Path
 from artifacts import MODELS, delete, download, model_spec, ready, require_model
 from index_store import IndexStore, source_identity, source_unchanged
 from media import Video, windows
-from shot_analysis import analyze_shots, inspect_source
+from shot_analysis import analyze_shots, inspect_source, picture_model
 from audio_ast import MODEL_ID as AUDIO_MODEL
 
 VERSION = "1"
@@ -131,7 +137,8 @@ def reason(store, models, request, memory):
     transcripts = request.get("transcripts", {})
     if not isinstance(transcripts, dict) or len(json.dumps(transcripts)) > 64000:
         raise ValueError("Transcript context is too large")
-    engine = load_model(models, REASONING, memory)
+    selected = picture_model(request)
+    engine = load_model(models, selected, memory)
     answers = []
     try:
         for position, (segment, source) in enumerate(evidence):
@@ -173,7 +180,7 @@ def dispatch(root: Path, request: dict):
         return prepare_proxy(root, local_path(request.get("path")), progress)
     if operation == "analyze-shots":
         return analyze_shots(local_path(request.get("path")), request,
-                             lambda: load_model(models, REASONING, memory), progress)
+                             lambda: load_model(models, picture_model(request), memory), progress)
     if operation == "analyze-music":
         # Require the explicit download even for silence/no-audio. Readiness is
         # a receipt check only; the classifier itself stays lazy until needed.

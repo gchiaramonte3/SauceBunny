@@ -9,6 +9,7 @@ import { getPlayheadFrames, usePlayheadFrames, setScrubbing } from "../lib/playh
 import { getGhosts, subscribeGhosts } from "../lib/ghost-store";
 import { loadReviewer, reviewerColorFor } from "../lib/review";
 import { isRealSpan } from "../lib/review-range";
+import type { CutMarker } from "../lib/cut-markers";
 
 /** Scrub-track height (px) when a filmstrip is shown — matches
  *  `.cp-track.has-filmstrip` in transport.css; also sizes the decoded thumbs. */
@@ -190,6 +191,10 @@ type Props = {
    *  the track, a title chip on hover, click → seek. Deliberately unlike the
    *  reviewer-tinted comment dots (which sit mid-track). */
   chapterMarkers?: { time: number; title: string }[];
+  /** Detected shot changes: bottom-edge ticks, never chapters. */
+  cutMarkers?: CutMarker[];
+  /** Source seconds retain the detector's precision at fractional frame rates. */
+  onCutSeek?: (seconds: number) => void;
   onSeek: (f: number) => void;
   onScrubStart?: () => void;
   onScrub?: (f: number) => void;
@@ -225,7 +230,7 @@ function TimelineGhosts({ fps, pct }: { fps: number; pct: (f: number) => number 
 export function Timeline({
   status, durationFrames, inFrames, outFrames, fps,
   queuedRanges, onRangeClick, commentMarkers, reviewRangeDraft, filmstripPath, waveformOn, speakerLanes,
-  chapterMarkers, onSeek, onScrubStart, onScrub, onScrubEnd, onHeightChange,
+  chapterMarkers, cutMarkers, onCutSeek, onSeek, onScrubStart, onScrub, onScrubEnd, onHeightChange,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -548,6 +553,18 @@ export function Timeline({
                 </div>
               );
             })}
+            {cutMarkers?.map((cut) => (
+              <button key={`cut-${cut.time}`} type="button" className="cp-track-cut"
+                style={{ left: `${pct(cut.time * Math.max(1, Math.round(fps)))}%` }}
+                aria-label={`Cut at ${cut.time.toFixed(3)} seconds`}
+                title={`Cut at ${cut.time.toFixed(3)}s`}
+                onMouseDown={e => e.stopPropagation()}
+                onClick={e => {
+                  e.stopPropagation();
+                  if (onCutSeek) onCutSeek(cut.time);
+                  else onSeek(Math.floor(cut.time * Math.max(1, Math.round(fps))));
+                }} />
+            ))}
             {/* Review comment RANGES — a thin reviewer-tinted bar with bracket
                 caps in the comment lane. Deliberately unlike the orange clip
                 selection: it sits low on the track and carries the note's

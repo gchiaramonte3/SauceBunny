@@ -2,6 +2,7 @@ import type { AafDocument } from "../bindings/AafDocument";
 import { audioTrackLabel, sequenceFps, sequenceTimecode, transcriptRows, untimedTranscriptRows } from "./multitrack";
 import { secondsToCueTc, type Turn } from "./srt";
 import { buildTranscriptPrintDoc } from "../components/transcript/helpers";
+import { transcriptMetadata } from "./multitrack-metadata";
 
 /** SRT has one caption lane. Split at speech boundaries and combine concurrent
  * voices, rather than emitting overlapping cues that players may hide. The
@@ -36,9 +37,10 @@ export function multitrackPrintDoc(document: AafDocument, name: string): string 
     ...transcriptRows(document).map((cue) => ({ ...cue, clock: cue.startFrame })),
     ...untimedTranscriptRows(document).map((cue) => ({ ...cue, clock: -1, text: `${cue.text}\nTiming needs review: ${cue.reason}` })),
   ];
-  const turns: Turn[] = entries.map((cue, index) => ({ speaker: `${cue.owner} (${audioTrackLabel(document, cue.trackId)})`, start: cue.clock, end: cue.clock,
+  const turns: Turn[] = entries.map((cue, index) => ({ speaker: `${cue.owner} (${audioTrackLabel(document, cue.trackId)})`, start: cue.clock, end: "endFrame" in cue ? cue.endFrame : -1,
     cues: [{ index, start: cue.clock, end: cue.clock, speaker: null, text: cue.text }] }));
   return buildTranscriptPrintDoc(turns, `${document.manifest.name} - ${name}`,
     (_index, speaker) => speaker ?? "", (frame) => frame < 0 ? "Timing needs review" : sequenceTimecode(document.manifest, frame),
-    "Mic owners are labels, not verified speakers. ASR timing is unverified.");
+    `${transcriptMetadata(document)}\nMic owners are labels, not verified speakers. ASR timing is unverified.`,
+    (start, end) => start < 0 ? "Untimed text (timing needs review)" : `${sequenceTimecode(document.manifest, start)} - ${sequenceTimecode(document.manifest, end)}`);
 }

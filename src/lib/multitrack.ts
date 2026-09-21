@@ -77,6 +77,8 @@ function csvCell(value: string | number): string {
   return `"${safe.replaceAll('"', '""')}"`;
 }
 
+import { transcriptMetadata } from "./multitrack-metadata";
+
 export function exportMultitrack(document: AafDocument, format: "csv" | "txt"): string {
   const rows = transcriptRows(document);
   const untimed = untimedTranscriptRows(document);
@@ -85,7 +87,7 @@ export function exportMultitrack(document: AafDocument, format: "csv" | "txt"): 
     ...rows.map((cue) => [document.manifest.name, audioTrackLabel(document, cue.trackId), cue.owner, sequenceTimecode(document.manifest, cue.startFrame), sequenceTimecode(document.manifest, cue.endFrame), cue.text, document.source_path.split(/[\\/]/).pop() ?? "", cue.startSeconds, cue.endSeconds, cue.engine, cue.model, "Mic owner label, not verified speaker", "ASR timing unverified"]),
     ...untimed.map((cue) => [document.manifest.name, audioTrackLabel(document, cue.trackId), cue.owner, "", "", cue.text, document.source_path.split(/[\\/]/).pop() ?? "", "", "", cue.engine, cue.model, "Mic owner label, not verified speaker", `Timing needs review: ${cue.reason} Reported: ${cue.reported_timing}`]),
   ].map((row) => row.map(csvCell).join(",")).join("\r\n");
-  return [document.manifest.name, "Mic owners are labels, not verified speakers. ASR timing is unverified.", "", ...rows.map((cue) =>
-    `${sequenceTimecode(document.manifest, cue.startFrame)}  ${cue.owner} (${audioTrackLabel(document, cue.trackId)})\n${cue.text}\n`), ...untimed.map((cue) =>
+  return [transcriptMetadata(document), "Mic owners are labels, not verified speakers. ASR timing is unverified.", "", ...rows.map((cue) =>
+    `${sequenceTimecode(document.manifest, cue.startFrame)} - ${sequenceTimecode(document.manifest, cue.endFrame)}  ${cue.owner} (${audioTrackLabel(document, cue.trackId)})\n${cue.text}\n`), ...(untimed.length ? ["Untimed text (timing needs review)", ""] : []), ...untimed.map((cue) =>
     `Timing needs review  ${cue.owner} (${audioTrackLabel(document, cue.trackId)})\n${cue.text}\n${cue.reason} Reported: ${cue.reported_timing}\n`)].join("\n");
 }

@@ -6,7 +6,7 @@ import { VideoIntelligenceSettings } from "./VideoIntelligenceSettings";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen, emit: vi.fn(async () => {}) }));
 const model = { id: "qwen3-vl-embedding-2b", name: "Qwen3-VL Embedding 2B", role: "embedding", bytes: 1800000000, ready: false };
 beforeEach(() => {
   vi.resetAllMocks(); mocks.listen.mockResolvedValue(() => {});

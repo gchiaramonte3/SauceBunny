@@ -17,6 +17,12 @@ MAX_DURATION_US = 24 * 3600 * 1_000_000
 SAMPLING_VERSION = "shot-spread-8frames-384-display-v2"
 REASONING = "qwen3.5-9b-video"
 
+def picture_model(request):
+    selected = request.get("model_id", REASONING)
+    if selected not in (REASONING, "qwen3.5-4b-video"):
+        raise ValueError("Choose an installed compatible picture model")
+    return selected
+
 
 def valid_hash(value):
     return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
@@ -62,6 +68,7 @@ def inspect_source(path: Path):
 
 
 def analyze_shots(path: Path, request, engine_factory, on_progress):
+    selected = picture_model(request)
     shots = validate_shots(request)
     # Full content identity ties these ranges to the source that was inspected,
     # not just a pathname that could now point at a different edit.
@@ -83,18 +90,21 @@ def analyze_shots(path: Path, request, engine_factory, on_progress):
                 if engine is None:
                     engine = engine_factory()
                 text = engine.reason(request["query"], frames,
-                                     [timestamp / 1_000_000 for timestamp in timestamps], shot["transcript"],
+                                     [timestamp / 1_000_000 for timestamp in timestamps], "",
                                      visual_only=True)
                 if not isinstance(text, str) or not text.strip() or len(text.encode("utf8")) > 16000:
                     raise ValueError("The video model returned an empty or oversized shot description")
                 if not source_unchanged(source):
                     raise ValueError("The video changed during shot analysis")
-                answers.append({**shot, "frame_pts_us": timestamps, "text": text})
+                # Picture generation receives no dialogue. Supplied dialogue is
+                # retained verbatim in its own field; no invented speech summary.
+                answers.append({**shot, "frame_pts_us": timestamps, "text": text,
+                                "picture_description": text, "transcript_summary": None})
                 # Do not retain images from completed shots while decoding the next.
                 del frames
                 on_progress("analyzing-shots", position + 1, len(shots))
         return {"shot_analysis": {"analysis_id": request["analysis_id"], "source": metadata,
-                "model_id": REASONING, "model_revision": model_spec(REASONING)["revision"],
+                "model_id": selected, "model_revision": model_spec(selected)["revision"],
                 "sampling_version": SAMPLING_VERSION, "audio_analyzed": False, "shots": answers}}
     finally:
         if engine is not None:

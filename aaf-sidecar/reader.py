@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date
 from fractions import Fraction
 import hashlib
 import json
@@ -97,6 +98,8 @@ class PCM:
     sample_rate: int
     sample_width: int
     time_reference: int | None
+    recording_date: str | None = None
+    recording_date_provenance: str = 'bwf-origination-date'
 
 
 def pcm_layout(essence, descriptor=None):
@@ -118,7 +121,7 @@ def pcm_layout(essence, descriptor=None):
     declared = struct.unpack('<I', head[4:8])[0]+8
     if declared != size:
         fail('An embedded WAVE stream has an inconsistent RIFF length.', 'invalid_media')
-    cursor, fmt, data, time_reference = 12, None, None, None
+    cursor, fmt, data, time_reference, recording_date = 12, None, None, None, None
     for _ in range(256):
         if cursor == size:
             break
@@ -133,6 +136,15 @@ def pcm_layout(essence, descriptor=None):
                 fail('The embedded WAVE format is invalid.', 'invalid_media')
             fmt = struct.unpack('<HHIIHH', stream.read(16))
         elif tag == b'bext' and count >= 346:
+            stream.seek(cursor+8+320)
+            raw_date = stream.read(10).decode('ascii', errors='replace')
+            try:
+                # BWF permits alternate separators; reject malformed or zero dates.
+                normalized = raw_date[:4]+'-'+raw_date[5:7]+'-'+raw_date[8:10]
+                if raw_date[4] in '-_: .' and raw_date[7] in '-_: .':
+                    recording_date = date.fromisoformat(normalized).isoformat()
+            except ValueError:
+                pass
             stream.seek(cursor+8+338)
             time_reference = struct.unpack('<Q', stream.read(8))[0]
         elif tag == b'data':
@@ -152,7 +164,7 @@ def pcm_layout(essence, descriptor=None):
         fail('Use mono PCM WAV audio at 44.1, 48 or 96 kHz and 16, 24 or 32 bits.')
     if align != bits//8 or byte_rate != hz*align or data[1] % align:
         fail('The embedded PCM sample layout is invalid.', 'invalid_media')
-    return PCM(str(essence.mob_id), data[0], data[1]//align, hz, align, time_reference)
+    return PCM(str(essence.mob_id), data[0], data[1]//align, hz, align, time_reference, recording_date)
 
 
 class Timeline:
@@ -205,6 +217,19 @@ class Timeline:
             if key not in self.essence:
                 fail('Linked or offline media is not read. Re-export the AAF with embedded WAV audio.')
             self.sources[key] = pcm_layout(self.essence[key],value(mob,'EssenceDescription'))
+            if not self.sources[key].recording_date:
+                # Only explicit recording fields. AAF CreationTime describes
+                # the edit/export and Finder timestamps describe the copy.
+                for tag in ('RecordingDate', 'ShootDate', 'DateRecorded'):
+                    tagged_date = mob.comments.get(tag)
+                    raw_date = value(tagged_date, 'Value') if tagged_date is not None else None
+                    if isinstance(raw_date, str):
+                        try:
+                            self.sources[key].recording_date = date.fromisoformat(raw_date.strip()).isoformat()
+                            self.sources[key].recording_date_provenance = 'explicit-recording-date'
+                            break
+                        except ValueError:
+                            pass
         return self.sources[key]
 
     def expand(self, seg, rate, start, duration, trail, warnings_list, depth=0):
@@ -310,7 +335,9 @@ class Timeline:
         return {'schema_version':SCHEMA_VERSION,'name':clean_name(self.mob.name,'AAF sequence'),
                 'sequence_id':str(self.mob.mob_id),'edit_rate':{'numerator':self.rate.numerator,'denominator':self.rate.denominator},
                 'start_frame':self.start,'duration_frames':self.duration,'timecode_fps':self.fps,'drop_frame':self.drop,
-                'source_fingerprint':source_fingerprint,'tracks':self.tracks,'warnings':self.warnings}
+                'source_fingerprint':source_fingerprint,'tracks':self.tracks,'warnings':self.warnings,
+                'recording_dates':[{'source_id':pcm.source_id,'date':pcm.recording_date,'provenance':pcm.recording_date_provenance}
+                                   for pcm in self.sources.values() if pcm.recording_date]}
 
     def track(self, track_id):
         for track in self.tracks:
