@@ -38,3 +38,12 @@ it("file choice is scoped to the source, and native mismatches stay actionable",
   await waitFor(()=>expect(screen.getByRole("alert").textContent).toContain("does not match"));
   expect(mocks.invoke).toHaveBeenCalledWith("aaf_resolve_media",expect.objectContaining({sourceId:"source-0",path:"/chosen/roll.wav"}));
 });
+it("keeps source-specific relink diagnostics inside its existing disclosure",async()=>{
+  const doc=fixture(); doc.manifest.graph!.sources[0].resolution_note="2 matching files found. Use Locate file to choose the intended copy.";
+  render(<MultitrackMedia document={doc}/>);
+  const note=screen.getByText(/2 matching files found/);
+  expect(note.closest("details")?.open).toBe(false);
+  fireEvent.click(note.closest("details")!.querySelector("summary")!);
+  expect(note.closest("details")?.open).toBe(true);
+  expect(mocks.invoke).not.toHaveBeenCalled();
+});

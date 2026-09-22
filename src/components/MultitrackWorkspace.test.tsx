@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { multitrackFixture, multitrackGroupFixture } from "../test/multitrack-fixture";
+import { multitrackFixture, multitrackGroupFixture, multitrackTranscript } from "../test/multitrack-fixture";
 import { MultitrackWorkspace } from "./MultitrackWorkspace";
 const mocks = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), seek: vi.fn().mockResolvedValue(undefined), pause: vi.fn(), toggle: vi.fn(), shuttle: vi.fn() }));
 vi.mock("../hooks/use-multitrack-transcription", () => ({ useMultitrackTranscription: () => ({ engine: "parakeet", models: [], ready: true, loading: false, status: "", error: null, resolution: null, ...mocks }) }));
@@ -14,9 +14,9 @@ afterEach(cleanup);
 it("group disclosure never selects an alternative or starts playback/transcription", () => {
   const visible = vi.fn();
   render(<MultitrackWorkspace document={multitrackGroupFixture()} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} onVisibleTracks={visible} />);
-  expect(screen.queryByRole("checkbox", { name: "Transcribe Sam mic" })).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: "Select Sam mic" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Alternative microphones for A1" }));
-  expect((screen.getByRole("checkbox", { name: "Transcribe Sam mic" }) as HTMLInputElement).checked).toBe(false);
+  expect((screen.getByRole("checkbox", { name: "Select Sam mic" }) as HTMLInputElement).checked).toBe(false);
   expect(visible).toHaveBeenLastCalledWith(["track-1", "track-2", "track-3"]);
   expect(mocks.start).not.toHaveBeenCalled(); expect(mocks.toggle).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Generate 1 track" }));
@@ -25,12 +25,28 @@ it("group disclosure never selects an alternative or starts playback/transcripti
 it("offline roots still reveal independently usable microphones", () => {
   const doc = multitrackGroupFixture(); doc.manifest.graph!.lanes[0].availability = "offline";
   render(<MultitrackWorkspace document={doc} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
-  expect((screen.getByRole("checkbox", { name: "Transcribe Alex mic" }) as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByRole("checkbox", { name: "Select Alex mic" }) as HTMLInputElement).disabled).toBe(true);
   expect(screen.getByText("Offline")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Alternative microphones for A1" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Transcribe Sam mic" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Sam mic" }));
   fireEvent.click(screen.getByRole("button", { name: "Generate 1 track" }));
   expect(mocks.start).toHaveBeenCalledWith(["track-2"], 0, 24000);
+});
+it("keeps offline saved tracks selectable for export without generating them", () => {
+  const doc = multitrackGroupFixture(); doc.manifest.graph!.lanes[0].availability = "offline";
+  doc.transcripts = [multitrackTranscript()];
+  render(<MultitrackWorkspace document={doc} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  const offline = screen.getByRole("checkbox", { name: "Select Alex mic" }) as HTMLInputElement;
+  expect(offline.disabled).toBe(false); expect(offline.checked).toBe(true);
+  expect((screen.getByRole("button", { name: "Generate 0 tracks" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Alternative microphones for A1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Sam mic" }));
+  fireEvent.click(screen.getByRole("button", { name: "Generate 1 track" }));
+  expect(mocks.start).toHaveBeenLastCalledWith(["track-2"], 0, 24000);
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  expect(offline.checked).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Deselect all" }));
+  expect(offline.checked).toBe(false);
 });
 it("opens Clip-style digit entry from the number pad, ignores letters and seeks only on Enter", () => {
   render(<MultitrackWorkspace document={multitrackFixture()} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
@@ -107,7 +123,7 @@ it("Generate starts the whole sequence without a mic confirmation, from checked 
   const button = screen.getByRole("button", { name: "Generate 3 tracks" }) as HTMLButtonElement;
   expect(button.disabled).toBe(false); fireEvent.click(button);
   expect(mocks.start).toHaveBeenCalledWith(["track-1", "track-2", "track-3"], 0, document.manifest.duration_frames);
-  fireEvent.click(screen.getByRole("checkbox", { name: "Transcribe Sam mic" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Sam mic" }));
   fireEvent.click(screen.getByRole("button", { name: "Generate 2 tracks" }));
   expect(mocks.start).toHaveBeenLastCalledWith(["track-1", "track-3"], 0, document.manifest.duration_frames);
 });

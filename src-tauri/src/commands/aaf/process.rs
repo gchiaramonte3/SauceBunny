@@ -55,6 +55,25 @@ impl ProcessResult {
 }
 
 pub async fn run(app: &AppHandle, job: &str, stage: &str, name: &str, args: Vec<String>) -> Result<ProcessResult, AppError> {
+    run_with_timeout(app, job, stage, name, args, Duration::from_secs(15 * 60)).await
+}
+
+pub async fn run_with_timeout(app: &AppHandle, job: &str, stage: &str, name: &str, args: Vec<String>, timeout: Duration) -> Result<ProcessResult, AppError> {
+    let started = std::time::Instant::now();
+    super::diagnostics::log(app, job, "info", stage, &format!("Starting {name}"));
+    let result = run_inner(app, job, stage, name, args, timeout).await;
+    let (level, message) = match &result {
+        Ok(output) if output.code == Some(0) => ("ok", format!("{name} completed")),
+        Ok(output) if stage == "asr" => ("err", format!("{name} exit {:?}; recognizer output omitted from diagnostics", output.code)),
+        Ok(output) => ("err", format!("{name} exit {:?}: {}", output.code, output.stderr.trim())),
+        Err(AppError::Cancelled) => ("warn", format!("{name} stopped")),
+        Err(error) => ("err", format!("{name}: {error}")),
+    };
+    super::diagnostics::log(app, job, level, stage, &format!("{message} · {} ms", started.elapsed().as_millis()));
+    result
+}
+
+async fn run_inner(app: &AppHandle, job: &str, stage: &str, name: &str, args: Vec<String>, timeout_duration: Duration) -> Result<ProcessResult, AppError> {
     check_cancelled(app, job)?;
     // The frozen reader extracts its private runtime here. A cancelled bootloader
     // cannot leave an unbounded _MEI directory in the system temp folder.
@@ -71,7 +90,7 @@ pub async fn run(app: &AppHandle, job: &str, stage: &str, name: &str, args: Vec<
         if let Some(child) = registry.take(&key) { let _ = child.kill(); }
         return Err(AppError::Cancelled);
     }
-    let timeout = tokio::time::sleep(Duration::from_secs(15 * 60));
+    let timeout = tokio::time::sleep(timeout_duration);
     tokio::pin!(timeout);
     let mut result = ProcessResult { code: None, stdout: String::new(), stderr: String::new() };
     loop {
@@ -79,7 +98,7 @@ pub async fn run(app: &AppHandle, job: &str, stage: &str, name: &str, args: Vec<
             event = rx.recv() => event,
             _ = &mut timeout => {
                 if let Some(child) = registry.take(&key) { let _ = child.kill(); }
-                return Err(AppError::internal(format!("{name} exceeded the 15-minute stage limit")));
+                return Err(AppError::internal(format!("{name} exceeded its {}-minute stage limit", timeout_duration.as_secs() / 60)));
             }
         };
         match event {

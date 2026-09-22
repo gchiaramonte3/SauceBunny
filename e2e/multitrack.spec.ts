@@ -58,6 +58,73 @@ async function boot(page: Page, trackCount = 3, audible = false, grouped = false
   await expect(page.getByRole("heading", { name: "Multitrack", exact: true })).toBeVisible();
 }
 
+for (const scale of [1, 1.25]) {
+  test(`Whisper subsettings stay compact and persist at ${scale} text scale`, async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 700 });
+    await boot(page);
+    if (scale !== 1) await page.evaluate(scale => {
+      for (const name of ["--text-base", "--text-md", "--text-lg", "--text-3xl"]) {
+        const size = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+        document.documentElement.style.setProperty(name, `${size * scale}px`);
+      }
+    }, scale);
+    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+    await region.getByRole("combobox", { name: "Engine", exact: true }).selectOption("whisper");
+    const options = region.locator(".cp-multitrack-asr-options");
+    await expect(options.getByRole("combobox", { name: "Decoding" })).not.toBeVisible();
+    await options.locator("summary").click();
+    await expect(options.getByRole("combobox", { name: "Decoding" })).toHaveValue("accurate");
+    await expect(options.getByLabel("Skip non-speech")).not.toBeChecked();
+    await options.getByRole("combobox", { name: "Decoding" }).selectOption("fast");
+    await options.getByLabel("Skip non-speech").check();
+    await expect(options.getByText(/May miss quiet voices/)).toBeVisible();
+    await expect(options.getByLabel("Skip non-speech")).toBeInViewport();
+    await expect(region.getByRole("button", { name: "Generate 3 tracks" })).toBeInViewport();
+    expect(await region.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: test.info().outputPath("whisper-options.png") });
+    await region.getByRole("button", { name: "Generate 3 tracks" }).click();
+    await expect(region.getByRole("status").filter({ hasText: "Selected range saved for every track" })).toBeVisible();
+    const calls = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter(call => call.command === "aaf_transcribe_track"));
+    expect(calls).toHaveLength(3);
+    for (const call of calls) expect(call.args).toMatchObject({ engine: "whisper", fast: true, speechOnly: true });
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("saucebunny.multitrackTranscriptionOptions")!))).toEqual({ fast: true, speechOnly: true });
+    await region.getByRole("combobox", { name: "Engine", exact: true }).selectOption("parakeet");
+    await expect(options).toHaveCount(0);
+    await region.getByRole("combobox", { name: "Engine", exact: true }).selectOption("whisper");
+    await expect(options.locator("summary")).toHaveText("Options · Fast · Speech filter");
+  });
+}
+
+test("Multitrack Pipeline remains available after a failed import and exports server diagnostics", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await boot(page, 20);
+  await page.evaluate(() => {
+    const app = window as unknown as { __TAURI_INTERNALS__: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> } };
+    const original = app.__TAURI_INTERNALS__.invoke;
+    app.__TAURI_INTERNALS__.invoke = (command, args) => command === "aaf_sequences"
+      ? Promise.reject({ kind: "Invalid", data: "Unable to inspect AAF" }) : original(command, args);
+  });
+  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+  await expect(region.getByRole("alert")).toBeVisible();
+  await page.evaluate(() => {
+    (window as unknown as { __TAURI_MOCK__: { emitTauriEvent: (name: string, payload: unknown) => void } }).__TAURI_MOCK__.emitTauriEvent("aaf-diagnostic", {
+      id: "missing-mxf", timestamp_ms: Date.now(), job_id: "failed-import", level: "err", stage: "candidate", active: false,
+      message: "/Volumes/Test Workspace/Avid MediaFiles/MXF/Editor.2/large.mxf · Permission denied (os error 13)",
+    });
+  });
+  await expect(region.getByText(/Permission denied/)).toBeVisible();
+  const button = region.getByRole("button", { name: "Export diagnostics", exact: true });
+  await expect(button).toBeInViewport();
+  await button.click();
+  await expect(region.getByText(/Diagnostics saved:/)).toBeVisible();
+  const exported = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: { text?: string } }[] }).__multitrackCalls.find(call => call.command === "write_text_to_path")?.args.text);
+  expect(exported).toContain("Permission denied");
+  expect(exported).toContain("Frontend build:");
+  await page.screenshot({ path: test.info().outputPath("multitrack-failed-import-pipeline.png") });
+});
+
 test("98 grouped microphones expand without implicit audition or transcription", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 850 }); await boot(page,98,true,true);
   const region=page.getByRole("region",{name:"Multitrack",exact:true});
@@ -84,6 +151,7 @@ test("98 grouped microphones expand without implicit audition or transcription",
   await region.getByRole('button',{name:'Generate 98 tracks',exact:true}).click();
   await expect.poll(async()=>(await calls()).filter(c=>c.command==='aaf_transcribe_track').length,{timeout:20000}).toBe(98);
   await expect(region.getByRole('status').filter({hasText:'Selected range saved for every track'})).toBeVisible();
+  await expect(region.locator('.cp-multitrack-saved-status[role="img"]')).toHaveCount(98);
   await test.info().attach('group-stress',{contentType:'application/json',body:JSON.stringify({lanes:98,roots:14,expandedMs,note:'Real browser mixer and controls, mocked native PCM/recognition; not packaged NEXIS certification.'})});
   await page.screenshot({path:test.info().outputPath('98-grouped-lanes.png')});
 });
@@ -140,6 +208,48 @@ test("50-track output has signal, solo 47 stays audible, and native controls sta
   await region.getByRole("button", { name: "Pause audition", exact: true }).click();
   await page.screenshot({ path: test.info().outputPath("fifty-track-os-light.png") });
 });
+
+for (const width of [1100, 1680]) {
+  test(`Selected-track export follows checkboxes, not person, search or Solo at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 }); await boot(page);
+    if (width === 1100) await page.evaluate(() => document.documentElement.style.zoom = "1.25");
+    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+    const selected = region.getByRole("button", { name: "Export selected (3)", exact: true });
+    await expect(selected).toBeDisabled();
+    await region.getByRole("button", { name: "Generate 3 tracks" }).click();
+    await expect(selected).toBeEnabled();
+    await region.getByRole("checkbox", { name: "Select Sam mic", exact: true }).uncheck();
+    await region.getByRole("combobox", { name: "Choose transcript" }).selectOption({ label: "Sam mic" });
+    await region.getByRole("button", { name: "Solo Sam mic", exact: true }).click();
+    await region.getByRole("searchbox", { name: "Search track transcripts" }).fill("no matching words");
+    const format = region.getByRole("combobox", { name: "Transcript export format" });
+    for (const kind of ["txt", "csv", "pdf", "avid", "srt", "print"]) {
+      await format.selectOption(kind);
+      const button = region.getByRole("button", { name: "Export selected (2)", exact: true });
+      await button.focus(); await button.press("Space");
+      await expect(format).toBeEnabled();
+      const call = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter(item => ["write_text_to_path", "export_transcript_pdf", "print_transcript"].includes(item.command)).at(-1));
+      const text = String(call!.args[kind === "pdf" || kind === "print" ? "html" : "text"]);
+      expect(text).toContain("Alex"); expect(text).toContain("Room");
+      expect(text).toContain("A1"); expect(text).toContain("A3");
+      expect(text).not.toContain("A2"); expect(text).not.toContain("Sam mic");
+    }
+    await expect(region.getByRole("button", { name: "Pause audition" })).toHaveCount(0);
+    await format.selectOption("txt");
+    for (const button of await region.locator(".cp-multitrack-export button:visible").all()) {
+      const box = (await button.boundingBox())!;
+      expect(box.height).toBeGreaterThanOrEqual(24); expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(width); expect(box.y + box.height).toBeLessThanOrEqual(900);
+      expect(await button.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    }
+    await page.screenshot({ path: test.info().outputPath(`multitrack-selected-export-${width}.png`) });
+    await region.getByRole("button", { name: "Select all", exact: true }).click();
+    await region.getByRole("button", { name: "Deselect all", exact: true }).click();
+    await expect(region.getByRole("button", { name: "Export selected (0)", exact: true })).toBeDisabled();
+    await expect(region.getByRole("button", { name: "Entire transcript", exact: true })).toBeEnabled();
+  });
+}
 
 test("Entire transcript exports every source lane in the selected format despite person/search filters", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 850 }); await boot(page);
@@ -302,6 +412,9 @@ for (const width of [1100, 1920]) {
     const region = page.getByRole("region", { name: "Multitrack", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
     const generate = region.getByRole("button", { name: "Generate 20 tracks", exact: true });
+    const trackStatus = region.locator('.cp-multitrack-saved-status[role="img"]');
+    await expect(trackStatus).toHaveCount(0);
+    const soloBefore = await region.getByRole("button", { name: "Solo Alex mic", exact: true }).boundingBox();
     const controls = region.locator(".cp-multitrack-generation .cp-multitrack-options");
     const idle = (await generate.boundingBox())!, toolbar = (await controls.boundingBox())!;
     expect(idle.width).toBe(240);
@@ -335,11 +448,15 @@ for (const width of [1100, 1920]) {
     }
     await page.evaluate(() => (window as unknown as { __progressTest: { finish: () => void } }).__progressTest.finish());
     await expect(label).toHaveText("Transcribing 2 of 20");
+    await expect(trackStatus).toHaveCount(1);
+    await expect(trackStatus).toHaveAttribute("aria-label", "Alex: Selected range transcribed. Transcript saved.");
+    expect(await region.getByRole("button", { name: "Solo Alex mic", exact: true }).boundingBox()).toEqual(soloBefore);
     expect((await button.boundingBox())!.height).toBeCloseTo(initial.height, 3);
     await page.screenshot({ path: test.info().outputPath("multitrack-steady-progress.png") });
     await region.getByRole("button", { name: "Stop", exact: true }).click();
     await expect(region.getByRole("status").filter({ hasText: "Stopped. 1 tracks saved." })).toBeVisible();
     await expect(button).toHaveAttribute("aria-busy", "false");
+    await expect(trackStatus).toHaveCount(1);
   });
 }
 
@@ -352,8 +469,11 @@ for (const viewport of [{ width: 1100, height: 740 }, { width: 1680, height: 102
     await expect(region.getByRole("slider", { name: /^Seek / })).toHaveCount(3);
     const generate = region.getByRole("button", { name: "Generate 3 tracks", exact: true });
     await expect(generate).toBeEnabled();
+    await expect(region.locator('.cp-multitrack-saved-status[role="img"]')).toHaveCount(0);
     await generate.click();
     await expect(region.getByRole("status").filter({ hasText: "Selected range saved for every track" })).toBeVisible();
+    await expect(region.locator('.cp-multitrack-saved-status[role="img"]')).toHaveCount(3);
+    await expect(region.getByRole("img", { name: "Alex: Transcribed. Transcript saved." })).toBeVisible();
     await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
     await region.getByRole("tab", { name: "All voices", exact: true }).click();
     await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(3);
@@ -374,6 +494,37 @@ for (const viewport of [{ width: 1100, height: 740 }, { width: 1680, height: 102
     await page.screenshot({ path: test.info().outputPath("multitrack-workspace.png") });
   });
 }
+
+test("Saved transcript icons survive failed regeneration and reopening without marking failed-only tracks", async ({ page }) => {
+  await boot(page);
+  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+  await page.evaluate(() => {
+    const app = window as unknown as { __TAURI_INTERNALS__: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> } };
+    const original = app.__TAURI_INTERNALS__.invoke;
+    app.__TAURI_INTERNALS__.invoke = (command, args = {}) => command === "aaf_transcribe_track" && args.trackId === "track-3"
+      ? Promise.reject(new Error("Test recognition failed")) : original(command, args);
+  });
+  await region.getByRole("button", { name: "Generate 3 tracks" }).click();
+  await expect(region.getByRole("status").filter({ hasText: "2 tracks saved · 1 failed" })).toBeVisible();
+  const statuses = region.locator('.cp-multitrack-saved-status[role="img"]');
+  await expect(statuses).toHaveCount(2);
+  await expect(region.getByRole("img", { name: /^Room:/ })).toHaveCount(0);
+  await page.evaluate(() => {
+    const app = window as unknown as { __TAURI_INTERNALS__: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> } };
+    const original = app.__TAURI_INTERNALS__.invoke;
+    app.__TAURI_INTERNALS__.invoke = (command, args) => command === "aaf_transcribe_track"
+      ? Promise.reject(new Error("Test regeneration failed")) : original(command, args);
+  });
+  await region.getByRole("button", { name: "Track actions for Alex", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Regenerate…", exact: true }).click();
+  await page.getByRole("dialog", { name: "Regenerate Alex" }).getByRole("button", { name: "Regenerate track" }).click();
+  await expect(region.getByRole("status").filter({ hasText: "0 tracks saved · 1 failed" })).toBeVisible();
+  await expect(statuses).toHaveCount(2);
+  await region.getByRole("button", { name: "Import AAF…", exact: true }).click();
+  await expect(region.getByRole("img", { name: "Alex: Transcribed. Transcript saved." })).toBeVisible();
+  await expect(statuses).toHaveCount(2);
+});
 
 test("Mic edits do not gate Generate, and typing does not invoke JKL playback", async ({ page }) => {
   await boot(page);
@@ -618,6 +769,10 @@ test("Track gain redraws cached waveforms at every density and zoom without chan
   const initialCalls = await waveformCalls();
   for (const density of ["small", "medium", "large"]) {
     await region.getByRole("combobox", { name: "Track size" }).selectOption(density);
+    await expect(region.getByRole("region", { name: "Audio tracks", exact: true })).toHaveClass(new RegExp(`cp-multitrack-density-${density}`));
+    // The prior bitmap still has ink while ResizeObserver is queuing the new
+    // density. Compare gain/reset only after the canvas matches its CSS size.
+    await expect.poll(() => first.evaluate((element: HTMLCanvasElement) => element.height === Math.round(element.getBoundingClientRect().height * window.devicePixelRatio))).toBe(true);
     await expect.poll(async () => (await waveformInk(first)).pixels).toBeGreaterThan(0);
     const baseline = await waveformInk(first), other = await waveformInk(canvases.nth(1));
     await region.getByRole("button", { name: "Alex volume: 0 dB", exact: true }).click();

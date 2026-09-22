@@ -36,6 +36,7 @@ export function MultitrackMedia({ document, disabled, onBusy }: { document: AafD
         <p>{source.locators.map(path => <span className="cp-multitrack-media-path" key={path}>{path}</span>)}</p>
         <p>Channel {source.channel + 1} of {source.channels} · {source.sample_rate / 1000} kHz · {source.sample_width * 8}-bit</p>
         <p className="cp-multitrack-media-path">Source {source.mob_id} · slot {source.slot_id}</p>
+        {source.resolution_note && <p className="cp-multitrack-media-path">{source.resolution_note}</p>}
         {source.resolved && <p className="cp-multitrack-media-path">{source.resolved.path}</p>}
         {!!source.ancestors.length && <details><summary>Original source references</summary>{source.ancestors.map((ancestor, index) => <p className="cp-multitrack-media-path" key={index}>{ancestor.locators.join("\n")} · offset {ancestor.start} at {ancestor.edit_rate}</p>)}<p>Original recorder files may have a different time origin from the linked Avid media. They are not substituted automatically.</p></details>}
         <button className="btn btn-ghost" disabled={busy || disabled} onClick={() => void resolve("file", source.id)}>Locate file…</button>

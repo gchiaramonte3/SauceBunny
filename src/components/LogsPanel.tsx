@@ -13,6 +13,9 @@ type Props = {
   /** Save a diagnostics report (versions + settings + this log) to a file —
    *  the local, no-telemetry way to hand support the context of a bug. */
   onExportDiagnostics?: () => void;
+  emptyMessage?: string;
+  activityLabel?: string;
+  actionsDisabled?: boolean;
   /** Optional secondary phase that overrides the status pill when active. */
   transcriptState?: "idle" | "running" | "done" | "error";
   transcriptProgress?: number;
@@ -71,6 +74,7 @@ export function LogsPanel({
   transcriptState, transcriptProgress, transcriptPhase, transcriptEngine,
   metadataLoading, playbackPrepBusy, analysisStatus,
   canStop, onStop,
+  emptyMessage, activityLabel, actionsDisabled,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -129,7 +133,7 @@ export function LogsPanel({
       >
         <IconChevronDown size={11} className="chev" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }} />
         <span className="title">Pipeline</span>
-        <span className={"status-pill " + pill.cls}>{pill.label}</span>
+        <span className={"status-pill " + pill.cls}>{activityLabel ?? pill.label}</span>
         {showProgress && (
           <div className="progress">
             <div className="progress-bar" style={{ width: `${shownProgress}%` }} />
@@ -154,13 +158,14 @@ export function LogsPanel({
               type="button"
               className="btn btn-ghost btn-compact"
               onClick={onExportDiagnostics}
+              disabled={actionsDisabled}
               title="Save a diagnostics report (app + sidecar versions, settings, recent log) to attach to a bug report"
             >
               Export diagnostics
             </button>
           )}
-          <button type="button" className="btn btn-ghost btn-compact" onClick={onCopy}>Copy</button>
-          <button type="button" className="btn btn-ghost btn-compact" onClick={onClear}>Clear</button>
+          <button type="button" className="btn btn-ghost btn-compact" disabled={actionsDisabled} onClick={onCopy}>Copy</button>
+          <button type="button" className="btn btn-ghost btn-compact" disabled={actionsDisabled} onClick={onClear}>Clear</button>
         </div>
       </div>
       {open && (
@@ -169,7 +174,7 @@ export function LogsPanel({
             <div className="log-line">
               <span className="ts">—</span>
               <span className="tag info">idle</span>
-              <span className="msg">Awaiting source. Logs will populate during fetch and export.</span>
+              <span className="msg">{emptyMessage ?? "Awaiting source. Logs will populate during fetch and export."}</span>
             </div>
           ) : lines.map((l) => (
             <div className="log-line" key={l.id}>

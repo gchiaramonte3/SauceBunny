@@ -2,4 +2,4 @@
 import type { AafResolvedSource } from "./AafResolvedSource";
 import type { AafSourceAncestor } from "./AafSourceAncestor";
 
-export type AafSource = { id: string, mob_id: string, slot_id: number, locators: Array<string>, ancestors: Array<AafSourceAncestor>, channel: number, channels: number, sample_rate: number, sample_width: number, sample_count: number, descriptor: string, status: string, resolved?: AafResolvedSource, };
+export type AafSource = { id: string, mob_id: string, slot_id: number, locators: Array<string>, ancestors: Array<AafSourceAncestor>, channel: number, channels: number, sample_rate: number, sample_width: number, sample_count: number, descriptor: string, status: string, resolution_note?: string, resolved?: AafResolvedSource, };

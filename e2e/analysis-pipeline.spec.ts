@@ -14,7 +14,7 @@ test("analysis events reach the existing Pipeline, status pill, and Copy", async
   });
   await page.goto("/");
   await page.getByRole("button", { name: "Clip", exact: true }).click();
-  const panel = page.locator(".cp-logs");
+  const panel = page.locator(".cp-logs:visible");
   await expect(panel).toBeVisible();
   const send = (sequence: number, status: string, message: string) => page.evaluate(payload => {
     (window as unknown as { __TAURI_MOCK__: { emitTauriEvent: (event: string, payload: unknown) => void } })

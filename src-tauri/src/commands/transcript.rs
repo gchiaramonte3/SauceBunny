@@ -1146,7 +1146,7 @@ async fn ensure_vad_model(app: &AppHandle) -> Option<PathBuf> {
     Some(path)
 }
 
-fn cached_vad_model(app: &AppHandle) -> Option<PathBuf> {
+pub(crate) fn cached_vad_model(app: &AppHandle) -> Option<PathBuf> {
     let path = whisper_models_dir(app).ok()?.join("ggml-silero-v5.1.2.bin");
     path.metadata().ok().filter(|m| m.is_file() && m.len() > 1000).map(|_| path)
 }

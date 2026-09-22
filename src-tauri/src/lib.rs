@@ -244,6 +244,8 @@ pub fn run() {
             commands::generate_transcript,
             commands::aaf_import,
             commands::aaf_sequences,
+            commands::aaf_diagnostics,
+            commands::aaf_clear_diagnostics,
             commands::aaf_resolve_media,
             commands::aaf_open,
             commands::aaf_list,

@@ -10,12 +10,37 @@ const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 beforeEach(() => {
+  localStorage.clear();
   vi.clearAllMocks(); mocks.listen.mockResolvedValue(() => {});
   mocks.invoke.mockImplementation((command: string) => command === "list_whisper_models" ? Promise.resolve([]) : command === "parakeet_model_downloaded" ? Promise.resolve(true) : Promise.resolve());
 });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 
 describe("multitrack jobs", () => {
+  it("remembers options, freezes them for every track, and keeps Parakeet independent", async () => {
+    const first = deferred<AafTrackTranscript>(), base = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((command, args) => command === "list_whisper_models" ? Promise.resolve([{ id: "medium.en", name: "Medium", downloaded: true }])
+      : command === "aaf_transcribe_track" ? args.trackId === "track-1" ? first.promise : Promise.resolve(multitrackTranscript(args.trackId)) : base(command, args));
+    const { result, unmount } = renderHook(() => useMultitrackTranscription(multitrackFixture(), vi.fn()));
+    await waitFor(() => expect(result.current.models).toHaveLength(1));
+    expect(result.current.options).toEqual({ fast: false, speechOnly: false });
+    act(() => { result.current.setEngine("whisper"); result.current.setOptions({ fast: true, speechOnly: true }); });
+    let work!: Promise<void>;
+    act(() => { work = result.current.start(["track-1", "track-2"], 0, 24000); });
+    act(() => result.current.setOptions({ fast: false, speechOnly: false }));
+    await act(async () => { first.resolve(multitrackTranscript()); await work; });
+    const calls = mocks.invoke.mock.calls.filter(([command]) => command === "aaf_transcribe_track");
+    expect(calls).toHaveLength(2);
+    for (const [, args] of calls) expect(args).toMatchObject({ fast: true, speechOnly: true });
+    act(() => result.current.setOptions({ fast: true, speechOnly: true }));
+    unmount();
+    const reopened = renderHook(() => useMultitrackTranscription(multitrackFixture(), vi.fn()));
+    expect(reopened.result.current.options).toEqual({ fast: true, speechOnly: true });
+    await waitFor(() => expect(reopened.result.current.ready).toBe(true));
+    await act(async () => reopened.result.current.start(["track-2"], 0, 24000, { engine: "parakeet", modelId: "unused" }));
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "aaf_transcribe_track").at(-1)?.[1]).toMatchObject({ engine: "parakeet", fast: false, speechOnly: false });
+    reopened.unmount();
+  });
   it("keeps chunk phase changes on one label and never rewinds or removes the progress fill", async () => {
     const first = deferred<AafTrackTranscript>(), second = deferred<AafTrackTranscript>();
     const base = mocks.invoke.getMockImplementation()!;

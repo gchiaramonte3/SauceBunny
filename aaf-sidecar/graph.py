@@ -55,6 +55,20 @@ def linked_format(descriptor):
             int(value(descriptor, 'Channels', 1)), int(value(descriptor, 'QuantizationBits', 24))//8)
 
 
+def audio_descriptor(descriptor, slot_id):
+    if isinstance(descriptor, aaf2.essence.MultipleDescriptor):
+        children = list(value(descriptor, 'FileDescriptors', []))
+        if len(children) > 256:
+            fail('Too many MXF stream descriptors.', 'limit_exceeded')
+        matches = [d for d in children if value(d, 'LinkedSlotID') == slot_id]
+        if len(matches) != 1:
+            fail('The MXF audio slot has no unique linked descriptor.')
+        descriptor = matches[0]
+    if not isinstance(descriptor, (aaf2.essence.SoundDescriptor, aaf2.essence.WAVEDescriptor)):
+        fail('The linked source is not an audio descriptor.')
+    return descriptor
+
+
 class GraphTimeline(Timeline):
     def __init__(self, file, sequence_id=None):
         self.external = {}
@@ -244,6 +258,8 @@ class GraphTimeline(Timeline):
                     fail('A source has a negative position.', 'invalid_media')
                 key = str(mob.mob_id) + ':' + str(slot.slot_id)
                 try:
+                    parent_descriptor = descriptor
+                    descriptor = audio_descriptor(descriptor, slot.slot_id)
                     hz, channels, width = linked_format(descriptor)
                 except ReaderError as error:
                     append_warning(warnings_list, str(error))
@@ -251,6 +267,8 @@ class GraphTimeline(Timeline):
                 physical = value(slot, 'PhysicalTrackNumber')
                 channel = 0 if channels == 1 else (physical-1 if isinstance(physical, int) and 1 <= physical <= channels else None)
                 locators = [str(value(loc, 'URLString', '')) for loc in value(descriptor, 'Locator', [])]
+                if parent_descriptor is not descriptor:
+                    locators.extend(str(value(loc, 'URLString', '')) for loc in value(parent_descriptor, 'Locator', []))
                 if hz.denominator != 1 or hz not in (44100, 48000, 96000) or width not in (2, 3, 4) or channel is None:
                     append_warning(warnings_list, 'Unsupported processing: source format or channel mapping needs review.')
                     return [{'kind': 'unavailable', 'duration': duration}]
@@ -298,7 +316,7 @@ class GraphTimeline(Timeline):
 
     def manifest(self, fingerprint):
         result = super().manifest(fingerprint)
-        result.update(schema_version=2, graph={'sequence_id': str(self.mob.mob_id),
+        result.update(schema_version=3, graph={'sequence_id': str(self.mob.mob_id),
             'sources': list(self.external.values()), 'picture_tracks': self.picture_tracks, 'markers': self.markers,
             'lanes': [{'track_id': t['id'], 'parent_track_id': t.get('parent_track_id'),
                        'branch_id': t.get('branch_id'), 'group_name': t.get('group_name'),

@@ -95,6 +95,8 @@ export function tauriMockInit(expectedBuildId: string): void {
     },
     library_reference_status: (args: unknown) => (args as { paths: string[] }).paths.map((path) => ({ path, exists: !path.includes("missing") })),
     aaf_list: () => JSON.parse(localStorage.getItem("e2e.aafList") ?? "[]"),
+    aaf_diagnostics: () => ({ events: [], active_jobs: [], persistence_error: null, context: "Browser fixture; native filesystem is not accessed." }),
+    aaf_clear_diagnostics: () => null,
     read_text_file_capped: (args: Record<string, unknown>) => {
       const path = String((args as { path?: string }).path ?? "");
       const hit = seededFiles()[path];

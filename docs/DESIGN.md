@@ -4,6 +4,36 @@ The current application rulebook. Source contracts enforce many of these
 rules, but cannot prove rendered geometry, dynamic names or complete keyboard
 behavior. Use the catalog and browser checks alongside those contracts.
 
+### Multitrack saved-transcript indicators · 2026-09-22
+
+Each track reserves a small status-icon slot beside its editable mic-owner name.
+Show a circle check only for a committed transcript, including an empty result;
+use the existing review icon when timing needs attention. Hover text and accessible
+names identify saved results, no-speech outcomes and selected-range coverage.
+Derive status from the document, not an in-flight job. Keep it on reopening,
+offline lanes and failed/cancelled regeneration while an earlier result remains.
+Do not shift Solo/Mute or waveform alignment as individual tracks finish.
+
+Multitrack's export footer also offers **Selected (N)** using the timeline
+checkboxes and current export format. Person tabs, search and Solo/Mute do not
+change that scope. Preserve the per-person and entire-transcript actions. Enable
+selection for offline tracks with saved results; generation still requires ready
+media. Disable an export with no meaningful saved content in its selected scope.
+The save dialog retains editable names, and an open export keeps its chosen track
+IDs even if selection changes while saving. Reuse the footer's wrapping controls.
+
+### Multitrack transcription options · 2026-09-22
+
+Whisper keeps Engine and Model visible, with a collapsed Options disclosure
+beside them. Accurate remains the default. Fast decoding and Skip non-speech
+are independent choices, remembered locally and snapshotted for an entire run.
+Explain the speed/accuracy tradeoff and quiet-voice risk inside the disclosure,
+not in a new persistent status row. Missing cached speech detection falls back
+to full audio and reports that in Pipeline. Never download a model implicitly.
+Use the same controls in Generate/Regenerate; disable them during recognition.
+Hide Whisper-only choices for Parakeet without erasing the user's preferences.
+Automatic model reuse is an implementation detail, not another switch.
+
 ### Advanced Intelligence disclosure · 2026-09-21
 
 Keep the analysis results compact. Source and picture-model selection remain

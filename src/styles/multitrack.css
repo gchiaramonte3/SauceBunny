@@ -184,6 +184,10 @@
 .cp-multitrack-check input { margin: 0; width: 13px; height: 13px; flex-shrink: 0; }
 .cp-multitrack-page input.cp-multitrack-owner { min-height: 24px; max-height: 24px; height: 24px; min-width: 0; box-sizing: border-box; padding: 2px 4px; border: 1px solid transparent; background: transparent; font-size: var(--text-base); text-overflow: ellipsis; cursor: default; }
 .cp-multitrack-page input.cp-multitrack-owner:focus { cursor: text; }
+.cp-multitrack-owner-status { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.cp-multitrack-saved-status { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; width: 16px; height: 16px; }
+.cp-multitrack-saved-status.is-saved { color: var(--success); }
+.cp-multitrack-saved-status.needs-review { color: var(--warning); }
 .cp-multitrack-track-switches { gap: 4px; }
 .cp-multitrack-track-switches .btn { min-width: 24px; width: 24px; min-height: 24px; max-height: 24px; height: 24px; box-sizing: border-box; line-height: var(--leading-none); padding: 0; font-size: var(--text-base); }
 .cp-multitrack-track-switches .cp-multitrack-text-toggle { width: 36px; }
@@ -226,6 +230,14 @@
 .cp-multitrack-generation .cp-multitrack-options { margin: 0; align-items: center; gap: 10px; }
 .cp-multitrack-options label { flex-direction: row; align-items: center; gap: 6px; }
 .cp-multitrack-options .cp-select { min-width: 100px; max-width: 160px; }
+.cp-multitrack-asr-options { min-width: 0; max-width: 280px; color: var(--fg-3); font-size: var(--text-base); }
+.cp-multitrack-asr-options summary { min-height: 30px; align-content: center; cursor: pointer; padding: 4px 6px; border-radius: var(--r-sm); }
+.cp-multitrack-asr-options summary:hover { color: var(--fg-1); background: var(--bg-3); }
+.cp-multitrack-asr-options summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.cp-multitrack-asr-options > div { padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.cp-multitrack-asr-options p { margin: 0; line-height: var(--leading-normal); }
+.cp-multitrack-asr-options label { min-height: 26px; }
+.cp-multitrack-asr-options input { margin: 0; flex-shrink: 0; }
 .cp-multitrack-options > .btn { margin-left: 0; }
 .cp-multitrack-generate-row { min-width: 0; max-width: 100%; flex: 0 1 auto; margin-left: auto; padding-left: 14px; }
 .cp-multitrack-generate-row > .cp-gen-btn { flex: 0 1 240px; width: 240px; min-width: 0; }
@@ -288,7 +300,7 @@
 .cp-multitrack-export { display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; gap: 8px; padding: 10px 12px; }
 .cp-multitrack-export-current { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; }
 .cp-multitrack-export-current .btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cp-multitrack-export-all { display: flex; gap: 8px; flex-wrap: wrap; }
+.cp-multitrack-export-all { display: flex; gap: var(--s-2) var(--s-1); flex-wrap: wrap; }
 .cp-multitrack-export-all .btn { flex: 1; white-space: nowrap; min-height: 28px; padding: 4px 8px; font-size: var(--text-base); }
 .cp-multitrack-export > p { margin: 0; max-height: 64px; overflow: auto; overflow-wrap: anywhere; }
 .cp-multitrack-person-nav { display: grid; grid-template-columns: minmax(0, 1fr) 28px; min-width: 0; border-bottom: 1px solid var(--line-1); margin-bottom: 12px; padding: 0 8px; }

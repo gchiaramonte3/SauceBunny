@@ -8,14 +8,19 @@ import type { AafTrackTranscript } from "../bindings/AafTrackTranscript";
 import type { WhisperModel } from "../bindings/WhisperModel";
 import { newJobId } from "../lib/job-id";
 import { formatError } from "../lib/error-format";
+import { loadMultitrackTranscriptionOptions, saveMultitrackTranscriptionOptions, type MultitrackTranscriptionOptions } from "../lib/multitrack-transcription-options";
 
 export type MultitrackRunReport = { requested: number; saved: number; review: number; empty: number; stopped: boolean; failures: Array<{ trackId: string; message: string }> };
-export type MultitrackModelChoice = { engine: AafEngine; modelId: string };
+export type MultitrackModelChoice = { engine: AafEngine; modelId: string } & Partial<MultitrackTranscriptionOptions>;
 
 export function useMultitrackTranscription(document: AafDocument, onTranscript: (result: AafTrackTranscript) => void, active = true) {
   const [engine, setEngine] = useState<AafEngine>("parakeet");
   const [models, setModels] = useState<WhisperModel[]>([]);
   const [modelId, setModelId] = useState("medium.en");
+  const [options, setOptionsState] = useState(loadMultitrackTranscriptionOptions);
+  const setOptions = useCallback((next: MultitrackTranscriptionOptions) => {
+    setOptionsState(next); saveMultitrackTranscriptionOptions(next);
+  }, []);
   const [parakeetReady, setParakeetReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -77,6 +82,8 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
   const start = useCallback(async (trackIds: string[], startFrame: number, durationFrames: number, choice?: MultitrackModelChoice) => {
     if (run.current || !trackIds.length) return;
     const selectedEngine = choice?.engine ?? engine, selectedModel = choice?.modelId ?? modelId;
+    const fast = selectedEngine === "whisper" && (choice?.fast ?? options.fast);
+    const speechOnly = selectedEngine === "whisper" && (choice?.speechOnly ?? options.speechOnly);
     if (choice && (selectedEngine === "parakeet" ? !parakeetReady : !models.some((model) => model.id === selectedModel))) { setError("The selected model is not installed."); return; }
     const current = { cancelled: false, jobId: newJobId() as string | null, index: 0, count: trackIds.length };
     run.current = current; setLoading(true); setResolution(null); setError(null); setProgress(0); setReport(null);
@@ -90,7 +97,7 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
         const completed = index / trackIds.length * 100;
         setProgress((previous) => Math.max(previous ?? 0, completed));
         try {
-          const result = await invoke<AafTrackTranscript>("aaf_transcribe_track", { documentId: document.id, trackId, startFrame, durationFrames, engine: selectedEngine, modelId: selectedEngine === "parakeet" ? "parakeet-tdt-0.6b-v3" : selectedModel, language: "en", fast: false, jobId: current.jobId });
+          const result = await invoke<AafTrackTranscript>("aaf_transcribe_track", { documentId: document.id, trackId, startFrame, durationFrames, engine: selectedEngine, modelId: selectedEngine === "parakeet" ? "parakeet-tdt-0.6b-v3" : selectedModel, language: "en", fast, speechOnly, jobId: current.jobId });
           // Native success is a committed result, even when Stop arrived while
           // its IPC reply was in flight. Stop still prevents the next track.
           if (!ownsRun()) break;
@@ -113,7 +120,7 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
       if (ownsRun()) { setReport({ ...outcome, stopped: current.cancelled }); setLoading(false); setProgress(null); }
       if (run.current === current) run.current = null;
     }
-  }, [document.id, engine, modelId, parakeetReady, models]);
+  }, [document.id, engine, modelId, parakeetReady, models, options]);
   const ready = engine === "parakeet" ? parakeetReady : models.some((model) => model.id === modelId);
-  return { engine, setEngine, models, modelId, setModelId, parakeetReady, ready, loading, progress, status, error, report, resolution, clearResolution: () => setResolution(null), start, stop };
+  return { engine, setEngine, models, modelId, setModelId, options, setOptions, parakeetReady, ready, loading, progress, status, error, report, resolution, clearResolution: () => setResolution(null), start, stop };
 }

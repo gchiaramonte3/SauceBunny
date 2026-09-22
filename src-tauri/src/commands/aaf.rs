@@ -1,9 +1,13 @@
 //! Local, read-only AAF import and microphone-track transcription.
 //! Existing Clip/Review playback and global transcription commands are untouched.
 mod audio;
+mod diagnostics;
+pub use diagnostics::*;
 mod pcm;
 mod peaks;
 mod linked;
+mod linked_paths;
+mod linked_probe;
 mod linked_audio;
 pub mod model;
 mod process;
@@ -16,6 +20,7 @@ use tauri::{AppHandle, Manager, Emitter};
 
 #[tauri::command]
 pub async fn aaf_import(app: AppHandle, path: String, job_id: String, sequence_id: Option<String>) -> Result<AafDocument, AppError> {
+    diagnostics::operation(&app, &job_id, "import", &diagnostics::describe_path(std::path::Path::new(&path)), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let source = std::fs::canonicalize(path)?;
     if source.extension().is_none_or(|extension| !extension.to_string_lossy().eq_ignore_ascii_case("aaf")) {
@@ -44,34 +49,51 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String, sequence_i
     linked::resolve(&app, &mut document, None, None, &job_id).await?;
     let document = app.state::<JobRegistry>().while_active(&job_id, || store::import(&root, document))?;
     let _ = app.emit("saucebunny:multitrack-changed", &document.id);
+    diagnostics::log(&app, &job_id, "ok", "saved", &format!("Timeline saved: {} · {} lanes · {} committed transcripts", document.manifest.name, document.manifest.tracks.len(), document.transcripts.len()));
     Ok(document)
+    }).await
 }
 
 #[tauri::command]
 pub async fn aaf_sequences(app: AppHandle, path: String, job_id: String) -> Result<Vec<AafSequenceChoice>, AppError> {
+    diagnostics::operation(&app, &job_id, "sequences", &diagnostics::describe_path(std::path::Path::new(&path)), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let result = process::run(&app, &job_id, "sequences", "saucebunny-aaf", vec!["sequences".into(), "--input".into(), path]).await?;
     result.require_success("saucebunny-aaf")?;
     Ok(serde_json::from_str(&result.stdout)?)
+    }).await
 }
 
 #[tauri::command]
 pub async fn aaf_resolve_media(app: AppHandle, document_id: String, source_id: Option<String>, path: Option<String>, job_id: String) -> Result<AafDocument, AppError> {
+    diagnostics::operation(&app, &job_id, "relink", &format!("Document {document_id} · source {} · {}", source_id.as_deref().unwrap_or("all"), path.as_deref().unwrap_or("refresh known paths")), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let root = store::root(&app)?;
     let mut document = store::load(&root, &document_id)?;
     let revision = store::cache_key(&document, "all", "relink");
     store::source_ready(&document)?;
+    if document.manifest.schema_version < SCHEMA_VERSION {
+        if let Some(graph) = &document.manifest.graph {
+            let result = process::run(&app, &job_id, "refresh-aaf-graph", "saucebunny-aaf", vec![
+                "inspect".into(), "--graph".into(), "--input".into(), document.source_path.clone(),
+                "--sequence".into(), graph.sequence_id.clone(), "--expected-fingerprint".into(), document.manifest.source_fingerprint.clone()]).await?;
+            result.require_success("saucebunny-aaf")?;
+            store::upgrade_graph(&mut document, serde_json::from_str(&result.stdout)?)?;
+        }
+    }
     linked::resolve(&app, &mut document, source_id.as_deref(), path.as_deref().map(std::path::Path::new), &job_id).await?;
     store::source_ready(&document)?;
     let saved = app.state::<JobRegistry>().while_active(&job_id, || store::save_graph(&root, &document, &revision))?;
     let _ = app.emit("saucebunny:multitrack-changed", &document_id);
     Ok(saved)
+    }).await
 }
 
 #[tauri::command]
 pub async fn aaf_open(app: AppHandle, document_id: String) -> Result<AafDocument, AppError> {
-    store::load(&store::root(&app)?, &document_id)
+    diagnostics::operation(&app, &diagnostics::new_id(), "open", &format!("Open saved document {document_id}"), async {
+        store::load(&store::root(&app)?, &document_id)
+    }).await
 }
 
 #[tauri::command]
@@ -95,6 +117,7 @@ pub async fn aaf_save_shoot_date(app: AppHandle, document_id: String, shoot_date
 
 #[tauri::command]
 pub async fn aaf_read_recording_dates(app: AppHandle, document_id: String, job_id: String) -> Result<AafDocument, AppError> {
+    diagnostics::operation(&app, &job_id, "dates", &format!("Read recording dates · document {document_id}"), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let root = store::root(&app)?;
     let document = store::load(&root, &document_id)?;
@@ -110,20 +133,24 @@ pub async fn aaf_read_recording_dates(app: AppHandle, document_id: String, job_i
     let document = app.state::<JobRegistry>().while_active(&job_id, || store::metadata(&root, &document_id, None, Some(manifest.recording_dates.unwrap_or_default())) )?;
     let _ = app.emit("saucebunny:multitrack-changed", &document_id);
     Ok(document)
+    }).await
 }
 
 #[tauri::command]
 pub async fn aaf_prepare_audio(app: AppHandle, document_id: String, track_id: String,
     start_frame: i64, duration_frames: i64, job_id: String) -> Result<AafAudioAsset, AppError>
 {
+    diagnostics::operation(&app, &job_id, "audio", &format!("Prepare document {document_id} · track {track_id} · frames {start_frame} + {duration_frames}"), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let document = store::load(&store::root(&app)?, &document_id)?;
     audio::prepare(&app, &document, &track_id, start_frame, duration_frames, &job_id).await
+    }).await
 }
 
 #[tauri::command]
 pub async fn aaf_waveform(app: AppHandle, document_id: String, track_id: String, job_id: String,
     start_frame: Option<i64>, duration_frames: Option<i64>) -> Result<AafWaveform, AppError> {
+    diagnostics::operation(&app, &job_id, "waveform", &format!("Waveform · document {document_id} · track {track_id}"), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let document = store::load(&store::root(&app)?, &document_id)?;
     match (start_frame, duration_frames) {
@@ -136,18 +163,21 @@ pub async fn aaf_waveform(app: AppHandle, document_id: String, track_id: String,
         },
         _ => Err(AppError::invalid("Waveform detail requires both a start and duration")),
     }
+    }).await
 }
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn aaf_transcribe_track(app: AppHandle, document_id: String, track_id: String,
     start_frame: i64, duration_frames: i64, engine: AafEngine, model_id: String,
-    language: String, fast: bool, job_id: String) -> Result<AafTrackTranscript, AppError>
+    language: String, fast: bool, speech_only: Option<bool>, job_id: String) -> Result<AafTrackTranscript, AppError>
 {
+    diagnostics::operation(&app, &job_id, "transcribe", &format!("Transcribe document {document_id} · track {track_id} · model {model_id} · frames {start_frame} + {duration_frames} · fast {fast} · speech filter {}", speech_only.unwrap_or(false)), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let document = store::load(&store::root(&app)?, &document_id)?;
     super::video_intelligence::yield_video_background(&app);
-    transcribe::transcribe(&app, &document, &track_id, start_frame, duration_frames, engine, &model_id, &language, fast, &job_id).await
+    transcribe::transcribe(&app, &document, &track_id, start_frame, duration_frames, engine, &model_id, &language, fast, speech_only.unwrap_or(false), &job_id).await
+    }).await
 }
 
 #[cfg(test)]

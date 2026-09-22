@@ -2,8 +2,8 @@
 use crate::AppError;
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_VERSION: u32 = 2;
-pub const DOCUMENT_SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 3;
+pub const DOCUMENT_SCHEMA_VERSION: u32 = 4;
 pub const ASR_RATE: i64 = 16_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -279,6 +279,7 @@ pub fn validate_manifest(manifest: &AafManifest) -> Result<(), AppError> {
                 || ![2,3,4].contains(&source.sample_width) || source.sample_count > 96_000*60*60*24*7
                 || source.locators.len() > 256 || source.ancestors.len() > 16
                 || source.locators.iter().any(|p| p.len() > 32768)
+                || source.resolution_note.as_ref().is_some_and(|n| n.len() > 4000)
                 || !matches!(source.status.as_str(), "ready" | "offline" | "needs_relink") { return Err(bad()); }
             if let Some(binding) = &source.resolved {
                 if !std::path::Path::new(&binding.path).is_absolute() || binding.path.len() > 32768
@@ -294,6 +295,7 @@ pub fn validate_manifest(manifest: &AafManifest) -> Result<(), AppError> {
         for mapping in &graph.path_mappings {
             if !std::path::Path::new(&mapping.from).is_absolute() || !std::path::Path::new(&mapping.to).is_absolute()
                 || mapping.from.len() > 32768 || mapping.to.len() > 32768 { return Err(bad()); }
+            if mapping.authority.as_ref().is_some_and(|h| h.is_empty() || h.len() > 253 || !h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')) { return Err(bad()); }
         }
     }
     Ok(())
@@ -349,6 +351,9 @@ pub struct AafSource {
     pub sample_count: u64,
     pub descriptor: String,
     pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub resolution_note: Option<String>,
     #[serde(default)]
     #[ts(optional)]
     pub resolved: Option<AafResolvedSource>,
@@ -379,7 +384,14 @@ pub struct AafResolvedSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
-pub struct AafPathMapping { pub from: String, pub to: String }
+pub struct AafPathMapping {
+    pub from: String,
+    pub to: String,
+    /// Namespace of a file://server locator, never a server to contact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub authority: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]

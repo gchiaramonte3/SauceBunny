@@ -79,6 +79,32 @@ class ReaderTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_sparse_source_over_64_gib_has_bounded_identity_reads(self):
+        path = self.root/'large-source.aaf'
+        size = 65 * 1024**3 + 123
+        head, tail = b'AAF head', b'tail past the old limit'
+        with path.open('wb') as stream:
+            stream.write(head)
+            stream.seek(size-len(tail))
+            stream.write(tail)
+        expected = hashlib.sha256(f'{size}:{path.stat().st_mtime_ns}'.encode())
+        expected.update(head + bytes(65536-len(head)))
+        expected.update(bytes(65536-len(tail)) + tail)
+        self.assertEqual(reader.fingerprint(path), expected.hexdigest())
+        self.assertLess(path.stat().st_blocks * 512, 1024 * 1024)
+        # Still reject empty sources and directories; no total-source cap.
+        empty = self.root/'empty.aaf'; empty.touch()
+        for invalid in (empty, self.root):
+            with self.assertRaises(reader.ReaderError): reader.fingerprint(invalid)
+
+    def test_sparse_padded_aaf_over_64_gib_remains_readable(self):
+        # Generated valid CFB, sparse extension. This proves the source-size
+        # guard and parser, not hours of real large-essence playback.
+        with self.aaf.open('r+b') as stream: stream.truncate(65 * 1024**3)
+        result = self.command('inspect', '--graph', '--input', str(self.aaf))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['tracks'][0]['name'], 'ALPHA')
+
     def command(self, *args):
         return subprocess.run([sys.executable,str(Path(reader.__file__)),'--version'] if not args else [sys.executable,str(Path(reader.__file__)),*args],capture_output=True,text=True,timeout=15)
 

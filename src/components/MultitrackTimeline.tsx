@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
+import type { AafTrackTranscript } from "../bindings/AafTrackTranscript";
 import { audioTrackLabel, clampFrame, sequenceTimecode, trackOwner, transcriptRows } from "../lib/multitrack";
 import { MultitrackWaveform } from "./MultitrackWaveform";
 import { MultitrackLevel } from "./MultitrackLevel";
 import { multitrackTextLayout } from "../lib/multitrack-text-layout";
 import { alternativeLane, laneMetadata, laneReady, laneStatus, visibleLanes } from "../lib/multitrack-graph";
-import { IconChevronRight, IconChevronDown } from "./Icons";
+import { IconChevronRight, IconChevronDown, IconCircleCheck, IconAlert } from "./Icons";
 
 type Props = {
   document: AafDocument; waveforms: Record<string, number[][]>; waveformErrors: Record<string, string>;
@@ -28,6 +29,16 @@ function TrackLabel({ document, trackId, onRename, onOwnerMenu }: Pick<Props, "d
     onBlur={() => { if (!cancelled.current && draft.trim() !== owner) onRename(trackId, draft); cancelled.current = false; }}
     onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { cancelled.current = true; setDraft(owner); event.currentTarget.blur(); } }} />;
 }
+function TranscriptStatus({ transcript, owner, duration }: { transcript?: AafTrackTranscript; owner: string; duration: number }) {
+  if (!transcript) return <span className="cp-multitrack-saved-status" aria-hidden="true" />;
+  const review = transcript.status === "review";
+  const range = transcript.start_frame > 0 || transcript.duration_frames < duration ? "Selected range transcribed" : "Transcribed";
+  const detail = review ? "Transcript saved; timing review needed" : transcript.status === "empty" ? "No speech found; result saved" : "Transcript saved";
+  const label = `${owner}: ${range}. ${detail}.`;
+  return <span className={`cp-multitrack-saved-status${review ? " needs-review" : " is-saved"}`} role="img" aria-label={label} title={label}>
+    {review ? <IconAlert size={16} /> : <IconCircleCheck size={16} />}
+  </span>;
+}
 export function MultitrackTimeline({ document, waveforms, waveformErrors, selected, onSelect, onRename, solo, muted = new Set(), onSolo, onMute, levels = {}, onLevel, onTrackMenu, onOwnerMenu, frame, onSeek, onScrub, onScrubEnd, playing = false, showWaveforms = true, transport, detail, onView, expanded = new Set(), onExpand }: Props) {
   const [zoom, setZoom] = useState(1), [start, setStart] = useState(0), [density, setDensity] = useState("small");
   const [textTracks, setTextTracks] = useState(new Set<string>()), [dragging, setDragging] = useState(false), [hover, setHover] = useState<number | null>(null);
@@ -42,6 +53,9 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
   const viewStart = Math.max(0, Math.min(start, duration - span)), viewEnd = Math.min(duration, viewStart + span);
   useEffect(() => { onView?.(viewStart, span, showWaveforms && !dragging && zoom > 1); }, [onView, viewStart, span, showWaveforms, dragging, zoom]);
   const rows = useMemo(() => transcriptRows(document), [document]);
+  // Native saving publishes these results one track at a time. Job progress is
+  // not a saved result, and a failed regeneration must not hide the prior one.
+  const savedTranscripts = useMemo(() => new Map(document.transcripts.map(transcript => [transcript.track_id, transcript])), [document.transcripts]);
   // View geometry changes on zoom/pan or new data, not on playback/hover ticks.
   const clipsByTrack = useMemo(() => new Map(document.manifest.tracks.map((track) => [track.id,
     track.clips.filter((clip) => clip.kind !== "gap" && clip.start_frame < viewEnd && clip.start_frame + clip.duration_frames > viewStart).map((clip) => ({
@@ -88,8 +102,11 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
           <div className="cp-multitrack-lane-label">
             {children > 0 && <button className="cp-icon-btn cp-multitrack-disclosure" aria-label={`Alternative microphones for ${audioTrackLabel(document, track.id)}`} aria-expanded={expanded.has(track.id)} title={`${children} alternative microphones`} onClick={() => onExpand?.(track.id)}>{expanded.has(track.id) ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}</button>}
             {child && <span className="cp-multitrack-branch" title={laneMetadata(document, track.id)?.group_name ?? "Group alternative"}>↳</span>}
-            <label className="cp-multitrack-check" title="Include in transcription"><input type="checkbox" disabled={!ready} checked={selected.has(track.id) && ready} onChange={() => onSelect(track.id)} aria-label={`Transcribe ${track.name}`} /><span>{audioTrackLabel(document, track.id)}</span></label>
-            <TrackLabel key={trackOwner(document, track.id)} document={document} trackId={track.id} onRename={onRename} onOwnerMenu={onOwnerMenu} />
+            <label className="cp-multitrack-check" title="Include in transcription and selected-track exports"><input type="checkbox" disabled={!ready && !savedTranscripts.has(track.id)} checked={selected.has(track.id)} onChange={() => onSelect(track.id)} aria-label={`Select ${track.name}`} /><span>{audioTrackLabel(document, track.id)}</span></label>
+            <div className="cp-multitrack-owner-status">
+              <TrackLabel key={trackOwner(document, track.id)} document={document} trackId={track.id} onRename={onRename} onOwnerMenu={onOwnerMenu} />
+              <TranscriptStatus transcript={savedTranscripts.get(track.id)} owner={trackOwner(document, track.id)} duration={duration} />
+            </div>
             <div className="cp-multitrack-track-switches"><button className="btn btn-ghost cp-multitrack-solo" disabled={!ready} aria-pressed={solo.has(track.id)} aria-label={`Solo ${track.name}`} title={`Solo ${trackOwner(document, track.id)}`} onClick={() => onSolo?.(track.id)}>S</button>
               <button className="btn btn-ghost cp-multitrack-solo" aria-pressed={muted.has(track.id)} aria-label={`Mute ${track.name}`} title={`Mute ${trackOwner(document, track.id)}`} onClick={() => onMute?.(track.id)}>M</button>
               <button className="btn btn-ghost cp-multitrack-text-toggle" aria-pressed={textTracks.has(track.id)} aria-label={`Text overlay ${track.name}`} title="Show transcript segments above the waveform" onClick={() => setTextTracks((prior) => { const next = new Set(prior); if (next.has(track.id)) next.delete(track.id); else next.add(track.id); return next; })}>Text</button>

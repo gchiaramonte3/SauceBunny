@@ -4,7 +4,7 @@ use crate::{commands::JobRegistry, AppError};
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 
-struct EngineConfig { engine: AafEngine, model_id: String, model_path: String, language: String, fast: bool }
+struct EngineConfig { engine: AafEngine, model_id: String, model_path: String, language: String, fast: bool, vad_model: Option<String> }
 // Enforce the limit natively too: a second window or overlapping IPC must not
 // turn a group expansion into dozens of recognizer processes.
 static RECOGNIZER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
@@ -29,7 +29,7 @@ fn engine_config(app: &AppHandle, engine: AafEngine, model_id: &str, language: &
             ("parakeet-tdt-0.6b-v3".into(), models.to_string_lossy().into_owned())
         }
     };
-    Ok(EngineConfig { engine, model_id, model_path, language, fast })
+    Ok(EngineConfig { engine, model_id, model_path, language, fast, vad_model: None })
 }
 
 #[derive(Debug)]
@@ -130,7 +130,28 @@ pub fn parse_cues(text: &str, chunk: &Chunk, rate: &AafRate, track: &str) -> Res
     Ok(ParsedCues { cues, timing_issues })
 }
 
-async fn run_chunk(app: &AppHandle, job: &str, config: &EngineConfig, wav: &Path, output: &Path) -> Result<String, AppError> {
+// Reuse the shipped CLI's model across four independent files. Never concatenate
+// their audio: each SRT retains its own origin and the existing boundary context.
+// Four windows bound scratch space and cancellation latency without a new server.
+const WHISPER_BATCH_SIZE: usize = 4;
+
+fn whisper_batch_args(config: &EngineConfig, files: &[(&Path, &Path)]) -> Result<Vec<String>, AppError> {
+    let Some((wav, output)) = files.first() else { return Err(AppError::invalid("No audio chunks to transcribe")); };
+    if files.len() > WHISPER_BATCH_SIZE { return Err(AppError::invalid("Too many recognition chunks")); }
+    let mut args = crate::commands::transcript::whisper_cli_args(&config.model_path,
+        &wav.to_string_lossy(), &output.to_string_lossy(), &config.language, config.vad_model.as_deref(), config.fast);
+    for (wav, output) in &files[1..] {
+        args.extend(["-f".into(), wav.to_string_lossy().into_owned(), "-of".into(), output.to_string_lossy().into_owned()]);
+    }
+    if config.vad_model.is_some() {
+        // Retain short/quiet utterances and pad boundaries. Still opt-in: no VAD
+        // threshold can guarantee retaining every faint or overlapping voice.
+        args.extend(["-vt", "0.35", "-vspd", "100", "-vp", "250"].map(str::to_owned));
+    }
+    Ok(args)
+}
+
+async fn run_batch(app: &AppHandle, job: &str, config: &EngineConfig, files: &[(&Path, &Path)]) -> Result<Vec<String>, AppError> {
     let _permit = loop {
         process::check_cancelled(app, job)?;
         tokio::select! {
@@ -140,24 +161,36 @@ async fn run_chunk(app: &AppHandle, job: &str, config: &EngineConfig, wav: &Path
     };
     process::check_cancelled(app, job)?;
     let (name, args) = match config.engine {
-        AafEngine::Whisper => ("whisper-cli", crate::commands::transcript::whisper_cli_args(
-            &config.model_path, &wav.to_string_lossy(), &output.to_string_lossy(), &config.language, None, config.fast)),
-        AafEngine::Parakeet => ("saucebunny-diarize", vec!["--asr".into(), "--input".into(), wav.to_string_lossy().into_owned(),
-            "--output".into(), output.with_extension("srt").to_string_lossy().into_owned(),
-            "--models-dir".into(), config.model_path.clone(), "--emit-progress".into()]),
+        AafEngine::Whisper => ("whisper-cli", whisper_batch_args(config, files)?),
+        AafEngine::Parakeet => {
+            let [(wav, output)] = files else { return Err(AppError::invalid("Parakeet requires one audio chunk")); };
+            ("saucebunny-diarize", vec!["--asr".into(), "--input".into(), wav.to_string_lossy().into_owned(),
+                "--output".into(), output.with_extension("srt").to_string_lossy().into_owned(),
+                "--models-dir".into(), config.model_path.clone(), "--emit-progress".into()])
+        },
     };
-    let result = process::run(app, job, "asr", name, args).await?;
-    let path = output.with_extension("srt");
-    let text = if path.is_file() {
-        if std::fs::metadata(&path)?.len() > 8 * 1024 * 1024 { return Err(AppError::invalid("Speech output exceeded its safety limit")); }
-        Some(std::fs::read_to_string(path)?)
-    } else { None };
-    output_text(&config.engine, result.code, &result.stderr, text)
+    // Keep the existing per-window budget on slower Macs. Batching must not
+    // turn four individually valid windows into a premature timeout.
+    let timeout = std::time::Duration::from_secs(15 * 60 * files.len() as u64);
+    let result = process::run_with_timeout(app, job, "asr", name, args, timeout).await?;
+    // Only engine counters, never recognized text or arbitrary stderr, enter
+    // shareable diagnostics. Separate initialization cost from recognition.
+    for line in result.stderr.lines().filter(|line| line.starts_with("whisper_print_timings:") || line.starts_with("ggml_metal_device_init: GPU name:")) {
+        super::diagnostics::log(app, job, "info", "asr-timing", line);
+    }
+    files.iter().map(|(_, output)| {
+        let path = output.with_extension("srt");
+        let text = if path.is_file() {
+            if std::fs::metadata(&path)?.len() > 8 * 1024 * 1024 { return Err(AppError::invalid("Speech output exceeded its safety limit")); }
+            Some(std::fs::read_to_string(path)?)
+        } else { None };
+        output_text(&config.engine, result.code, &result.stderr, text)
+    }).collect()
 }
 
 #[allow(clippy::too_many_arguments)]
 pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64,
-    engine: AafEngine, model_id: &str, language: &str, fast: bool, job: &str) -> Result<AafTrackTranscript, AppError>
+    engine: AafEngine, model_id: &str, language: &str, fast: bool, speech_only: bool, job: &str) -> Result<AafTrackTranscript, AppError>
 {
     let lane = store::track(document, track)?;
     store::source_ready(document)?;
@@ -166,29 +199,50 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
     if start < 0 || duration <= 0 || end > document.manifest.duration_frames {
         return Err(AppError::invalid("Choose a transcription range within the sequence"));
     }
-    let config = engine_config(app, engine, model_id, language, fast)?;
+    let mut config = engine_config(app, engine, model_id, language, fast)?;
+    let whisper = matches!(config.engine, AafEngine::Whisper);
+    if whisper && speech_only {
+        config.vad_model = crate::commands::transcript::cached_vad_model(app).map(|path| path.to_string_lossy().into_owned());
+    }
+    let speech_note = if config.vad_model.is_some() { "Speech filter enabled. Quiet or overlapping speech may be missed. Original audio timestamps are retained." }
+        else if whisper && speech_only { "Speech detector unavailable. Full audio was used; no download was started." }
+        else { "Full audio used. Only timeline gaps and digital silence are skipped." };
+    super::diagnostics::log(app, job, if whisper && speech_only && config.vad_model.is_none() { "warn" } else { "info" }, "asr-options", speech_note);
+    let batch_size = if whisper { WHISPER_BATCH_SIZE } else { 1 };
     let chunks = chunks(duration, &document.manifest.edit_rate)?;
+    super::diagnostics::log(app, job, "info", "asr-options", &format!("{} windows · up to {batch_size} per model load · one recognizer · {} decoding", chunks.len(), if fast && whisper { "fast" } else { "accurate" }));
     let mut cues = Vec::new();
     let mut timing_issues = Vec::new();
-    for relative in chunks {
-        let chunk = Chunk { start: relative.start + start, end: relative.end + start,
-            extract_start: relative.extract_start + start, extract_end: relative.extract_end + start };
-        process::check_cancelled(app, job)?;
-        // Gaps can be skipped without ever asking a model to invent speech in them.
-        if !lane.clips.iter().any(|clip| clip.kind == "audio" && clip.start_frame < chunk.extract_end && clip.start_frame + clip.duration_frames > chunk.extract_start) { continue; }
-        let work = audio::WorkDir::new(app, job)?;
-        process::progress(app, job, Some(track), "preparing-audio", chunk.start - start, duration);
-        let (wav, info) = audio::extract_16k(app, document, track, chunk.extract_start,
-            chunk.extract_end - chunk.extract_start, job, &work.0).await?;
-        if !info.digital_silence {
-            process::progress(app, job, Some(track), "transcribing", chunk.start - start, duration);
-            let text = run_chunk(app, job, &config, &wav, &work.0.join("transcript")).await?;
+    for batch in chunks.chunks(batch_size) {
+        let mut prepared = Vec::new();
+        for relative in batch {
+            let chunk = Chunk { start: relative.start + start, end: relative.end + start,
+                extract_start: relative.extract_start + start, extract_end: relative.extract_end + start };
             process::check_cancelled(app, job)?;
-            let parsed = parse_cues(&text, &chunk, &document.manifest.edit_rate, track)?;
-            cues.extend(parsed.cues);
-            timing_issues.extend(parsed.timing_issues);
+            // Gaps can be skipped without ever asking a model to invent speech in them.
+            if !lane.clips.iter().any(|clip| clip.kind == "audio" && clip.start_frame < chunk.extract_end && clip.start_frame + clip.duration_frames > chunk.extract_start) { continue; }
+            let work = audio::WorkDir::new(app, job)?;
+            process::progress(app, job, Some(track), "preparing-audio", batch[0].start, duration);
+            let (wav, info) = audio::extract_16k(app, document, track, chunk.extract_start,
+                chunk.extract_end - chunk.extract_start, job, &work.0).await?;
+            if !info.digital_silence {
+                let output = work.0.join("transcript");
+                prepared.push((chunk, work, wav, output));
+            }
         }
-        process::progress(app, job, Some(track), "transcribing", chunk.end - start, duration);
+        if !prepared.is_empty() {
+            process::progress(app, job, Some(track), "transcribing", batch[0].start, duration);
+            super::diagnostics::log(app, job, "info", "asr-batch", &format!("{} audio windows · sequence frames {} to {}", prepared.len(), start + batch[0].start, start + batch[batch.len()-1].end));
+            let files = prepared.iter().map(|(_, _, wav, output)| (wav.as_path(), output.as_path())).collect::<Vec<_>>();
+            let texts = run_batch(app, job, &config, &files).await?;
+            for ((chunk, _, _, _), text) in prepared.iter().zip(texts) {
+                process::check_cancelled(app, job)?;
+                let parsed = parse_cues(&text, chunk, &document.manifest.edit_rate, track)?;
+                cues.extend(parsed.cues);
+                timing_issues.extend(parsed.timing_issues);
+            }
+        }
+        process::progress(app, job, Some(track), "transcribing", batch[batch.len()-1].end, duration);
     }
     cues.sort_by_key(|cue| (cue.start_sample, cue.end_sample));
     store::source_ready(document)?;
@@ -199,7 +253,8 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
         warnings: vec!["Names identify microphone owners. Nearby voices and recognition mistakes may appear on any track.".into(),
             "Cue times are machine estimates, not verified word boundaries. No diarization or cross-track deletion was performed.".into(),
             "Cues marked for boundary review can repeat across processing chunks. Both are kept so differing segmentation cannot silently remove words.".into(),
-            "Recognition uses bounded audio chunks with one second of context. Whisper VAD is not used in this multitrack path.".into()] };
+            "Recognition uses bounded audio chunks with one second of context.".into(),
+            speech_note.into(), format!("Decoding: {}. Model reuse: up to {batch_size} windows per load.", if fast && whisper { "Fast" } else { "Accurate" })] };
     let root = store::root(app)?;
     app.state::<JobRegistry>().while_active(job, || store::save_transcript(&root, document, transcript.clone()))?;
     let _ = tauri::Emitter::emit(app, "saucebunny:multitrack-changed", &document.id);
@@ -209,6 +264,65 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn config(fast: bool, vad: bool) -> EngineConfig {
+        EngineConfig { engine: AafEngine::Whisper, model_id: "medium.en".into(), model_path: "model with spaces.bin".into(),
+            language: "en".into(), fast, vad_model: vad.then(|| "installed-vad.bin".into()) }
+    }
+    #[test]
+    fn batch_reuses_one_model_and_keeps_each_input_output_pair_separate() {
+        let files = [(Path::new("one.wav"), Path::new("one")), (Path::new("mic é two.wav"), Path::new("two"))];
+        let args = whisper_batch_args(&config(false, false), &files).unwrap();
+        assert_eq!(args.iter().filter(|arg| arg.as_str() == "-m").count(), 1);
+        assert_eq!(args.iter().filter(|arg| arg.as_str() == "-f").count(), 2);
+        assert_eq!(args.iter().filter(|arg| arg.as_str() == "-of").count(), 2);
+        assert!(args.windows(2).any(|p| p == ["-bs", "5"]));
+        assert!(args.windows(2).any(|p| p == ["-f", "mic é two.wav"]));
+        assert!(!args.contains(&"--vad".into()));
+        assert!(whisper_batch_args(&config(false, false), &[]).is_err());
+        assert!(whisper_batch_args(&config(false, false), &[files[0]; WHISPER_BATCH_SIZE+1]).is_err());
+    }
+    #[test]
+    fn fast_and_speech_filter_are_independent_opt_ins() {
+        let files = [(Path::new("one.wav"), Path::new("one"))];
+        let fast = whisper_batch_args(&config(true, false), &files).unwrap();
+        assert!(fast.windows(2).any(|p| p == ["-bs", "1"]));
+        assert!(fast.windows(2).any(|p| p == ["-bo", "1"]));
+        assert!(!fast.contains(&"--vad".into()));
+        let filtered = whisper_batch_args(&config(false, true), &files).unwrap();
+        assert!(filtered.windows(2).any(|p| p == ["-bs", "5"]));
+        assert!(filtered.windows(2).any(|p| p == ["-vm", "installed-vad.bin"]));
+        assert!(filtered.windows(2).any(|p| p == ["-vp", "250"]));
+    }
+    #[test]
+    #[ignore = "requires bundled Whisper and SB_AAF_ASR_TEST_WAV / SB_AAF_ASR_TEST_MODEL"]
+    fn real_batch_retains_independent_srt_origins_and_one_model_load() {
+        let wav = std::path::PathBuf::from(std::env::var("SB_AAF_ASR_TEST_WAV").unwrap());
+        let mut config = config(false, false);
+        config.model_path = std::env::var("SB_AAF_ASR_TEST_MODEL").unwrap();
+        config.vad_model = std::env::var("SB_AAF_ASR_TEST_VAD").ok();
+        let root = audio::WorkDir(std::env::temp_dir().join(format!("aaf-batch-test-{}", uuid::Uuid::new_v4())));
+        std::fs::create_dir(&root.0).unwrap();
+        let outputs: Vec<_> = (0..WHISPER_BATCH_SIZE).map(|i| root.0.join(format!("mic é {i}"))).collect();
+        let files: Vec<_> = outputs.iter().map(|out| (wav.as_path(), out.as_path())).collect();
+        let result = std::process::Command::new(crate::commands::sidecar_path("whisper-cli").unwrap())
+            .args(whisper_batch_args(&config, &files).unwrap()).output().unwrap();
+        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert_eq!(stderr.lines().filter(|line| line.starts_with("whisper_init_from_file") && line.contains("loading model")).count(), 1);
+        let rate = AafRate { numerator: 24000, denominator: 1001 };
+        for (index, out) in outputs.iter().enumerate() {
+            let text = output_text(&AafEngine::Whisper, result.status.code(), &stderr, Some(std::fs::read_to_string(out.with_extension("srt")).unwrap())).unwrap();
+            let chunk = Chunk { start: index as i64 * 2880, end: (index as i64 + 1) * 2880, extract_start: index as i64 * 2880, extract_end: (index as i64 + 1) * 2880 };
+            let parsed = parse_cues(&text, &chunk, &rate, "test-mic").unwrap();
+            // Model timing mistakes remain review items, not manufactured cues.
+            assert!(parsed.timing_issues.iter().all(|issue| issue.chunk_start_frame == chunk.extract_start));
+            assert!(!parsed.cues.is_empty());
+            assert!(parsed.cues.iter().all(|cue| cue.start_sample >= frame_samples(chunk.start, &rate).unwrap()
+                && cue.end_sample <= frame_samples(chunk.end, &rate).unwrap()));
+            // Fixture has speech at 5, 45 and 95 seconds, not packed together.
+            assert!(parsed.cues.iter().any(|cue| cue.start_sample >= frame_samples(chunk.start, &rate).unwrap() + 40 * ASR_RATE));
+        }
+    }
     #[test]
     fn one_invalid_cue_cannot_discard_valid_text_or_invent_a_timeline_position() {
         let rate = AafRate { numerator: 24000, denominator: 1001 };

@@ -135,7 +135,22 @@ ASR result handling. The bundled `saucebunny-aaf` process resolves source spans
 and reads embedded PCM; existing FFmpeg, Whisper, and Parakeet sidecars provide
 resampling and recognition. No diarization or cloud service is involved.
 
-The native schema-2 AAF document remains authoritative for labels, recording-date
+Multitrack Whisper processes at most four independent two-minute PCM windows
+per CLI invocation, reusing one model initialization. Each input retains its own
+output path, original timestamp mapping and one-second boundary context; audio
+is never concatenated. Scratch space is bounded, one recognizer is enforced
+natively, and Stop kills the JobRegistry-owned process. Parakeet still receives
+one window. Only a fully completed track atomically replaces its saved result.
+`saucebunny.multitrackTranscriptionOptions` stores opt-in Fast decoding and
+Skip non-speech preferences. Accurate/full-audio remains the default. The latter
+uses only a cached Silero model, preserves original timestamps, and falls back
+to full audio if unavailable. It can miss quiet/overlapping speech. Run choices
+and fallback warnings accompany saved results; sanitized Whisper GPU/timing
+counters enter Pipeline without recognized text. Both main and regeneration
+pickers share this contract, and settings are frozen for the selected-track run.
+
+The native schema-4 AAF document (manifest schema 3, embedded PCM index schema 2)
+remains authoritative for labels, recording-date
 provenance/overrides and per-track results, including committed empty results.
 Native writes emit `saucebunny:multitrack-changed` only after atomic saving.
 `useMultitrackLibrary` reconciles typed document entries on disk into the
@@ -143,6 +158,47 @@ Transcripts > Multitrack shelf; no SRT alias or second transcript payload is
 created. Entries use source filenames and disambiguate preserved duplicates.
 Unchanged reimports reopen an existing document; changed versions remain distinct.
 Cast preferences are copied into document labels rather than live-linked.
+
+Linked-media resolution treats `file://server/workspace/...` and UNC addresses
+as metadata. `linked_paths.rs` converts them to known mounted filesystem paths
+or document-scoped, authority-qualified prefix mappings. It never opens a network
+URL or mounts a server. Exact relative paths are tried before any selected-folder
+scan. Scans stay inside the chosen root, omit symlinks and stop at 20,000 entries;
+identity fallback indexes at most 5,000 MXFs. Duplicate valid candidates require
+an explicit file choice. A scan failure does not discard direct-path successes.
+
+`linked_probe.rs` batches bounded `mxf-info` header inspection in the existing
+pyaaf2 sidecar. Fingerprinted header caches provide a local identity index for
+renamed files. Material track IDs are resolved from SourcePackage UMID plus source
+slot, then FFprobe's `i:<track-id>` selector identifies the actual stream index.
+Format, channel count, duration and current file identity are checked before
+binding. MultipleDescriptor children are matched by LinkedSlotID, not array order.
+Nonzero internal MXF origins and unsupported nested MXF edits fail explicitly
+until their additional time transforms are supported. FFmpeg decodes only bounded
+PCM windows; no full-file transcode or new library is required.
+
+Source files have no arbitrary size ceiling. AAF and MXF fingerprints use
+64-bit seeks and two 64 KiB reads regardless of total size. Graph/header bounds,
+PCM window sizes and corruption checks remain independent resource safeguards.
+`MultitrackPipeline` reuses the Clip `LogsPanel`, including before import succeeds.
+Native `aaf-diagnostic` events record job boundaries, subprocess stages/timings,
+candidate paths/sizes, validation failures and media-resolution totals. The local
+journal retains 1,500 recent rows in memory and two rolling 1 MiB files under
+the app log directory. `aaf_diagnostics` returns that history plus saved graph
+context; it never probes disconnected media during export. `aaf_clear_diagnostics`
+clears only diagnostic history. The frontend subscribes before hydrating the
+snapshot and deduplicates overlap. Save As writes an atomic TXT report; cancellation
+does not write, and success follows the write. Reports omit transcript content,
+recognizer output and URL credentials; source paths/identities remain useful for
+manual support. There is no automatic upload.
+
+Refreshing an older graph reinspects the unchanged AAF with stable lane IDs,
+retaining labels, cast snapshots, path mappings and committed text. Changed
+routing invalidates old bindings/caches and adds a review warning to saved results.
+Native relink saves compare the complete graph revision, preventing concurrent
+mapping changes from overwriting one another. Per-source diagnostics stay in
+the existing Linked media disclosure. Live NEXIS and macOS 14 runtime acceptance
+remain separate from generated-media and static packaging checks.
 
 The transcript pane keeps its overflow selector in a fixed, compact grid column
 outside the scrolling person tabs. Optional **Search with AI** uses the same

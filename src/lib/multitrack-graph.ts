@@ -2,6 +2,8 @@ import type { AafDocument } from "../bindings/AafDocument";
 
 export const laneMetadata = (document: AafDocument, id: string) => document.manifest.graph?.lanes.find(lane => lane.track_id === id);
 export const laneReady = (document: AafDocument, id: string) => !document.manifest.graph || laneMetadata(document, id)?.availability === "ready";
+// Offline media prevents generation, not selection/export of a saved result.
+export const laneSelectable = (document: AafDocument, id: string) => laneReady(document, id) || document.transcripts.some(track => track.track_id === id);
 export const alternativeLane = (document: AafDocument, id: string) => !!laneMetadata(document, id)?.parent_track_id;
 export function laneStatus(document: AafDocument, id: string) {
   switch (laneMetadata(document, id)?.availability) {

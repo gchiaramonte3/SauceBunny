@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { IconPlus, IconSettings } from "./Icons";
 import { IconMultitrack } from "./IconMultitrack";
 import { MultitrackWorkspace } from "./MultitrackWorkspace";
+import { MultitrackPipeline } from "./MultitrackPipeline";
 
 export function MultitrackPage({ active, onOpenSettings, aiModelId, openRequest }: { active: boolean; onOpenSettings?: () => void; aiModelId?: string | null; openRequest?: { id: string; tick: number; frame?: number; trackId?: string } | null }) {
   const state = useMultitrackDocument(active);
@@ -32,5 +33,6 @@ export function MultitrackPage({ active, onOpenSettings, aiModelId, openRequest 
     {state.loading && <div className="cp-multitrack-importing" role="status"><span>Reading the AAF sequence…</span><button className="btn btn-ghost" onClick={state.cancelImport}>Stop</button></div>}
     {state.document ? <MultitrackWorkspace key={state.document.id} document={state.document} active={active && !state.loading} openRequest={pendingOpen ? null : openRequest} waveforms={state.waveforms} waveformErrors={state.waveformErrors} labelStatus={state.labelStatus} onRename={state.rename} onTranscript={state.acceptTranscript} onOpenSettings={onOpenSettings} onJobState={setJobRunning} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} aiModelId={aiModelId} onVisibleTracks={state.showTracks} />
       : <div className="cp-multitrack-empty"><IconMultitrack size={32} /><h2>Read the room, mic by mic</h2><p>Import an AAF to see its audio tracks together. Solo a mic, label its owner, and generate a searchable transcript.</p><button className="btn btn-ghost" disabled={state.loading} onClick={() => void state.load()}>Import AAF…</button><span>Local processing · Your original AAF stays untouched</span></div>}
+    <MultitrackPipeline documentId={state.document?.id} error={state.error} loading={state.loading || jobRunning} />
   </section>;
 }

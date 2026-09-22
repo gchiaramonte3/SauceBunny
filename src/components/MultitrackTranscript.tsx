@@ -10,10 +10,10 @@ import { useAiTranscriptSearch } from "../hooks/use-ai-transcript-search";
 
 const passageKey = (kind: string, trackId: string, id: string) => JSON.stringify([kind, trackId, id]);
 
-export function MultitrackTranscript({ document, frame, solo, onSeek, report, error, loading, active = true, aiModelId, initialAll = false }: {
+export function MultitrackTranscript({ document, frame, solo, onSeek, report, error, loading, active = true, aiModelId, initialAll = false, selectedTracks }: {
   document: AafDocument; frame: number; solo: Set<string>; onSeek: (frame: number, trackId: string) => void;
   report?: MultitrackRunReport | null; error?: string | null; loading?: boolean;
-  active?: boolean; aiModelId?: string | null; initialAll?: boolean;
+  active?: boolean; aiModelId?: string | null; initialAll?: boolean; selectedTracks?: ReadonlySet<string>;
 }) {
   const [limit, setLimit] = useState(200);
   const people = useMemo(() => multitrackPeople(document), [document]);
@@ -65,6 +65,6 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
         {filteredUntimed.length > limit && <button className="btn btn-ghost" onClick={() => setLimit(limit + 200)}>Show more untimed text</button>}</section>}
     </div>
     </div>
-    <MultitrackExport document={document} person={person} />
+    <MultitrackExport document={document} person={person} selectedTracks={selectedTracks} />
   </aside>;
 }

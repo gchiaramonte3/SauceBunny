@@ -750,7 +750,7 @@ test("timeline: helper row holds its space; queued range renders with status cla
   // The row RESERVES its space. It used to be removed outright, so setting a
   // mark collapsed it and shoved everything below up the screen. Measure the
   // element under it before and after: that position is the actual contract.
-  const below = page.locator(".cp-logs").first();
+  const below = page.locator(".cp-logs:visible");
   const beforeY = (await below.boundingBox())?.y ?? -1;
   expect(beforeY, "needed a reference element below the hint").toBeGreaterThan(0);
 

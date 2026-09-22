@@ -83,3 +83,34 @@ it("exports the committed shoot date and result even when Save As outlives its r
   expect(mocks.invoke.mock.calls.at(-1)![1].text).toContain("Shoot date: 2026-08-02");
   expect(mocks.invoke.mock.calls.at(-1)![1].text).toContain("Committed during Save As");
 });
+it.each(["txt", "csv", "pdf", "srt", "avid", "print"] as const)("selected %s output includes only the chosen source IDs even when owners match", async format => {
+  const doc = fixture(); doc.transcripts.push({ ...multitrackTranscript("track-3"), cues: [{ ...multitrackTranscript().cues[0], text: "Room sound" }] });
+  doc.labels = doc.manifest.tracks.map(track => ({ track_id: track.id, owner_name: "Same owner", cast_member_id: null, color: null, marker_color: track.id === "track-3" ? "pink" : "blue" }));
+  mocks.invoke.mockImplementation(async command => command === "aaf_open" ? doc : "/exports/Selected tracks.txt");
+  const { result } = renderHook(() => useMultitrackExport(doc));
+  await act(async () => result.current.download(format, ["track-1", "track-3"], "Selected tracks"));
+  const call = mocks.invoke.mock.calls.at(-1)!;
+  const text = call[1][format === "pdf" || format === "print" ? "html" : "text"];
+  expect(text).toContain("This is the first answer"); expect(text).toContain("Room sound");
+  expect(text).not.toContain("Sam's reply"); expect(text).not.toContain("Sam&#39;s reply");
+  expect(text).toContain("A1"); expect(text).toContain("A3"); expect(text).not.toContain("A2");
+  if (format === "avid") { expect(text).toContain("\tA1\tblue\t"); expect(text).toContain("\tA3\tpink\t"); }
+  if (format !== "print") expect(mocks.save.mock.calls[0][0].defaultPath).toContain("Selected tracks");
+});
+it("keeps the clicked selection through Save As while picking up newly committed text", async () => {
+  let finish!: (path: string | null) => void;
+  mocks.save.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const { result, rerender } = renderHook(({ doc }) => useMultitrackExport(doc), { initialProps: { doc: fixture() } });
+  let work!: Promise<void>;
+  await act(async () => { work = result.current.download("txt", ["track-2"], "Selected tracks"); });
+  const newer = fixture(); newer.transcripts[1].cues[0].text = "Latest selected result";
+  mocks.invoke.mockImplementation(async command => command === "aaf_open" ? newer : "/exports/chosen.txt");
+  rerender({ doc: newer });
+  await act(async () => { finish("/exports/chosen.txt"); await work; });
+  const text = mocks.invoke.mock.calls.at(-1)![1].text;
+  expect(text).toContain("Latest selected result"); expect(text).not.toContain("This is the first answer");
+  mocks.invoke.mockClear();
+  await act(async () => { work = result.current.download("txt", ["track-1"], "Selected tracks"); });
+  await act(async () => { finish(null); await work; });
+  expect(mocks.invoke).not.toHaveBeenCalled(); expect(result.current.phase).toBe("idle");
+});

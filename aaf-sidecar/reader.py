@@ -12,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import signal
+import stat as file_stat
 import struct
 import sys
 import tempfile
@@ -31,7 +32,6 @@ MAX_SEGMENTS = 10000
 MAX_DEPTH = 16
 MAX_DURATION_SECONDS = 24 * 60 * 60
 MAX_EXTRACT_SECONDS = 600
-MAX_INPUT_BYTES = 64 * 1024**3
 BLOCK_BYTES = 192 * 1024
 PEAK_BUCKETS = 2048
 
@@ -80,8 +80,10 @@ def append_warning(warnings_list, message):
 
 def fingerprint(path):
     stat = path.stat()
-    if not path.is_file() or not 0 < stat.st_size <= MAX_INPUT_BYTES:
-        fail('Choose an AAF file smaller than 64 GiB.', 'invalid_input')
+    if not file_stat.S_ISREG(stat.st_mode) or stat.st_size <= 0:
+        fail('Choose a non-empty regular media file.', 'invalid_input')
+    # AAF and MXF can be hundreds of GB. Identity reads only the head/tail,
+    # using 64-bit offsets; source size is not a memory allocation budget.
     digest = hashlib.sha256(f'{stat.st_size}:{stat.st_mtime_ns}'.encode())
     with path.open('rb') as src:
         digest.update(src.read(65536))
@@ -472,6 +474,9 @@ def stream_extents(stream):
 
 
 def run(args):
+    if args.command == 'mxf-info':
+        from mxf_info import inspect_many
+        return inspect_many(args.input)
     path = Path(args.input)
     identity = fingerprint(path)
     if args.expected_fingerprint and args.expected_fingerprint != identity:
@@ -566,6 +571,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version',action='version',version='saucebunny-aaf 1.0.0 (pyaaf2 '+aaf2.__version__+')')
     commands = parser.add_subparsers(dest='command',required=True)
+    child = commands.add_parser('mxf-info')
+    child.add_argument('--input', nargs='+', required=True)
     for command in ('inspect','index','extract','peaks','sequences'):
         child = commands.add_parser(command)
         child.add_argument('--input',required=True)

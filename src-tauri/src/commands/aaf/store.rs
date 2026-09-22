@@ -82,6 +82,8 @@ pub fn import(root: &Path, document: AafDocument) -> Result<AafDocument, AppErro
                 if !existing.labels.iter().any(|old| old.track_id == label.track_id) { existing.labels.push(label); }
             }
             existing.manifest = document.manifest;
+        } else if existing.manifest.schema_version < SCHEMA_VERSION {
+            upgrade_graph(&mut existing, document.manifest)?;
         }
         write(root, &existing)?;
         return Ok(existing);
@@ -205,6 +207,7 @@ pub fn source_ready(document: &AafDocument) -> Result<(), AppError> {
 pub fn source_fingerprint(path: &Path) -> Result<String, AppError> {
     let mut file = std::fs::File::open(path)?;
     let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() == 0 { return Err(AppError::invalid("Choose a non-empty regular media file")); }
     let modified_ns = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| AppError::invalid("AAF modification time is outside the supported range"))?.as_nanos();
     let mut hash = Sha256::new();
@@ -229,10 +232,58 @@ pub fn track<'a>(document: &'a AafDocument, id: &str) -> Result<&'a AafTrack, Ap
 }
 
 pub fn cache_key(document: &AafDocument, track: &str, purpose: &str) -> String {
-    let graph = document.manifest.graph.as_ref().map(|g| format!("{}:{:?}", g.sequence_id,
-        g.sources.iter().map(|s| (&s.id, s.channel, &s.status, &s.resolved)).collect::<Vec<_>>())).unwrap_or_default();
-    blake3::hash(format!("aaf-v2:{}:{track}:{purpose}:{graph}", document.manifest.source_fingerprint).as_bytes())
+    let graph = document.manifest.graph.as_ref().map(|g| if purpose == "relink" {
+        format!("{}:{g:?}", document.manifest.schema_version)
+    } else { format!("{}:{:?}", g.sequence_id,
+        g.sources.iter().map(|s| (&s.id, s.slot_id, s.channel, s.channels, s.sample_rate, s.sample_width, s.sample_count, &s.status, &s.resolved)).collect::<Vec<_>>()) }).unwrap_or_default();
+    blake3::hash(format!("aaf-v3:{}:{track}:{purpose}:{graph}", document.manifest.source_fingerprint).as_bytes())
         .to_hex().to_string()
+}
+
+/// Reinspect old graph semantics without renaming lanes or discarding a saved
+/// result. A changed layout needs an explicit new import, never a guessed merge.
+pub fn upgrade_graph(document: &mut AafDocument, mut fresh: AafManifest) -> Result<(), AppError> {
+    validate_manifest(&fresh)?;
+    let old = &document.manifest;
+    if old.source_fingerprint != fresh.source_fingerprint || old.duration_frames != fresh.duration_frames
+        || old.start_frame != fresh.start_frame || old.edit_rate.numerator != fresh.edit_rate.numerator
+        || old.edit_rate.denominator != fresh.edit_rate.denominator || old.tracks.len() != fresh.tracks.len()
+        || !old.tracks.iter().all(|t| fresh.tracks.iter().any(|n| t.id == n.id)) {
+        return Err(AppError::invalid("Updated AAF inspection found a different lane layout. Keep this saved document and import the AAF as a new version."));
+    }
+    if let (Some(old), Some(new)) = (&old.graph, &mut fresh.graph) {
+        if old.sequence_id != new.sequence_id { return Err(AppError::invalid("AAF sequence identity changed during inspection")); }
+        new.path_mappings = old.path_mappings.clone();
+        for source in &mut new.sources {
+            if let Some(previous) = old.sources.iter().find(|s| s.id == source.id && same_routing(s, source)) {
+                source.resolved = previous.resolved.clone();
+                source.status = previous.status.clone();
+            }
+        }
+    }
+    warn_changed_routing(document, &fresh);
+    fresh.recording_dates = document.manifest.recording_dates.clone();
+    document.manifest = fresh;
+    Ok(())
+}
+
+fn same_routing(a: &AafSource, b: &AafSource) -> bool {
+    a.mob_id == b.mob_id && a.slot_id == b.slot_id && a.channel == b.channel && a.channels == b.channels
+        && a.sample_rate == b.sample_rate && a.sample_width == b.sample_width && a.sample_count == b.sample_count
+}
+
+fn warn_changed_routing(document: &mut AafDocument, fresh: &AafManifest) {
+    let changed: Vec<_> = document.manifest.graph.iter().flat_map(|g| &g.sources).filter(|old| {
+        fresh.graph.as_ref().and_then(|g| g.sources.iter().find(|s| s.id == old.id)).is_none_or(|new|
+            !same_routing(old, new) || old.resolved.as_ref().is_some_and(|binding| new.resolved.as_ref().is_some_and(|n|
+                binding.fingerprint != n.fingerprint || binding.stream_index != n.stream_index)))
+    }).map(|s| s.id.as_str()).collect();
+    for transcript in &mut document.transcripts {
+        if document.manifest.tracks.iter().find(|t| t.id == transcript.track_id).is_some_and(|t| t.clips.iter().any(|c| c.source_id.as_deref().is_some_and(|id| changed.contains(&id)))) {
+            let warning = "Media routing changed after this transcript was saved. The transcript is preserved; review it against the linked recording.".to_owned();
+            if !transcript.warnings.contains(&warning) { transcript.warnings.push(warning); }
+        }
+    }
 }
 
 pub fn save_graph(root: &Path, update: &AafDocument, expected_revision: &str) -> Result<AafDocument, AppError> {
@@ -240,17 +291,9 @@ pub fn save_graph(root: &Path, update: &AafDocument, expected_revision: &str) ->
     let mut current = load(root, &update.id)?;
     if cache_key(&current, "all", "relink") != expected_revision { return Err(AppError::invalid("Media resolution changed in another operation. Refresh availability and try again.")); }
     if current.manifest.source_fingerprint != update.manifest.source_fingerprint { return Err(AppError::invalid("The AAF changed during relinking")); }
-    let replaced: Vec<_> = current.manifest.graph.iter().flat_map(|g| &g.sources).filter(|old| {
-        old.resolved.as_ref().is_some_and(|binding| update.manifest.graph.as_ref().and_then(|g| g.sources.iter().find(|s| s.id == old.id))
-            .and_then(|s| s.resolved.as_ref()).is_some_and(|new| binding.fingerprint != new.fingerprint))
-    }).map(|source| source.id.as_str()).collect();
-    for transcript in &mut current.transcripts {
-        if current.manifest.tracks.iter().find(|track| track.id == transcript.track_id)
-            .is_some_and(|track| track.clips.iter().any(|clip| clip.source_id.as_deref().is_some_and(|id| replaced.contains(&id)))) {
-            let warning = "Media was relinked after this transcript was saved. The transcript is preserved; review it against the replacement recording.".to_owned();
-            if !transcript.warnings.contains(&warning) { transcript.warnings.push(warning); }
-        }
-    }
+    warn_changed_routing(&mut current, &update.manifest);
+    current.manifest.schema_version = update.manifest.schema_version;
+    current.manifest.tracks = update.manifest.tracks.clone();
     current.manifest.graph = update.manifest.graph.clone();
     write(root, &current)?;
     Ok(current)
@@ -305,6 +348,21 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn large_sparse_identity_uses_64_bit_tail_offsets() {
+        use std::io::Write;
+        let path = std::env::temp_dir().join(format!("aaf-large-{}", uuid::Uuid::new_v4()));
+        let mut file = std::fs::File::create(&path).unwrap();
+        let size = 65_u64 * 1024 * 1024 * 1024 + 123;
+        file.set_len(size).unwrap();
+        file.seek(SeekFrom::Start(size - 4)).unwrap(); file.write_all(b"tail").unwrap();
+        let metadata = file.metadata().unwrap();
+        let nanos = metadata.modified().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let mut expected = Sha256::new(); expected.update(format!("{size}:{nanos}"));
+        expected.update(vec![0_u8; 65536]); expected.update(vec![0_u8; 65532]); expected.update(b"tail");
+        assert_eq!(source_fingerprint(&path).unwrap(), format!("{:x}", expected.finalize()));
+        std::fs::remove_file(path).unwrap();
+    }
     #[test]
     fn bounded_identity_detects_same_size_same_mtime_head_replacement() {
         let root = std::env::temp_dir().join(format!("aaf-identity-{}", uuid::Uuid::new_v4()));
@@ -410,5 +468,32 @@ mod tests {
         assert!(save_transcript(&root,&doc,transcript).is_err());
         assert_eq!(load(&root,&doc.id).unwrap().transcripts[0].model_id,"committed");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn refreshing_an_old_graph_preserves_labels_results_and_server_mappings() {
+        let mut doc=with_graph(fixture());
+        let source: AafSource=serde_json::from_value(serde_json::json!({"id":"s","mob_id":"mob","slot_id":3,"locators":[],"ancestors":[],"channel":0,"channels":1,"sample_rate":48000,"sample_width":3,"sample_count":96000,"descriptor":"PCMDescriptor","status":"ready",
+            "resolved":{"path":"/tmp/audio.mxf","fingerprint":"a".repeat(64),"stream_index":1,"size":576000,"modified_ms":1}})).unwrap();
+        doc.manifest.graph.as_mut().unwrap().sources.push(source);
+        doc.manifest.graph.as_mut().unwrap().path_mappings.push(AafPathMapping {from:"/Show/MXF".into(),to:"/Volumes/Renamed/MXF".into(),authority:Some("nexis".into())});
+        doc.labels[0].owner_name="Edited owner".into();
+        let clip=&mut doc.manifest.tracks[0].clips[0]; clip.kind="audio".into(); clip.source_id=Some("s".into());
+        doc.transcripts.push(AafTrackTranscript {track_id:"10".into(),start_frame:0,duration_frames:240,engine:AafEngine::Whisper,model_id:"saved".into(),status:AafTranscriptStatus::Empty,sample_rate:16000,cues:vec![],timing_issues:vec![],warnings:vec![]});
+        let mut fresh=doc.manifest.clone(); fresh.schema_version=SCHEMA_VERSION; fresh.graph.as_mut().unwrap().path_mappings.clear();
+        fresh.graph.as_mut().unwrap().sources[0].resolved=None;
+        upgrade_graph(&mut doc,fresh.clone()).unwrap();
+        assert_eq!(doc.labels[0].owner_name,"Edited owner"); assert_eq!(doc.transcripts.len(),1);
+        assert!(doc.manifest.graph.as_ref().unwrap().sources[0].resolved.is_some());
+        assert_eq!(doc.manifest.graph.as_ref().unwrap().path_mappings.len(),1);
+        let revision=cache_key(&doc,"all","relink");
+        doc.manifest.graph.as_mut().unwrap().path_mappings[0].to="/Volumes/Other/MXF".into();
+        assert_ne!(revision,cache_key(&doc,"all","relink"));
+        fresh.graph.as_mut().unwrap().sources[0].channels=2;
+        upgrade_graph(&mut doc,fresh).unwrap();
+        assert!(doc.manifest.graph.as_ref().unwrap().sources[0].resolved.is_none());
+        assert_eq!(doc.transcripts[0].model_id,"saved"); assert_eq!(doc.transcripts[0].warnings.len(),1);
+        let mut changed=doc.manifest.clone(); changed.tracks[0].id="different".into(); changed.graph.as_mut().unwrap().lanes[0].track_id="different".into();
+        assert!(upgrade_graph(&mut doc,changed).is_err()); assert_eq!(doc.labels[0].owner_name,"Edited owner");
     }
 }

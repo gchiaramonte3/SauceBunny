@@ -1,36 +1,10 @@
 //! Resolves only local, explicitly selected or AAF-referenced media. No mounts,
 //! network protocols, filename-only relinks, or changes to source recordings.
-use super::{model::*, process, store};
+use super::{diagnostics, linked_paths, linked_probe::ProbeCache, model::*, process, store};
 use crate::AppError;
 use serde::Deserialize;
 use std::{collections::{BTreeMap, BTreeSet}, path::{Path, PathBuf}};
 use tauri::AppHandle;
-
-pub fn locator_paths(locator: &str) -> Vec<PathBuf> {
-    if locator.starts_with('/') { return vec![PathBuf::from(locator)]; }
-    let Ok(url) = url::Url::parse(locator) else { return Vec::new(); };
-    if url.scheme() != "file" || url.host_str().is_some_and(|h| h != "localhost") { return Vec::new(); }
-    let Ok(path) = url.to_file_path() else { return Vec::new(); };
-    let mut paths = vec![path.clone()];
-    let text = path.to_string_lossy();
-    if let Some(index) = text.find("/Volumes/") {
-        if index > 0 { paths.push(PathBuf::from(&text[index..])); }
-    }
-    paths
-}
-
-fn mapped_paths(source: &AafSource, mappings: &[AafPathMapping]) -> BTreeSet<PathBuf> {
-    let mut paths = BTreeSet::new();
-    for locator in &source.locators {
-        for path in locator_paths(locator) {
-            for mapping in mappings {
-                if let Ok(suffix) = path.strip_prefix(&mapping.from) { paths.insert(Path::new(&mapping.to).join(suffix)); }
-            }
-            paths.insert(path);
-        }
-    }
-    paths
-}
 
 #[derive(Deserialize)]
 struct Probe { #[serde(default)] streams: Vec<Stream>, #[serde(default)] format: Format }
@@ -43,28 +17,12 @@ struct Stream {
     duration_ts: Option<i64>, time_base: Option<String>, duration: Option<String>,
     #[serde(default)] tags: BTreeMap<String, String>,
 }
-fn umid(value: &str) -> String {
+pub(super) fn umid(value: &str) -> String {
     value.trim().trim_start_matches("urn:smpte:umid:").trim_start_matches("0x")
         .chars().filter(|c| c.is_ascii_hexdigit()).map(|c| c.to_ascii_lowercase()).collect()
 }
 
-async fn probe(app: &AppHandle, job: &str, source: &AafSource, path: &Path) -> Result<AafResolvedSource, AppError> {
-    let path = std::fs::canonicalize(path)?;
-    let metadata = std::fs::metadata(&path)?;
-    if !metadata.is_file() || !matches!(path.extension().and_then(|s| s.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("wav" | "bwf" | "mxf")) {
-        return Err(AppError::invalid("Choose a WAV, BWF, or MXF audio file"));
-    }
-    let result = process::run(app, job, "probe-linked-audio", "ffprobe", vec!["-v".into(), "error".into(),
-        "-protocol_whitelist".into(), "file".into(), "-select_streams".into(), "a".into(),
-        "-show_streams".into(), "-show_format".into(), "-of".into(), "json".into(), path.to_string_lossy().into_owned()]).await?;
-    result.require_success("ffprobe")?;
-    let stream_index = compatible_stream(source, &result.stdout)?;
-    let fingerprint = store::source_fingerprint(&path)?;
-    Ok(AafResolvedSource { path: path.to_string_lossy().into_owned(), fingerprint, stream_index,
-        size: metadata.len(), modified_ms: store::modified_ms(&metadata) })
-}
-
-fn compatible_stream(source: &AafSource, json: &str) -> Result<u32, AppError> {
+pub(super) fn compatible_stream(source: &AafSource, json: &str) -> Result<u32, AppError> {
     let probe: Probe = serde_json::from_str(json)?;
     let streams: Vec<_> = probe.streams.iter().filter(|s| {
         let samples = s.duration_ts.zip(s.time_base.as_deref()).and_then(|(ts, base)| {
@@ -78,11 +36,14 @@ fn compatible_stream(source: &AafSource, json: &str) -> Result<u32, AppError> {
             && s.channels == Some(source.channels) && source.channel < source.channels
             && samples.is_some_and(|n| n.is_finite() && (n-source.sample_count as f64).abs() <= 2.)
     }).collect();
-    if streams.len() != 1 { return Err(AppError::invalid("Media format, channel count, or duration does not match this AAF source")); }
+    if streams.len() != 1 {
+        let observed = probe.streams.iter().take(8).map(|s| format!("stream {}: codec {}, channels {:?}, rate {:?}, bits {:?}/{:?}, duration_ts {:?}, time_base {:?}, duration {:?}", s.index, s.codec_name.as_deref().unwrap_or("unknown"), s.channels, s.sample_rate, s.bits_per_raw_sample, s.bits_per_sample, s.duration_ts, s.time_base, s.duration)).collect::<Vec<_>>().join("; ");
+        return Err(AppError::invalid(format!("No unique PCM stream matches {} channels, {} Hz, {}-bit, and {} samples. Choose the original Avid media file. Observed: {observed}", source.channels, source.sample_rate, source.sample_width*8, source.sample_count)));
+    }
     let stream = streams[0];
     for (key, value) in probe.format.tags.iter().chain(stream.tags.iter()) {
         if key.eq_ignore_ascii_case("file_package_umid") && umid(value) != umid(&source.mob_id) {
-            return Err(AppError::invalid("The MXF source identity does not match the AAF"));
+            return Err(AppError::invalid(format!("The MXF source identity does not match the AAF: expected {}, observed {value}", source.mob_id)));
         }
     }
     Ok(stream.index)
@@ -99,7 +60,10 @@ fn folder_candidates(root: &Path, check: impl Fn() -> Result<(), AppError>) -> R
             if count > 20_000 { return Err(AppError::invalid("Choose a smaller media folder (at most 20,000 entries)")); }
             let kind = entry.file_type()?;
             if kind.is_symlink() { continue; }
-            if kind.is_dir() && depth < 12 { pending.push((entry.path(), depth+1)); }
+            if kind.is_dir() {
+                if depth >= 12 { return Err(AppError::invalid("Media folders are nested too deeply. Choose a closer MXF subfolder.")); }
+                pending.push((entry.path(), depth+1));
+            }
             if kind.is_file() { found.entry(entry.file_name().to_string_lossy().into_owned()).or_default().push(entry.path()); }
         }
     }
@@ -110,63 +74,137 @@ fn folder_candidates(root: &Path, check: impl Fn() -> Result<(), AppError>) -> R
 /// while disconnected so reconnecting cannot quietly choose a different take.
 fn refresh_binding(source: &mut AafSource) -> bool {
     let Some(binding) = &source.resolved else { return false; };
-    source.status = match store::source_fingerprint(Path::new(&binding.path)) {
-        Ok(fingerprint) if fingerprint == binding.fingerprint => "ready",
-        Ok(_) => "needs_relink",
-        Err(_) => "offline",
-    }.into();
+    let (status, note) = match store::source_fingerprint(Path::new(&binding.path)) {
+        Ok(fingerprint) if fingerprint == binding.fingerprint => ("ready", None),
+        Ok(_) => ("needs_relink", Some("Previously linked media changed. Locate the original recording again.".to_owned())),
+        Err(error) => ("offline", Some(format!("Previously linked media is unavailable: {} · {error}. Reconnect the workspace, then refresh; or locate its new folder.", binding.path))),
+    };
+    source.status = status.into();
+    source.resolution_note = note;
     true
 }
 
 pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Option<&str>, selected: Option<&Path>, job: &str) -> Result<(), AppError> {
     let Some(graph) = document.manifest.graph.as_mut() else { return Ok(()); };
+    diagnostics::log(app, job, "info", "media", &format!("Resolve {} linked sources · {} saved path mappings", graph.sources.len(), graph.path_mappings.len()));
     if source_id.is_some_and(|id| !graph.sources.iter().any(|s| s.id == id)) { return Err(AppError::invalid("Unknown AAF media source")); }
-    let folder = if let Some(path) = selected.filter(|p| p.is_dir()) {
-        let path = path.to_path_buf();
-        let owner = app.clone(); let job = job.to_owned();
-        Some(tauri::async_runtime::spawn_blocking(move || folder_candidates(&path, || process::check_cancelled(&owner, &job))).await.map_err(|e| AppError::internal(e.to_string()))??)
-    } else { None };
+    let selected = selected.map(std::fs::canonicalize).transpose()?;
+    let selected = selected.as_deref();
+    let root = selected.filter(|p| p.is_dir());
     if selected.is_some_and(|p| p.is_file()) && source_id.is_none() { return Err(AppError::invalid("Choose the source to relink first")); }
-    for source in &mut graph.sources {
-        process::check_cancelled(app, job)?;
-        if source_id.is_some_and(|id| id != source.id) { continue; }
-        if selected.is_none() && refresh_binding(source) { continue; }
-        let mut candidates = mapped_paths(source, &graph.path_mappings);
-        if let Some(resolved) = &source.resolved { candidates.insert(PathBuf::from(&resolved.path)); }
-        if let Some(folder) = &folder {
-            for path in mapped_paths(source, &[]) {
-                if let Some(matches) = path.file_name().and_then(|n| folder.get(n.to_string_lossy().as_ref())) { candidates.extend(matches.iter().cloned()); }
-            }
-        }
-        if let Some(path) = selected.filter(|p| p.is_file()) { candidates = BTreeSet::from([path.to_path_buf()]); }
-        let mut valid = BTreeMap::new();
-        let mut mismatch = false;
-        for candidate in candidates {
-            if !candidate.is_file() { continue; }
-            match probe(app, job, source, &candidate).await {
-                Ok(binding) => { valid.insert(binding.path.clone(), binding); },
-                Err(AppError::Cancelled) => return Err(AppError::Cancelled),
-                Err(error) if selected.is_some_and(|p| p.is_file()) => return Err(error),
-                Err(_) => mismatch = true,
-            }
-        }
-        let ambiguous = valid.len() > 1;
-        let resolved = if valid.len() == 1 { valid.into_values().next() } else { None };
-        source.status = if resolved.is_some() { "ready" } else if mismatch || ambiguous { "needs_relink" } else { "offline" }.into();
-        if resolved.is_some() { source.resolved = resolved; }
-        // Persist only a mapping validated by an explicit file/folder choice.
-        if selected.is_some() && source.status == "ready" {
-            if let Some(binding) = &source.resolved {
-                if let Some(old) = source.locators.iter().flat_map(|l| locator_paths(l)).next().and_then(|p| p.parent().map(Path::to_path_buf)) {
-                    if let Some(new) = Path::new(&binding.path).parent() {
-                        let mapping = AafPathMapping { from: old.to_string_lossy().into_owned(), to: new.to_string_lossy().into_owned() };
-                        if !graph.path_mappings.iter().any(|m| m.from == mapping.from && m.to == mapping.to) { graph.path_mappings.push(mapping); }
-                    }
-                }
+    let mut cache = ProbeCache::default();
+    let total = graph.sources.len() as i64;
+    // Batch header discovery once for known paths, avoiding one frozen-runtime
+    // startup per microphone when a group references dozens of mono MXFs.
+    let mut direct_mxfs = BTreeSet::new();
+    for source in &graph.sources {
+        if source_id.is_some_and(|id| id != source.id) || (selected.is_none() && source.resolved.is_some()) { continue; }
+        let mut paths = linked_paths::candidates(source, &graph.path_mappings);
+        if let Some(root) = root { paths.extend(linked_paths::under_root(source, root).into_iter().filter(|p| linked_paths::contained(p, root))); }
+        if let Some(file) = selected.filter(|p| p.is_file()) { paths = BTreeSet::from([file.to_path_buf()]); }
+        for path in paths {
+            process::check_cancelled(app, job)?;
+            if path.is_file() && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("mxf")) {
+                direct_mxfs.insert(path);
             }
         }
     }
+    cache.index(app, job, &direct_mxfs.into_iter().collect::<Vec<_>>()).await?;
+    for (index, source) in graph.sources.iter_mut().enumerate() {
+        process::check_cancelled(app, job)?;
+        if source_id.is_some_and(|id| id != source.id) { continue; }
+        if selected.is_none() && refresh_binding(source) {
+            diagnostics::log(app, job, if source.status == "ready" { "ok" } else { "warn" }, "media", &format!("{} · {} · {}", source.id, source.status, source.resolution_note.as_deref().unwrap_or("Verified saved binding")));
+            continue;
+        }
+        process::progress(app, job, None, "resolving", index as i64, total);
+        let mut candidates = linked_paths::candidates(source, &graph.path_mappings);
+        if let Some(resolved) = &source.resolved { candidates.insert(PathBuf::from(&resolved.path)); }
+        if let Some(root) = root {
+            candidates.extend(linked_paths::under_root(source, root).into_iter().filter(|p| linked_paths::contained(p, root)));
+        }
+        if let Some(path) = selected.filter(|p| p.is_file()) { candidates = BTreeSet::from([path.to_path_buf()]); }
+        choose(app, job, source, candidates, &mut cache).await?;
+        if selected.is_some() && source.status == "ready" { linked_paths::remember(source, &mut graph.path_mappings); }
+    }
+    // Most NEXIS relinks finish above, without enumerating a workspace. Only
+    // unresolved sources trigger a bounded scan of the folder the user chose.
+    if let Some(root) = root.filter(|_| graph.sources.iter().any(|s| s.status != "ready" && source_id.is_none_or(|id| id == s.id))) {
+        let folder_root = root.to_path_buf();
+        let owner = app.clone(); let job_id = job.to_owned();
+        process::progress(app, job, None, "searching-media", 0, total);
+        diagnostics::log(app, job, "info", "search", &format!("Search only the chosen folder: {}", root.display()));
+        let folder = tauri::async_runtime::spawn_blocking(move || folder_candidates(&folder_root, || process::check_cancelled(&owner, &job_id))).await.map_err(|e| AppError::internal(e.to_string()))?;
+        match folder {
+            Ok(folder) => {
+                // Header cache doubles as a source-identity index for renamed
+                // MXFs. Never match a recorder ancestor or use filename alone.
+                let mxfs: Vec<_> = folder.values().flatten().filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("mxf")) && linked_paths::contained(p, root)).cloned().collect();
+                let index_all = mxfs.len() <= 5000;
+                if index_all { cache.index(app, job, &mxfs).await?; }
+                for source in &mut graph.sources {
+                    if source.status == "ready" || source_id.is_some_and(|id| id != source.id) { continue; }
+                    let mut candidates: BTreeSet<_> = cache.matches(source).into_iter().filter(|p| linked_paths::contained(p, root)).collect();
+                    for locator in linked_paths::locators(source) {
+                        if let Some(matches) = locator.path.file_name().and_then(|n| folder.get(n.to_string_lossy().as_ref())) { candidates.extend(matches.iter().filter(|p| linked_paths::contained(p, root)).cloned()); }
+                    }
+                    choose(app, job, source, candidates, &mut cache).await?;
+                    if source.status == "ready" { linked_paths::remember(source, &mut graph.path_mappings); }
+                    else if !index_all { source.resolution_note = Some("More than 5,000 MXFs in this folder. Choose a numbered MXF subfolder to search renamed files by identity.".into()); }
+                }
+            }
+            Err(AppError::Cancelled) => return Err(AppError::Cancelled),
+            Err(error) => {
+                diagnostics::log(app, job, "err", "search", &error.to_string());
+                for source in &mut graph.sources {
+                    if source.status != "ready" && source_id.is_none_or(|id| id == source.id) { source.resolution_note = Some(error.to_string()); }
+                }
+            },
+        }
+    }
     refresh_lanes(&document.manifest.tracks, graph);
+    let ready = graph.sources.iter().filter(|s| s.status == "ready" && s.resolved.is_some()).count();
+    diagnostics::log(app, job, if ready == graph.sources.len() { "ok" } else { "warn" }, "media", &format!("{ready}/{} linked sources available; unavailable media is not timeline silence. Saved transcripts are retained.", graph.sources.len()));
+    Ok(())
+}
+
+async fn choose(app: &AppHandle, job: &str, source: &mut AafSource, candidates: BTreeSet<PathBuf>, cache: &mut ProbeCache) -> Result<(), AppError> {
+    diagnostics::log(app, job, "info", "media", &format!("{} · UMID {} · slot {} · channel {}/{} · {} Hz · {}-bit · {} samples · {} candidate paths", source.id, source.mob_id, source.slot_id, source.channel + 1, source.channels, source.sample_rate, source.sample_width * 8, source.sample_count, candidates.len()));
+    let mut valid = BTreeMap::new();
+    let mut reason = if candidates.is_empty() && source.status == "needs_relink" { source.resolution_note.clone() } else { None };
+    for candidate in candidates {
+        process::check_cancelled(app, job)?;
+        match std::fs::metadata(&candidate) {
+            Ok(meta) if meta.is_file() => diagnostics::log(app, job, "info", "candidate", &format!("{} · {} · {} bytes", source.id, candidate.display(), meta.len())),
+            Ok(_) => { diagnostics::log(app, job, "warn", "candidate", &format!("{} · {} · not a regular file", source.id, candidate.display())); continue; },
+            Err(error) => {
+                let detail = format!("{} · {error}", candidate.display());
+                diagnostics::log(app, job, "warn", "candidate", &format!("{} · {detail}", source.id));
+                if error.kind() != std::io::ErrorKind::NotFound { reason = Some(detail); }
+                continue;
+            },
+        }
+        match cache.probe(app, job, source, &candidate).await {
+            Ok(binding) => {
+                diagnostics::log(app, job, "ok", "candidate", &format!("{} · {} · verified stream {}, channel {}", source.id, binding.path, binding.stream_index, source.channel + 1));
+                valid.insert(binding.path.clone(), binding);
+            },
+            Err(AppError::Cancelled) => return Err(AppError::Cancelled),
+            Err(error) => {
+                diagnostics::log(app, job, "warn", "candidate", &format!("{} · {} · rejected: {error}", source.id, candidate.display()));
+                reason = Some(error.to_string().chars().take(2000).collect::<String>());
+            },
+        }
+    }
+    if valid.len() == 1 {
+        source.resolved = valid.into_values().next(); source.status = "ready".into(); source.resolution_note = None;
+    } else {
+        if valid.len() > 1 { reason = Some(format!("{} matching files found. Use Locate file to choose the intended copy.", valid.len())); }
+        source.status = if reason.is_some() { "needs_relink" } else { "offline" }.into();
+        source.resolution_note = Some(reason.unwrap_or_else(|| "Referenced media was not found. Choose its mounted workspace or media folder.".into()));
+        diagnostics::log(app, job, "warn", "media", &format!("{} · {} · {}", source.id, source.status, source.resolution_note.as_deref().unwrap_or("Unavailable")));
+        // Keep the previous verified binding and all saved transcripts.
+    }
     Ok(())
 }
 
@@ -198,7 +236,7 @@ mod tests {
     fn source() -> AafSource {
         AafSource { id:"source:1".into(), mob_id:"urn:smpte:umid:abcd".into(), slot_id:1,
             locators:vec![], ancestors:vec![], channel:1, channels:2, sample_rate:48000,
-            sample_width:2, sample_count:96000, descriptor:"PCMDescriptor".into(), status:"offline".into(), resolved:None }
+            sample_width:2, sample_count:96000, descriptor:"PCMDescriptor".into(), status:"offline".into(), resolved:None, resolution_note:None }
     }
     #[test]
     fn verified_binding_survives_disconnection_but_never_silently_accepts_changed_media() {
@@ -216,10 +254,37 @@ mod tests {
     }
     #[test]
     fn local_locator_decoding_and_mount_prefixes_do_not_follow_network_urls() {
-        assert_eq!(locator_paths("file:///Editing-Mac/Volumes/Show%20Audio/roll.wav"), vec![PathBuf::from("/Editing-Mac/Volumes/Show Audio/roll.wav"),PathBuf::from("/Volumes/Show Audio/roll.wav")]);
-        for url in ["https://example.test/audio.wav","smb://nexis/roll.wav","file://remote/roll.wav","../roll.wav"] { assert!(locator_paths(url).is_empty()); }
-        let mut s=source(); s.locators=vec!["file:///Volumes/Show/roll.wav".into()];
-        assert!(!mapped_paths(&s,&[AafPathMapping { from:"/Volumes/Sho".into(),to:"/tmp/wrong".into() }]).contains(&PathBuf::from("/tmp/wrong/w/roll.wav")));
+        let mut s=source(); s.locators=vec!["file:///Editing-Mac/Volumes/Show%20Audio/roll.wav".into()];
+        assert_eq!(linked_paths::candidates(&s, &[]), BTreeSet::from([PathBuf::from("/Editing-Mac/Volumes/Show Audio/roll.wav"),PathBuf::from("/Volumes/Show Audio/roll.wav")]));
+        s.locators=vec!["/Editing-Mac/Volumes/Show Audio/roll.wav".into()];
+        assert!(linked_paths::candidates(&s,&[]).contains(Path::new("/Volumes/Show Audio/roll.wav")));
+        s.locators=vec!["file:///Volumes/Show/roll.wav".into()];
+        assert!(!linked_paths::candidates(&s,&[AafPathMapping { from:"/Volumes/Sho".into(),to:"/tmp/wrong".into(), authority:None }]).contains(&PathBuf::from("/tmp/wrong/w/roll.wav")));
+    }
+    #[test]
+    fn nexis_workspace_mapping_is_host_scoped_and_remembers_verified_parent() {
+        let mut s=source(); s.locators=vec!["file://TestNexis/Show%20Audio/Avid%20MediaFiles/MXF/Editor.2/A01.mxf".into()];
+        assert!(linked_paths::candidates(&s,&[]).contains(Path::new("/Volumes/Show Audio/Avid MediaFiles/MXF/Editor.2/A01.mxf")));
+        assert!(linked_paths::under_root(&s,Path::new("/tmp/Renamed Mount")).contains(Path::new("/tmp/Renamed Mount/Avid MediaFiles/MXF/Editor.2/A01.mxf")));
+        s.resolved=Some(AafResolvedSource {path:"/tmp/Renamed Mount/Avid MediaFiles/MXF/Editor.2/A01.mxf".into(),fingerprint:"a".repeat(64),stream_index:0,size:1,modified_ms:0});
+        let mut mappings=vec![]; linked_paths::remember(&s,&mut mappings);
+        assert_eq!(mappings.len(),1); assert_eq!(mappings[0].authority.as_deref(),Some("testnexis"));
+        s.locators[0]=s.locators[0].replace("A01.mxf","A02.mxf");
+        assert!(linked_paths::candidates(&s,&mappings).contains(Path::new("/tmp/Renamed Mount/Avid MediaFiles/MXF/Editor.2/A02.mxf")));
+        s.locators[0]=s.locators[0].replace("TestNexis","OtherServer");
+        assert!(!linked_paths::candidates(&s,&mappings).iter().any(|p| p.starts_with("/tmp/Renamed Mount")));
+    }
+    #[test]
+    fn op1a_uses_source_slot_and_material_track_not_channel_or_stream_order() {
+        use super::super::linked_probe::{MxfTrack,material_track};
+        let mut s=source(); s.slot_id=38;
+        let tracks=vec![MxfTrack{material_track_id:7,mob_id:s.mob_id.clone(),slot_id:38,aligned:true},MxfTrack{material_track_id:5,mob_id:s.mob_id.clone(),slot_id:42,aligned:true}];
+        assert_eq!(material_track(&tracks,&s).unwrap(),7);
+        s.slot_id=42; assert_eq!(material_track(&tracks,&s).unwrap(),5);
+        s.slot_id=7; assert!(material_track(&tracks,&s).is_err());
+        s.slot_id=38; assert!(material_track(&[tracks[0].clone(),tracks[0].clone()],&s).is_err());
+        let mut shifted=tracks[0].clone(); shifted.aligned=false; assert!(material_track(&[shifted],&s).is_err());
+        s.mob_id="abcd1111".into(); assert!(material_track(&tracks,&s).is_err());
     }
     #[test]
     fn probe_rejects_wrong_channels_duration_compressed_audio_and_umid() {
