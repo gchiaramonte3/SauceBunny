@@ -5,6 +5,8 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-22
+
 ### Added
 - Library Projects organize references to local media, web links, transcripts
   and saved Multitrack sequences in nested in-app folders. Favorites, smart
