@@ -11,16 +11,27 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.open }));
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 beforeEach(() => {
   vi.clearAllMocks(); mocks.open.mockResolvedValue("/fixtures/Interview.aaf");
-  mocks.invoke.mockImplementation((command: string) => Promise.resolve(command === "aaf_list" ? [] : command === "aaf_import" ? multitrackFixture() : command === "aaf_waveform" ? { peaks: [[-.5, .5]] } : undefined));
+  mocks.invoke.mockImplementation((command: string) => Promise.resolve(command === "aaf_sequences" ? [{ id: "sequence", name: "Interview" }] : command === "aaf_list" ? [] : command === "aaf_import" ? multitrackFixture() : command === "aaf_waveform" ? { peaks: [[-.5, .5]] } : undefined));
 });
 
 describe("multitrack document ownership", () => {
+  it("offers multiple top-level sequences and imports only the user's choice", async () => {
+    const base=mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((command,args)=>command==="aaf_sequences"?Promise.resolve([{id:"one",name:"First"},{id:"two",name:"Second"}]):base(command,args));
+    const {result}=renderHook(()=>useMultitrackDocument(true)); await act(async()=>result.current.load());
+    expect(result.current.sequenceChoices?.choices).toHaveLength(2); expect(result.current.document).toBeNull();
+    expect(mocks.invoke.mock.calls.some(([command])=>command==="aaf_import")).toBe(false);
+    act(()=>result.current.chooseSequence("two"));
+    await waitFor(()=>expect(result.current.document).not.toBeNull());
+    expect(mocks.invoke).toHaveBeenCalledWith("aaf_import",expect.objectContaining({sequenceId:"two",path:"/fixtures/Interview.aaf"}));
+  });
   it("keeps queued owner edits when another sequence is opened before returning", async () => {
     let disk = multitrackFixture();
     const other = { ...multitrackFixture(), id: "other-sequence" }, gate = deferred<void>();
     let writes = 0;
     mocks.invoke.mockImplementation(async (command, args) => {
       if (command === "aaf_list") return [];
+      if (command === "aaf_sequences") return [{ id: "sequence", name: "Interview" }];
       if (command === "aaf_import") return structuredClone(disk);
       if (command === "aaf_open") return structuredClone(args.documentId === other.id ? other : disk);
       if (command === "aaf_waveform") return { peaks: [[-.5, .5]] };

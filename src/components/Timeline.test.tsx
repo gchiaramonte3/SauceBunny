@@ -58,7 +58,7 @@ it("keeps cut-marker source seconds precise and out of the scrub/chapters path",
   const onCutSeek = vi.fn(), onScrubStart = vi.fn();
   const { onSeek } = mount({ fps: 24000 / 1001, cutMarkers: [{ time: 1.500002 }],
     chapterMarkers: [{ time: 1.500002, title: "Creator chapter" }], onCutSeek, onScrubStart });
-  const cut = screen.getByRole("button", { name: "Cut at 1.500 seconds" });
+  const cut = screen.getByRole("button", { name: "Cut at 00:00:01:11" });
   fireEvent.mouseDown(cut);
   fireEvent.click(cut);
   expect(onCutSeek).toHaveBeenCalledWith(1.500002);

@@ -67,7 +67,7 @@ def inspect_source(path: Path):
     return {"analysis_source": metadata}
 
 
-def analyze_shots(path: Path, request, engine_factory, on_progress):
+def analyze_shots(path: Path, request, engine_factory, on_progress, on_shot=None):
     selected = picture_model(request)
     shots = validate_shots(request)
     # Full content identity ties these ranges to the source that was inspected,
@@ -81,6 +81,9 @@ def analyze_shots(path: Path, request, engine_factory, on_progress):
     try:
         with contextlib.closing(Video(path)) as video:
             metadata = source_metadata(source, video)
+            binding = {"analysis_id": request["analysis_id"], "source": metadata,
+                       "model_id": selected, "model_revision": model_spec(selected)["revision"],
+                       "sampling_version": SAMPLING_VERSION, "audio_analyzed": False}
             if shots[-1]["end_us"] > metadata["duration_us"]:
                 raise ValueError("A detected shot extends beyond the video")
             for position, shot in enumerate(shots):
@@ -102,10 +105,10 @@ def analyze_shots(path: Path, request, engine_factory, on_progress):
                                 "picture_description": text, "transcript_summary": None})
                 # Do not retain images from completed shots while decoding the next.
                 del frames
+                if on_shot is not None:
+                    on_shot({**binding, "shots": [answers[-1]]})
                 on_progress("analyzing-shots", position + 1, len(shots))
-        return {"shot_analysis": {"analysis_id": request["analysis_id"], "source": metadata,
-                "model_id": selected, "model_revision": model_spec(selected)["revision"],
-                "sampling_version": SAMPLING_VERSION, "audio_analyzed": False, "shots": answers}}
+        return {"shot_analysis": {**binding, "shots": answers}}
     finally:
         if engine is not None:
             engine.close()

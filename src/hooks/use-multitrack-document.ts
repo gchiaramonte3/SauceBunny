@@ -7,6 +7,8 @@ import type { AafDocumentSummary } from "../bindings/AafDocumentSummary";
 import type { AafTrackTranscript } from "../bindings/AafTrackTranscript";
 import type { AafWaveform } from "../bindings/AafWaveform";
 import type { AafTrackLabel } from "../bindings/AafTrackLabel";
+import type { AafSequenceChoice } from "../bindings/AafSequenceChoice";
+import { alternativeLane, laneReady, mediaRevision } from "../lib/multitrack-graph";
 import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
 import { mergeTrackTranscript } from "../lib/multitrack";
@@ -15,6 +17,9 @@ export function useMultitrackDocument(active: boolean) {
   const [document, setDocument] = useState<AafDocument | null>(null);
   const [saved, setSaved] = useState<AafDocumentSummary[]>([]);
   const [loading, setLoading] = useState(false);
+  const [sequenceChoices, setSequenceChoices] = useState<{ path: string; choices: AafSequenceChoice[] } | null>(null);
+  const [visible, setVisible] = useState<string[]>([]);
+  const showTracks = useCallback((ids: string[]) => setVisible(prior => prior.join("|") === ids.join("|") ? prior : ids), []);
   const [error, setError] = useState<string | null>(null);
   const [labelStatus, setLabelStatus] = useState("");
   const [waveforms, setWaveforms] = useState<Record<string, number[][]>>({});
@@ -38,14 +43,22 @@ export function useMultitrackDocument(active: boolean) {
     setLoading(false);
     if (jobId) void invoke("cancel_job", { jobId }).catch((cause) => setError(formatError(cause)));
   }, []);
-  const load = useCallback(async (documentId?: string) => {
+  const load = useCallback(async (documentId?: string, selectedPath?: string, sequenceId?: string) => {
     if (importJob.current) return;
     const token = ++revision.current;
-    const jobId = newJobId(); importJob.current = jobId;
+    let jobId = newJobId(); importJob.current = jobId;
     setLoading(true); setError(null);
     try {
-      const path = documentId ? null : await open({ multiple: false, directory: false, filters: [{ name: "AAF sequence", extensions: ["aaf"] }] });
+      const path = documentId ? null : selectedPath ?? await open({ multiple: false, directory: false, filters: [{ name: "AAF sequence", extensions: ["aaf"] }] });
       if (token !== revision.current || !mounted.current || (!documentId && typeof path !== "string")) return;
+      if (!documentId && !sequenceId) {
+        const choices = await invoke<AafSequenceChoice[]>("aaf_sequences", { path, jobId });
+        if (token !== revision.current || !mounted.current) return;
+        if (choices.length > 1) { setSequenceChoices({ path: path as string, choices }); return; }
+        sequenceId = choices[0]?.id;
+        jobId = newJobId(); importJob.current = jobId;
+      }
+      setSequenceChoices(null);
       let next: AafDocument;
       if (documentId) {
         // Opening another sequence does not cancel this one's queued writes.
@@ -57,8 +70,13 @@ export function useMultitrackDocument(active: boolean) {
           next = await invoke<AafDocument>("aaf_open", { documentId });
           if (pending === saves.current.get(documentId)) break;
         }
-      } else next = await invoke<AafDocument>("aaf_import", { path, jobId });
+      } else next = await invoke<AafDocument>("aaf_import", { path, jobId, sequenceId: sequenceId ?? null });
       const labelsBeforeMetadata = saves.current.get(next.id);
+      if (next.manifest.graph?.sources.length && token === revision.current && mounted.current) {
+        jobId = newJobId(); importJob.current = jobId;
+        try { next = await invoke<AafDocument>("aaf_resolve_media", { documentId: next.id, jobId }); }
+        catch { /* Offline projects still open; preparing media checks identity again. */ }
+      }
       if (next.manifest.recording_dates == null && token === revision.current && mounted.current) {
         try { next = await invoke<AafDocument>("aaf_read_recording_dates", { documentId: next.id, jobId }); }
         catch { /* Saved text remains readable when the original media is offline. */ }
@@ -89,7 +107,7 @@ export function useMultitrackDocument(active: boolean) {
         await saves.current.get(event.payload);
         const saved = await invoke<AafDocument>("aaf_open", { documentId: event.payload });
         if (!disposed && before && current.current === before) {
-          const next = { ...saved, manifest: { ...before.manifest, recording_dates: saved.manifest.recording_dates } };
+          const next = { ...saved, manifest: { ...before.manifest, graph: saved.manifest.graph, recording_dates: saved.manifest.recording_dates } };
           current.current = next; setDocument(next);
         }
       } catch (cause) { if (!disposed) setError(formatError(cause)); }
@@ -99,8 +117,10 @@ export function useMultitrackDocument(active: boolean) {
     return () => { disposed = true; void subscription.then(unlisten => unlisten()).catch(() => {}); };
   }, [documentId]);
   const tracks = document?.manifest.tracks;
+  const mediaKey = document ? mediaRevision(document) : "";
+  const requested = visible.join("|");
   const waveformCache = useRef<Record<string, number[][]>>({});
-  useEffect(() => { waveformCache.current = {}; setWaveforms({}); setWaveformErrors({}); }, [documentId]);
+  useEffect(() => { waveformCache.current = {}; setWaveforms({}); setWaveformErrors({}); }, [documentId, mediaKey]);
   useEffect(() => {
     if (!active || loading || !documentId || !tracks) return;
     let cancelled = false;
@@ -108,6 +128,8 @@ export function useMultitrackDocument(active: boolean) {
     void (async () => {
       for (const track of tracks) {
         if (cancelled) break;
+        const snapshot = current.current;
+        if (!snapshot || !laneReady(snapshot, track.id) || (requested ? !requested.split("|").includes(track.id) : alternativeLane(snapshot, track.id))) continue;
         if (waveformCache.current[track.id]) continue;
         jobId = newJobId();
         try {
@@ -118,7 +140,7 @@ export function useMultitrackDocument(active: boolean) {
       jobId = null;
     })();
     return () => { cancelled = true; if (jobId) void invoke("cancel_job", { jobId }).catch(() => {}); };
-  }, [active, loading, documentId, tracks]);
+  }, [active, loading, documentId, tracks, mediaKey, requested]);
 
   const rename = useCallback((trackId: string, ownerName: string, castMemberId?: string | null, color?: string | null, preferences?: Pick<AafTrackLabel, "gender" | "marker_color">) => {
     const before = current.current;
@@ -143,5 +165,6 @@ export function useMultitrackDocument(active: boolean) {
     if (!before) return;
     const next = mergeTrackTranscript(before, transcript); current.current = next; setDocument(next);
   }, []);
-  return { document, saved, loading, error, labelStatus, waveforms, waveformErrors, load, cancelImport, rename, acceptTranscript };
+  return { document, saved, loading, error, labelStatus, waveforms, waveformErrors, load, cancelImport, rename, acceptTranscript, showTracks,
+    sequenceChoices, chooseSequence: (id: string) => { if (sequenceChoices) void load(undefined, sequenceChoices.path, id); }, cancelChoice: () => setSequenceChoices(null) };
 }

@@ -23,6 +23,31 @@ def request_for(path):
 
 
 class ShotAnalysisTests(unittest.TestCase):
+    def test_publishes_complete_shot_before_next_inference_and_retains_it_on_failure(self):
+        updates = []
+        engine = Mock()
+        def reason(*args, **kwargs):
+            if updates:
+                self.assertEqual(updates[0]["shots"][0]["id"], 1)
+                self.assertEqual(updates[0]["source"]["sha256"], self.request["source_sha256"])
+                self.assertEqual(updates[0]["shots"][0]["picture_description"], "A red frame.")
+                raise RuntimeError("second shot failed")
+            return "A red frame."
+        engine.reason.side_effect = reason
+        with self.assertRaisesRegex(RuntimeError, "second shot failed"):
+            analyze_shots(self.path, self.request, lambda: engine, Mock(), updates.append)
+        self.assertEqual(len(updates), 1)
+        self.assertFalse(updates[0]["audio_analyzed"])
+        engine.close.assert_called_once()
+
+    def test_streamed_results_match_final_without_reloading_the_model(self):
+        updates, factory = [], Mock()
+        factory.return_value.reason.return_value = "Visible frame."
+        result = analyze_shots(self.path, self.request, factory, Mock(), updates.append)["shot_analysis"]
+        self.assertEqual([item["shots"][0] for item in updates], result["shots"])
+        self.assertTrue(all(item["model_revision"] == result["model_revision"] for item in updates))
+        factory.assert_called_once()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

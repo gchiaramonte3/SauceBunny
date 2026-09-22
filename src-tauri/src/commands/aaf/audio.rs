@@ -4,6 +4,17 @@ use crate::AppError;
 use std::{io::{Read, Seek, SeekFrom}, path::{Path, PathBuf}};
 use tauri::{AppHandle, Manager};
 
+static PREPARATION: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+pub async fn preparation(app: &AppHandle, job: &str) -> Result<tokio::sync::SemaphorePermit<'static>, AppError> {
+    loop {
+        process::check_cancelled(app, job)?;
+        tokio::select! {
+            permit = PREPARATION.acquire() => return permit.map_err(|_| AppError::internal("Audio preparation unavailable")),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {},
+        }
+    }
+}
+
 pub struct WorkDir(pub PathBuf);
 impl WorkDir {
     pub fn new(app: &AppHandle, job: &str) -> Result<Self, AppError> {
@@ -37,11 +48,17 @@ pub async fn extract_16k(app: &AppHandle, document: &AafDocument, track: &str, s
     let wav = directory.join("audio.wav");
     // Share audition's read-only index; do not boot Python or compute unused
     // waveform peaks for every recognition chunk. FFmpeg remains the resampler.
-    let reader = super::pcm::get(app, document, job).await?;
-    let (app2, job2, track2, raw2) = (app.clone(), job.to_owned(), track.to_owned(), raw.clone());
-    tauri::async_runtime::spawn_blocking(move || reader.wav(reader.index.track(&track2)?, start, duration, &raw2,
-        || process::check_cancelled(&app2, &job2))).await.map_err(|e| AppError::internal(e.to_string()))??;
+    if super::linked_audio::needed(document) {
+        super::linked_audio::render(app, document, track, start, duration, job, &raw).await?;
+    } else {
+        let _permit = preparation(app, job).await?;
+        let reader = super::pcm::get(app, document, job).await?;
+        let (app2, job2, track2, raw2) = (app.clone(), job.to_owned(), track.to_owned(), raw.clone());
+        tauri::async_runtime::spawn_blocking(move || reader.wav(reader.index.track(&track2)?, start, duration, &raw2,
+            || process::check_cancelled(&app2, &job2))).await.map_err(|e| AppError::internal(e.to_string()))??;
+    }
     process::check_cancelled(app, job)?;
+    let _permit = preparation(app, job).await?;
     let mut args = crate::commands::transcript::wav_16k_mono_args(&raw.to_string_lossy(), None, &wav.to_string_lossy());
     args.splice(0..0, ["-nostdin".into(), "-hide_banner".into(), "-loglevel".into(), "error".into()]);
     process::run(app, job, "resample", "ffmpeg", args).await?.require_success("ffmpeg")?;
@@ -61,6 +78,8 @@ pub async fn prepare(app: &AppHandle, document: &AafDocument, track: &str, start
     validate_range(document, start, duration)?;
     store::track(document, track)?;
     store::source_ready(document)?;
+    if super::linked_audio::needed(document) { return prepare_linked(app, document, track, start, duration, job).await; }
+    let _permit = preparation(app, job).await?;
     let reader = super::pcm::get(app, document, job).await?;
     let selected = reader.index.track(track)?;
     let sample_rate = selected.sample_rate;
@@ -89,6 +108,21 @@ pub async fn prepare(app: &AppHandle, document: &AafDocument, track: &str, start
         duration_frames: duration, sample_rate, sample_count: sample_count as i64, peaks: Vec::new() };
     crate::commands::system::write_bytes_impl(&metadata_path.to_string_lossy(), &serde_json::to_vec(&asset)?, false, false, true)?;
     Ok(asset)
+}
+
+async fn prepare_linked(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64, job: &str) -> Result<AafAudioAsset, AppError> {
+    super::linked::check_sources(document, store::track(document, track)?)?;
+    let expected = super::linked_audio::sample(start+duration, &document.manifest.edit_rate)-super::linked_audio::sample(start, &document.manifest.edit_rate);
+    let key = store::cache_key(document, track, &format!("linked-pcm-v1-{start}-{duration}"));
+    let destination = store::cache(app)?.join(format!("{key}.wav"));
+    if !native_wav_valid(&destination, 48000, 3, expected) {
+        let work = WorkDir::new(app, job)?; let partial = work.0.join("window.wav");
+        super::linked_audio::render(app, document, track, start, duration, job, &partial).await?;
+        process::check_cancelled(app, job)?;
+        std::fs::rename(partial, &destination)?;
+    }
+    Ok(AafAudioAsset { path: destination.to_string_lossy().into_owned(), start_frame: start, duration_frames: duration,
+        sample_rate: 48000, sample_count: expected as i64, peaks: Vec::new() })
 }
 
 fn native_wav_valid(path: &Path, hz: u32, width: u32, samples: u64) -> bool {

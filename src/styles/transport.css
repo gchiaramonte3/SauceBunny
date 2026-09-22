@@ -791,6 +791,17 @@
   text-align: center;
   line-height: var(--leading-normal);
 }
+.cp-timeline-hint { position: relative; }
+.cp-timeline-hint--confirming .cp-timeline-hint-default { visibility: hidden; }
+.cp-timeline-hint-status { position: absolute; inset: 0; pointer-events: none; }
+.cp-timeline-confirmation { color: var(--fg-2); animation: cp-timeline-confirmation 3s linear both; }
+@keyframes cp-timeline-confirmation {
+  0%, 90% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-timeline-confirmation { animation: none; }
+}
 
 
 /* Keyboard focus on the playhead (r151). The timeline is the app's primary

@@ -13,3 +13,11 @@ export function multitrackFixture(): AafDocument {
 export function multitrackTranscript(trackId = "track-1"): AafTrackTranscript {
   return { track_id: trackId, engine: "parakeet", model_id: "parakeet-tdt-0.6b-v3", start_frame: 0, duration_frames: 2878, status: "completed", sample_rate: 16000, cues: [{ id: "cue-1", start_sample: 160000, end_sample: 208000, text: "This is the first answer.", boundary_review: false }], timing_issues: [], warnings: [] };
 }
+
+export function multitrackGroupFixture(): AafDocument {
+  const doc = multitrackFixture();
+  doc.manifest.graph = { sequence_id: "top", sources: [], positions: [], markers: [], picture_tracks: [], path_mappings: [],
+    lanes: doc.manifest.tracks.map((track, index) => ({ track_id: track.id, parent_track_id: index ? "track-1" : null, branch_id: index ? `branch-${index}` : null, group_name: "Group fixture", availability: "ready" })) };
+  doc.manifest.tracks.forEach((track, index) => { track.physical_track_number = 1; track.clips[0].source_id = `source-${index}`; });
+  return doc;
+}

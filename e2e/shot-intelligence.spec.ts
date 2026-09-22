@@ -8,6 +8,8 @@ import type { VideoRequest } from "../src/bindings/VideoRequest";
 import type { VideoAudioWindow } from "../src/bindings/VideoAudioWindow";
 import type { VideoMusicAnalysis } from "../src/bindings/VideoMusicAnalysis";
 import type { VideoShotAnalysis } from "../src/bindings/VideoShotAnalysis";
+import { secondsToTc } from "../src/lib/timecode";
+import { AUDIOSET_CLASSIFIER, AUDIOSET_PREPROCESSING } from "../src/lib/scene-analysis/music-summary";
 
 const proxyManifestPath = process.env.SCENE_PROXY_MANIFEST;
 const generatedReportPath = process.env.SCENE_GENERATED_SMOKE_REPORT;
@@ -61,13 +63,13 @@ test.afterEach(async ({ page }) => {
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("e2e.cspViolations") ?? "[]"))).toEqual([]);
 });
 
-async function boot(page: Page, enabled = true, live = false, videoPath = "/clip.mp4") {
+async function boot(page: Page, enabled = true, live = false, videoPath = "/clip.mp4", fps = 30) {
   await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
-  await page.addInitScript(({ enabled, live, videoPath }) => {
+  await page.addInitScript(({ enabled, live, videoPath, fps }) => {
     if (enabled) localStorage.setItem("saucebunny.shotIntelligence.preview", "1");
     localStorage.setItem("saucebunny.ai.provider", "openai"); // Fake cloud IPC; prevents unrelated local pre-warm.
     localStorage.setItem("saucebunny.panelSnapshot", JSON.stringify({ sourceIdentity: "source-a", programInputActive: live,
-      transcriptPath: "/clip.srt", aiVideoPath: videoPath, hasSource: true, durationSec: 12, chapterSourceKey: "source-a" }));
+      transcriptPath: "/clip.srt", aiVideoPath: videoPath, fps, hasSource: true, durationSec: 12, chapterSourceKey: "source-a" }));
     localStorage.setItem("e2e.files", JSON.stringify({ "/clip.srt": "1\n00:00:00,000 --> 00:00:01,000\nA supplied line.\n" }));
     const app = window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
     const original = app.__TAURI_INTERNALS__.invoke;
@@ -81,10 +83,97 @@ async function boot(page: Page, enabled = true, live = false, videoPath = "/clip
       }
       return original(cmd, args);
     };
-  }, { enabled, live, videoPath });
+  }, { enabled, live, videoPath, fps });
   await page.goto("/?window=panel");
   await page.getByRole("tab", { name: "AI Summary" }).click();
 }
+
+test("shot corrections edit every column, reopen, and remain compact at narrow widths", async ({ page }) => {
+  test.skip(process.env.SAUCE_PACKAGED_FRONTEND === "1", "Correction UI fixture uses mocked native persistence, not packaged inference");
+  await page.setViewportSize({ width: 440, height: 820 });
+  await page.route("**/src/hooks/use-shot-intelligence.ts*", route => route.fulfill({ contentType: "text/javascript", body: `
+    export function useShotIntelligence() {
+      const restored = !!localStorage.getItem("e2e.analysisCorrections");
+      return { busy:false, stopping:false, draining:false, error:"", nativeError:"", audioError:"", phase:"", progress:null,
+        audio:{status:"not-started"}, dialogue:{status:"ready",text:{},error:""}, complete:true, modelUsed:"qwen3.5-9b-video",
+        evidence: restored ? null : {id:"fixture",proxy:{source:{path:"/clip.mp4",sha256:"${"a".repeat(64)}",duration_us:4000000,origin_us:0}},
+          shots:[{id:1,start_us:0,end_us:2000000,transcript:"Original dialogue"},{id:2,start_us:2000000,end_us:4000000,transcript:""}],detection:{boundaries:[{}]}},
+        answers:[{id:1,picture_description:"Original picture",transcript_summary:"Original summary"}], start:async()=>{},stop:()=>{}};
+    }` }));
+  await boot(page, true, false, "/clip.mp4", 24000 / 1001);
+  const mockCorrectionPersistence = () => {
+    const app = window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
+    const invoke = app.__TAURI_INTERNALS__.invoke;
+    app.__TAURI_INTERNALS__.invoke = async (cmd, args) => {
+      const stored = JSON.parse(localStorage.getItem("e2e.analysisCorrections") ?? "null");
+      if (cmd === "load_analysis_corrections") return stored;
+      if (cmd === "save_analysis_correction") {
+        if (localStorage.getItem("e2e.correctionFailure")) throw new Error("Cannot save: disk full");
+        const snapshot = args?.snapshot as Record<string, unknown>, key = String(args?.key);
+        const doc = { ...snapshot, revision: (stored?.revision ?? 0) + 1, corrections: { ...stored?.corrections,
+          [key]: { ...(args?.edit as Record<string, unknown>), revision: Number(args?.expectedRevision) + 1 } } };
+        localStorage.setItem("e2e.analysisCorrections", JSON.stringify(doc)); return doc;
+      }
+      return invoke(cmd, args);
+    };
+  };
+  await page.addInitScript(mockCorrectionPersistence);
+  await page.evaluate(mockCorrectionPersistence);
+  await page.getByRole("switch", { name: "Advanced Intelligence" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("button", { name: "Edit shot 1 picture", exact: true }).click();
+  await page.getByRole("textbox", { name: "Picture", exact: true }).fill("Corrected picture: 東京 é");
+  const bounds = (await page.getByRole("dialog").boundingBox())!;
+  expect(bounds.x).toBeGreaterThanOrEqual(8); expect(bounds.x + bounds.width).toBeLessThanOrEqual(432);
+  await page.screenshot({ path: `/private/tmp/sauce-analysis-editor-${process.env.SCENE_BROWSER ?? "chromium"}.png`, animations: "disabled" });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText("Corrected picture: 東京 é", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit shot 1 end", exact: true }).click();
+  const end = page.getByRole("textbox", { name: "End", exact: true });
+  await end.fill("abc"); await expect(end).not.toHaveValue("abc");
+  await end.fill("100"); await end.press("Enter");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit shot 1 end", exact: true })).toHaveText("00:00:01:00");
+  await page.getByRole("button", { name: "Edit shot 1 start", exact: true }).click();
+  await page.getByRole("textbox", { name: "Start", exact: true }).fill("1");
+  await page.getByRole("textbox", { name: "Start", exact: true }).press("Enter");
+  await page.getByRole("button", { name: "Edit shot 1 duration", exact: true }).click();
+  await page.getByRole("textbox", { name: "Duration", exact: true }).fill("100");
+  await page.getByRole("textbox", { name: "Duration", exact: true }).press("Enter");
+  await expect(page.getByRole("button", { name: "Edit shot 1 end", exact: true })).toHaveText("00:00:01:01");
+  await page.getByText("Transcript summary", { exact: true }).first().click();
+  await page.getByRole("button", { name: "Edit shot 1 transcript summary", exact: true }).click();
+  await page.getByRole("textbox", { name: "Transcript summary", exact: true }).fill("Corrected summary");
+  await page.getByRole("textbox", { name: "Transcript summary", exact: true }).press("Control+Enter");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("button", { name: "Edit shot 1 dialogue", exact: true }).click();
+  await page.getByRole("textbox", { name: "Dialogue", exact: true }).fill("");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Edit shot 1 dialogue", exact: true })).toHaveText("Empty");
+  await page.getByRole("button", { name: "Edit shot 1 shot", exact: true }).click();
+  await page.getByRole("textbox", { name: "Shot", exact: true }).fill("1B");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Edit shot 1B picture", exact: true })).toBeVisible();
+  await page.evaluate(() => localStorage.setItem("e2e.correctionFailure", "1"));
+  await page.getByRole("button", { name: "Edit shot 1B picture", exact: true }).click();
+  await page.getByRole("textbox", { name: "Picture", exact: true }).fill("Unsaved draft");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("Cannot save: disk full");
+  await expect(page.getByRole("textbox", { name: "Picture", exact: true })).toHaveValue("Unsaved draft");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  // Reopen the production analysis panel. The live hook has no evidence;
+  // the persisted document must supply the corrected rows without inference.
+  await page.reload();
+  await page.getByRole("tab", { name: "AI Summary", exact: true }).click();
+  const mode = page.getByRole("switch", { name: "Advanced Intelligence" });
+  if (!(await mode.isChecked())) await mode.click();
+  await expect(page.getByText("Corrected picture: 東京 é", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Shot 1B end at 00:00:01:01", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("e2e.analysisCorrections") ?? "{}").corrections["0:2000000"].end_us)).toBe(1042708);
+  expect(await page.evaluate(() => localStorage.getItem("saucebunny.cutMarkers.source-a"))).toBeNull();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("e2e.shotRequests") ?? "[]").filter((request: { operation: string }) => request.operation !== "models"))).toEqual([]);
+});
 
 test("the rollout defaults to the unchanged text workflow", async ({ page }) => {
   await boot(page, false);
@@ -99,7 +188,7 @@ test("an explicitly opted-in build exposes Advanced without changing saved prefe
   await expect(mode).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("saucebunny.shotIntelligence.preview"))).toBeNull();
   await mode.click();
-  await expect(page.getByText("Understand the cut, shot by shot.")).toBeVisible();
+  await expect(page.getByText("Analyze picture, dialogue, and audio.")).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("e2e.shotRequests"))).toBeNull();
 });
 
@@ -114,7 +203,7 @@ test("compact mode switch preserves the conversation and draft, and never auto-d
   const mode = page.getByRole("switch", { name: "Advanced Intelligence" });
   await mode.click();
   await expect(mode).toBeChecked();
-  await expect(page.getByText("Understand the cut, shot by shot.")).toBeVisible();
+  await expect(page.getByText("Analyze picture, dialogue, and audio.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Analyze video", exact: true })).toBeDisabled();
   await expect(page.getByRole("combobox", { name: "Picture model" })).toContainText("not installed");
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("e2e.shotRequests") ?? "[]"))).toEqual([{ operation: "models" }]);
@@ -140,7 +229,165 @@ test("a live input cannot analyze a retained file from the detached panel", asyn
   await expect(page.getByText(/Live inputs are not analyzed/)).toBeVisible();
 });
 
-test("detected cuts keep their action beside the count in narrow and enlarged panels", async ({ page }) => {
+test("analysis footer keeps every busy phase on one unclipped line beside Stop", async ({ page }) => {
+  test.skip(process.env.SAUCE_PACKAGED_FRONTEND === "1", "Layout fixture replaces a dev hook, not packaged inference");
+  await page.route("**/src/hooks/use-shot-intelligence.ts*", route => route.fulfill({
+    contentType: "text/javascript", body: `import React from "/node_modules/.vite/deps/react.js";
+      const {useEffect, useState} = React;
+      export function useShotIntelligence() {
+        const [phase, setPhase] = useState("");
+        const [stopping, setStopping] = useState(false);
+        useEffect(() => {
+          const change = event => {setPhase(event.detail); setStopping(false);};
+          window.addEventListener("test:analysis-phase", change);
+          return () => window.removeEventListener("test:analysis-phase", change);
+        }, []);
+        return {busy:!!phase, stopping, draining:false, error:"", nativeError:"", audioError:"",
+          phase, progress:42, audio:{status:"not-started"}, answers:[], evidence:null,
+          start:async()=>{}, stop:()=>setStopping(true)};
+      }`,
+  }));
+  await page.setViewportSize({ width: 360, height: 560 });
+  await boot(page);
+  await page.getByRole("switch", { name: "Advanced Intelligence" }).click();
+  const footer = page.locator(".cp-shot-actions");
+  const action = footer.locator(".cp-gen-btn");
+  const label = action.locator(".cp-gen-load");
+  const stop = footer.getByRole("button", { name: "Stop", exact: true });
+  for (const width of [360, 440, 680]) {
+    await page.setViewportSize({ width, height: 560 });
+    for (const scale of [1, 1.25]) {
+      await page.locator(".cp-shot-analysis").evaluate((element, value) => {
+        (element as HTMLElement).style.zoom = String(value);
+      }, scale);
+      let firstHeight = 0;
+      for (const phase of ["Preparing analysis video…", "Detecting shots…", "Checking source and transcript…",
+        "Describing 0 of 1000 shots…", "Described 999 of 1000 shots", "Analyzing source audio…"]) {
+        await page.evaluate(value => window.dispatchEvent(new CustomEvent("test:analysis-phase", { detail: value })), phase);
+        await expect(action).toHaveAccessibleName(phase);
+        await expect(label).toHaveText(phase);
+        const geometry = await label.evaluate(element => {
+          const range = document.createRange(); range.selectNodeContents(element);
+          const style = getComputedStyle(element);
+          return { text: range.getBoundingClientRect().toJSON(), whiteSpace: style.whiteSpace };
+        });
+        const buttonBox = (await action.boundingBox())!;
+        const stopBox = (await stop.boundingBox())!;
+        firstHeight ||= buttonBox.height;
+        expect(buttonBox.height).toBeCloseTo(firstHeight, 1);
+        expect(geometry.whiteSpace).toBe("nowrap");
+        expect(geometry.text.y).toBeGreaterThan(buttonBox.y);
+        expect(geometry.text.bottom).toBeLessThan(buttonBox.y + buttonBox.height);
+        expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(stopBox.x - 7);
+        expect(stopBox.x + stopBox.width).toBeLessThanOrEqual(width);
+        expect(stopBox.y + stopBox.height).toBeLessThanOrEqual(560);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      }
+    }
+  }
+  await page.setViewportSize({ width: 360, height: 560 });
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("test:analysis-phase", { detail: "Preparing analysis video…" })));
+  await expect(action).toHaveAccessibleName("Preparing analysis video…");
+  await page.screenshot({ path: `/private/tmp/sauce-analysis-footer-${process.env.SCENE_BROWSER ?? "chromium"}.png` });
+  await stop.click();
+  await expect(action).toHaveAccessibleName("Stopping…");
+  await expect(stop).toBeDisabled();
+});
+
+for (const fps of [24000 / 1001, 60000 / 1001]) test(`analysis uses source-frame timecode at ${fps} fps in the detached panel`, async ({ page, browserName }) => {
+  test.skip(process.env.SAUCE_PACKAGED_FRONTEND === "1", "Uses deterministic evidence, not packaged inference");
+  const startUs = Math.round((Math.round(fps) * 58 + 15) / fps * 1e6);
+  const endUs = Math.round((Math.round(fps) * 59 + 15) / fps * 1e6);
+  await page.route("**/src/hooks/use-shot-intelligence.ts*", route => route.fulfill({
+    contentType: "text/javascript", body: `export function useShotIntelligence() { return {
+      busy:false, stopping:false, draining:false, error:"", nativeError:"", audioError:"", phase:"", progress:null,
+      audio:{status:"not-started"}, answers:[], start:async()=>{}, stop:()=>{},
+      evidence:{id:"frame-clock", detection:{boundaries:[{}]}, shots:[
+        {id:1,start_us:0,end_us:${startUs},transcript:""},
+        {id:2,start_us:${startUs},end_us:${endUs},transcript:"Supplied dialogue."}
+      ]}
+    }; }`,
+  }));
+  await page.setViewportSize({ width: 440, height: 800 });
+  await boot(page, true, false, "/fractional.mp4", fps);
+  await page.getByRole("switch", { name: "Advanced Intelligence" }).click();
+  const time = page.getByRole("button", { name: "Shot 2 start at 00:00:58:15", exact: true });
+  const end = page.getByRole("button", { name: "Shot 2 end at 00:00:59:15", exact: true });
+  await expect(time).toBeVisible();
+  await expect(end).toBeVisible();
+  await expect(page.locator(".cp-shot-duration").last()).toHaveText("00:00:01:00");
+  const appearance = await time.evaluate(element => {
+    const css = getComputedStyle(element);
+    return { border: css.borderTopWidth, style: css.borderTopStyle, cursor: css.cursor, height: element.getBoundingClientRect().height };
+  });
+  expect(appearance).toMatchObject({ border: "1px", style: "solid", cursor: "pointer" });
+  expect(appearance.height).toBeGreaterThanOrEqual(24);
+  await time.click();
+  const seeks = () => page.evaluate(() => (window as unknown as { __TAURI_MOCK__: {
+    invoked: () => { args?: { event?: string; payload?: unknown } }[];
+  } }).__TAURI_MOCK__.invoked().filter(call => call.args?.event === "panel:action:seek"));
+  expect(JSON.stringify((await seeks()).at(-1))).toContain(String(startUs / 1e6));
+  await time.press(browserName === "webkit" ? "Alt+Tab" : "Tab");
+  await expect(end).toBeFocused();
+  expect(await end.evaluate(element => getComputedStyle(element).outlineStyle)).toBe("solid");
+  await end.press("Enter");
+  expect(JSON.stringify((await seeks()).at(-1))).toContain(String(endUs / 1e6));
+  await time.focus();
+  await time.press("Space");
+  expect(JSON.stringify((await seeks()).at(-1))).toContain(String(startUs / 1e6));
+  for (const width of [360, 440, 680]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const scale of [1, 1.25]) {
+      await page.locator(".cp-shot-analysis").evaluate((element, value) => (element as HTMLElement).style.zoom = String(value), scale);
+      expect(await time.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+      expect(await end.evaluate(element => {
+        const button = element.getBoundingClientRect(), cell = element.closest("td")!.getBoundingClientRect();
+        return button.left >= cell.left && button.right <= cell.right;
+      })).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    }
+  }
+  await page.setViewportSize({ width: 680, height: 800 });
+  await page.locator(".cp-shot-analysis").evaluate(element => (element as HTMLElement).style.zoom = "1");
+  await page.screenshot({ path: `/private/tmp/sauce-frame-timecode-${Math.round(fps)}-${process.env.SCENE_BROWSER ?? "chromium"}.png` });
+});
+
+test("live shot and dialogue cells update in place without changing column widths", async ({ page }) => {
+  test.skip(process.env.SAUCE_PACKAGED_FRONTEND === "1", "Uses deterministic progressive evidence");
+  await page.route("**/src/hooks/use-shot-intelligence.ts*", route => route.fulfill({
+    contentType: "text/javascript", body: `import React from '/node_modules/.vite/deps/react.js'; const {useState,useEffect}=React;
+      export function useShotIntelligence() {
+        const [step,setStep]=useState(0);
+        useEffect(()=>{const update=e=>setStep(e.detail);window.addEventListener('test:shot-update',update);return()=>window.removeEventListener('test:shot-update',update)},[]);
+        return {busy:true, stopping:false, draining:false, error:'', nativeError:'', audioError:'', phase:'Describing shots…', progress:step*25,
+          audio:{status:'not-started'}, dialogue:{status:step>1?'ready':'analyzing',error:'',text:step?{1:step>1?'SPEAKER_00: Hello there.':'Hello there.'}:{}},
+          answers:step>2?[{id:1,picture_description:'A person walks through a warmly lit room and pauses beside a window.'}]:[],
+          start:async()=>{},stop:()=>{},evidence:{id:'live',detection:{boundaries:[{}]},shots:[
+            {id:1,start_us:0,end_us:1000000,transcript:''},{id:2,start_us:1000000,end_us:2000000,transcript:''}]}};
+      }`,
+  }));
+  await page.setViewportSize({ width: 680, height: 800 });
+  await boot(page);
+  await page.getByRole("switch", { name: "Advanced Intelligence" }).click();
+  const table = page.locator(".cp-shot-table"), first = table.locator("tbody tr").first();
+  await expect(first).toContainText("Transcribing…");
+  const widths = () => table.locator("thead th").evaluateAll(cells => cells.map(cell => cell.getBoundingClientRect().width));
+  const before = await widths();
+  await first.evaluate(element => element.setAttribute("data-retained-row", "yes"));
+  for (const step of [1, 2, 3]) {
+    await page.evaluate(value => window.dispatchEvent(new CustomEvent("test:shot-update", { detail: value })), step);
+    await expect(first).toContainText(step > 1 ? "SPEAKER_00: Hello there." : "Hello there.");
+    expect(await widths()).toEqual(before);
+    await expect(first).toHaveAttribute("data-retained-row", "yes");
+  }
+  await expect(first).toContainText("A person walks");
+  await expect(table.locator("tbody tr").last()).toContainText("Pending");
+  await expect(table.locator("tbody tr").last()).toContainText("No dialogue");
+  await page.setViewportSize({ width: 360, height: 640 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("cut markers sit beside Audio and wrap safely in narrow and enlarged panels", async ({ page }) => {
   test.skip(process.env.SAUCE_PACKAGED_FRONTEND === "1", "Isolated layout fixture replaces a dev hook, not packaged inference");
   // Production UI, deterministic evidence only. No detection or model job.
   await page.route("**/src/hooks/use-shot-intelligence.ts*", route => route.fulfill({
@@ -158,29 +405,183 @@ test("detected cuts keep their action beside the count in narrow and enlarged pa
   await page.getByRole("switch", { name: "Advanced Intelligence" }).click();
   const summary = page.locator(".cp-shot-summary");
   await expect(summary).toContainText("2 shots · 1 cut");
-  for (const width of [440, 360]) {
+  const toolbar = page.locator(".cp-shot-toolbar");
+  const action = toolbar.getByRole("button", { name: "Add cut markers" });
+  for (const width of [680, 440, 360]) {
     await page.setViewportSize({ width, height: 800 });
     for (const scale of [1, 1.25]) {
       await page.locator(".cp-shot-analysis").evaluate((element, value) => {
         (element as HTMLElement).style.zoom = String(value);
       }, scale);
-      const countBox = (await summary.locator(".cp-shot-count").boundingBox())!;
-      const actionBox = (await summary.getByRole("button", { name: "Add cut markers" }).boundingBox())!;
-      expect(Math.abs(countBox.y + countBox.height / 2 - actionBox.y - actionBox.height / 2)).toBeLessThan(2);
+      const audioBox = (await toolbar.getByRole("tab", { name: "Audio" }).boundingBox())!;
+      const actionBox = (await action.boundingBox())!;
+      if (width === 680) {
+        expect(Math.abs(audioBox.y + audioBox.height / 2 - actionBox.y - actionBox.height / 2)).toBeLessThan(2);
+        expect(actionBox.x).toBeGreaterThan(audioBox.x + audioBox.width + 7);
+      } else expect(actionBox.y >= audioBox.y + audioBox.height || actionBox.x >= audioBox.x + audioBox.width).toBe(true);
       expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(width);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     }
   }
   await page.screenshot({ path: `/private/tmp/sauce-shot-summary-${process.env.SCENE_BROWSER ?? "chromium"}.png` });
-  await summary.getByRole("button", { name: "Add cut markers" }).click();
-  await expect(summary.getByRole("status")).toHaveText("Added 1 cut marker.");
+  await action.click();
+  await expect(toolbar.getByRole("status")).toHaveCount(0);
   const cutNotifications = await page.evaluate(() => {
     const mock = (window as unknown as { __TAURI_MOCK__: {
       invoked: () => { cmd: string; args?: { event?: string } }[];
     } }).__TAURI_MOCK__;
-    return mock.invoked().filter(call => call.cmd === "plugin:event|emit" && call.args?.event === "panel:action:cutMarkersChanged").length;
+    return mock.invoked().filter(call => call.cmd === "plugin:event|emit" && call.args?.event === "panel:action:cutMarkersChanged");
   });
-  expect(cutNotifications).toBe(1);
+  expect(cutNotifications).toHaveLength(1);
+  expect(cutNotifications[0].args).toMatchObject({ payload: { sourceKey: "source-a", addedCount: 1 } });
+});
+
+test("audio content uses compact icons, frame-based seeks and opt-in diagnostics at narrow widths", async ({ page }) => {
+  test.skip(process.env.SAUCE_PACKAGED_FRONTEND === "1", "Deterministic audio evidence fixture, not packaged inference");
+  const audio: VideoMusicAnalysis = {
+    analysis_id: "audio-layout", source: { path: "/audio-fixture.mp4", sha256: "test", origin_us: 3e6, duration_us: 40e6 },
+    audio_track_index: 0, classifier: AUDIOSET_CLASSIFIER, preprocessing_version: AUDIOSET_PREPROCESSING, os: "Test OS",
+    status: "decoded", labels: ["Speech", "Music", "Explosion", "Throbbing"], windows: [
+      { start_us: 0, end_us: 13, peak: .1, rms: .1, status: "insufficient-context", scores: [] },
+      ...[[.8, .1, 0, 0], [.6, .7, .1, .32], [.1, .9, 0, 0], [.1, .1, .8, 0]].map((scores, index) => ({
+        start_us: index ? index * 10e6 : 13, end_us: (index + 1) * 10e6, peak: .5, rms: .2, status: "classified" as const, scores,
+      })),
+    ],
+  };
+  await page.route("**/src/hooks/use-shot-intelligence.ts*", route => route.fulfill({ contentType: "text/javascript", body: `
+    export function useShotIntelligence() { return {
+      busy:false, complete:true, stopping:false, draining:false, error:"", nativeError:"", audioError:"", phase:"", progress:null,
+      modelUsed:"qwen3.5-4b-video", audio:{status:"ready",evidence:${JSON.stringify(audio)}}, answers:[], start:async()=>{}, stop:()=>{},
+      evidence:{id:"audio-layout", detection:{boundaries:[]}, shots:[{id:"one",start_us:0,end_us:40000000,transcript:""}]}
+    }; }` }));
+  const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  const fps = 24000 / 1001;
+  await page.setViewportSize({ width: 680, height: 800 });
+  await boot(page, true, false, "/audio-fixture.mp4", fps);
+  await page.getByRole("switch", { name: "Advanced Intelligence" }).click();
+  await expect(page.getByRole("list", { name: "Audio content" })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Audio", exact: true }).click();
+  const list = page.getByRole("list", { name: "Audio content" });
+  const rows = list.getByRole("listitem");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(0)).toContainText("Speech");
+  await expect(rows.nth(1)).toContainText("Speech + Music");
+  await expect(rows.nth(1).locator("svg")).toHaveCount(2);
+  await expect(rows.nth(2)).toContainText("Music");
+  await expect(rows.nth(3)).toContainText("SFXExplosion");
+  await expect(page.getByText(/score|Throbbing|Type unclear|Short tail|Audio evidence/i)).toHaveCount(0);
+  const start = rows.nth(1).getByRole("button", { name: /start at/ });
+  const end = rows.nth(1).getByRole("button", { name: /end at/ });
+  await expect(start).toHaveText(secondsToTc(10, fps));
+  await expect(end).toHaveText(secondsToTc(20, fps));
+  const seekPayloads = () => page.evaluate(() => (window as unknown as { __TAURI_MOCK__: {
+    invoked: () => { args?: { event?: string; payload?: unknown } }[];
+  } }).__TAURI_MOCK__.invoked().filter(call => call.args?.event === "panel:action:seek").map(call => call.args?.payload));
+  await start.focus(); await page.keyboard.press("Enter");
+  expect(JSON.stringify((await seekPayloads()).at(-1))).toContain(String(Math.floor(10 * fps) / fps));
+  await end.focus(); await page.keyboard.press("Space");
+  expect(JSON.stringify((await seekPayloads()).at(-1))).toContain(String(Math.floor(20 * fps) / fps));
+  const originalSizes = await page.evaluate(() => Object.fromEntries(["base", "sm", "md", "lg", "xl"].map(size => [size, parseFloat(getComputedStyle(document.documentElement).getPropertyValue(`--text-${size}`))])));
+  for (const width of [680, 440, 360]) for (const scale of [1, 1.25]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.evaluate(({ sizes, scale }) => { for (const [name, size] of Object.entries(sizes)) document.documentElement.style.setProperty(`--text-${name}`, `${size * scale}px`); }, { sizes: originalSizes, scale });
+    expect(await list.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const box = (await start.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(24); expect(box.height).toBeGreaterThanOrEqual(24);
+    expect(await rows.nth(1).locator("svg").first().evaluate(element => getComputedStyle(element).color)).toBe(
+      await rows.nth(1).locator("svg").last().evaluate(element => getComputedStyle(element).color));
+  }
+  const info = page.getByRole("button", { name: "Analysis info", exact: true });
+  await info.click();
+  const details = page.getByRole("dialog", { name: "Analysis info" });
+  await expect(details.getByText(/Speech \(0.600\)/)).toHaveCount(0);
+  await details.getByText("Audio details", { exact: true }).click();
+  await expect(details.getByText(/Speech \(0.600\)/)).toBeAttached();
+  await expect(details.getByText(/not necessarily at every frame/)).toBeAttached();
+  await expect(details.getByText(/1 sub-frame fragment is/)).toBeAttached();
+  await page.keyboard.press("Escape");
+  await expect(details).toHaveCount(0); await expect(info).toBeFocused();
+  await page.setViewportSize({ width: 680, height: 800 });
+  await page.evaluate(sizes => { for (const [name, size] of Object.entries(sizes)) document.documentElement.style.setProperty(`--text-${name}`, `${size}px`); }, originalSizes);
+  await page.screenshot({ path: `/private/tmp/sauce-audio-content-${process.env.SCENE_BROWSER ?? "chromium"}.png` });
+  await page.getByRole("tab", { name: "All", exact: true }).click();
+  await expect(list).toHaveCount(0);
+  await page.getByText("Audio · 4 ranges", { exact: true }).click();
+  await expect(list).toBeVisible();
+  const requests = await page.evaluate(() => JSON.parse(localStorage.getItem("e2e.shotRequests") ?? "[]"));
+  expect(requests.every((request: VideoRequest) => request.operation === "models")).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("analysis details stay behind the header info icon, with keyboard dismissal and no work dispatched", async ({ page }) => {
+  test.skip(process.env.SAUCE_PACKAGED_FRONTEND === "1", "Deterministic partial-result layout fixture");
+  await page.route("**/src/hooks/use-picture-model.ts*", route => route.fulfill({ contentType: "text/javascript", body: `
+    export function usePictureModelPreference() { return {id:"qwen3.5-4b-video",select:()=>{},error:""}; }
+    export function usePictureModel() { return {...usePictureModelPreference(),ready:true,models:[{id:"qwen3.5-4b-video",ready:true},{id:"qwen3.5-9b-video",ready:true}]}; }` }));
+  await page.route("**/src/hooks/use-shot-intelligence.ts*", route => route.fulfill({ contentType: "text/javascript", body: `
+    export function useShotIntelligence() { return {
+      busy:false, complete:false, stopping:false, draining:false, error:"Analysis stopped to give playback or transcription priority.", nativeError:"", audioError:"", phase:"", progress:null,
+      modelUsed:"qwen3.5-4b-video", audio:{status:"not-started"}, answers:[], start:async()=>{}, stop:()=>{},
+      evidence:{id:"quiet-layout", detection:{boundaries:[{}]}, shots:Array.from({length:12},(_,index)=>({id:index+1,start_us:index*1001000,end_us:(index+1)*1001000,transcript:""}))}
+    }; }` }));
+  const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  await boot(page, true, false, "/a-long-source-name-for-analysis-layout.mp4", 60000 / 1001);
+  const mode = page.getByRole("switch", { name: "Advanced Intelligence" });
+  await mode.click();
+  const info = page.getByRole("button", { name: "Analysis info", exact: true });
+  const gear = page.getByRole("button", { name: "Advanced Intelligence settings" });
+  await expect(info).toBeVisible();
+  await expect(page.getByText(/Analysis could not finish|Source audio has not been analyzed|Picture results:/)).toHaveCount(0);
+  await expect(page.getByText("Not generated", { exact: true })).toHaveCount(12);
+  await expect(page.getByText("No dialogue", { exact: true })).toHaveCount(12);
+  await expect(page.getByRole("button", { name: "Retry analysis", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry analysis", exact: true })).toBeEnabled();
+  const originalSizes = await page.evaluate(() => Object.fromEntries(["base", "md", "lg", "xl"].map(size => [size, parseFloat(getComputedStyle(document.documentElement).getPropertyValue(`--text-${size}`))])));
+  for (const width of [680, 440, 360]) for (const scale of [1, 1.25]) {
+    await page.setViewportSize({ width, height: 560 });
+    await page.evaluate(({ sizes, scale }) => { for (const [name, size] of Object.entries(sizes)) document.documentElement.style.setProperty(`--text-${name}`, `${size * scale}px`); }, { sizes: originalSizes, scale });
+    const infoBox = (await info.boundingBox())!, gearBox = (await gear.boundingBox())!;
+    expect(infoBox.width).toBeGreaterThanOrEqual(24); expect(infoBox.height).toBeGreaterThanOrEqual(24);
+    expect(infoBox.x + infoBox.width).toBeLessThanOrEqual(gearBox.x - 3);
+    expect(Math.abs(infoBox.y - gearBox.y)).toBeLessThan(1);
+    expect(gearBox.x + gearBox.width).toBeLessThanOrEqual(width - 7);
+    await info.focus(); await page.keyboard.press("Enter");
+    const details = page.getByRole("dialog", { name: "Analysis info" });
+    await expect(details).toBeVisible();
+    await expect(details.getByText("Incomplete", { exact: true })).toBeVisible();
+    await expect(details.getByText("Qwen3.5 4B", { exact: true })).toBeVisible();
+    await expect(details.getByText("Not analyzed", { exact: true })).toBeVisible();
+    await expect(details.locator("details")).not.toHaveAttribute("open", "");
+    await details.getByText("Technical details", { exact: true }).click();
+    await expect(details.getByText("Analysis stopped to give playback or transcription priority.")).toBeVisible();
+    // Native details expansion triggers the popup's ResizeObserver placement.
+    await expect.poll(async () => {
+      const box = (await details.boundingBox())!;
+      return box.x >= 7 && box.x + box.width <= width - 7 && box.y >= 7 && box.y + box.height <= 553;
+    }).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(details).toHaveCount(0); await expect(info).toBeFocused();
+  }
+  await page.setViewportSize({ width: 840, height: 820 });
+  await page.evaluate(sizes => { for (const [name, size] of Object.entries(sizes)) document.documentElement.style.setProperty(`--text-${name}`, `${size}px`); }, originalSizes);
+  await expect.poll(() => page.locator(".cp-shot-table").evaluate(table => {
+    const headers = Array.from(table.querySelectorAll("thead th"));
+    const cells = Array.from(table.querySelectorAll("tbody tr:first-child > *"));
+    return headers.every((header, index) => Math.abs(header.getBoundingClientRect().left - cells[index].getBoundingClientRect().left) < 1);
+  })).toBe(true);
+  await page.screenshot({ path: `/private/tmp/sauce-quiet-analysis-${process.env.SCENE_BROWSER ?? "chromium"}.png` });
+  await info.click();
+  await page.getByText("Technical details", { exact: true }).click();
+  await page.screenshot({ path: `/private/tmp/sauce-quiet-analysis-info-${process.env.SCENE_BROWSER ?? "chromium"}.png` });
+  await mode.click();
+  await expect(page.getByRole("dialog", { name: "Analysis info" })).toHaveCount(0);
+  await mode.click();
+  await expect(info).toHaveAttribute("aria-expanded", "false");
+  const requests = await page.evaluate(() => JSON.parse(localStorage.getItem("e2e.shotRequests") ?? "[]"));
+  expect(requests.every((request: VideoRequest) => request.operation === "models")).toBe(true);
+  expect(errors).toEqual([]);
 });
 
 for (const scenario of [
@@ -264,7 +665,8 @@ for (const scenario of [
       return terminal;
     });
   }
-  await boot(page, true, false, manifest.source.path);
+  const sourceFps = scenario.generated ? 24000 / 1001 : 30;
+  await boot(page, true, false, manifest.source.path, sourceFps);
   // Optional real helper, only for the explicitly supplied reviewed fixture.
   // Without SCENE_VIDEO_WORKER, visual inference stays mocked. Tauri IPC is
   // always a test bridge here; this is not a packaged-app test.
@@ -327,9 +729,10 @@ for (const scenario of [
   await page.setViewportSize({ width: 440, height: 800 });
   await page.getByRole("switch", { name: "Advanced Intelligence" }).click();
   await page.getByRole("button", { name: "Analyze video", exact: true }).click();
-  await expect(page.getByText(`${expectedShots} shots · ${expectedShots - 1} detected cuts`)).toBeVisible();
-  await expect(page.locator(".cp-shot-list > li")).toHaveCount(expectedShots);
-  await expect(page.getByRole("button", { name: scenario.generated ? "00:00.000 to 00:01.001" : "00:00.000 to 00:00.867", exact: true })).toBeVisible();
+  await expect(page.getByText(`${expectedShots} shots · ${expectedShots - 1} ${expectedShots === 2 ? "cut" : "cuts"}`)).toBeVisible();
+  await expect(page.locator(".cp-shot-table tbody > tr")).toHaveCount(expectedShots);
+  await expect(page.getByRole("button", { name: "Shot 1 start at 00:00:00:00", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: `Shot 1 end at ${secondsToTc(scenario.generated ? 1.001 : 0.866667, sourceFps)}`, exact: true })).toBeVisible();
   if (videoWorkerPath) {
     await expect(page.getByRole("button", { name: "Analyze video", exact: true })).toBeEnabled({ timeout: 200_000 });
     expect(realDescriptions?.shots).toHaveLength(expectedShots);
@@ -339,10 +742,8 @@ for (const scenario of [
       // raw answer above; fail the real-model check instead of hiding a loop.
       const sentences = shot.text.split(/(?<=[.!?])\s+/).map(text => text.trim()).filter(Boolean);
       expect(sentences.length - new Set(sentences).size, `Shot ${shot.id} repeated sentences`).toBeLessThan(3);
-      // Verify all rendered prose, not Markdown characters deliberately
-      // replaced by headings, list elements and emphasis.
-      await expect(page.locator(".cp-shot-list > li").nth(shot.id - 1).locator(".cp-md"))
-        .toHaveText(renderedDescriptionText(shot.text), { useInnerText: true });
+      await expect(page.locator(".cp-shot-table tbody > tr").nth(shot.id - 1).locator("td").nth(2))
+        .toHaveText(shot.picture_description ?? `Legacy combined response: ${shot.text}`, { useInnerText: true });
     }
     if (scenario.generated) {
       expect(realDescriptions!.shots[0].text.toLowerCase()).toContain("red");
@@ -351,25 +752,27 @@ for (const scenario of [
     }
   } else await expect(page.getByText("Visible description for shot 12.")).toBeAttached();
   if (!scenario.generated && (audioHelperPath || recordedMusic)) {
-    await expect(page.getByText(/Source audio analyzed/)).toBeVisible();
     const count = recordedMusic ? 3 : 8;
-    if (recordedMusic) {
-      await expect(page.getByText("Possible music type: Electronic music.")).toBeVisible();
-      await expect(page.locator(".cp-shot-audio-windows")).toHaveCount(0);
-    } else await expect(page.getByText(/Music type is not yet verified/)).toBeVisible();
-    const disclosure = page.getByText(`Audio evidence · ${count} windows`);
+    await expect(page.getByRole("list", { name: "Audio content" })).toHaveCount(0);
+    const disclosure = page.getByText(`Audio · ${count} ranges`, { exact: true });
     await disclosure.focus(); await page.keyboard.press("Enter");
-    await expect(page.locator(".cp-shot-audio-windows > li")).toHaveCount(count);
+    const ranges = page.getByRole("list", { name: "Audio content" }).getByRole("listitem");
+    await expect(ranges).toHaveCount(count);
+    await expect(ranges.last()).toContainText("Unclassified");
+    await expect(page.getByText(/score|Music suggested|Possible type:/)).toHaveCount(0);
     if (recordedMusic) {
-      await expect(page.locator(".cp-shot-audio-windows > li").nth(0)).toContainText("Music suggested. Type unclear.");
-      await expect(page.locator(".cp-shot-audio-windows > li").nth(1)).toContainText("Possible type: Electronic music.");
-      await expect(page.locator(".cp-shot-audio-windows > li").last()).toContainText("Short window. Music type unclear.");
-      await expect(page.locator(".cp-shot-audio-windows > li").last()).toContainText("00:20.000 to 00:23.500");
-      await expect(page.getByText(/not song boundaries/)).toBeAttached();
-    } else {
-      await expect(page.getByText("Short tail. Not classified.")).toBeAttached();
-      await expect(page.locator(".cp-shot-audio-windows > li").last()).toContainText("00:21.000 to 00:23.500");
+      await expect(ranges.nth(0)).toContainText("Music");
+      await expect(ranges.nth(1)).toContainText("Music");
     }
+    await expect(ranges.last().getByRole("button", { name: /start at/ })).toHaveText(recordedMusic ? "00:00:20:00" : "00:00:21:00");
+    await expect(ranges.last().getByRole("button", { name: /end at/ })).toHaveText("00:00:23:15");
+    await page.getByRole("button", { name: "Analysis info", exact: true }).click();
+    const info = page.getByRole("dialog", { name: "Analysis info" });
+    await expect(info.getByText("Analyzed", { exact: true })).toBeVisible();
+    await info.getByText("Audio details", { exact: true }).click();
+    await expect(info.getByText(/not frame-level event boundaries/)).toBeAttached();
+    if (recordedMusic) await expect(info.getByText("Possible music types: Electronic music. Not verified.")).toBeAttached();
+    await page.keyboard.press("Escape");
     for (const enlarged of [false, true]) {
       if (enlarged) await page.evaluate(() => {
         const root = document.documentElement, computed = getComputedStyle(root);
@@ -387,8 +790,8 @@ for (const scenario of [
     }
     await page.locator(".cp-ai-thread").last().evaluate(element => { element.scrollTop = 0; });
     await page.screenshot({ path: `/private/tmp/sauce-ai-${recordedMusic ? "music" : "audio"}-${process.env.SCENE_BROWSER ?? "chrome"}.png`, animations: "disabled" });
-    await disclosure.click(); // Final screenshot shows the normal compact result, not expanded diagnostics.
-  } else await expect(page.getByText("This video has no audio track.")).toBeVisible();
+    await disclosure.click(); // Restore the normal compact result.
+  } else await expect(page.getByText("No audio track", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Analyze video", exact: true })).toBeEnabled();
   const saved = await page.evaluate(() => new Promise<number>((resolve, reject) => {
     const request = indexedDB.open("sauce-scene-evidence", 1);

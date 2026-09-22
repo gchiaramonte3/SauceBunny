@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CutMarkerChange } from "../lib/cut-markers";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -15,6 +16,7 @@ import { IconAiSummary } from "./Icons";
 import { Markdown } from "./Markdown";
 import { AiChapters } from "./AiChapters";
 import { ShotIntelligence } from "./ShotIntelligence";
+import { ModelDownloadProgress } from "./ModelDownloadProgress";
 import { IconSettings } from "./Icons";
 import { shotIntelligenceEnabled } from "../lib/scene-analysis/rollout";
 import type { LlmModel } from "../bindings/LlmModel";
@@ -55,6 +57,7 @@ type Props = {
   onOpenSettings?: () => void;
   /** Completed local source only. Never a live input or unverified playback proxy. */
   videoPath?: string | null;
+  fps?: number;
   onOpenVideoSettings?: () => void;
   videoForegroundBusy?: boolean;
   /** Seek playback to a timestamp (seconds) — makes summary [m:ss] clickable. */
@@ -69,7 +72,7 @@ type Props = {
   /** Auto-chapters: notify the host after a generate/delete — the popped-out
    *  panel forwards this over the panel bus so main's timeline re-reads. */
   onChaptersChanged?: () => void;
-  onCutMarkersChanged?: () => void;
+  onCutMarkersChanged?: (change: CutMarkerChange) => void;
 };
 
 import { matchPrompts, slashQuery } from "../lib/transcript-prompts";
@@ -175,6 +178,7 @@ export function AiSummary(props: Props) {
   const [visitedAdvanced, setVisitedAdvanced] = useState(false);
   const [textBusy, setTextBusy] = useState(false);
   const [videoBusy, setVideoBusy] = useState(false);
+  const [videoInfoHost, setVideoInfoHost] = useState<HTMLSpanElement | null>(null);
   if (!videoEnabled) return <TextSummary {...props} active onBusyChange={setTextBusy} />;
   return <div className="cp-ai-modes">
     <div className="cp-ai-mode-switch">
@@ -182,13 +186,16 @@ export function AiSummary(props: Props) {
       <button type="button" className={`cp-toggle-switch${advanced ? " on" : ""}`} role="switch" aria-label="Advanced Intelligence" aria-checked={advanced}
         disabled={textBusy || videoBusy} onClick={() => { setAdvanced(value => !value); setVisitedAdvanced(true); }} />
       <span>Advanced Intelligence</span>
-      {advanced && props.onOpenVideoSettings && <button type="button" className="btn btn-ghost cp-ai-model-settings" aria-label="Advanced Intelligence settings" title="Advanced Intelligence settings" disabled={videoBusy} onClick={props.onOpenVideoSettings}><IconSettings size={16} /></button>}
+      <div className="cp-ai-mode-tools" hidden={!advanced}>
+        <span ref={setVideoInfoHost} />
+        {props.onOpenVideoSettings && <button type="button" className="btn btn-ghost cp-ai-model-settings" aria-label="Advanced Intelligence settings" title="Advanced Intelligence settings" disabled={videoBusy} onClick={props.onOpenVideoSettings}><IconSettings size={16} /></button>}
+      </div>
     </div>
     <div className="cp-ai-mode-body" hidden={advanced}>
       <TextSummary {...props} active={!advanced} warmable={props.warmable && !advanced} onBusyChange={setTextBusy} />
     </div>
     {visitedAdvanced && <div className="cp-ai-mode-body" hidden={!advanced}>
-      <ShotIntelligence videoPath={props.videoPath ?? null} transcriptPath={props.transcriptPath}
+      <ShotIntelligence videoPath={props.videoPath ?? null} transcriptPath={props.transcriptPath} fps={props.fps} infoHost={advanced ? videoInfoHost : null}
         foregroundBusy={props.videoForegroundBusy}
         sourceKey={props.sourceKey} reloadToken={props.reloadToken} onSeek={props.onSeek}
         onCutMarkersChanged={props.onCutMarkersChanged}
@@ -725,10 +732,7 @@ function TextSummary({
                 <div className="cp-ai-model-blurb">{m.blurb}</div>
               </div>
               {downloadingId === m.id ? (
-                <div className="cp-ai-dl">
-                  <div className="cp-ai-dl-bar"><div className="cp-ai-dl-fill" style={{ width: `${downloadPct}%` }} /></div>
-                  <div className="cp-ai-dl-pct">{Math.round(downloadPct)}%</div>
-                </div>
+                <ModelDownloadProgress name={m.name} percent={downloadPct} />
               ) : (
                 <button className="btn btn-primary" onClick={() => startDownload(m.id)}>
                   Download · {(m.size_bytes / 1e9).toFixed(1)} GB

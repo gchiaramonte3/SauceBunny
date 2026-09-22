@@ -1,3 +1,4 @@
+import { frameRate } from "./lib/timecode";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
@@ -133,7 +134,7 @@ export default function PanelApp() {
   const fpsRef = useRef(state.fps);
   fpsRef.current = state.fps;
   useEffect(() => {
-    const r = Math.max(1, Math.round(state.fps));
+    const r = frameRate(state.fps);
     setPlayheadFrames(state.transcriptPlayhead != null ? Math.round(state.transcriptPlayhead * r) : 0);
   }, [state.transcriptPlayhead, state.fps]);
   useEffect(() => {
@@ -142,7 +143,7 @@ export default function PanelApp() {
     (async () => {
       const off = await listen<{ seconds: number; sourceIdentity?: string | null }>(PANEL_PLAYHEAD_EVENT, (e) => {
         if (cancelled || !panelCanTargetSource(stateRef.current, e.payload)) return;
-        const r = Math.max(1, Math.round(fpsRef.current));
+        const r = frameRate(fpsRef.current);
         setPlayheadFrames(Math.round(e.payload.seconds * r));
       });
       if (cancelled) { off(); return; }
@@ -227,7 +228,7 @@ export default function PanelApp() {
         chapterSourceKey={state.chapterSourceKey}
         chapterDurationSec={state.durationSec}
         onChaptersChanged={() => sendAction("chaptersChanged")}
-        onCutMarkersChanged={() => sendAction("cutMarkersChanged")}
+        onCutMarkersChanged={change => sendAction("cutMarkersChanged", change)}
         /* `onPopOut` intentionally undefined — the pop-out button
            shouldn't appear inside the popped-out window. */
       />

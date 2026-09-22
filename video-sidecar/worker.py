@@ -180,7 +180,8 @@ def dispatch(root: Path, request: dict):
         return prepare_proxy(root, local_path(request.get("path")), progress)
     if operation == "analyze-shots":
         return analyze_shots(local_path(request.get("path")), request,
-                             lambda: load_model(models, picture_model(request), memory), progress)
+                             lambda: load_model(models, picture_model(request), memory), progress,
+                             lambda analysis: emit({"type": "shot", "shot_analysis": analysis}))
     if operation == "analyze-music":
         # Require the explicit download even for silence/no-audio. Readiness is
         # a receipt check only; the classifier itself stays lazy until needed.

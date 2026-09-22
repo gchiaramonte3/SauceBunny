@@ -1,65 +1,45 @@
 import { useState } from "react";
 import type { ShotAudioState } from "../hooks/use-shot-intelligence";
-import { formatTimestamp } from "../lib/scene-analysis/detector-core";
-import { summarizeMusic, type MusicWindowSummary } from "../lib/scene-analysis/music-summary";
+import { framesToTc, frameRate } from "../lib/timecode";
+import { AUDIO_CONTENT_NAMES, summarizeAudio } from "../lib/scene-analysis/audio-summary";
+import { IconMic, IconMusic, IconVolumeMuted } from "./Icons";
 
-function musicWindowText(window: MusicWindowSummary) {
-  if (window.kind === "silence") return "Digital silence";
-  if (window.kind === "short") return "Short window. Music type unclear.";
-  if (window.kind === "unclear") return "Music is uncertain in this range.";
-  return window.style ? `Possible type: ${window.style}.` : "Music suggested. Type unclear.";
-}
-
-/** Observations from actual PCM, not a music verdict or model-authored timing. */
-export function ShotAudioEvidence({ audio, error, busy, onSeek }: {
-  audio: ShotAudioState; error: string; busy: boolean; onSeek?: (seconds: number) => void;
+/** An editor-facing view of completed evidence. Scores and limits live in Info. */
+export function ShotAudioEvidence({ audio, busy, fps = 30, compact = false, onSeek }: {
+  audio: ShotAudioState; busy: boolean; onSeek?: (seconds: number) => void; fps?: number; compact?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  if (audio.status !== "ready") {
-    const message = audio.status === "analyzing" ? "Analyzing source audio…"
-      : audio.status === "stopped" ? "Audio analysis stopped. Shot descriptions are retained."
-      : audio.status === "unavailable" ? "Audio analysis unavailable. Shot descriptions are retained."
-      : busy ? "Source audio analysis is next." : "Source audio has not been analyzed.";
-    return <div className="cp-shot-audio">
-      <p className="cp-muted" role="status">{message}</p>
-      {error && <details><summary>Audio details</summary><p className="cp-muted">{error}</p></details>}
-    </div>;
-  }
+  if (audio.status !== "ready") return <p className="cp-muted" role="status">{audio.status === "analyzing" ? "Analyzing audio…"
+    : audio.status === "stopped" ? "Stopped" : audio.status === "unavailable" ? "Unavailable" : busy ? "Audio pending" : "Not analyzed"}</p>;
   const evidence = audio.evidence;
-  const music = summarizeMusic(evidence);
-  if (evidence.status === "no-audio") return <p className="cp-muted">This video has no audio track.</p>;
-  if (!evidence.windows.length) return <p className="cp-muted">No decoded audio overlaps this video range.</p>;
-  return <div className="cp-shot-audio">
-    <p className="cp-muted">Source audio analyzed · Audio track {evidence.audio_track_index + 1}. {"labels" in evidence
-      ? "AudioSet suggestions need review." : "Music type is not yet verified."}</p>
-    {music && <p>{music.styles.length ? `Possible music ${music.styles.length === 1 ? "type" : "types"}: ${music.styles.slice(0, 3).join(", ")}${music.styles.length > 3 ? ", with more in the evidence" : ""}.`
-      : music.windows.every(window => window.kind === "silence") ? "Digital silence in the analyzed audio."
-      : music.windows.some(window => window.kind === "music") ? "Music suggested. Type unclear." : "Music type unclear."}</p>}
-    <details onToggle={event => setExpanded(event.currentTarget.open)}>
-      <summary>Audio evidence · {evidence.windows.length} {evidence.windows.length === 1 ? "window" : "windows"}</summary>
-      {expanded && <>
-        <p className="cp-muted">Classifier suggestions are not confirmed sounds or music genres. Each range covers an audio window, which can span several shots. {"labels" in evidence
-          ? "Short windows have limited context. Gaps and tails shorter than 25 ms are not classified."
-          : "Gaps and short tails are not classified."}</p>
-        <ol className="cp-shot-audio-windows">
-          {evidence.windows.map((window, index) => <li key={window.start_us}>
-            <button type="button" className="btn btn-ghost" disabled={!onSeek} onClick={() => onSeek?.(window.start_us / 1e6)}>
-              {formatTimestamp(window.start_us)} to {formatTimestamp(window.end_us)}
-            </button>
-            {music && window.status === "classified" && <p>{musicWindowText(music.windows[index])}</p>}
-            <p>{window.status === "digital-silence" ? "Digital silence"
-              : window.status === "insufficient-context" ? "Short tail. Not classified."
-              // A compact view of the ranked raw evidence, not a threshold or
-              // inferred presence rule. All original scores remain in evidence.
-              : ("scores" in window && "labels" in evidence
-                ? window.scores.map((score, index) => ({ identifier: evidence.labels[index], score }))
-                : "classifications" in window ? [...window.classifications] : []).sort((a, b) => b.score - a.score).slice(0, 3)
-                .map(score => `${score.identifier.replaceAll("_", " ")} (score ${score.score.toFixed(3)})`).join(" · ")}</p>
-          </li>)}
-        </ol>
-        <p className="cp-muted">{evidence.classifier} · {evidence.preprocessing_version} · {evidence.os}</p>
-        {music && <p className="cp-muted">Suggestions use {music.policyVersion}, an experimental review policy. Uncertain ranges do not mean music is absent. These are analysis windows, not song boundaries.</p>}
-      </>}
-    </details>
-  </div>;
+  if (evidence.status === "no-audio") return <p className="cp-muted">No audio track</p>;
+  if (!evidence.windows.length) return <p className="cp-muted">No audio in this range</p>;
+  if (!Number.isFinite(fps) || fps <= 0) return <p className="cp-muted">Frame rate unavailable</p>;
+  const { ranges } = summarizeAudio(evidence, fps);
+  if (!ranges.length) return <p className="cp-muted">Less than one frame of audio</p>;
+  const table = <ol className="cp-shot-audio-ranges" aria-label="Audio content">
+    {ranges.map((range, index) => {
+      const start = framesToTc(range.startFrame, fps), end = framesToTc(range.endFrame, fps);
+      const speech = range.kind === "speech" || range.kind === "mixed", music = range.kind === "music" || range.kind === "mixed";
+      return <li key={`${range.startFrame}:${range.endFrame}:${index}`}>
+        <div className="cp-shot-audio-times">
+          <button type="button" className="cp-tc cp-shot-time" aria-label={`Audio range ${index + 1} start at ${start}`} title={`Go to ${start}`}
+            disabled={!onSeek} onClick={() => onSeek?.(range.startFrame / frameRate(fps))}>{start}</button>
+          <span className="cp-shot-audio-to" aria-hidden="true">to</span>
+          <button type="button" className="cp-tc cp-shot-time" aria-label={`Audio range ${index + 1} end at ${end}`} title={`Go to ${end}`}
+            disabled={!onSeek} onClick={() => onSeek?.(range.endFrame / frameRate(fps))}>{end}</button>
+        </div>
+        <div className="cp-shot-audio-content">
+          <span className="cp-shot-audio-kind" data-kind={range.kind} title={speech || music || range.kind === "sfx" ? "Suggested audio content" : undefined}>
+            {speech && <IconMic size={15} />}{music && <IconMusic size={15} />}{range.kind === "silence" && <IconVolumeMuted size={15} />}
+            <span>{AUDIO_CONTENT_NAMES[range.kind]}</span>
+          </span>
+          {!!range.sounds.length && <span className="cp-shot-audio-sounds">{range.kind !== "sfx" && <span className="cp-shot-audio-sfx">SFX</span>}{range.sounds.join(" · ")}</span>}
+        </div>
+      </li>;
+    })}
+  </ol>;
+  return <div className="cp-shot-audio">{compact ? <details onToggle={event => setExpanded(event.currentTarget.open)}>
+    <summary>Audio · {ranges.length} {ranges.length === 1 ? "range" : "ranges"}</summary>{expanded && table}
+  </details> : table}</div>;
 }

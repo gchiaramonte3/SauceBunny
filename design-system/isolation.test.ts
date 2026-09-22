@@ -36,6 +36,8 @@ function importsOf(path: string, runtimeOnly = false): string[] {
 
 // Every production import is deliberately reviewed, including its runtime dependencies.
 const allowedProduction = new Set([
+  // Props-only rail and pure number formatting; no store, IPC or downloads.
+  "src/components/ModelDownloadProgress", "src/lib/format-bytes",
   "src/components/Icons", "src/components/Tooltip", "src/components/CollapsibleSection", "src/components/VolumeControl",
   "src/components/GenerateButton", "src/components/StatefulButton", "src/assets/saucebunny.svg",
   "src/hooks/use-dismiss", "src/hooks/use-menu-keys", "src/hooks/use-modal-focus",
@@ -58,8 +60,12 @@ const allowedProduction = new Set([
   // Controlled AAF lanes: React, type-only bindings, pure time/CSV geometry.
   // The page, stores, worker hooks and audio element are deliberately absent.
   "src/components/MultitrackTimeline", "src/lib/multitrack", "src/lib/marker-time",
+  // Numeric-only controlled HUD and pure frame conversion; no media or persistence.
+  "src/components/MultitrackTimecodeDialog", "src/lib/timecode",
   // Pure export metadata formatting and canonical path strings, no store or IPC.
   "src/lib/multitrack-metadata", "src/lib/repath",
+  // Pure graph relationships, source provenance and lane filtering; no IPC/media.
+  "src/lib/multitrack-graph",
   // Controlled track-gain popup and pure viewport text aggregation; no audio,
   // export, persistence or native command dependencies are imported.
   "src/components/MultitrackLevel", "src/lib/multitrack-text-layout",

@@ -3,6 +3,8 @@
 mod audio;
 mod pcm;
 mod peaks;
+mod linked;
+mod linked_audio;
 pub mod model;
 mod process;
 mod store;
@@ -13,7 +15,7 @@ use model::*;
 use tauri::{AppHandle, Manager, Emitter};
 
 #[tauri::command]
-pub async fn aaf_import(app: AppHandle, path: String, job_id: String) -> Result<AafDocument, AppError> {
+pub async fn aaf_import(app: AppHandle, path: String, job_id: String, sequence_id: Option<String>) -> Result<AafDocument, AppError> {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let source = std::fs::canonicalize(path)?;
     if source.extension().is_none_or(|extension| !extension.to_string_lossy().eq_ignore_ascii_case("aaf")) {
@@ -22,8 +24,9 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String) -> Result<
     let metadata = std::fs::metadata(&source)?;
     if !metadata.is_file() { return Err(AppError::invalid("Choose an AAF file, not a folder")); }
     process::progress(&app, &job_id, None, "inspecting", 0, 0);
-    let result = process::run(&app, &job_id, "inspect", "saucebunny-aaf",
-        vec!["inspect".into(), "--input".into(), source.to_string_lossy().into_owned()]).await?;
+    let mut args = vec!["inspect".into(), "--graph".into(), "--input".into(), source.to_string_lossy().into_owned()];
+    if let Some(sequence) = sequence_id { args.extend(["--sequence".into(), sequence]); }
+    let result = process::run(&app, &job_id, "inspect", "saucebunny-aaf", args).await?;
     result.require_success("saucebunny-aaf")?;
     let manifest: AafManifest = serde_json::from_str(&result.stdout)
         .map_err(|e| AppError::invalid(format!("AAF reader returned an invalid manifest: {e}")))?;
@@ -34,13 +37,36 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String) -> Result<
         cast_member_id: None, color: None, gender: None, marker_color: None,
     }).collect();
     let id = blake3::hash(crate::stream_proxy::mint_token()?.as_bytes()).to_hex().to_string();
-    let document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, id,
+    let mut document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, id,
         source_path: source.to_string_lossy().into_owned(), source_size: metadata.len(),
         source_modified_ms: store::modified_ms(&metadata), manifest, labels, transcripts: Vec::new() };
     store::source_ready(&document)?;
+    linked::resolve(&app, &mut document, None, None, &job_id).await?;
     let document = app.state::<JobRegistry>().while_active(&job_id, || store::import(&root, document))?;
     let _ = app.emit("saucebunny:multitrack-changed", &document.id);
     Ok(document)
+}
+
+#[tauri::command]
+pub async fn aaf_sequences(app: AppHandle, path: String, job_id: String) -> Result<Vec<AafSequenceChoice>, AppError> {
+    let _job = process::JobGuard::begin(&app, &job_id)?;
+    let result = process::run(&app, &job_id, "sequences", "saucebunny-aaf", vec!["sequences".into(), "--input".into(), path]).await?;
+    result.require_success("saucebunny-aaf")?;
+    Ok(serde_json::from_str(&result.stdout)?)
+}
+
+#[tauri::command]
+pub async fn aaf_resolve_media(app: AppHandle, document_id: String, source_id: Option<String>, path: Option<String>, job_id: String) -> Result<AafDocument, AppError> {
+    let _job = process::JobGuard::begin(&app, &job_id)?;
+    let root = store::root(&app)?;
+    let mut document = store::load(&root, &document_id)?;
+    let revision = store::cache_key(&document, "all", "relink");
+    store::source_ready(&document)?;
+    linked::resolve(&app, &mut document, source_id.as_deref(), path.as_deref().map(std::path::Path::new), &job_id).await?;
+    store::source_ready(&document)?;
+    let saved = app.state::<JobRegistry>().while_active(&job_id, || store::save_graph(&root, &document, &revision))?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -73,7 +99,9 @@ pub async fn aaf_read_recording_dates(app: AppHandle, document_id: String, job_i
     let root = store::root(&app)?;
     let document = store::load(&root, &document_id)?;
     store::source_ready(&document)?;
-    let result = process::run(&app, &job_id, "inspect", "saucebunny-aaf", vec!["inspect".into(), "--input".into(), document.source_path.clone()]).await?;
+    let mut args = vec!["inspect".into(), "--input".into(), document.source_path.clone()];
+    if let Some(graph) = &document.manifest.graph { args.extend(["--graph".into(), "--sequence".into(), graph.sequence_id.clone()]); }
+    let result = process::run(&app, &job_id, "inspect", "saucebunny-aaf", args).await?;
     result.require_success("saucebunny-aaf")?;
     let manifest: AafManifest = serde_json::from_str(&result.stdout)?;
     validate_manifest(&manifest)?;

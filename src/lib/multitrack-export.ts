@@ -3,6 +3,7 @@ import { audioTrackLabel, sequenceFps, sequenceTimecode, transcriptRows, untimed
 import { secondsToCueTc, type Turn } from "./srt";
 import { buildTranscriptPrintDoc } from "../components/transcript/helpers";
 import { transcriptMetadata } from "./multitrack-metadata";
+import { alternativeLane } from "./multitrack-graph";
 
 /** SRT has one caption lane. Split at speech boundaries and combine concurrent
  * voices, rather than emitting overlapping cues that players may hide. The
@@ -11,7 +12,7 @@ export function multitrackSrt(document: AafDocument): string {
   const endMs = Math.round(document.manifest.duration_frames / sequenceFps(document.manifest) * 1000);
   const cues = transcriptRows(document).map((cue) => ({
     start: Math.round(cue.startSeconds * 1000), end: Math.round(cue.endSeconds * 1000),
-    text: `${cue.owner} (${audioTrackLabel(document, cue.trackId)}): ${cue.text}`.replace(/\s+/g, " ").trim(),
+    text: `${cue.owner} (${audioTrackLabel(document, cue.trackId)}${alternativeLane(document, cue.trackId) ? " group alternative" : ""}): ${cue.text}`.replace(/\s+/g, " ").trim(),
     hasText: !!cue.text.trim(),
   })).filter((cue) => cue.hasText && Number.isSafeInteger(cue.start) && Number.isSafeInteger(cue.end)
     && cue.start >= 0 && cue.end > cue.start && cue.end <= endMs);

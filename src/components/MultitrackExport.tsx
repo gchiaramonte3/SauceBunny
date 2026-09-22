@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { MultitrackPerson } from "../lib/multitrack-person";
+import { hasTranscriptContent } from "../lib/multitrack";
 import { useMultitrackExport, type MultitrackExportFormat } from "../hooks/use-multitrack-export";
 import { StatefulButton } from "./StatefulButton";
 import { MultitrackShootDate } from "./MultitrackShootDate";
@@ -8,8 +9,9 @@ import { MultitrackShootDate } from "./MultitrackShootDate";
 export function MultitrackExport({ document, person }: { document: AafDocument; person?: MultitrackPerson }) {
   const [format, setFormat] = useState<MultitrackExportFormat>("txt"), output = useMultitrackExport(document);
   const counts = useMemo(() => {
-    const scoped = document.transcripts.filter((track) => !person || person.trackIds.includes(track.track_id));
-    return { scoped: scoped.some((track) => track.cues.length || track.timing_issues?.length), timed: scoped.some((track) => track.cues.length), any: document.transcripts.some((track) => track.cues.length || track.timing_issues?.length), anyTimed: document.transcripts.some((track) => track.cues.length) };
+    const tracks = document.transcripts.map((track) => ({ id: track.track_id, timed: track.cues.some((cue) => hasTranscriptContent(cue.text)), untimed: track.timing_issues?.some((cue) => hasTranscriptContent(cue.text)) }));
+    const scoped = tracks.filter((track) => !person || person.trackIds.includes(track.id));
+    return { scoped: scoped.some((track) => track.timed || track.untimed), timed: scoped.some((track) => track.timed), any: tracks.some((track) => track.timed || track.untimed), anyTimed: tracks.some((track) => track.timed) };
   }, [document.transcripts, person]);
   const busy = output.phase === "loading";
   const timedOnly = format === "avid" || format === "srt";

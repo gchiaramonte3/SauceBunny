@@ -1,8 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { multitrackFixture, multitrackTranscript } from "../test/multitrack-fixture";
-import { clampFrame, exportMultitrack, mergeTrackTranscript, sampleFrame, sequenceTimecode, transcriptRows, waveformPath } from "./multitrack";
+import { clampFrame, exportMultitrack, mergeTrackTranscript, sampleFrame, sequenceDurationTimecode, sequenceEntryFrame, sequenceTimecode, transcriptRows, waveformPath } from "./multitrack";
 
 describe("multitrack sequence timing and export", () => {
+  it("punches source timecode at 23.976 without adding its hour offset to TRT", () => {
+    const { manifest } = multitrackFixture();
+    expect(sequenceEntryFrame(manifest, "01001012")).toBe(252);
+    expect(sequenceTimecode(manifest, 252)).toBe("01:00:10:12");
+    expect(sequenceDurationTimecode(manifest)).toBe("00:16:40:00");
+    expect(sequenceEntryFrame(manifest, "01000090")).toBe(90);
+    expect(sequenceEntryFrame(manifest, "0")).toBe(0);
+    expect(sequenceEntryFrame(manifest, "99999999")).toBe(23999);
+    for (const digits of ["", "abc", "1a2", "12:34", "-10", "123456789"]) expect(sequenceEntryFrame(manifest, digits)).toBeNull();
+  });
+  it.each([[30000, 107892, "01010002", 1800, "01010000"], [60000, 215784, "01010004", 3600, "01010003"]])("punches %i/1001 drop-frame using the displayed numbering", (numerator, start_frame, digits, expected, skipped) => {
+    const manifest = { ...multitrackFixture().manifest, edit_rate: { numerator, denominator: 1001 }, start_frame, drop_frame: true };
+    expect(sequenceEntryFrame(manifest, digits)).toBe(expected);
+    expect(sequenceEntryFrame(manifest, skipped)).toBeNull();
+    expect(sequenceTimecode(manifest, expected).replace(/[:;]/g, "")).toBe(digits);
+  });
+  it("keeps unsupported time bases explicit instead of guessing a timecode", () => {
+    const manifest = { ...multitrackFixture().manifest, edit_rate: { numerator: 27, denominator: 1 } };
+    expect(sequenceEntryFrame(manifest, "01001012")).toBeNull();
+    expect(sequenceDurationTimecode(manifest)).toBe("24000 frames");
+  });
   it("keeps sequence sample time independent of source timecode at fractional rates", () => {
     const doc = multitrackFixture();
     expect(sequenceTimecode(doc.manifest, 0)).toBe("01:00:00:00");

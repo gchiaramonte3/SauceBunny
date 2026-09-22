@@ -243,6 +243,9 @@ pub struct VideoProgress {
     pub job_id: String, pub phase: String,
     #[ts(type = "number")] pub completed: u64,
     #[ts(type = "number")] pub total: u64,
+    /// One complete, source-bound description. Never token fragments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)] pub shot_analysis: Option<VideoShotAnalysis>,
 }
 
 #[cfg(test)]

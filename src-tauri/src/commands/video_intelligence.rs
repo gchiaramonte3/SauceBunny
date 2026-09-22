@@ -1,6 +1,9 @@
 //! Offline video intelligence, isolated from playback and existing transcription.
 pub mod model;
 mod audio;
+mod shots;
+mod edits;
+pub use edits::*;
 use crate::{commands::{JobRegistry, LlmServer}, AppError};
 use model::*;
 use std::{collections::HashSet, path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Mutex}, time::Duration};
@@ -149,6 +152,7 @@ pub async fn video_intelligence_run(app: AppHandle, job_id: String, request: Vid
     if !registry.write_stdin(&key, &payload) { return Err(AppError::internal("Cannot send request to the video worker")); }
     let mut result = None;
     let mut audio = audio::Collector::new(&request);
+    let mut shots = shots::Collector::new(&request);
     let mut error = None;
     let mut stderr = String::new();
     let mut output_bytes: usize = 0;
@@ -180,16 +184,25 @@ pub async fn video_intelligence_run(app: AppHandle, job_id: String, request: Vid
                     if !matches!(packet.get("type").and_then(|value| value.as_str()), Some("error" | "progress")) {
                         let (completed, total) = collector.push(packet)?;
                         let _ = app.emit("video-intelligence-progress", VideoProgress { job_id: job_id.clone(),
-                            phase: "analyzing-audio".into(), completed, total });
+                            phase: "analyzing-audio".into(), completed, total, shot_analysis: None });
                         continue;
                     }
                 }
                 match packet.get("type").and_then(|value| value.as_str()) {
+                    Some("shot") => {
+                        check_cancelled(&app, &job_id)?;
+                        let update = serde_json::from_value::<VideoResponse>(packet)?.shot_analysis
+                            .ok_or_else(|| AppError::invalid("Missing shot update"))?;
+                        let collector = shots.as_mut().ok_or_else(|| AppError::invalid("Unexpected shot update"))?;
+                        let (completed, total) = collector.push(&update)?;
+                        let _ = app.emit("video-intelligence-progress", VideoProgress { job_id: job_id.clone(),
+                            phase: "shot-complete".into(), completed, total, shot_analysis: Some(update) });
+                    },
                     Some("progress") => {
                         let phase = packet["phase"].as_str().unwrap_or("working");
                         if phase.len() > 64 { return Err(AppError::invalid("Invalid video progress")); }
                         let _ = app.emit("video-intelligence-progress", VideoProgress { job_id: job_id.clone(),
-                            phase: phase.into(), completed: packet["completed"].as_u64().unwrap_or(0), total: packet["total"].as_u64().unwrap_or(0) });
+                            phase: phase.into(), completed: packet["completed"].as_u64().unwrap_or(0), total: packet["total"].as_u64().unwrap_or(0), shot_analysis: None });
                     },
                     Some("result") if result.is_none() => result = Some(serde_json::from_value::<VideoResponse>(packet)?),
                     Some("error") => error = Some(packet["message"].as_str().unwrap_or("Video analysis failed").to_owned()),
@@ -209,6 +222,7 @@ pub async fn video_intelligence_run(app: AppHandle, job_id: String, request: Vid
                     return Err(AppError::invalid(format!("The local video worker stopped unexpectedly.{}", request.saved_work_note())));
                 }
                 if let Some(collector) = audio { return collector.finish(); }
+                if let Some(collector) = shots { collector.finish(result.as_ref().and_then(|value| value.shot_analysis.as_ref()))?; }
                 return result.ok_or_else(|| AppError::invalid("The video worker returned no result"));
             },
             Some(CommandEvent::Error(_)) | None => return Err(AppError::invalid(format!("The video worker disconnected.{}", request.saved_work_note()))),

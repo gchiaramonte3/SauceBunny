@@ -1,3 +1,4 @@
+import { frameRate, secondsToFrames } from "./lib/timecode";
 import { RoomAccessDialog } from "./components/RoomAccessDialog";
 import { MultitrackPage } from "./components/MultitrackPage";
 import { lazy, Suspense, type ComponentProps } from "react";
@@ -7,7 +8,8 @@ import { PeerStageVideo } from "./components/PeerStageVideo"; import { MediaSpik
 import { SourceShareMenu, type ShareOption } from "./components/SourceShareMenu"; import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "./lib/import-extensions"; import {   findForSource, touchEntry, renameEntryPath as renameTranscriptEntryPath, notifyTranscriptsChanged, getHistory as getTranscriptHistory, type TranscriptHistoryEntry, } from "./lib/transcript-history"; import { prepareCues, renameSpeakerOverridesPath } from "./components/transcript/helpers"; import {   deriveOnboardingSteps, onboardingComplete, loadOnboardingDismissed, saveOnboardingDismissed, type OnboardingStepId, } from "./lib/onboarding"; import type { Command } from "./lib/commands"; import { buildCommands } from "./lib/commands"; import { markRangeFromSeconds as markRange } from "./lib/mark-range"; import { useBatchTranscribe } from "./hooks/use-batch-transcribe"; import { TranscriptSearchModal } from "./components/TranscriptSearchModal"; import { batchSummary } from "./lib/batch-queue"; import {   loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides, } from "./lib/keybindings"; import { migrateLegacyStorageKeys } from "./lib/migrate-storage"; import { sanitizePlaybackRate, stepPlaybackRate } from "./lib/playback-rate"; import { parseSrt } from "./lib/srt"; import { speakerLanes } from "./lib/speaker-stats"; import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers"; import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity"; import { MediaInfoModal } from "./components/MediaInfoModal"; import { loadReview, saveReview, ensureVersion, setActiveVersion, removeVersion, unlinkFingerprint, canUnlinkVersion, carriedComments, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, receivedReviewKey,  AUTHOR_KEY,
 } from "./lib/review";
 import { loadChapters, adoptSourceChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
-import { loadCutMarkers, CUT_MARKERS_CHANGED_EVENT, type CutMarker } from "./lib/cut-markers";
+import { announceCutMarkers, loadCutMarkers, CUT_MARKERS_CHANGED_EVENT, type CutMarker } from "./lib/cut-markers";
+import { TimelineHint } from "./components/TimelineHint";
 import { appUndo } from "./lib/undo";
 import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage";
 import { useClipExportListeners } from "./hooks/use-clip-export-listeners";
@@ -38,7 +40,7 @@ import {
   durationToTc, framesToTc, tcToFrames, isCompleteTc,
   tcDigitsToDisplay,
 } from "./lib/timecode";
-import { currentQueueSource, queuedRangesForSource } from "./lib/queue-ranges";
+import { currentQueueSource, queuedRangesForSource, queueFrameRate } from "./lib/queue-ranges";
 import { hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
 import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { decodeHtmlEntities } from "./lib/text";
@@ -57,6 +59,7 @@ import { migrateCaptionFont } from "./lib/caption-font";
 import { isMissingCommandError, staleBinaryMessage } from "./lib/stale-backend";
 import { newJobId } from "./lib/job-id";
 import { useVideoForegroundPriority } from "./hooks/use-video-intelligence";
+import { useAnalysisPipeline } from "./hooks/use-analysis-pipeline";
 import { DEFAULT_STUN_URL } from "./lib/ice-servers";
   // Cookie access is checked in Web sources or for an explicit authenticated
   // retry. Opening cached/public media never opens system permission settings.
@@ -633,7 +636,7 @@ export default function App() {
   // Effective fps and duration in frames.
   const fps = metadata?.fps && metadata.fps > 0 ? metadata.fps : fallbackFps;
   const durationFrames = useMemo(
-    () => metadata?.duration != null ? Math.floor(metadata.duration * Math.max(1, Math.round(fps))) : 0,
+    () => metadata?.duration != null ? secondsToFrames(metadata.duration, fps) : 0,
     [metadata, fps]
   );
   const durationTc = useMemo(() => durationToTc(metadata?.duration ?? 0, fps), [metadata, fps]);
@@ -1381,6 +1384,8 @@ export default function App() {
     });
   }, []);
 
+  const analysisPipelineStatus = useAnalysisPipeline(appendLog);
+
   /**
    * Run a cookie-taking yt-dlp command, then RETRY once WITHOUT cookies if it
    * failed while cookies were actually applied. Public social posts (LinkedIn,
@@ -1484,7 +1489,7 @@ export default function App() {
     pushNotification,
     // Playhead at dispatch time, for the download fallback's position
     // handoff (RC4). fps via ref-free read: round at call time.
-    getPlayheadSeconds: () => getPlayheadFrames() / Math.max(1, Math.round(fpsRef.current)),
+    getPlayheadSeconds: () => getPlayheadFrames() / frameRate(fpsRef.current),
     maybePromptYtAuth,
     cookiesBrowser: cookiesBrowserOrNone,
     previewMaxHeight: defaults.previewMaxHeight,
@@ -1733,12 +1738,16 @@ export default function App() {
     playbackController.reportPresented(seconds);
   }, [playbackController]);
 
-  useEffect(() => playbackController.subscribe(() => {
-    const snapshot = playbackController.getSnapshot();
-    const seconds = snapshot.phase === "landing" || snapshot.phase === "scrubbing"
-      ? snapshot.requestedSeconds : snapshot.presentedSeconds;
-    publishPlayheadFrames(playheadSecondsToFrames(seconds, fps));
-  }), [fps, playbackController]);
+  useEffect(() => {
+    const publish = () => {
+      const snapshot = playbackController.getSnapshot();
+      const seconds = snapshot.phase === "landing" || snapshot.phase === "scrubbing"
+        ? snapshot.requestedSeconds : snapshot.presentedSeconds;
+      publishPlayheadFrames(playheadSecondsToFrames(seconds, fps));
+    };
+    publish();
+    return playbackController.subscribe(publish);
+  }, [fps, playbackController]);
 
   const onPlayerStateChange = useCallback((playing: boolean) => {
     playbackController.reportPlaying(playing);
@@ -2435,7 +2444,7 @@ export default function App() {
 
   const handleSnapshot = useCallback(async () => {
     if (!metadata || snapshotBusy) return;
-    const r = Math.max(1, Math.round(fps));
+    const r = frameRate(fps);
     // Action-time store read: grab the frame that's on screen when the user
     // clicks, not a closure value from the last App render.
     const playheadNow = getPlayheadFrames();
@@ -2581,7 +2590,7 @@ export default function App() {
    * be the wrong trade.
    */
   const grabFaceFromFrame = useCallback(async (): Promise<string | null> => {
-    const seconds = getPlayheadFrames() / Math.max(1, Math.round(fps));
+    const seconds = getPlayheadFrames() / frameRate(fps);
     // 1. The active player's own decoder — zero file IO (MediaBunnyPlayer).
     let blob = (await playerRef.current?.getFrameBlob?.(seconds).catch(() => null)) ?? null;
     // 2. A fresh mediabunny pass on the original file.
@@ -3551,7 +3560,7 @@ export default function App() {
     : null;
   // Source duration in seconds for the auto-chapters clamp (null = unknown).
   const sourceDurationSec = durationFrames > 0
-    ? durationFrames / Math.max(1, Math.round(fps))
+    ? durationFrames / frameRate(fps)
     : null;
 
   // Review comment markers for the monitor timeline — re-read whenever the
@@ -3619,7 +3628,7 @@ export default function App() {
   // Live reviews own notes, not the hidden file's frame marks. Changing the
   // publication must neither copy those marks into an NDI pass nor restore
   // old live-pass values over the still-mounted file's marks.
-  useSourceMarks({ reviewSourceKey: mediaReviewSourceKey, durationFrames, inFrames, outFrames, setInFrames, setOutFrames });
+  useSourceMarks({ reviewSourceKey: mediaReviewSourceKey, fps, durationFrames, inFrames, outFrames, setInFrames, setOutFrames });
 
   /**
    * Version stacks: absorb the OPEN file into `oldKey`'s review doc as its
@@ -4578,9 +4587,7 @@ export default function App() {
       onChaptersChanged: () => {
         try { window.dispatchEvent(new CustomEvent(CHAPTERS_CHANGED_EVENT)); } catch { /* non-DOM */ }
       },
-      onCutMarkersChanged: () => {
-        window.dispatchEvent(new CustomEvent(CUT_MARKERS_CHANGED_EVENT));
-      },
+      onCutMarkersChanged: announceCutMarkers,
     },
   });
 
@@ -5544,8 +5551,8 @@ export default function App() {
                       currentQueueSource(sourceKind, localFilePath, metadata?.webpage_url),
                     ).map((c) => ({
                       id: c.id,
-                      inFrames: c.inFrames,
-                      outFrames: c.outFrames,
+                      inFrames: c.inFrames / queueFrameRate(c) * frameRate(fps),
+                      outFrames: c.outFrames / queueFrameRate(c) * frameRate(fps),
                       status: c.status,
                       label: c.filename,
                     }))}
@@ -5566,11 +5573,8 @@ export default function App() {
                     onScrub={onScrub}
                     onScrubEnd={onScrubEnd}
                   />}
-                  {/* Status line under the timeline (9a): the no-marks helper
-                      shows ONLY with no marks and an empty queue; a completed
-                      selection (or a queued no-marks state) renders NOTHING -
-                      the row's space collapses, no reserved empty line.
-                      Partial-mark guidance stays (it completes the gesture). */}
+                  {/* The reserved hint line also hosts brief cut confirmations.
+                      Partial-mark guidance returns when the confirmation fades. */}
                   {roomActive && theater && (
                     <PeoplePanel
                       {...participantPanelProps}
@@ -5606,9 +5610,9 @@ export default function App() {
                     // set. The row holds its line box when it has nothing to
                     // say; aria-hidden keeps an empty one out of the a11y tree.
                     return (
-                      <div className="cp-timeline-hint" aria-hidden={!content}>
+                      <TimelineHint sourceKey={reviewSourceKey}>
                         {content}
-                      </div>
+                      </TimelineHint>
                     );
                   })()}
                 </div>
@@ -5628,6 +5632,7 @@ export default function App() {
                   transcriptEngine={defaults.transcriptionEngine === "parakeet" ? "parakeet" : "whisper"}
                   metadataLoading={metadataLoading}
                   playbackPrepBusy={playbackPrepBusy}
+                  analysisStatus={analysisPipelineStatus}
                   canStop={status === "exporting" || transcriptState === "running" || playbackPrepBusy}
                   onStop={handleStop}
                 />
@@ -5699,8 +5704,7 @@ export default function App() {
                   // onSeek owns the duration clamp (playhead-clock) — no
                   // inline math here, or an unknown duration snaps the cue
                   // click to frame 0.
-                  const r = Math.max(1, Math.round(fps));
-                  onSeek(Math.max(0, Math.floor(seconds * r)));
+                  onSeek(secondsToFrames(seconds, fps));
                 }}
                 transcriptArrivedTick={transcriptArrivedTick}
                 onClearTranscript={handleClearTranscript}
@@ -5871,8 +5875,7 @@ export default function App() {
               // Same clamp path a cue click uses: onSeek owns the duration
               // clamp, so no inline math here.
               setTimeout(() => {
-                const r = Math.max(1, Math.round(fps));
-                onSeek(Math.max(0, Math.floor(seconds * r)));
+                onSeek(secondsToFrames(seconds, fps));
               }, 350);
             });
           }}

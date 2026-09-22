@@ -12,11 +12,31 @@ interpreter. Python is a build dependency, not an installation requirement for
 the app. The worker accepts explicit inspect, index, extract, and waveform commands;
 it is not a server and does not accept arbitrary Python code.
 
-The first supported import is embedded PCM/WAV audio. Unsupported effects,
-transitions, cyclic references, and offline/linked media produce an actionable
-error instead of a flattened timeline that silently moves dialogue. Avid gain
-metadata may be disclosed while analysing the raw isolated microphone audio;
-this is not an Avid mixdown renderer.
+Import supports embedded PCM/WAV and offline/linked audio graphs, including
+group selectors and nested compositions. Selected sequence tracks open first;
+disclosures reveal alternative microphones, initially muted and unchecked.
+Offline audio is unavailable, never substituted with timeline silence. Audio
+Pan/Gain wrappers expose raw isolated microphones with a disclosure in settings;
+other processing and transitions retain identified unavailable spans. Malformed
+graphs and cycles are rejected. This is not an Avid mixdown renderer.
+
+Linked WAV/BWF and PCM MXF are resolved only from local locator paths, mounted
+volumes, or a user-selected file/folder. Multitrack settings contain Locate media
+and Refresh availability. File URLs are decoded, exporter prefixes before
+`/Volumes/` are recognized, and document-local prefix mappings are remembered.
+Candidates must match PCM format, channel count, bit depth, duration, and MXF
+file-package identity when supplied. Duplicate matches require an explicit file
+choice. Ancestor recorder-WAV references retain their different time origins;
+they are not guessed as substitutes for trimmed Avid MXF. No server is mounted,
+no credentials are requested, and network URLs in metadata are never opened.
+
+The graph manifest is v2, saved documents v3, and the embedded PCM index v2;
+older embedded documents remain readable. Original track IDs, labels, cast
+snapshots and transcripts survive compatible migration. New branch IDs depend
+on graph identity, not editable labels. A relink invalidates decoded caches and
+late recognizer responses while preserving already committed transcripts.
+There are separate limits of 64 sequence audio tracks and 256 expanded lanes.
+Multiple top-level sequences are selected explicitly before import.
 
 An AAF is a graph of clip references, not a list of audio files to concatenate.
 Extraction follows source trims and sequence positions, removes unused handles,
@@ -52,13 +72,22 @@ clock holds at the last covered boundary with Play intent retained; the matching
 ready block resumes playback. Pause, a new seek or disposal rejects that late
 resume. Pausing cancels unfinished work but retains completed buffers.
 Obsolete queued windows are cancelled before starting native work.
-Audition retains native sample rate/bit depth. ASR shares the indexed native
-reader for preparation, then uses the existing FFmpeg 16 kHz mono conversion.
+Embedded-only audition retains native sample rate/bit depth. Linked sources use
+bundled FFmpeg to isolate the mapped channel into bounded 48 kHz/24-bit PCM
+windows, then enter the same mixer. There are at most two native preparation
+jobs and one Multitrack recognizer. ASR uses the existing 16 kHz mono conversion.
 Solo is additive and toggleable; Mute is independent. A changed parked
 mix stays silent. Scrubbing uses Clip's short, faded audio-grain policy and never
 waits for decoding to move the playhead. Cold audio still requires preparation.
 Transcription works in bounded chunks rather than making a second full copy of
 every track in advance.
+
+Group alternatives have independent waveforms, audition, selection and saved
+results. Opening a disclosure starts optional waveforms but never playback or
+recognition. Different microphones can be deliberately mixed; identical
+parent/child source mappings are deduplicated. TXT/CSV/PDF/SRT exports identify alternative
+provenance; Avid markers for alternative lanes are deliberately unavailable.
+Root sequence markers keep their original A1/A2/etc. destinations.
 
 ## Track-first controls
 

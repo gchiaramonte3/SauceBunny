@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
-import { sequenceTimecode, transcriptRows, untimedTranscriptRows } from "../lib/multitrack";
+import { hasTranscriptContent, sequenceTimecode, transcriptRows, untimedTranscriptRows } from "../lib/multitrack";
 import { multitrackPeople, multitrackScope } from "../lib/multitrack-person";
 import { MultitrackTranscriptTabs } from "./MultitrackTranscriptTabs";
 import { MultitrackExport } from "./MultitrackExport";
@@ -18,7 +18,7 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
   const [limit, setLimit] = useState(200);
   const people = useMemo(() => multitrackPeople(document), [document]);
   const [choice, setChoice] = useState(initialAll ? "all" : "");
-  const firstWithText = people.find((person) => document.transcripts.some((track) => person.trackIds.includes(track.track_id) && (track.cues.length || track.timing_issues?.length)));
+  const firstWithText = useMemo(() => people.find((person) => document.transcripts.some((track) => person.trackIds.includes(track.track_id) && (track.cues.some((cue) => hasTranscriptContent(cue.text)) || track.timing_issues?.some((cue) => hasTranscriptContent(cue.text))))), [people, document.transcripts]);
   const selected = choice === "all" ? "all" : people.find((person) => person.id === choice)?.id ?? firstWithText?.id ?? people[0]?.id ?? "all";
   const person = people.find((item) => item.id === selected), panelId = useId();
   const scoped = useMemo(() => multitrackScope(document, person?.trackIds), [document, person]);

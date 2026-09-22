@@ -5,6 +5,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getPlayheadFrames, playheadFramesToSeconds } from "../lib/playhead-store";
 import type { QueuedClip } from "../types";
 import type { TranscriptHistoryEntry } from "../lib/transcript-history";
+import type { CutMarkerChange } from "../lib/cut-markers";
 
 /**
  * Cross-window state-sync bridge for the floating side-panel (r44.B).
@@ -106,7 +107,7 @@ export type PanelHandlers = {
   /** Panel generated/deleted chapters (already saved to the shared
    *  localStorage) — main re-reads so its timeline markers update. */
   onChaptersChanged: () => void;
-  onCutMarkersChanged?: () => void;
+  onCutMarkersChanged?: (change: CutMarkerChange) => void;
 };
 
 /** Shared key the main window mirrors the snapshot to on every publish.
@@ -419,8 +420,8 @@ export function usePanelBus({
           () => handlersRef.current.onOpenVideoSettings?.()),
         listen("panel:action:chaptersChanged",
           () => handlersRef.current.onChaptersChanged()),
-        listen("panel:action:cutMarkersChanged",
-          () => handlersRef.current.onCutMarkersChanged?.()),
+        listen<CutMarkerChange>("panel:action:cutMarkersChanged",
+          e => handlersRef.current.onCutMarkersChanged?.(e.payload)),
       ]);
       if (cancelled) { off.forEach((u) => u()); return; }
       unlistens = off;

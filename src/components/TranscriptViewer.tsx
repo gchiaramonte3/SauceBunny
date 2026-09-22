@@ -1,3 +1,4 @@
+import { frameRate } from "../lib/timecode";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useDismiss } from "../hooks/use-dismiss";
 import { reportStorageProblem } from "../lib/storage";
@@ -490,7 +491,7 @@ export function TranscriptViewer({
     useCallback(() => {
       if (!playheadActive || flatCues.length === 0) return -1;
       const seconds = playheadFramesToSeconds(getPlayheadFrames(), fps);
-      const eps = 1 / Math.max(1, Math.round(fps)); // one frame, in seconds
+      const eps = 1 / frameRate(fps); // one frame, in seconds
       let lo = 0, hi = flatCues.length - 1;
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;

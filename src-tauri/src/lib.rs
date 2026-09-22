@@ -243,6 +243,8 @@ pub fn run() {
             commands::list_audio_input_devices,
             commands::generate_transcript,
             commands::aaf_import,
+            commands::aaf_sequences,
+            commands::aaf_resolve_media,
             commands::aaf_open,
             commands::aaf_list,
             commands::aaf_save_labels,
@@ -258,6 +260,8 @@ pub fn run() {
             commands::stop_llm_server,
             commands::llm_server_status,
             commands::video_intelligence_run,
+            commands::load_analysis_corrections,
+            commands::save_analysis_correction,
             commands::video_set_foreground_busy,
             commands::set_api_key,
             commands::delete_api_key,
@@ -383,6 +387,9 @@ pub fn run() {
             commands::session_cancel_fetch,
         ])
         .setup(|app| {
+            // Native menus, panels and subsequent windows must not inherit a
+            // light system appearance while the web content is always dark.
+            app.set_theme(Some(tauri::Theme::Dark));
             // Spell-check: WebKit reads a user default, not an HTML attribute.
             // Set once, before the webview asks. See enable_spellcheck_once.
             #[cfg(target_os = "macos")]

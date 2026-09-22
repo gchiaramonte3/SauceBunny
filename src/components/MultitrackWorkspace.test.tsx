@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { multitrackFixture } from "../test/multitrack-fixture";
+import { multitrackFixture, multitrackGroupFixture } from "../test/multitrack-fixture";
 import { MultitrackWorkspace } from "./MultitrackWorkspace";
 const mocks = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), seek: vi.fn().mockResolvedValue(undefined), pause: vi.fn(), toggle: vi.fn(), shuttle: vi.fn() }));
 vi.mock("../hooks/use-multitrack-transcription", () => ({ useMultitrackTranscription: () => ({ engine: "parakeet", models: [], ready: true, loading: false, status: "", error: null, resolution: null, ...mocks }) }));
@@ -11,6 +11,94 @@ vi.mock("./MultitrackCast", () => ({ MultitrackCast: () => <div>Save Mic Owners 
 vi.mock("./MultitrackTranscript", () => ({ MultitrackTranscript: () => null }));
 beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
+it("group disclosure never selects an alternative or starts playback/transcription", () => {
+  const visible = vi.fn();
+  render(<MultitrackWorkspace document={multitrackGroupFixture()} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} onVisibleTracks={visible} />);
+  expect(screen.queryByRole("checkbox", { name: "Transcribe Sam mic" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Alternative microphones for A1" }));
+  expect((screen.getByRole("checkbox", { name: "Transcribe Sam mic" }) as HTMLInputElement).checked).toBe(false);
+  expect(visible).toHaveBeenLastCalledWith(["track-1", "track-2", "track-3"]);
+  expect(mocks.start).not.toHaveBeenCalled(); expect(mocks.toggle).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Generate 1 track" }));
+  expect(mocks.start).toHaveBeenCalledWith(["track-1"], 0, 24000);
+});
+it("offline roots still reveal independently usable microphones", () => {
+  const doc = multitrackGroupFixture(); doc.manifest.graph!.lanes[0].availability = "offline";
+  render(<MultitrackWorkspace document={doc} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  expect((screen.getByRole("checkbox", { name: "Transcribe Alex mic" }) as HTMLInputElement).disabled).toBe(true);
+  expect(screen.getByText("Offline")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Alternative microphones for A1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Transcribe Sam mic" }));
+  fireEvent.click(screen.getByRole("button", { name: "Generate 1 track" }));
+  expect(mocks.start).toHaveBeenCalledWith(["track-2"], 0, 24000);
+});
+it("opens Clip-style digit entry from the number pad, ignores letters and seeks only on Enter", () => {
+  render(<MultitrackWorkspace document={multitrackFixture()} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "Current timecode" }).textContent).toBe("01:00:00:00");
+  expect(screen.getByLabelText("Total runtime").textContent).toBe("TRT00:16:40:00");
+  fireEvent.keyDown(window, { key: "0", code: "Numpad0", location: 3 });
+  const dialog = screen.getByRole("dialog", { name: "Go to timecode" });
+  expect(document.activeElement).toBe(dialog);
+  for (const key of "1001012") fireEvent.keyDown(dialog, { key, code: `Numpad${key}`, location: 3 });
+  expect(screen.getByLabelText("Entered timecode").textContent).toBe("01:00:10:12");
+  for (const key of ["x", "j", "k", "l", " ", ".", "+"]) fireEvent.keyDown(dialog, { key });
+  expect(screen.getByLabelText("Entered timecode").textContent).toBe("01:00:10:12");
+  expect(mocks.seek).not.toHaveBeenCalled(); expect(mocks.shuttle).not.toHaveBeenCalled(); expect(mocks.pause).not.toHaveBeenCalled(); expect(mocks.toggle).not.toHaveBeenCalled();
+  fireEvent.keyDown(dialog, { key: "Enter", code: "NumpadEnter", location: 3 });
+  expect(mocks.seek).toHaveBeenCalledExactlyOnceWith(252, undefined, false);
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+it("click entry supports correction, Escape and empty Enter without seeking, and restores focus", () => {
+  render(<MultitrackWorkspace document={multitrackFixture()} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  const trigger = screen.getByRole("button", { name: "Current timecode" }); trigger.focus(); fireEvent.click(trigger);
+  let dialog = screen.getByRole("dialog", { name: "Go to timecode" });
+  for (const key of "123456789") fireEvent.keyDown(dialog, { key });
+  expect(screen.getByLabelText("Entered timecode").textContent).toBe("23:45:67:89");
+  fireEvent.keyDown(dialog, { key: "Backspace" });
+  expect(screen.getByLabelText("Entered timecode").textContent).toBe("02:34:56:78");
+  fireEvent.keyDown(dialog, { key: "Escape" }); expect(document.activeElement).toBe(trigger);
+  fireEvent.click(trigger); dialog = screen.getByRole("dialog", { name: "Go to timecode" });
+  fireEvent.keyDown(dialog, { key: "Enter" });
+  expect(screen.queryByRole("dialog")).toBeNull(); expect(mocks.seek).not.toHaveBeenCalled();
+});
+it("does not steal numeric typing from fields, menus, modifiers, hidden views or settings", () => {
+  const props = { document: multitrackFixture(), active: true, waveforms: {}, waveformErrors: {}, labelStatus: "", onRename: vi.fn(), onTranscript: vi.fn() };
+  const { rerender } = render(<MultitrackWorkspace {...props} />);
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Mic owner for track-1" }), { key: "1" });
+  fireEvent.keyDown(window, { key: "1", metaKey: true });
+  fireEvent.keyDown(window, { key: "1", isComposing: true });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Track actions for Alex" }));
+  fireEvent.keyDown(window, { key: "1" }); expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.keyDown(screen.getByRole("menu", { name: "Actions for Alex" }), { key: "Escape" });
+  fireEvent.keyDown(window, { key: "1" }); expect(screen.getByRole("dialog", { name: "Go to timecode" })).toBeTruthy();
+  rerender(<MultitrackWorkspace {...props} active={false} />);
+  fireEvent.keyDown(window, { key: "1" }); expect(screen.queryByRole("dialog")).toBeNull();
+  rerender(<MultitrackWorkspace {...props} settingsOpen />);
+  fireEvent.keyDown(window, { key: "1" }); expect(screen.queryByRole("dialog", { name: "Go to timecode" })).toBeNull();
+  expect(mocks.seek).not.toHaveBeenCalled();
+});
+it("abandons uncommitted entry when the loaded document changes", () => {
+  const props = { document: multitrackFixture(), active: true, waveforms: {}, waveformErrors: {}, labelStatus: "", onRename: vi.fn(), onTranscript: vi.fn() };
+  const { rerender } = render(<MultitrackWorkspace {...props} />);
+  fireEvent.keyDown(window, { key: "1" });
+  rerender(<MultitrackWorkspace {...props} document={{ ...props.document, id: "another-document" }} />);
+  expect(screen.queryByRole("dialog", { name: "Go to timecode" })).toBeNull(); expect(mocks.seek).not.toHaveBeenCalled();
+});
+it("keeps an invalid drop-frame entry open for correction instead of seeking another frame", () => {
+  const doc = multitrackFixture();
+  doc.manifest = { ...doc.manifest, edit_rate: { numerator: 30000, denominator: 1001 }, start_frame: 107892, drop_frame: true };
+  render(<MultitrackWorkspace document={doc} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Current timecode" }));
+  const dialog = screen.getByRole("dialog", { name: "Go to timecode" });
+  for (const key of "01010000") fireEvent.keyDown(dialog, { key });
+  fireEvent.keyDown(dialog, { key: "Enter" });
+  expect(screen.getByRole("alert").textContent).toContain("skipped in drop-frame"); expect(mocks.seek).not.toHaveBeenCalled();
+  fireEvent.keyDown(dialog, { key: "Backspace" }); fireEvent.keyDown(dialog, { key: "2" });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByLabelText("Entered timecode").textContent).toBe("01:01:00;02");
+  fireEvent.keyDown(dialog, { key: "Enter" }); expect(mocks.seek).toHaveBeenCalledExactlyOnceWith(1800, undefined, false);
+});
 it("Generate starts the whole sequence without a mic confirmation, from checked tracks only", () => {
   const document = multitrackFixture();
   render(<MultitrackWorkspace document={document} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);

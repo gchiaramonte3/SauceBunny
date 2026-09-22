@@ -1,5 +1,13 @@
 # Sauce Bunny — Architecture
 
+Multitrack output recovery: cached PCM does not imply an active audio device.
+Play/scrub resume a non-running Web Audio context (including WebKit's
+`interrupted` state), recheck readiness after resume/decode, and report a
+non-running device instead of showing false playback. Device interruptions
+park transport and stop scheduled voices; resuming the device alone does not
+restart playback. A new explicit Play gesture is required. This does not
+change the bounded PCM preparation or recognizer concurrency.
+
 A walk-through of how the pieces fit. Read this before your first PR; it'll save you a day of source-spelunking.
 
 ## What Sauce Bunny is
@@ -115,6 +123,12 @@ See [LIBRARY-ORGANIZATION.md](LIBRARY-ORGANIZATION.md) for acceptance coverage.
 `MultitrackPage` owns its document, track selection, single-clock PCM audition, and
 transcription jobs independently of App's Clip player. Navigation hides the
 workspace without throwing away jobs, and pauses its audition when inactive.
+`useMultitrackKeyboard` opens the numeric `MultitrackTimecodeDialog` only in the
+active workspace outside editable fields and other overlays. It shares Clip's
+digit-fill parsing and HUD styling; AAF rate/drop-frame conversion and source
+start offset resolve only on Enter. The dialog seeks the existing audition
+engine in frames, never the hidden Clip player. TRT is a separate duration
+frame count, not an absolute source timecode.
 `commands/aaf.rs` exposes the typed boundary; `commands/aaf/` separates the
 versioned model/store, cancellable processes, bounded audio preparation, and
 ASR result handling. The bundled `saucebunny-aaf` process resolves source spans
@@ -283,6 +297,50 @@ frozen while running; embeddings and audio classification remain separate.
 Picture inference receives frames without dialogue; supplied transcript text has
 its own response field. Pinned software AV1 decoding extends the existing runtime
 without changing the source identity or presentation-time mapping.
+Analysis emits source-labeled, ordered `video-analysis-pipeline` events to the
+main window from either docked or detached panels. `useAnalysisPipeline` feeds
+the existing bounded Pipeline log (and therefore Copy/Export diagnostics) and
+its active badge. Native job-scoped observers report real model loading and
+shot counts; percentage updates are coalesced. The worker publishes each complete
+description while keeping the model loaded for its bounded batch. Native and
+frontend validators bind every update to its job, source, detector ID, model,
+requested range and sampled frames. The final batch must match the live updates.
+Stop retains accepted rows; source changes hide them and reject late updates.
+
+When no transcript is supplied, `scene-analysis/dialogue.ts` owns a separate
+local Clip Whisper job before picture inference. It uses the selected installed
+Whisper model with fast decoding and cached SpeakerKit diarization; it never
+downloads models. `transcript-preview` exposes the completed Whisper SRT while
+speaker detection finishes. Final text and speaker labels replace those dialogue
+cells, with cue overlap mapped to the same source-relative shot ranges. Speech
+stays outside picture prompts and immutable detector evidence. A second source
+identity check precedes adoption and picture inference. Unique library filenames
+avoid overwriting existing transcripts, and committed saves are recorded even
+when Stop or navigation rejects their display. Existing supplied transcripts
+remain untouched; a retry reuses this run's verified dialogue. Missing speech
+models remain an Info diagnostic and do not prevent picture analysis.
+Terminal events identify user Stop, source/panel changes, priority cancellation,
+and failures; stale events cannot revive a finished run. This observability
+path does not change cancellation, add resumability, or persist model answers.
+Analysis metadata and diagnostics live in `ShotAnalysisInfo`, a viewport-contained
+disclosure next to the existing settings gear. Its trigger is portalled into
+the mode row while the source-bound analysis hook retains ownership; opening
+info performs no native work. The tab toolbar holds Add cut markers immediately
+after Audio, outside the tablist. Results retain their terse missing/pending
+states; failure changes the CTA to Retry analysis and marks the info trigger
+without inserting diagnostic prose into the results table.
+Analysis start/end, audio ranges, durations and cut tooltips use source-rate
+HH:MM:SS:FF non-drop-frame timecode, shared with the player. Only timecode
+numbering uses rounded FPS; media-time conversions retain the actual rate
+(e.g. 60000/1001). Half-microsecond tolerance at frame boundaries accounts for
+the proxy's PTS serialization without snapping arbitrary seeks or modifying
+immutable evidence. Shot end is exclusive. VFR retains original PTS for seeking;
+the displayed clock is its source-rate timeline address, not a decoded-frame ordinal.
+The playhead's consumers, panel heartbeat, scrub/step and export paths use the
+same actual-rate clock. New queue rows carry `frameClock: "source"`; legacy rows
+keep their rounded-FPS elapsed ranges. Source marks persist their conversion
+rate; old marks restore to the nearest source frame once, including late FPS
+metadata, without re-saving a stale pre-conversion snapshot.
 This is not yet enabled by default. See `docs/VIDEO-INTELLIGENCE.md` for tested
 browser surfaces and remaining rollout gates.
 

@@ -1,4 +1,4 @@
-"""Read-only AAF timeline/embedded-PCM reader. No locator or network access."""
+"""Read-only AAF inspection and embedded PCM extraction. Never opens locators."""
 from __future__ import annotations
 import argparse
 from contextlib import contextmanager
@@ -100,6 +100,8 @@ class PCM:
     time_reference: int | None
     recording_date: str | None = None
     recording_date_provenance: str = 'bwf-origination-date'
+    channels: int = 1
+    channel: int = 0
 
 
 def pcm_layout(essence, descriptor=None):
@@ -110,11 +112,11 @@ def pcm_layout(essence, descriptor=None):
         channels = value(descriptor,'Channels')
         bits = value(descriptor,'QuantizationBits')
         align = value(descriptor,'BlockAlign')
-        if hz.denominator != 1 or hz not in (44100,48000,96000) or channels != 1 or bits not in (16,24,32):
-            fail('Use mono PCM audio at 44.1, 48 or 96 kHz and 16, 24 or 32 bits.')
-        if align != bits//8 or size % align or value(descriptor,'Length') != size//align:
+        if hz.denominator != 1 or hz not in (44100,48000,96000) or not 1 <= channels <= 256 or bits not in (16,24,32):
+            fail('Use PCM audio at 44.1, 48 or 96 kHz and 16, 24 or 32 bits.')
+        if align != channels*bits//8 or size % align or value(descriptor,'Length') != size//align:
             fail('The embedded PCM descriptor does not match its samples.', 'invalid_media')
-        return PCM(str(essence.mob_id),0,size//align,int(hz),align,None)
+        return PCM(str(essence.mob_id),0,size//align,int(hz),bits//8,None,channels=channels)
     head = stream.read(12)
     if head[:4] != b'RIFF' or head[8:] != b'WAVE':
         fail('Only embedded PCM WAVE essence is supported. Export embedded WAV audio.')
@@ -160,11 +162,11 @@ def pcm_layout(essence, descriptor=None):
     if fmt is None or data is None:
         fail('An embedded WAVE is missing its format or samples.', 'invalid_media')
     tag, channels, hz, byte_rate, align, bits = fmt
-    if tag != 1 or channels != 1 or bits not in (16, 24, 32) or hz not in (44100, 48000, 96000):
-        fail('Use mono PCM WAV audio at 44.1, 48 or 96 kHz and 16, 24 or 32 bits.')
-    if align != bits//8 or byte_rate != hz*align or data[1] % align:
+    if tag != 1 or not 1 <= channels <= 256 or bits not in (16, 24, 32) or hz not in (44100, 48000, 96000):
+        fail('Use PCM WAV audio at 44.1, 48 or 96 kHz and 16, 24 or 32 bits.')
+    if align != channels*bits//8 or byte_rate != hz*align or data[1] % align:
         fail('The embedded PCM sample layout is invalid.', 'invalid_media')
-    return PCM(str(essence.mob_id), data[0], data[1]//align, hz, align, time_reference, recording_date)
+    return PCM(str(essence.mob_id), data[0], data[1]//align, hz, bits//8, time_reference, recording_date, channels=channels)
 
 
 class Timeline:
@@ -282,6 +284,8 @@ class Timeline:
             fail('Negative source positions are not supported.', 'invalid_media')
         if str(mob.mob_id) in self.essence:
             pcm = self.source(mob)
+            if pcm.channels != 1:
+                fail('Multichannel embedded audio requires the graph importer.')
             if round_sample((offset+duration)*pcm.sample_rate) > pcm.sample_count:
                 fail('A clip exceeds the embedded audio samples.', 'invalid_media')
             return [{'kind':'audio', 'duration':duration, 'source_id':pcm.source_id,
@@ -364,10 +368,16 @@ class Timeline:
                 if offset+count > pcm.sample_count:
                     fail('The requested sample range exceeds the embedded audio.', 'invalid_media')
                 stream = self.essence[clip['source_id']].open('r')
-                stream.seek(pcm.data_offset+offset*width)
+                stream.seek(pcm.data_offset+offset*width*pcm.channels)
+            elif clip['kind'] != 'gap':
+                fail('This range contains unavailable audio.', 'missing_media')
             while count:
-                take = min(count,BLOCK_BYTES//width)
-                block = stream.read(take*width) if stream else bytes(take*width)
+                channels = pcm.channels if stream else 1
+                take = min(count,BLOCK_BYTES//(width*channels))
+                block = stream.read(take*width*channels) if stream else bytes(take*width)
+                if channels > 1:
+                    stride = width*channels
+                    block = b''.join(block[i+pcm.channel*width:i+(pcm.channel+1)*width] for i in range(0,len(block),stride))
                 if len(block) != take*width:
                     fail('Embedded audio ended before the requested range.', 'invalid_media')
                 yield block
@@ -467,7 +477,14 @@ def run(args):
     if args.expected_fingerprint and args.expected_fingerprint != identity:
         fail('The AAF changed. Import it again before continuing.', 'source_changed')
     with aaf2.open(str(path),'r') as file:
-        timeline = Timeline(file)
+        if args.command == 'sequences':
+            from graph import sequence_choices
+            return sequence_choices(file)
+        if getattr(args, 'graph', False):
+            from graph import GraphTimeline
+            timeline = GraphTimeline(file, getattr(args, 'sequence', None))
+        else:
+            timeline = Timeline(file)
         if args.command == 'index':
             # Internal read-only playback index. Keep exact rational source
             # positions; the public manifest intentionally omits these details.
@@ -476,7 +493,9 @@ def run(args):
                 'extents': stream_extents(timeline.essence[key].open('r')),
                 'data_offset': pcm.data_offset, 'sample_count': pcm.sample_count,
                 'sample_rate': pcm.sample_rate, 'sample_width': pcm.sample_width,
-            } for key, pcm in timeline.sources.items()}
+                'channels': pcm.channels, 'channel': pcm.channel,
+            } for key, pcm in timeline.sources.items() if key in timeline.essence}
+            result['schema_version'] = 2 if getattr(args, 'graph', False) else 1
             if sum(len(source['extents']) for source in result['sources'].values()) > 200000:
                 fail('The PCM index exceeds its safety limit.', 'limit_exceeded')
             if fingerprint(path) != identity:
@@ -529,6 +548,9 @@ def run(args):
 
 
 def main():
+    # graph imports the shared reader contracts; use this module instance so
+    # structured ReaderError handling also works in the frozen executable.
+    sys.modules.setdefault('reader', sys.modules[__name__])
     if getattr(sys,'frozen',False):
         # Tauri may SIGKILL the one-file bootloader, which cannot forward that
         # signal. Never let its Python worker keep reading/writing after Stop.
@@ -544,11 +566,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version',action='version',version='saucebunny-aaf 1.0.0 (pyaaf2 '+aaf2.__version__+')')
     commands = parser.add_subparsers(dest='command',required=True)
-    for command in ('inspect','index','extract','peaks'):
+    for command in ('inspect','index','extract','peaks','sequences'):
         child = commands.add_parser(command)
         child.add_argument('--input',required=True)
         child.add_argument('--expected-fingerprint')
-        if command not in ('inspect','index'):
+        child.add_argument('--graph', action='store_true')
+        child.add_argument('--sequence')
+        if command not in ('inspect','index','sequences'):
             child.add_argument('--track',required=True)
             child.add_argument('--output',required=True)
         if command == 'extract':

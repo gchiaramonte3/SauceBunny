@@ -8,6 +8,7 @@ import { newJobId } from "../lib/job-id";
 import { formatError, isAppError } from "../lib/error-format";
 
 type Job = { id: string; stopped: boolean; started: boolean };
+export type VideoRunObserver = { progress?: (event: VideoProgress) => void; error?: (message: string) => void };
 export function useVideoIntelligence() {
   const active = useRef<Job | null>(null);
   const mounted = useRef(true);
@@ -26,7 +27,7 @@ export function useVideoIntelligence() {
     mounted.current = true;
     return () => { mounted.current = false; stop(); };
   }, [stop]);
-  const run = useCallback(async (request: VideoRequest, preserveError = false): Promise<VideoResponse | null> => {
+  const run = useCallback(async (request: VideoRequest, preserveError = false, observer?: VideoRunObserver): Promise<VideoResponse | null> => {
     if (active.current || !mounted.current) return null;
     const job: Job = { id: newJobId(), stopped: false, started: false };
     active.current = job;
@@ -34,14 +35,18 @@ export function useVideoIntelligence() {
     let unlisten: (() => void) | undefined;
     try {
       unlisten = await listen<VideoProgress>("video-intelligence-progress", ({ payload }) => {
-        if (mounted.current && active.current === job && !job.stopped && payload.job_id === job.id) setProgress(payload);
+        if (mounted.current && active.current === job && !job.stopped && payload.job_id === job.id) {
+          setProgress(payload); observer?.progress?.(payload);
+        }
       });
       if (job.stopped || !mounted.current) return null;
       job.started = true;
       const result = await invoke<VideoResponse>("video_intelligence_run", { jobId: job.id, request });
       return mounted.current && !job.stopped ? result : null;
     } catch (cause) {
-      if (mounted.current && !job.stopped && !(isAppError(cause) && cause.kind === "Cancelled")) setError(formatError(cause));
+      if (mounted.current && !job.stopped && !(isAppError(cause) && cause.kind === "Cancelled")) {
+        const message = formatError(cause); setError(message); observer?.error?.(message);
+      }
       return null;
     } finally {
       unlisten?.();

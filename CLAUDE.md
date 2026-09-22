@@ -418,6 +418,7 @@ with the ones still open. The table below is the index into it.
 | Review docs | `~/Documents/Sauce Bunny/Reviews/` — one `<slug>-<hash>.json` per source + `index.json`; hydrated at boot, debounced write-through (`src/lib/review-store.ts`); legacy localStorage docs migrated out on first boot |
 | Screenings | `~/Documents/Sauce Bunny/Screenings/` — one `<date>-<slug>-<hash>.json` per session + `index.json`, FLAT rather than `YYYY-MM/` (the index's no-path-separator guard is worth more than tidy subfolders, and screenings number in the tens). An INDEX over review docs: it records who was there and what the room watched, and holds zero comment bodies, so opening a source solo still shows every note made about it in a session. Boot reads only `index.json`; a full doc is read on demand. See `docs/DATA-MODEL.md` |
 | Library tree state | `localStorage` `saucebunny.libraryTreeExpanded` — which folders are open. Roots seed open once; the selection's ancestors are revealed when the selection MOVES, never on a rescan, and never on first mount when a preference is already recorded |
+| Analysis corrections | `~/Documents/Sauce Bunny/Analysis Corrections/<source-sha256>.json` — schema-versioned original shot snapshot plus independent user field overrides. Native atomic read/compare/write serializes webviews and rejects stale row revisions. Original source contents are hashed on reopening, not matched by filename. Exact original boundary anchors prevent reruns from retargeting corrections onto different shots; unmatched overrides remain on disk. Saved snapshots reflect the last correction, not a separate promise that every inference result is archived. |
 | Review grants | `app_data_dir()/review-grants.json` — one record per issued link: label, BLAKE3 of the secret, created/last-seen, revoked. NOT under `~/Documents`, which is iCloud-synced, because it holds secret hashes. Atomic write: a truncated grant file is a host that refuses everyone |
 | Undelivered notes | `localStorage` `saucebunny.review.outbox` — review ops whose send failed, per review key, capped at 500 with the OLDEST dropped. Drained on every snapshot adoption, not just the first; re-sending an op the host already has is a no-op because `add` carries a fully-built comment and resolve/like/status are SET rather than toggle |
 | Received review files | `localStorage` `saucebunny.review.receivedAs` — local path (NFC-keyed) to the review key the session that delivered it was using. Consulted BEFORE the fingerprint index when opening a file: a copy received in a session has a `<hash8>-` filename prefix, so its fingerprint deliberately does not match the host's, and without this a guest's own notes read back empty |
@@ -744,7 +745,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and ten rules in this file are checked by a test rather than remembered. If you
+One hundred and twelve rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -793,6 +794,7 @@ written after finding the rule already broken somewhere.
 | `hit-target-contract` | Declared pointer-target sizes (see also `e2e/target-size.spec.ts`, which measures the rendered ones) |
 | `design-tokens-contract` | `--font-mono` always brings `tabular-nums`; no unreferenced token; the radius scale is used, not re-typed, and is complete so an off-scale literal fails; `font-weight` names only a face `main.tsx` actually imports; `font-size` comes from `--text-*`; `line-height` is unitless and from `--leading-*`; `letter-spacing` from `--track-*`; app-level `z-index` (above 99) comes from a `--z-*` rung while local stacking stays a small integer |
 | `path-identity-contract` | One NFC path normaliser, in `lib/repath` |
+| `transcript-seek-contract` | Transcript clicks and search results use the shared seconds-to-frame conversion, preserving the displayed frame when a serialized timestamp rounds down |
 | `storage-keys-contract` | New prefs use the `saucebunny.` namespace; nine legacy `cp-` keys are pinned by name |
 | `invoke-contract` | Invoke type args come from `src/bindings/`; byte payloads use the raw IPC body; every `write_text_to_path` is atomic |
 | `store-version-contract` | Every file store that stamps a schema version also refuses to write a file stamped with a NEWER one (see `docs/DATA-MODEL.md`) |
@@ -835,6 +837,7 @@ written after finding the rule already broken somewhere.
 | `list-columns-contract` | A list view's grid tracks, header cells and row cells all derive from one column model, so a column can be hidden or reordered without three literals having to agree (see also `e2e/list-columns.spec.ts`, which checks that they DO agree once rendered) |
 | `list-zebra-contract` | List rows alternate rather than carrying hairlines, and the row ladder stays monotonic: stripe < hover < focus < selected (see also `e2e/list-zebra.spec.ts`, which measures the rendered stripes and the header's place in the child order) |
 | `transition-target-contract` | A transition names the properties it animates rather than saying `all`, and animates no layout property outside a listed progress fill (shrink-only, and a listed entry must still match) |
+| `dark-appearance-contract` | Document color scheme, native app appearance and configured windows remain Dark regardless of the macOS Light/Auto preference |
 | `monitor-stack-contract` | Everything that floats over the video is a child of one stack rather than positioning itself, and nothing but captions sits in the bottom-centre band |
 | `device-state-contract` | "Your device is off" is one colour everywhere it says so (the self tile switch, the room bar, the roster badge), and it is the token that stays legible on a plate over live video |
 | `dismiss-parity-contract` | No NEW hand-rolled click-outside dismisser; use `useDismiss`, which brings Escape with it |

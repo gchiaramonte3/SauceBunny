@@ -2,8 +2,8 @@
 use crate::AppError;
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_VERSION: u32 = 1;
-pub const DOCUMENT_SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 2;
+pub const DOCUMENT_SCHEMA_VERSION: u32 = 3;
 pub const ASR_RATE: i64 = 16_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -46,6 +46,9 @@ pub struct AafTrack {
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct AafManifest {
     pub schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub graph: Option<AafGraph>,
     pub name: String,
     pub source_fingerprint: String,
     #[serde(default)]
@@ -225,12 +228,12 @@ pub fn validate_manifest(manifest: &AafManifest) -> Result<(), AppError> {
             || !matches!(date.provenance.as_str(), "bwf-origination-date" | "explicit-recording-date"))) {
         return Err(AppError::invalid("Invalid recording-date metadata"));
     }
-    if manifest.schema_version != SCHEMA_VERSION {
+    if !(1..=SCHEMA_VERSION).contains(&manifest.schema_version) {
         return Err(AppError::invalid("This AAF document version is not supported. Update Sauce Bunny."));
     }
     if manifest.duration_frames <= 0 || manifest.start_frame < 0
         || manifest.timecode_fps == 0 || manifest.timecode_fps > 120
-        || manifest.tracks.is_empty() || manifest.tracks.len() > 64
+        || manifest.tracks.is_empty() || manifest.tracks.len() > if manifest.graph.is_some() { 256 } else { 64 }
         || manifest.source_fingerprint.len() != 64
         || !manifest.source_fingerprint.bytes().all(|b| b.is_ascii_hexdigit())
     { return Err(AppError::invalid("Invalid or unsupported AAF manifest")); }
@@ -250,13 +253,156 @@ pub fn validate_manifest(manifest: &AafManifest) -> Result<(), AppError> {
             let end = clip.start_frame.checked_add(clip.duration_frames)
                 .ok_or_else(|| AppError::invalid("AAF clip duration overflow"))?;
             if clip.start_frame < previous_end || clip.duration_frames < 0
-                || end > manifest.duration_frames || !matches!(clip.kind.as_str(), "audio" | "gap")
+                || end > manifest.duration_frames || !matches!(clip.kind.as_str(), "audio" | "gap" | "unavailable")
             { return Err(AppError::invalid("Unsupported overlapping or out-of-range AAF clips")); }
             previous_end = end;
         }
     }
+    if let Some(graph) = &manifest.graph {
+        let bad = || AppError::invalid("Invalid AAF source graph");
+        if graph.sequence_id.is_empty() || graph.sequence_id.len() > 256 || graph.lanes.len() != ids.len()
+            || graph.sources.len() > 10000 || graph.positions.len() > 2560000 || graph.path_mappings.len() > 10000
+            || graph.markers.len() > 100000 || graph.picture_tracks.len() > 256 { return Err(bad()); }
+        let mut lanes = std::collections::HashSet::new();
+        for lane in &graph.lanes {
+            if !ids.contains(&lane.track_id) || !lanes.insert(&lane.track_id)
+                || !matches!(lane.availability.as_str(), "ready" | "offline" | "needs_relink" | "unsupported") { return Err(bad()); }
+            if let Some(parent) = &lane.parent_track_id {
+                if parent == &lane.track_id || !graph.lanes.iter().any(|p| &p.track_id == parent && p.parent_track_id.is_none()) { return Err(bad()); }
+            }
+        }
+        if graph.lanes.iter().filter(|l| l.parent_track_id.is_none()).count() > 64 { return Err(bad()); }
+        let mut sources = std::collections::HashSet::new();
+        for source in &graph.sources {
+            if source.id.len() > 512 || !sources.insert(&source.id) || !(1..=256).contains(&source.channels)
+                || source.channel >= source.channels || ![44100,48000,96000].contains(&source.sample_rate)
+                || ![2,3,4].contains(&source.sample_width) || source.sample_count > 96_000*60*60*24*7
+                || source.locators.len() > 256 || source.ancestors.len() > 16
+                || source.locators.iter().any(|p| p.len() > 32768)
+                || !matches!(source.status.as_str(), "ready" | "offline" | "needs_relink") { return Err(bad()); }
+            if let Some(binding) = &source.resolved {
+                if !std::path::Path::new(&binding.path).is_absolute() || binding.path.len() > 32768
+                    || binding.fingerprint.len() != 64 || !binding.fingerprint.bytes().all(|b| b.is_ascii_hexdigit()) { return Err(bad()); }
+            }
+        }
+        let mut positions = std::collections::HashSet::new();
+        for position in &graph.positions {
+            if position.numerator < 0 || position.denominator <= 0 || position.denominator > 1_000_000_000
+                || !positions.insert((&position.track_id, position.clip_index))
+                || !manifest.tracks.iter().any(|t| t.id == position.track_id && t.clips.get(position.clip_index).is_some_and(|c| c.kind == "audio")) { return Err(bad()); }
+        }
+        for mapping in &graph.path_mappings {
+            if !std::path::Path::new(&mapping.from).is_absolute() || !std::path::Path::new(&mapping.to).is_absolute()
+                || mapping.from.len() > 32768 || mapping.to.len() > 32768 { return Err(bad()); }
+        }
+    }
     Ok(())
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafGraph {
+    pub sequence_id: String,
+    pub sources: Vec<AafSource>,
+    pub lanes: Vec<AafLane>,
+    pub positions: Vec<AafSourcePosition>,
+    pub markers: Vec<AafImportedMarker>,
+    pub picture_tracks: Vec<AafPictureTrack>,
+    #[serde(default)]
+    pub path_mappings: Vec<AafPathMapping>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafLane {
+    pub track_id: String,
+    pub parent_track_id: Option<String>,
+    pub branch_id: Option<String>,
+    pub group_name: Option<String>,
+    pub availability: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafSourcePosition {
+    pub track_id: String,
+    pub clip_index: usize,
+    #[ts(type = "number")]
+    pub numerator: i64,
+    #[ts(type = "number")]
+    pub denominator: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafSource {
+    pub id: String,
+    pub mob_id: String,
+    pub slot_id: u32,
+    pub locators: Vec<String>,
+    pub ancestors: Vec<AafSourceAncestor>,
+    pub channel: u32,
+    pub channels: u32,
+    pub sample_rate: u32,
+    pub sample_width: u32,
+    #[ts(type = "number")]
+    pub sample_count: u64,
+    pub descriptor: String,
+    pub status: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub resolved: Option<AafResolvedSource>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafSourceAncestor {
+    pub mob_id: String,
+    pub slot_id: u32,
+    #[ts(type = "number")]
+    pub start: i64,
+    pub edit_rate: String,
+    pub locators: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafResolvedSource {
+    pub path: String,
+    pub fingerprint: String,
+    pub stream_index: u32,
+    #[ts(type = "number")]
+    pub size: u64,
+    #[ts(type = "number")]
+    pub modified_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafPathMapping { pub from: String, pub to: String }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafImportedMarker {
+    #[ts(type = "number")]
+    pub position: i64,
+    pub comment: String,
+    pub described_slots: Vec<u32>,
+    pub attributes: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafPictureTrack {
+    pub slot_id: u32,
+    pub physical_track_number: Option<u32>,
+    pub name: String,
+    pub component: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafSequenceChoice { pub id: String, pub name: String }
 
 #[cfg(test)]
 mod tests {

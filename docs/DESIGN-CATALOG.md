@@ -33,6 +33,8 @@ they do not acquire media. It imports no document,
 audio, or transcription hook. These interactions update only the fixture's local
 state. The production workspace reuses the existing transport, volume,
 Generate, and export controls; the catalog does not prove AAF parsing or ASR.
+The timecode control also opens the real numeric HUD with Enter-only local seek,
+and shows a zero-origin TRT distinct from the source timecode.
 
 Run `npm run design:catalog` and open [the local catalog](http://127.0.0.1:51731/design-system.html). Run `npm run check:design-catalog` for strict TypeScript, the application's Hooks lint rules, recursive inventory, isolation tests, browser checks, and a temporary production-build exclusion check. This development-only HTML entry is not the production application's default build input.
 
@@ -285,6 +287,14 @@ not reapply the old fixes. Other keyboard findings remain separately tracked
 in the frontend re-audit.
 
 ### Content, surfaces and feedback
+
+Model download progress is a production recipe in
+`src/components/ModelDownloadProgress.tsx`, styled by `.cp-model-progress` in
+`settings.css`. Feedback includes determinate and unknown-size specimens with
+fixed local props—no downloads. Whisper, Parakeet, diarization, AI Summary and
+Video Intelligence use this same neutral rail. Generate remains its separate
+stateful action. Validate both OS Light and Dark preferences: the application
+and its native controls retain the dark appearance described in DESIGN.md.
 
 Keep the shared native select, table vocabulary, existing tooltip exception and explicit toast dismissal. Show their important states in the catalog rather than replacing them with generic cards.
 

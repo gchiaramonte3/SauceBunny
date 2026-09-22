@@ -5,6 +5,9 @@ use std::path::Path;
 use tauri::{AppHandle, Manager};
 
 struct EngineConfig { engine: AafEngine, model_id: String, model_path: String, language: String, fast: bool }
+// Enforce the limit natively too: a second window or overlapping IPC must not
+// turn a group expansion into dozens of recognizer processes.
+static RECOGNIZER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 fn engine_config(app: &AppHandle, engine: AafEngine, model_id: &str, language: &str, fast: bool) -> Result<EngineConfig, AppError> {
     let language = language.trim().to_ascii_lowercase();
@@ -128,6 +131,14 @@ pub fn parse_cues(text: &str, chunk: &Chunk, rate: &AafRate, track: &str) -> Res
 }
 
 async fn run_chunk(app: &AppHandle, job: &str, config: &EngineConfig, wav: &Path, output: &Path) -> Result<String, AppError> {
+    let _permit = loop {
+        process::check_cancelled(app, job)?;
+        tokio::select! {
+            permit = RECOGNIZER.acquire() => break permit.map_err(|_| AppError::internal("Speech recognition unavailable"))?,
+            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {},
+        }
+    };
+    process::check_cancelled(app, job)?;
     let (name, args) = match config.engine {
         AafEngine::Whisper => ("whisper-cli", crate::commands::transcript::whisper_cli_args(
             &config.model_path, &wav.to_string_lossy(), &output.to_string_lossy(), &config.language, None, config.fast)),
@@ -150,6 +161,7 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
 {
     let lane = store::track(document, track)?;
     store::source_ready(document)?;
+    super::linked::check_sources(document, store::track(document, track)?)?;
     let end = start.checked_add(duration).ok_or_else(|| AppError::invalid("AAF transcription range overflow"))?;
     if start < 0 || duration <= 0 || end > document.manifest.duration_frames {
         return Err(AppError::invalid("Choose a transcription range within the sequence"));
@@ -180,6 +192,7 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
     }
     cues.sort_by_key(|cue| (cue.start_sample, cue.end_sample));
     store::source_ready(document)?;
+    super::linked::check_sources(document, lane)?;
     let transcript = AafTrackTranscript { track_id: track.into(), start_frame: start, duration_frames: duration, engine: config.engine,
         model_id: config.model_id, status: if !timing_issues.is_empty() { AafTranscriptStatus::Review } else if cues.is_empty() { AafTranscriptStatus::Empty } else { AafTranscriptStatus::Completed },
         sample_rate: ASR_RATE as u32, cues, timing_issues,
@@ -188,7 +201,7 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
             "Cues marked for boundary review can repeat across processing chunks. Both are kept so differing segmentation cannot silently remove words.".into(),
             "Recognition uses bounded audio chunks with one second of context. Whisper VAD is not used in this multitrack path.".into()] };
     let root = store::root(app)?;
-    app.state::<JobRegistry>().while_active(job, || store::save_transcript(&root, &document.id, transcript.clone()))?;
+    app.state::<JobRegistry>().while_active(job, || store::save_transcript(&root, document, transcript.clone()))?;
     let _ = tauri::Emitter::emit(app, "saucebunny:multitrack-changed", &document.id);
     Ok(transcript)
 }

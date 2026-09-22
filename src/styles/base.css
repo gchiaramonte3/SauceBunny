@@ -2,6 +2,10 @@
 /* Sauce Bunny — editorial source-acquisition utility (Ella tokens). */
 @import './tokens.css';
 
+/* App chrome is always dark, including native form controls and scrollbars.
+   Paint colors alone do not set WebKit's system-control appearance. */
+:root { color-scheme: only dark; }
+
 * {
   box-sizing: border-box;
   /* Global tabular numerics — since the whole app is now Nunito Sans
@@ -293,4 +297,3 @@ button:focus-visible, input:focus-visible,
   max-width: 280px;
 }
 .cp-pane-empty p { margin: 0; }
-

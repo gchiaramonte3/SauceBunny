@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ShotCutAction } from "../../src/components/ShotCutAction";
 import { Timeline } from "../../src/components/Timeline";
+import { TimelineHint } from "../../src/components/TimelineHint";
 import { loadChapters, saveChapters } from "../../src/lib/chapters";
 import { CUT_MARKERS_CHANGED_EVENT, loadCutMarkers } from "../../src/lib/cut-markers";
 import type { SceneEvidence } from "../../src/lib/scene-analysis/evidence";
@@ -24,13 +25,13 @@ function Fixture() {
         <ShotCutAction evidence={evidence} sourceKey="fixture-source" onCutMarkersChanged={() => {
           document.documentElement.dataset.notifications = String(Number(document.documentElement.dataset.notifications ?? 0) + 1);
         }} />
-        <span className="cp-muted cp-shot-cut-help">Cuts mark shot changes along the bottom of the timeline. Chapters stay at the top.</span>
       </div>
     </section>
     <Timeline status="loaded" durationFrames={72} fps={24000 / 1001} inFrames={null} outFrames={null}
       chapterMarkers={loadChapters("fixture-source")} cutMarkers={cuts}
       onSeek={frame => { document.documentElement.dataset.frameSeek = String(frame); }}
       onCutSeek={seconds => { document.documentElement.dataset.cutSeek = String(seconds); }} />
+    <TimelineHint sourceKey="fixture-source">No marks set. Export grabs the whole clip.</TimelineHint>
   </main>;
 }
 createRoot(document.getElementById("root")!).render(<Fixture />);

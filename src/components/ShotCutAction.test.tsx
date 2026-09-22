@@ -24,9 +24,13 @@ it("requires a click, preserves creator chapters, and adds exact source-time mar
   ]);
   expect(loadCutMarkers("source")).toEqual([{ time: 1.500002 }]);
   expect(changed).toHaveBeenCalledTimes(1);
+  expect(changed).toHaveBeenLastCalledWith({ sourceKey: "source", addedCount: 1 });
+  expect(screen.queryByRole("status")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add cut markers" }));
   expect(loadCutMarkers("source")).toHaveLength(1);
-  expect(changed).toHaveBeenCalledTimes(1);
+  expect(changed).toHaveBeenCalledTimes(2);
+  expect(changed).toHaveBeenLastCalledWith({ sourceKey: "source", addedCount: 0 });
+  expect(screen.queryByRole("status")).toBeNull();
 });
 
 it("reads edits made after render instead of replacing them with a stale snapshot", () => {
@@ -45,7 +49,7 @@ it("does not claim success or notify the detached panel when persistence fails",
   vi.spyOn(console, "warn").mockImplementation(() => {});
   render(<ShotCutAction evidence={evidence} sourceKey="source" onCutMarkersChanged={changed} />);
   fireEvent.click(screen.getByRole("button", { name: "Add cut markers" }));
-  expect(screen.getByRole("status").textContent).toContain("Couldn't save");
+  expect(screen.getByRole("alert").textContent).toContain("Couldn't save");
   expect(changed).not.toHaveBeenCalled();
 });
 

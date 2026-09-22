@@ -1,4 +1,10 @@
 import type { QueuedClip, QueueSource } from "../types";
+import { frameRate } from "./timecode";
+
+/** Old pending exports keep their original elapsed-time ranges. No rewrite. */
+export function queueFrameRate(clip: QueuedClip): number {
+  return frameRate(clip.frameClock === "source" ? clip.fps : Math.round(clip.fps));
+}
 
 /**
  * Which queued clips belong to the source currently loaded.

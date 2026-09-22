@@ -12,8 +12,8 @@ export const MUSIC_SUMMARY_POLICY = Object.freeze({
   minimumStyleScore: 0.1,
   minimumStyleRatio: 1.5,
 });
-const CLASSIFIER = "ast-audioset@f826b80d28226b62986cc218e5cec390b1096902";
-const PREPROCESSING = "pyav-swr16k-mono-10s-kaldi-ast-v1";
+export const AUDIOSET_CLASSIFIER = "ast-audioset@f826b80d28226b62986cc218e5cec390b1096902";
+export const AUDIOSET_PREPROCESSING = "pyav-swr16k-mono-10s-kaldi-ast-v1";
 
 // Parent/child labels are correlated, not independent votes. Use each family's
 // maximum, never their sum. Instrument, mood and usage labels are not genres.
@@ -45,8 +45,8 @@ export type MusicSummary = {
  * timestamps, threshold-derived song boundaries, or negative "no music" claim.
  */
 export function summarizeMusic(evidence: AudioEvidence): MusicSummary | null {
-  if (!("labels" in evidence) || evidence.classifier !== CLASSIFIER
-    || evidence.preprocessing_version !== PREPROCESSING || evidence.status !== "decoded"
+  if (!("labels" in evidence) || evidence.classifier !== AUDIOSET_CLASSIFIER
+    || evidence.preprocessing_version !== AUDIOSET_PREPROCESSING || evidence.status !== "decoded"
     || !evidence.windows.length) return null;
   const indices = new Map(evidence.labels.map((label, index) => [label, index]));
   if (indices.size !== evidence.labels.length || !indices.has("Music")) return null;

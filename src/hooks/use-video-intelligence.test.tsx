@@ -13,6 +13,25 @@ beforeEach(() => { vi.resetAllMocks(); mocks.listen.mockResolvedValue(mocks.unli
 afterEach(cleanup);
 
 describe("video worker ownership", () => {
+  it("observes only owned live progress and reports native errors without swallowing the reason", async () => {
+    let reject!: (error: unknown) => void;
+    const gate = new Promise((_, no) => { reject = no; });
+    mocks.invoke.mockReturnValue(gate);
+    const observer = { progress: vi.fn(), error: vi.fn() };
+    const { result } = renderHook(() => useVideoIntelligence());
+    let operation!: Promise<unknown>;
+    act(() => { operation = result.current.run({ operation: "models" }, false, observer); });
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledOnce());
+    const id = mocks.invoke.mock.calls[0][1].jobId;
+    const listener = mocks.listen.mock.calls[0][1] as (event: { payload: VideoProgress }) => void;
+    const progress = { job_id: id, phase: "loading-model", completed: 0, total: 0 };
+    act(() => { listener({ payload: { ...progress, job_id: "foreign" } }); listener({ payload: progress }); });
+    expect(observer.progress).toHaveBeenCalledExactlyOnceWith(progress);
+    await act(async () => { reject(new Error("Decoder failure")); await operation; });
+    expect(observer.error).toHaveBeenCalledExactlyOnceWith("Decoder failure");
+    act(() => listener({ payload: progress }));
+    expect(observer.progress).toHaveBeenCalledOnce();
+  });
   it("one paused player cannot release another player's foreground priority", () => {
     const first = renderHook(({ busy }) => useVideoForegroundPriority(busy), { initialProps: { busy: true } });
     const second = renderHook(({ busy }) => useVideoForegroundPriority(busy), { initialProps: { busy: true } });

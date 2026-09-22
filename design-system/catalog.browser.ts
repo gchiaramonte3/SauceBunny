@@ -5,6 +5,18 @@ const entry = (page: Page, id: string) => page.getByTestId(`catalog-entry-${id}`
 const proposed = (page: Page, id: string) => entry(page, id).locator('[data-ds-example="proposed"]').first();
 const pageErrors = new WeakMap<Page, string[]>();
 
+test("Multitrack numeric HUD changes only its local fixture frame", async ({ page }) => {
+  await selectFamily(page, "panels");
+  const trigger = page.getByRole("button", { name: "Go to multitrack timecode", exact: true });
+  await trigger.click(); await page.keyboard.type("01001012letters");
+  await expect(page.getByLabel("Entered timecode")).toHaveText("01:00:10:12");
+  await expect(trigger).toHaveText("01:00:17:12");
+  await page.keyboard.press("Enter"); await expect(trigger).toHaveText("01:00:10:12");
+  await expect(trigger).toBeFocused();
+  await trigger.click(); await page.keyboard.type("01000000"); await page.keyboard.press("Escape");
+  await expect(trigger).toHaveText("01:00:10:12");
+});
+
 test("expected speakers uses production violet selection and keyboard focus return", async ({ page }) => {
   await selectFamily(page, "selects");
   const trigger = page.getByRole("button", { name: "Expected speakers: 2" });

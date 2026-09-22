@@ -3,19 +3,21 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { AafWaveform } from "../bindings/AafWaveform";
 import { newJobId } from "../lib/job-id";
+import { alternativeLane, laneReady, mediaRevision } from "../lib/multitrack-graph";
 
 /** Refine only a settled, zoomed view. Overview remains visible during extraction. */
-export function useMultitrackDetail(document: AafDocument, start: number, span: number, enabled: boolean) {
+export function useMultitrackDetail(document: AafDocument, start: number, span: number, enabled: boolean, visibleIds?: string[]) {
   const [detail, setDetail] = useState<{ key: string; peaks: Record<string, number[][]> }>({ key: "", peaks: {} });
   const cache = useRef(new Map<string, Record<string, number[][]>>());
-  const key = `${document.id}:${start}:${span}`, tracks = document.manifest.tracks.map((track) => track.id).join("|");
+  const mediaKey = mediaRevision(document);
+  const key = `${mediaKey}:${start}:${span}`, tracks = document.manifest.tracks.filter(track => laneReady(document, track.id) && (visibleIds ? visibleIds.includes(track.id) : !alternativeLane(document, track.id))).map((track) => track.id).join("|");
   const documentId = document.id;
-  useEffect(() => { cache.current.clear(); }, [documentId]);
+  useEffect(() => { cache.current.clear(); }, [documentId, mediaKey]);
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false; const jobs = new Set<string>();
     const timer = window.setTimeout(() => {
-      const ids = tracks.split("|"); let index = 0;
+      const ids = tracks ? tracks.split("|") : []; let index = 0;
       const saved = cache.current.get(key) ?? {};
       cache.current.delete(key); cache.current.set(key, saved);
       while (cache.current.size > 8) cache.current.delete(cache.current.keys().next().value!);

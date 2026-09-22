@@ -34,7 +34,21 @@ export class MultitrackAudio {
   constructor(documentId: string, private fps: number, private duration: number, private ids: string[], private notify: (state: AuditionState) => void) {
     this.context = new AudioContext(); this.master = this.context.createGain(); this.master.connect(this.context.destination);
     this.cache = new MultitrackAudioCache(documentId, fps, duration, this.context);
+    this.context.onstatechange = () => {
+      if (!this.closed && this.state.rate && this.context.state !== "running") {
+        this.fail(new Error("Audio output was interrupted. Press Play to resume."));
+      }
+    };
   }
+  private async resumeOutput() {
+    if (this.context.state === "running") return;
+    if (!this.resuming) this.resuming = this.context.resume().finally(() => { this.resuming = null; });
+    await this.resuming;
+    // Read again after resume; TypeScript otherwise retains the pre-await narrowing.
+    const state: AudioContextState = this.outputState();
+    if (state !== "running") throw new Error("Audio output is unavailable. Check the Mac's output device, then press Play.");
+  }
+  private outputState(): AudioContextState { return this.context.state; }
   private publish(patch: Partial<AuditionState>) { this.state = { ...this.state, ...patch }; if (!this.closed) this.notify(this.state); }
   private stopVoices() { for (const voice of this.voices) { try { voice.stop(); } catch { /* already ended */ } voice.disconnect(); } this.voices.clear(); }
   private currentFrame() {
@@ -70,7 +84,7 @@ export class MultitrackAudio {
     this.publish({ frame, rate: 0, busy: false });
   }
   suspend() { this.pause(); this.cache.clear(); this.buffers.clear(); this.bufferStart = -1; }
-  close() { this.suspend(); this.closed = true; for (const gain of this.trackLevels.values()) gain.disconnect(); this.trackLevels.clear(); void this.context.close(); }
+  close() { this.suspend(); this.closed = true; this.context.onstatechange = null; for (const gain of this.trackLevels.values()) gain.disconnect(); this.trackLevels.clear(); void this.context.close(); }
   /** Decode the parked window plus one look-ahead silently. No context resume,
    * voices or playhead movement; Play reuses pending/completed cache entries. */
   async warm(frame: number) {
@@ -90,10 +104,9 @@ export class MultitrackAudio {
     if (!this.scrubEnabled) return;
     // Silent warming does not unlock Web Audio. The actual pointer gesture
     // must resume it even when PCM is already cached, using the latest frame.
-    if (this.scrubEnabled && this.context.state === "suspended") {
+    if (this.scrubEnabled && this.context.state !== "running") {
       const request = this.request;
-      if (!this.resuming) this.resuming = this.context.resume().finally(() => { this.resuming = null; });
-      void this.resuming.then(() => { if (request === this.request && !this.closed && !this.state.rate) this.queueGrain(); })
+      void this.resumeOutput().then(() => { if (request === this.request && !this.closed && !this.state.rate) this.queueGrain(); })
         .catch((cause) => { if (request === this.request && !this.closed) this.publish({ error: formatError(cause) }); });
     } else this.queueGrain();
     // Coalesce cold scrub positions. Never move the UI back to an old decode result.
@@ -107,7 +120,7 @@ export class MultitrackAudio {
     const target = this.state.frame, start = this.cache.start(target), request = ++this.request;
     this.cache.cancel(); this.preparingStart = start;
     try {
-      if (this.context.state === "suspended") await this.context.resume();
+      if (this.context.state !== "running") await this.resumeOutput();
       if (request !== this.request || this.closed || !this.scrubEnabled) return;
       const buffers = await this.cache.get(this.ids, target);
       if (request !== this.request || this.closed || this.state.rate) return;
@@ -123,7 +136,7 @@ export class MultitrackAudio {
     this.requestedRate = rate;
     this.publish({ frame: target, error: null });
     try {
-      if (this.context.state === "suspended") await this.context.resume();
+      if (this.context.state !== "running") await this.resumeOutput();
       if (request !== this.request || this.closed) return;
       if (!this.hasBuffers(target)) {
         this.publish({ busy: true });
@@ -137,6 +150,7 @@ export class MultitrackAudio {
     } catch (cause) { if (request === this.request && !this.closed) this.fail(cause); }
   }
   private startPlayback(frame: number, rate: number) {
+    if (this.context.state !== "running") throw new Error("Audio output was interrupted. Press Play to resume.");
     this.originFrame = frame; this.originTime = this.context.currentTime + SCHEDULE_LEAD_SECONDS;
     this.grainState = idleScrubState(); this.publish({ frame, rate, busy: false });
     if (rate === 1) { this.schedule(this.buffers, this.bufferStart, frame, this.originTime); this.prepareNext(this.bufferStart, this.originTime - (frame - this.bufferStart) / this.fps); }

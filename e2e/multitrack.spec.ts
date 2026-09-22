@@ -3,7 +3,12 @@ import { EXPECTED_BACKEND_BUILD_ID } from "../src/lib/build-id";
 import { multitrackFixture, multitrackTranscript } from "../src/test/multitrack-fixture";
 import { tauriMockInit } from "./tauri-mock";
 
-async function boot(page: Page, trackCount = 3) {
+test.use({ browserName: process.env.SAUCE_AUDIO_BROWSER === "webkit" ? "webkit" : "chromium" });
+
+async function boot(page: Page, trackCount = 3, audible = false, grouped = false) {
+  const fixture = multitrackFixture();
+  fixture.manifest.tracks = Array.from({ length: trackCount }, (_, index) => ({ ...structuredClone(multitrackFixture().manifest.tracks[index % 3]), id: `track-${index + 1}`, name: index < 3 ? multitrackFixture().manifest.tracks[index].name : `Mic ${index + 1}` }));
+  if (grouped) fixture.manifest.graph = { sequence_id: "group", sources: [], positions: [], markers: [], picture_tracks: [], path_mappings: [], lanes: fixture.manifest.tracks.map((track, index) => ({ track_id: track.id, parent_track_id: index < 14 ? null : `track-${Math.floor((index-14)/6)+1}`, branch_id: index < 14 ? null : `branch-${index}`, group_name: "Generated group", availability: "ready" })) };
   // Silent, duration-correct PCM exercises browser decoding without private
   // media or a nonexistent asset:// URL masking unrelated UI failures.
   await page.route("**/e2e-mock/solo-*.wav", (route) => {
@@ -13,6 +18,7 @@ async function boot(page: Page, trackCount = 3) {
     body.writeUInt32LE(16, 16); body.writeUInt16LE(1, 20); body.writeUInt16LE(1, 22);
     body.writeUInt32LE(16000, 24); body.writeUInt32LE(32000, 28); body.writeUInt16LE(2, 32); body.writeUInt16LE(16, 34);
     body.write("data", 36); body.writeUInt32LE(samples * 2, 40);
+    if (audible) for (let sample = 0; sample < samples; sample++) body.writeInt16LE(Math.round(Math.sin(sample / 16000 * 2 * Math.PI * 440) * 4000), 44 + sample * 2);
     return route.fulfill({ contentType: "audio/wav", body });
   });
   await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
@@ -27,6 +33,7 @@ async function boot(page: Page, trackCount = 3) {
     app.__TAURI_INTERNALS__.invoke = (command, args = {}) => {
       app.__multitrackCalls.push({ command, args });
       if (command === "aaf_list") return Promise.resolve([]);
+      if (command === "aaf_sequences") return Promise.resolve([{ id: "fixture", name: fixture.manifest.name }]);
       if (command === "plugin:dialog|open") return Promise.resolve((args.options as { directory?: boolean })?.directory ? "/exports" : fixture.source_path);
       if (command === "plugin:dialog|save") return Promise.resolve("/exports/transcript.txt");
       if (command === "write_text_to_path") return Promise.resolve(args.path);
@@ -44,12 +51,95 @@ async function boot(page: Page, trackCount = 3) {
       if (command === "aaf_prepare_audio") return Promise.resolve({ path: `/e2e-mock/solo-${args.durationFrames}.wav`, start_frame: args.startFrame, duration_frames: args.durationFrames, sample_rate: 16000, sample_count: Math.ceil(Number(args.durationFrames) * 1001 / 24000 * 16000), peaks: [] });
       return original(command, args);
     };
-  }, { document: { ...multitrackFixture(), manifest: { ...multitrackFixture().manifest, tracks: Array.from({ length: trackCount }, (_, index) => ({ ...multitrackFixture().manifest.tracks[index % 3], id: `track-${index + 1}`, name: index < 3 ? multitrackFixture().manifest.tracks[index].name : `Mic ${index + 1}` })) } }, transcript: multitrackTranscript() });
+  }, { document: fixture, transcript: multitrackTranscript() });
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible();
   await page.locator(".cp-nav-item").filter({ hasText: "Multitrack" }).click();
   await expect(page.getByRole("heading", { name: "Multitrack", exact: true })).toBeVisible();
 }
+
+test("98 grouped microphones expand without implicit audition or transcription", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 850 }); await boot(page,98,true,true);
+  const region=page.getByRole("region",{name:"Multitrack",exact:true});
+  await region.getByRole("button",{name:"Import AAF…",exact:true}).first().click();
+  await expect(region.locator('.cp-multitrack-lane')).toHaveCount(14);
+  await expect(region.getByRole("button",{name:"Generate 14 tracks",exact:true})).toBeEnabled();
+  const calls=()=>page.evaluate(()=>(window as unknown as { __multitrackCalls: {command:string;args:Record<string,unknown>}[] }).__multitrackCalls);
+  await expect.poll(async()=> (await calls()).filter(c=>c.command==="aaf_waveform").length).toBeGreaterThanOrEqual(14);
+  expect((await calls()).filter(c=>c.command==="aaf_waveform").every(c=>Number(String(c.args.trackId).split('-')[1])<=14)).toBe(true);
+  const started=Date.now();
+  for (const button of await region.getByRole('button',{name:/Alternative microphones for/}).all()) await button.click();
+  await expect(region.locator('.cp-multitrack-lane')).toHaveCount(98);
+  expect(await region.getByRole('checkbox',{checked:true}).count()).toBe(14);
+  await expect(region.getByRole('button',{name:'Mute Mic 98',exact:true})).toHaveAttribute('aria-pressed','true');
+  expect((await calls()).filter(c=>c.command==='aaf_transcribe_track')).toHaveLength(0);
+  expect((await calls()).filter(c=>c.command==='aaf_prepare_audio').every(c=>Number(String(c.args.trackId).split('-')[1])<=14)).toBe(true);
+  const expandedMs=Date.now()-started;
+  await region.getByRole('button',{name:'Solo Mic 98',exact:true}).click();
+  await region.getByRole('button',{name:'Play tracks',exact:true}).click();
+  await expect.poll(async()=>Number(await region.getByRole('slider',{name:'Seek Mic 98',exact:true}).getAttribute('aria-valuenow'))).toBeGreaterThan(0);
+  await region.getByRole('button',{name:'Pause audition',exact:true}).click();
+  await region.getByRole('button',{name:'Zoom in',exact:true}).click();
+  await region.getByRole('button',{name:'Select all',exact:true}).click();
+  await region.getByRole('button',{name:'Generate 98 tracks',exact:true}).click();
+  await expect.poll(async()=>(await calls()).filter(c=>c.command==='aaf_transcribe_track').length,{timeout:20000}).toBe(98);
+  await expect(region.getByRole('status').filter({hasText:'Selected range saved for every track'})).toBeVisible();
+  await test.info().attach('group-stress',{contentType:'application/json',body:JSON.stringify({lanes:98,roots:14,expandedMs,note:'Real browser mixer and controls, mocked native PCM/recognition; not packaged NEXIS certification.'})});
+  await page.screenshot({path:test.info().outputPath('98-grouped-lanes.png')});
+});
+
+test("50-track output has signal, solo 47 stays audible, and native controls stay dark under OS Light", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 1680, height: 1020 });
+  await page.addInitScript(() => {
+    const probes: AnalyserNode[] = [];
+    const connect = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function (destination: AudioNode, output?: number, input?: number) {
+      if (destination instanceof AudioDestinationNode) {
+        const probe = this.context.createAnalyser(); probe.fftSize = 2048;
+        connect.call(this, probe); probes.push(probe);
+      }
+      return connect.call(this, destination, output ?? 0, input ?? 0);
+    } as typeof connect;
+    (window as unknown as { outputRms: () => number }).outputRms = () => Math.max(0, ...probes.map(probe => {
+      const samples = new Float32Array(probe.fftSize); probe.getFloatTimeDomainData(samples);
+      return Math.sqrt(samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length);
+    }));
+  });
+  await boot(page, 50, true);
+  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+  for (const selector of ["html", ".cp-multitrack-scroll", 'input[type="checkbox"]']) {
+    const elements = page.locator(selector);
+    if (await elements.count()) expect(await elements.first().evaluate(element => getComputedStyle(element).colorScheme)).toContain("dark");
+  }
+  const tabs = region.getByRole("tablist", { name: "Transcripts by person" });
+  expect(await tabs.evaluate(element => getComputedStyle(element).colorScheme)).toContain("dark");
+  const rms = () => page.evaluate(() => (window as unknown as { outputRms: () => number }).outputRms());
+  const started = Date.now();
+  await region.getByRole("button", { name: "Play tracks", exact: true }).click();
+  await expect.poll(rms).toBeGreaterThan(0.002);
+  const firstSignalMs = Date.now() - started;
+  // Sustain real output across the fixed five-second PCM window boundary.
+  const seek = region.getByRole("slider", { name: "Seek Alex mic", exact: true });
+  await expect.poll(async () => Number(await seek.getAttribute("aria-valuenow")), { timeout: 12_000 }).toBeGreaterThan(145);
+  const acrossBoundaryRms = await rms(); expect(acrossBoundaryRms).toBeGreaterThan(0.002);
+  await test.info().attach("output-measurement", { contentType: "application/json", body: JSON.stringify({
+    browser: process.env.SAUCE_AUDIO_BROWSER ?? "chromium", tracks: 50, firstSignalMs, acrossBoundaryRms,
+    note: "Measured Web Audio destination graph, not physical speaker output; generated PCM and mocked file IPC.",
+  }, null, 2) });
+  await region.getByRole("button", { name: "Pause audition", exact: true }).click();
+  await expect.poll(rms).toBeLessThan(0.000001);
+  await region.getByRole("button", { name: "Solo Mic 47", exact: true }).click();
+  await region.getByRole("button", { name: "Play tracks", exact: true }).click();
+  await expect.poll(rms).toBeGreaterThan(0.002);
+  await region.getByRole("button", { name: "Mute Mic 47", exact: true }).click();
+  await expect.poll(rms).toBeLessThan(0.000001);
+  await region.getByRole("button", { name: "Mute Mic 47", exact: true }).click();
+  await expect.poll(rms).toBeGreaterThan(0.002);
+  await region.getByRole("button", { name: "Pause audition", exact: true }).click();
+  await page.screenshot({ path: test.info().outputPath("fifty-track-os-light.png") });
+});
 
 test("Entire transcript exports every source lane in the selected format despite person/search filters", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 850 }); await boot(page);
@@ -77,6 +167,53 @@ test("Entire transcript exports every source lane in the selected format despite
 });
 
 for (const width of [1100, 1680]) {
+  test(`Multitrack timecode punch-in commits on Enter and sits above Play at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 }); await boot(page, 50);
+    if (width === 1100) await page.evaluate(() => {
+      for (const name of ["--text-base", "--text-md", "--text-lg", "--text-3xl"]) {
+        const size = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+        document.documentElement.style.setProperty(name, `${size * 1.25}px`);
+      }
+    });
+    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+    const tc = region.getByRole("button", { name: "Current timecode", exact: true });
+    const play = region.getByRole("button", { name: "Play tracks", exact: true });
+    const trt = region.getByLabel("Total runtime", { exact: true });
+    await expect(tc).toHaveText("01:00:00:00"); await expect(trt).toHaveText("TRT00:16:40:00");
+    const tcBox = (await tc.boundingBox())!, playBox = (await play.boundingBox())!;
+    expect(tcBox.y + tcBox.height).toBeLessThan(playBox.y);
+    expect(Math.abs(tcBox.x + tcBox.width / 2 - playBox.x - playBox.width / 2)).toBeLessThan(1);
+    const toolbar = region.locator(".cp-multitrack-transport");
+    expect(await toolbar.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    await expect(trt).toBeInViewport();
+    const owner = region.getByRole("textbox", { name: "Mic owner for track-1", exact: true });
+    await owner.fill("Mic 123"); await expect(page.getByRole("dialog", { name: "Go to timecode" })).toBeHidden();
+    await owner.press("Escape");
+    const lane = region.getByRole("slider", { name: "Seek Alex mic", exact: true }); await lane.focus();
+    // Playwright's US keypad map uses navigation keys unless shifted. This
+    // emits real digit keydowns with Numpad codes/location, as on a Mac keypad.
+    for (const digit of "01001012") await page.keyboard.press(`Shift+Numpad${digit}`);
+    const dialog = page.getByRole("dialog", { name: "Go to timecode" });
+    await expect(dialog).toBeVisible(); await expect(dialog).toBeFocused();
+    await expect(dialog.getByLabel("Entered timecode")).toHaveText("01:00:10:12");
+    await page.keyboard.type("lettersJKL.+-");
+    await expect(dialog.getByLabel("Entered timecode")).toHaveText("01:00:10:12");
+    await expect(tc).toHaveText("01:00:00:00"); await expect(lane).toHaveAttribute("aria-valuenow", "0");
+    await page.keyboard.press("Tab"); await expect(dialog).toBeFocused();
+    await page.screenshot({ path: test.info().outputPath("multitrack-timecode-entry.png") });
+    await page.keyboard.press("NumpadEnter");
+    await expect(dialog).toBeHidden(); await expect(tc).toHaveText("01:00:10:12");
+    await expect(lane).toHaveAttribute("aria-valuenow", "252"); await expect(lane).toBeFocused();
+    await expect(play).toBeVisible(); await expect(trt).toHaveText("TRT00:16:40:00");
+    await tc.click(); await page.keyboard.type("01002000"); await page.keyboard.press("Escape");
+    await expect(tc).toBeFocused(); await expect(tc).toHaveText("01:00:10:12");
+    await tc.click(); await page.keyboard.press("Enter"); await expect(tc).toHaveText("01:00:10:12");
+    await page.screenshot({ path: test.info().outputPath("multitrack-timecode-transport.png") });
+    await page.locator(".cp-nav-item").filter({ hasText: "Home" }).click();
+    await page.keyboard.press("Shift+Numpad1"); await expect(dialog).toBeHidden();
+  });
+
   test(`Transcript picker stays compact and fixed beside overflowing tabs at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 }); await boot(page, 20);
     if (width === 1100) await page.evaluate(() => document.documentElement.style.setProperty("--text-md", "15px"));
@@ -499,7 +636,7 @@ test("Track gain redraws cached waveforms at every density and zoom without chan
     await popup.getByRole("textbox").fill("+6 dB"); await popup.getByRole("textbox").press("Enter");
     await expect.poll(async () => (await waveformInk(first)).pixels).toBeGreaterThan(baseline.pixels);
     await popup.getByRole("button", { name: "Reset to 0 dB" }).click();
-    expect((await waveformInk(first)).image).toBe(baseline.image);
+    await expect.poll(async () => (await waveformInk(first)).image).toBe(baseline.image);
     expect((await waveformInk(canvases.nth(1))).image).toBe(other.image);
     await fader.press("Escape");
     expect(await waveformCalls()).toBe(initialCalls);

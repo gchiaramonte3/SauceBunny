@@ -291,7 +291,8 @@ func writeEnvelope(
 func initSpeakerKit(emit: Bool) async throws -> SpeakerKit {
   emitStatus(["phase": "prepare", "message": "Loading SpeakerKit models…", "backend": "speakerkit"], emit: emit)
   // Init triggers HuggingFace model download on first run (cached after).
-  return try await SpeakerKit()
+  let offline = ProcessInfo.processInfo.environment["SAUCE_DIARIZER_OFFLINE"] == "1"
+  return try await SpeakerKit(PyannoteConfig(download: !offline, load: offline))
 }
 
 func runSpeakerKit(args: Args, emit: Bool) async throws -> ([Turn], String, String) {
@@ -534,7 +535,10 @@ struct Main {
     // error." We deliberately only auto-fallback for init/model errors
     // — once diarization has STARTED, a failure is a real audio issue
     // and retrying with another backend just hides it.
-    switch args.backend {
+    // Analysis may reuse cached SpeakerKit weights, never initiate a download
+    // or fall back to an auto-downloading backend when that cache is missing.
+    let backend: Backend = ProcessInfo.processInfo.environment["SAUCE_DIARIZER_OFFLINE"] == "1" ? .speakerkit : args.backend
+    switch backend {
     case .speakerkit:
       do {
         let r = try await runSpeakerKit(args: args, emit: args.emitProgress)

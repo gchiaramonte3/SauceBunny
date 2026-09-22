@@ -59,6 +59,19 @@ it("reveals the first saved text automatically until a person is explicitly sele
   view.rerender(<MultitrackTranscript {...props} document={{ ...saved, transcripts: [...saved.transcripts, multitrackTranscript()] }} />);
   expect(screen.getByRole("tabpanel", { name: "Room" })).toBeTruthy();
 });
+it("opens on actual transcript content, skipping blank placeholders without hiding inaudible passages", () => {
+  const document = multitrackFixture(), blank = multitrackTranscript(), speech = multitrackTranscript("track-2");
+  blank.cues[0].text = "[BLANK_AUDIO]";
+  speech.cues[0].text = "[inaudible]";
+  document.transcripts = [blank, speech];
+  render(<MultitrackTranscript document={document} frame={0} solo={new Set()} onSeek={vi.fn()} />);
+  expect(screen.getByRole("tabpanel", { name: "Sam mic" })).toBeTruthy();
+  expect(screen.getByText("[inaudible]")).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "All voices" }));
+  expect(screen.queryByText("[BLANK_AUDIO]")).toBeNull();
+  expect(screen.getByText("[inaudible]")).toBeTruthy();
+  expect(document.transcripts[0].cues[0].text).toBe("[BLANK_AUDIO]");
+});
 it("shows an honest failed-run summary with technical details collapsed", () => {
   const { container } = render(<MultitrackTranscript document={multitrackFixture()} frame={0} solo={new Set()} onSeek={vi.fn()} report={{ requested: 3, saved: 0, review: 0, empty: 0, stopped: false, failures: [{ trackId: "track-1", message: "Speech cue is outside its prepared audio range" }] }} />);
   expect(screen.getByText(/0 of 3 tracks saved/)).toBeTruthy();

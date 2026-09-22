@@ -397,6 +397,8 @@
 .cp-model-progress {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 10px;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -404,9 +406,9 @@
   color: var(--fg-3);
 }
 .cp-model-progress .bar {
-  flex: 1;
+  flex: 1 1 120px;
   height: 4px;
-  background: rgba(255,255,255,0.05);
+  background: var(--progress-track);
   border-radius: var(--r-2xs);
   overflow: hidden;
   max-width: 280px;
@@ -414,10 +416,9 @@
 .cp-model-progress .bar > span {
   display: block;
   height: 100%;
-  background: var(--accent);
-  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.45);
-  transition: width var(--dur-base) linear;
+  background: var(--progress-fill);
 }
+.cp-model-progress .bar.is-indeterminate { background: repeating-linear-gradient(110deg, var(--progress-track) 0 4px, var(--progress-fill) 4px 6px); }
 .cp-model-progress .meta {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -427,6 +428,12 @@
   gap: 6px;
   flex-shrink: 0;
 }
+.cp-video-model-group { margin-top: var(--s-6); }
+.cp-video-model-group h4 { margin: 0 0 var(--s-2); font-size: var(--text-lg); font-weight: var(--weight-semibold); color: var(--fg-2); }
+.cp-video-model-group > .cp-settings-note { margin-bottom: var(--s-3); }
+.cp-video-model-settings .cp-model-row { flex-wrap: wrap; }
+.cp-video-model-settings .cp-model-info-wrap { flex-basis: 240px; }
+.cp-video-model-settings .cp-model-actions { flex-wrap: wrap; margin-left: auto; max-width: 100%; }
 
 /* Shortcuts grid */
 .cp-shortcuts-grid {

@@ -2,6 +2,7 @@ import type { AafDocument } from "../bindings/AafDocument";
 import type { AafMarkerColor } from "../bindings/AafMarkerColor";
 import { audioTrackLabel, trackOwner, transcriptRows, sequenceTimecode } from "./multitrack";
 import { avidMarkerRowsToTxt } from "./markers";
+import { alternativeLane } from "./multitrack-graph";
 
 export type MultitrackPerson = { id: string; name: string; trackIds: string[]; color: string | null };
 
@@ -38,8 +39,12 @@ export function multitrackExportName(name: string): string {
  * Untimed text remains in plain-text exports; it never becomes a fabricated marker.
  */
 export function multitrackAvidMarkers(document: AafDocument): string {
+  if (transcriptRows(document).some(cue => alternativeLane(document, cue.trackId))) {
+    throw new Error("Avid marker export for group alternatives is not available yet. Select an original sequence track, or export these microphones as text, CSV, SRT, or PDF.");
+  }
   const lanes = new Set<string>();
   for (const source of document.manifest.tracks) {
+    if (alternativeLane(document, source.id)) continue;
     const lane = audioTrackLabel(document, source.id);
     if (lanes.has(lane)) throw new Error(`More than one source track maps to ${lane}. Re-import an AAF with distinct audio-track numbers before exporting markers.`);
     lanes.add(lane);

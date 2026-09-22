@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "Sauce Bunny",
+        "theme": "Dark",
         "width": 1680,
         "height": 1020,
         "minWidth": 1100,
@@ -74,7 +75,7 @@
     "macOS": {
       "minimumSystemVersion": "14.0",
       "entitlements": "entitlements.plist",
-      "bundleVersion": "2026092113"
+      "bundleVersion": "2026092211"
     },
     "category": "public.app-category.video"
   },

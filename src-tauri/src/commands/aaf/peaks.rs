@@ -41,9 +41,13 @@ pub fn build(reader: &pcm::Reader, track: &pcm::Track, path: &Path, check: impl 
         Ok(())
     })?;
     if count > 0 { values.push([low,high]); }
+    write_pyramid(values, samples, track.sample_rate, path, check)
+}
+
+pub fn write_pyramid(mut values: Vec<[i16;2]>, samples: u64, hz: u32, path: &Path, check: impl Fn() -> Result<(), AppError>) -> Result<(), AppError> {
     let mut file = File::create(path)?;
     file.write_all(b"SBPEAK01")?; file.write_all(&samples.to_le_bytes())?;
-    file.write_all(&u64::from(track.sample_rate).to_le_bytes())?; file.write_all(&BASE.to_le_bytes())?;
+    file.write_all(&u64::from(hz).to_le_bytes())?; file.write_all(&BASE.to_le_bytes())?;
     loop {
         check()?; write_pairs(&mut file, &values)?;
         if values.len() <= 1 { break; }
@@ -76,6 +80,7 @@ pub fn query(path: &Path, first: u64, end: u64, expected_samples: u64, hz: u32) 
 
 pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64, job: &str) -> Result<AafWaveform, AppError> {
     store::track(document, track)?; store::source_ready(document)?;
+    if super::linked_audio::needed(document) { return super::linked_audio::waveform(app, document, track, start, duration, job).await; }
     let reader = pcm::get(app, document, job).await?;
     let selected = reader.index.track(track)?;
     let first = reader.index.sample(start, selected.sample_rate);
@@ -93,6 +98,7 @@ pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, star
         if let Ok(peaks) = query(&path, first, end, total, selected.sample_rate) { return Ok(AafWaveform { track_id: track.into(), peaks }); }
     }
     let work = WorkDir::new(app, job)?; let partial = work.0.join("peaks.bin");
+    let _permit = super::audio::preparation(app, job).await?;
     let (app2, job2, track2, partial2) = (app.clone(), job.to_owned(), track.to_owned(), partial.clone());
     tauri::async_runtime::spawn_blocking(move || build(&reader, reader.index.track(&track2)?, &partial2, || process::check_cancelled(&app2, &job2))).await
         .map_err(|e| AppError::internal(e.to_string()))??;

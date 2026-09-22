@@ -467,14 +467,36 @@ fn timecode_to_seconds(tc: &str, fps: f64) -> Result<f64, crate::AppError> {
     if m >= 60 || s >= 60 {
         return Err(crate::AppError::invalid(format!("Invalid timecode: {tc}")));
     }
-    let fps = if fps > 0.0 { fps } else { 24.0 };
-    if f as f64 >= fps {
+    let fps = if fps.is_finite() && fps >= 1.0 { fps } else { 24.0 };
+    let nominal = fps.round();
+    if f as f64 >= nominal {
         return Err(crate::AppError::invalid(format!(
             "Frame index {f} out of range for {fps:.3} fps"
         )));
     }
-    let seconds = h as f64 * 3600.0 + m as f64 * 60.0 + s as f64 + (f as f64 / fps);
+    let whole_seconds = h as f64 * 3600.0 + m as f64 * 60.0 + s as f64;
+    // Four fields are NDF frame timecode. Short forms remain elapsed clocks.
+    let seconds = if parts.len() == 4 {
+        (whole_seconds * nominal + f as f64) / fps
+    } else {
+        whole_seconds
+    };
     Ok(seconds)
+}
+
+#[cfg(test)]
+mod frame_timecode_tests {
+    use super::timecode_to_seconds;
+
+    #[test]
+    fn fractional_timecode_uses_actual_frame_duration() {
+        for (fps, nominal) in [(24000.0 / 1001.0, 24.0), (30000.0 / 1001.0, 30.0), (60000.0 / 1001.0, 60.0)] {
+            assert!((timecode_to_seconds("01:00:00:00", fps).unwrap() - 3603.6).abs() < 1e-9);
+            let last_frame = format!("00:00:00:{:02}", nominal as u32 - 1);
+            assert!((timecode_to_seconds(&last_frame, fps).unwrap() - (nominal - 1.0) / fps).abs() < 1e-9);
+            assert_eq!(timecode_to_seconds("01:00:00", fps).unwrap(), 3600.0);
+        }
+    }
 }
 
 /// Byte budget for the user-visible BASE filename. macOS/APFS caps a full
