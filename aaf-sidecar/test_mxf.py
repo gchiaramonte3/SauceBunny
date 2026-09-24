@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 import aaf2
 from graph import GraphTimeline
-from mxf_info import inspect, inspect_many
+from mxf_info import HEADER_WORKERS, inspect, inspect_many
 from reader import fingerprint, ReaderError
 
 BINS = Path(__file__).resolve().parents[1]/'src-tauri'/'binaries'
@@ -115,9 +115,9 @@ class MxfTests(unittest.TestCase):
             with self.assertRaises(ReaderError) as error:
                 inspect_many([f'{index}.mxf' for index in range(20)])
         self.assertEqual(error.exception.code,'cancelled')
-        self.assertLessEqual(inspect_file.call_count,2)
+        self.assertLessEqual(inspect_file.call_count,HEADER_WORKERS)
 
-    def test_inspection_overlaps_exactly_two_files_and_returns_input_order(self):
+    def test_inspection_overlaps_header_workers_and_returns_input_order(self):
         lock = threading.Lock(); active = 0; maximum = 0
         def slow(path):
             nonlocal active, maximum
@@ -129,7 +129,7 @@ class MxfTests(unittest.TestCase):
         paths = [f'{index}.mxf' for index in range(12)]
         with patch('mxf_info.inspect', side_effect=slow):
             result = inspect_many(paths)
-        self.assertEqual(maximum, 2)
+        self.assertEqual(maximum, HEADER_WORKERS)
         self.assertEqual([row['path'] for row in result['files']], paths)
 
     def test_legacy_sound_definitions_preserve_source_slot_identity(self):

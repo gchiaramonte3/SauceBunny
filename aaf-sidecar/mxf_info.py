@@ -15,6 +15,8 @@ from aaf2 import mxf
 from reader import fail, fingerprint, ReaderError
 
 SOUND_DEFS = {'DataDef_Sound', 'DataDef_LegacySound'}
+# Header reads are small and latency-bound on NEXIS, so overlap several.
+HEADER_WORKERS = 6
 
 
 class Header(mxf.MXFFile):
@@ -120,11 +122,11 @@ def inspect_many(paths):
                    tracks=len(result.get('tracks', [])), error=result.get('error'))
             finished.put((index, result))
 
-    # Header I/O overlaps at most two files. Daemon workers let SIGTERM unwind
+    # Header I/O overlaps at most HEADER_WORKERS files. Daemon workers let SIGTERM unwind
     # the main reader immediately even if a disconnected mount blocks a read.
     # No worker writes media/cache files; the native owner commits results.
     results = [None] * len(paths)
-    for _ in range(min(2, len(paths))):
+    for _ in range(min(HEADER_WORKERS, len(paths))):
         threading.Thread(target=worker, daemon=True).start()
     try:
         for _ in paths:

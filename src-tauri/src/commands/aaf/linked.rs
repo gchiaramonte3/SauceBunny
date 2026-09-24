@@ -84,6 +84,10 @@ fn refresh_binding(source: &mut AafSource) -> bool {
     true
 }
 
+/// Sources resolved (and saved as one checkpoint) per pass. Each pass costs
+/// one header-reader launch, so this trades Stop granularity for NEXIS time.
+const RESOLVE_BATCH: usize = 32;
+
 pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Option<&str>, selected: Option<&Path>, job: &str,
     mut checkpoint: impl FnMut(&AafGraph) -> Result<(), AppError>) -> Result<(), AppError> {
     let Some(graph) = document.manifest.graph.as_mut() else { return Ok(()); };
@@ -94,13 +98,13 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
     let root = selected.filter(|p| p.is_dir());
     if selected.is_some_and(|p| p.is_file()) && source_id.is_none() { return Err(AppError::invalid("Choose the source to relink first")); }
     let mut cache = ProbeCache::default();
-    // Visible sequence microphones first; alternatives never delay them. Small
-    // batches amortize runtime startup without holding all 396 sources hostage.
+    // Visible sequence microphones first; alternatives never delay them.
+    // Batches amortize runtime startup without holding every source hostage.
     let order = resolution_order(&document.manifest.tracks, graph, source_id);
     let total = order.len() as i64;
     let mut completed = 0;
     process::progress(app, job, None, "resolving", 0, total);
-    for batch in order.chunks(8) {
+    for batch in order.chunks(RESOLVE_BATCH) {
     let mut direct_mxfs = BTreeSet::new();
     for &index in batch {
         let source = &graph.sources[index];
@@ -153,7 +157,7 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
                 let mxfs: Vec<_> = folder.values().flatten().filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("mxf")) && linked_paths::contained(p, root)).cloned().collect();
                 let index_all = mxfs.len() <= 5000;
                 if index_all { cache.index(app, job, &mxfs).await?; }
-                for batch in order.chunks(8) {
+                for batch in order.chunks(RESOLVE_BATCH) {
                 for &index in batch {
                     let source = &mut graph.sources[index];
                     process::check_cancelled(app, job)?;

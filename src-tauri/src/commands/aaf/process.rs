@@ -133,9 +133,10 @@ async fn run_inner(app: &AppHandle, job: &str, stage: &str, name: &str, args: Ve
                 if stage == "inspect-mxf" {
                     for line in String::from_utf8_lossy(&bytes).lines() {
                         if let Some(json) = line.strip_prefix("AAF_MXF_EVENT ") {
-                            if let Ok(event) = serde_json::from_str::<MxfEvent>(json) {
-                                let detail = if event.phase == "start" { "Inspecting header".into() }
-                                else { format!("{} audio mappings · {} ms{}", event.tracks.unwrap_or(0), event.elapsed_ms.unwrap_or(0), event.error.as_ref().map(|e| format!(" · {e}")).unwrap_or_default()) };
+                            // One row per file: start rows doubled the count and
+                            // pushed an import's opening out of the bounded log.
+                            if let Some(event) = serde_json::from_str::<MxfEvent>(json).ok().filter(|e| e.phase == "finish") {
+                                let detail = format!("{} audio mappings · {} ms{}", event.tracks.unwrap_or(0), event.elapsed_ms.unwrap_or(0), event.error.as_ref().map(|e| format!(" · {e}")).unwrap_or_default());
                                 super::diagnostics::log(app, job, if event.error.is_some() { "warn" } else { "info" }, "mxf-file", &format!("{} · {detail}", event.path));
                             }
                         }
