@@ -27,11 +27,12 @@ type Props = {
   labelStatus: string; onRename: RenameMic; onTranscript: (transcript: AafTrackTranscript) => void;
   onOpenSettings?: () => void; onJobState?: (running: boolean) => void; settingsOpen?: boolean; onCloseSettings?: () => void;
   aiModelId?: string | null;
+  resolvingMedia?: boolean;
   onVisibleTracks?: (ids: string[]) => void;
   openRequest?: { id: string; tick: number; frame?: number; trackId?: string } | null;
 };
-export function MultitrackWorkspace({ document, active, waveforms, waveformErrors, labelStatus, onRename, onTranscript, onOpenSettings, onJobState, settingsOpen, onCloseSettings, aiModelId, openRequest, onVisibleTracks }: Props) {
-  const [selected, setSelected] = useState(() => new Set(document.manifest.tracks.filter(track => !alternativeLane(document, track.id) && laneSelectable(document, track.id)).map((track) => track.id)));
+export function MultitrackWorkspace({ document, active, waveforms, waveformErrors, labelStatus, onRename, onTranscript, onOpenSettings, onJobState, settingsOpen, onCloseSettings, aiModelId, openRequest, onVisibleTracks, resolvingMedia }: Props) {
+  const [selected, setSelected] = useState(() => new Set(document.manifest.tracks.filter(track => !alternativeLane(document, track.id)).map((track) => track.id)));
   const [expanded, setExpanded] = useState(new Set<string>());
   const [relinking, setRelinking] = useState(false);
   const visible = visibleLanes(document, expanded).map(track => track.id);
@@ -125,7 +126,7 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
       <div className={`cp-multitrack-resize cp-resize-handle vertical${pane.resizing ? " dragging" : ""}`} role="separator" aria-label="Resize track transcripts" aria-orientation="vertical" aria-valuemin={pane.min} aria-valuemax={pane.max} aria-valuenow={pane.width} tabIndex={0} onMouseDown={pane.onMouseDown} onKeyDown={pane.onKeyDown} onDoubleClick={() => pane.setWidth(340)} title="Drag to resize · arrow keys to nudge · Home to reset" />
       <MultitrackTranscript document={document} frame={audio.frame} solo={audio.solo} onSeek={seek} report={transcription.report} error={transcription.error} loading={transcription.loading} active={active} aiModelId={aiModelId} selectedTracks={selected} />
     </div>
-    {settingsOpen && active && <MultitrackSettings document={document} waveformErrors={waveformErrors} onBusy={setRelinking} disabled={transcription.loading} onClose={() => onCloseSettings?.()} />}
+    {settingsOpen && active && <MultitrackSettings document={document} waveformErrors={waveformErrors} onBusy={setRelinking} disabled={transcription.loading || resolvingMedia} onClose={() => onCloseSettings?.()} />}
     {timecodeEntry != null && active && !settingsOpen && <MultitrackTimecodeDialog key={document.id} manifest={document.manifest} initialDigits={timecodeEntry} onClose={closeTimecode} onSeek={(frame) => { void audio.seek(frame, undefined, false); }} />}
   </div>;
 }

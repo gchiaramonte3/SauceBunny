@@ -2,11 +2,20 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { MultitrackExport } from "./MultitrackExport";
-import { multitrackFixture, multitrackTranscript } from "../test/multitrack-fixture";
+import { multitrackFixture, multitrackGroupFixture, multitrackTranscript } from "../test/multitrack-fixture";
 const download = vi.hoisted(() => vi.fn());
+const downloadPeople = vi.hoisted(() => vi.fn());
 const state = vi.hoisted(() => ({ phase: "idle" }));
-vi.mock("../hooks/use-multitrack-export", () => ({ useMultitrackExport: () => ({ phase: state.phase, status: "", error: null, download, downloadPeople: vi.fn(), clearResolution: vi.fn() }) }));
+vi.mock("../hooks/use-multitrack-export", () => ({ useMultitrackExport: () => ({ phase: state.phase, status: "", error: null, download, downloadPeople, clearResolution: vi.fn() }) }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); state.phase = "idle"; });
+it("reuses the bulk action for independent group microphone files", () => {
+  const document = multitrackGroupFixture(); document.transcripts = [multitrackTranscript("track-2")];
+  render(<MultitrackExport document={document} selectedTracks={new Set(["track-2"])} />);
+  const button = screen.getByRole("button", { name: "Avid files by microphone" });
+  expect(button.textContent).toBe("Avid by mic"); expect(button.title).toContain("parent sequence track");
+  fireEvent.click(button); expect(downloadPeople).toHaveBeenCalledOnce();
+  expect(screen.queryByRole("button", { name: "Avid files by person" })).toBeNull();
+});
 it.each(["txt", "csv", "avid", "srt", "pdf"])("Entire transcript honors %s even when viewing one person", (format) => {
   const document = multitrackFixture(); document.transcripts = [multitrackTranscript(), multitrackTranscript("track-2")];
   render(<MultitrackExport document={document} person={{ id: "sam", name: "Sam", trackIds: ["track-2"], color: null }} />);

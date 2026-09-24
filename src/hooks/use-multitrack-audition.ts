@@ -24,8 +24,18 @@ export function useMultitrackAudition(document: AafDocument, active: boolean) {
     return engine.current;
   }, []);
   const mediaKey = mediaRevision(document);
-  useEffect(() => () => { engine.current?.close(); engine.current = null; }, [document.id, mediaKey]);
-  useEffect(() => { if (active) void getEngine()?.warm(latest.current.frame); }, [active, document.id, mediaKey, getEngine]);
+  const prepared = useRef(new Map<string, string>());
+  useEffect(() => () => { engine.current?.close(); engine.current = null; prepared.current.clear(); }, [document.id]);
+  useEffect(() => {
+    const snapshot = settings.current.document;
+    // Adding a newly verified mic must not destroy the clock or the buffers
+    // already playing. Only changes to previously available audio invalidate it.
+    const changed = [...prepared.current].some(([id, key]) => mediaRevision(snapshot, id) !== key);
+    if (changed) engine.current?.suspend();
+    prepared.current = new Map(snapshot.manifest.tracks.filter(track => !snapshot.manifest.graph || snapshot.manifest.graph.lanes.some(lane => lane.track_id === track.id && lane.availability === "ready"))
+      .map(track => [track.id, mediaRevision(snapshot, track.id)]));
+    if (active) void getEngine()?.warm(latest.current.frame);
+  }, [active, document.id, mediaKey, getEngine]);
   useEffect(() => { if (!active) engine.current?.suspend(); }, [active]);
   useEffect(() => { engine.current?.setLevel(volume, muted); }, [volume, muted]);
   useEffect(() => { engine.current?.setScrubbing(scrubbing); }, [scrubbing]);

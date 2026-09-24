@@ -234,8 +234,11 @@ pub fn track<'a>(document: &'a AafDocument, id: &str) -> Result<&'a AafTrack, Ap
 pub fn cache_key(document: &AafDocument, track: &str, purpose: &str) -> String {
     let graph = document.manifest.graph.as_ref().map(|g| if purpose == "relink" {
         format!("{}:{g:?}", document.manifest.schema_version)
-    } else { format!("{}:{:?}", g.sequence_id,
-        g.sources.iter().map(|s| (&s.id, s.slot_id, s.channel, s.channels, s.sample_rate, s.sample_width, s.sample_count, &s.status, &s.resolved)).collect::<Vec<_>>()) }).unwrap_or_default();
+    } else { format!("{}:{:?}:{:?}:{:?}", g.sequence_id,
+        g.sources.iter().filter(|s| track == "all" || document.manifest.tracks.iter().any(|t| t.id == track && t.clips.iter().any(|c| c.source_id.as_deref() == Some(&s.id))))
+            .map(|s| (&s.id, s.slot_id, s.channel, s.channels, s.sample_rate, s.sample_width, s.sample_count, &s.status, &s.resolved)).collect::<Vec<_>>(),
+        document.manifest.tracks.iter().filter(|t| track == "all" || t.id == track).map(|t| (&t.id, &t.clips)).collect::<Vec<_>>(),
+        g.positions.iter().filter(|p| track == "all" || p.track_id == track).collect::<Vec<_>>()) }).unwrap_or_default();
     blake3::hash(format!("aaf-v3:{}:{track}:{purpose}:{graph}", document.manifest.source_fingerprint).as_bytes())
         .to_hex().to_string()
 }
@@ -467,6 +470,38 @@ mod tests {
         assert!(save_graph(&root,&doc,&revision).is_err());
         assert!(save_transcript(&root,&doc,transcript).is_err());
         assert_eq!(load(&root,&doc.id).unwrap().transcripts[0].model_id,"committed");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn progressive_checkpoints_keep_labels_and_commits_on_unrelated_microphones() {
+        let root=std::env::temp_dir().join(format!("aaf-progressive-{}",uuid::Uuid::new_v4())); std::fs::create_dir(&root).unwrap();
+        let mut doc=with_graph(fixture());
+        let source: AafSource=serde_json::from_value(serde_json::json!({"id":"s","mob_id":"mob","slot_id":1,"locators":[],"ancestors":[],"channel":0,"channels":1,"sample_rate":48000,"sample_width":2,"sample_count":480480,"descriptor":"PCMDescriptor","status":"ready",
+            "resolved":{"path":"/tmp/audio.wav","fingerprint":"a".repeat(64),"stream_index":0,"size":960960,"modified_ms":1}})).unwrap();
+        let mut other=source.clone(); other.id="other".into(); other.status="offline".into(); other.resolved=None;
+        doc.manifest.graph.as_mut().unwrap().sources=vec![source.clone(),other];
+        let clip=&mut doc.manifest.tracks[0].clips[0]; clip.kind="audio".into(); clip.source_id=Some("s".into()); clip.source_start_sample=Some(0); clip.sample_rate=Some(48000);
+        doc.manifest.graph.as_mut().unwrap().positions.push(AafSourcePosition {track_id:"10".into(),clip_index:0,numerator:0,denominator:1});
+        create(&root,&doc).unwrap();
+        let mut user_labels=doc.labels.clone(); user_labels[0].owner_name="Edited while checking".into(); labels(&root,&doc.id,user_labels).unwrap();
+        let key=cache_key(&doc,"10","commit");
+        let mut pending=doc.clone();
+        pending.manifest.graph.as_mut().unwrap().sources[1].status="ready".into();
+        pending.manifest.graph.as_mut().unwrap().sources[1].resolved=source.resolved;
+        assert_eq!(key,cache_key(&pending,"10","commit"));
+        let saved=save_graph(&root,&pending,&cache_key(&doc,"all","relink")).unwrap();
+        assert_eq!(saved.labels[0].owner_name,"Edited while checking");
+        let transcript=AafTrackTranscript {track_id:"10".into(),engine:AafEngine::Whisper,model_id:"committed during resolution".into(),start_frame:0,duration_frames:240,status:AafTranscriptStatus::Empty,sample_rate:16000,cues:vec![],timing_issues:vec![],warnings:vec![]};
+        save_transcript(&root,&doc,transcript).unwrap();
+        pending.manifest.graph.as_mut().unwrap().sources[1].status="offline".into();
+        let last=save_graph(&root,&pending,&cache_key(&saved,"all","relink")).unwrap();
+        // Stop here: only these checkpoints exist on disk; no stale full
+        // document write can remove the independent transcription or label.
+        assert_eq!(last.transcripts.len(),1); assert_eq!(last.labels[0].owner_name,"Edited while checking");
+        assert_eq!(load(&root,&doc.id).unwrap().transcripts[0].model_id,"committed during resolution");
+        pending.manifest.tracks[0].clips[0].source_start_sample=Some(1);
+        assert_ne!(key,cache_key(&pending,"10","commit"));
         std::fs::remove_dir_all(root).unwrap();
     }
 

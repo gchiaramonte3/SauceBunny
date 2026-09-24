@@ -4,6 +4,8 @@ import math
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 import aaf2
@@ -111,9 +113,42 @@ class MxfTests(unittest.TestCase):
     def test_stop_during_header_inspection_does_not_continue_the_batch(self):
         with patch('mxf_info.inspect', side_effect=ReaderError('cancelled','Stopped')) as inspect_file:
             with self.assertRaises(ReaderError) as error:
-                inspect_many(['first.mxf','second.mxf'])
+                inspect_many([f'{index}.mxf' for index in range(20)])
         self.assertEqual(error.exception.code,'cancelled')
-        self.assertEqual(inspect_file.call_count,1)
+        self.assertLessEqual(inspect_file.call_count,2)
+
+    def test_inspection_overlaps_exactly_two_files_and_returns_input_order(self):
+        lock = threading.Lock(); active = 0; maximum = 0
+        def slow(path):
+            nonlocal active, maximum
+            with lock:
+                active += 1; maximum = max(maximum, active)
+            time.sleep(0.02)
+            with lock: active -= 1
+            return {'path': path, 'tracks': [{'slot_id': 1}]}
+        paths = [f'{index}.mxf' for index in range(12)]
+        with patch('mxf_info.inspect', side_effect=slow):
+            result = inspect_many(paths)
+        self.assertEqual(maximum, 2)
+        self.assertEqual([row['path'] for row in result['files']], paths)
+
+    def test_legacy_sound_definitions_preserve_source_slot_identity(self):
+        from aaf2.auid import AUID
+        path = self.root/'legacy.mxf'; generate(path); before = inspect(path)
+        def encoded(value):
+            raw = AUID(value).bytes_be
+            return raw[8:] + raw[:8]
+        original = encoded('01030202-0200-0000-060e-2b3404010101')
+        legacy = encoded('78e1ebe1-6cef-11d2-807d-006008143e6f')
+        raw = path.read_bytes(); self.assertGreaterEqual(raw.count(original), 4)
+        path.write_bytes(raw.replace(original, legacy))
+        self.assertEqual(inspect(path)['tracks'], before['tracks'])
+
+    def test_no_audio_mapping_is_not_a_successful_empty_result(self):
+        path = self.root/'unknown.mxf'; generate(path)
+        with patch('mxf_info.SOUND_DEFS', set()):
+            with self.assertRaisesRegex(ReaderError, 'no recognized audio source mappings'):
+                inspect(path)
 
 
 if __name__ == '__main__': unittest.main()

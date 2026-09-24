@@ -18,8 +18,11 @@ export function visibleLanes(document: AafDocument, expanded: Set<string>) {
     ...(expanded.has(track.id) ? document.manifest.tracks.filter(child => laneMetadata(document, child.id)?.parent_track_id === track.id) : [])]);
 }
 /** Changes when decoded audio can change, never when a person's name changes. */
-export function mediaRevision(document: AafDocument) {
-  return JSON.stringify([document.id, document.manifest.source_fingerprint, document.manifest.graph?.sources.map(source => [source.id, source.channel, source.status, source.resolved])]);
+export function mediaRevision(document: AafDocument, trackId?: string) {
+  const clips = trackId ? document.manifest.tracks.find(track => track.id === trackId)?.clips : undefined;
+  return JSON.stringify([document.id, document.manifest.source_fingerprint, clips,
+    document.manifest.graph?.sources.filter(source => !trackId || clips?.some(clip => clip.source_id === source.id))
+      .map(source => [source.id, source.channel, source.status, source.resolved])]);
 }
 export function trackProvenance(document: AafDocument, id: string) {
   const lane = laneMetadata(document, id);

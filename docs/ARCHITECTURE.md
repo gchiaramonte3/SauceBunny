@@ -167,6 +167,18 @@ scan. Scans stay inside the chosen root, omit symlinks and stop at 20,000 entrie
 identity fallback indexes at most 5,000 MXFs. Duplicate valid candidates require
 an explicit file choice. A scan failure does not discard direct-path successes.
 
+AAF import saves/reopens the timeline before linked-media validation. The page
+publishes that document immediately and owns a separate cancellable background
+resolution job; opening a saved document does not wait for the server. Resolution
+prioritizes original sequence lanes, processes eight sources per checkpoint, and
+overlaps at most two MXF header reads inside the existing sidecar. Each atomic
+graph-only checkpoint merges into the latest document and notifies the library.
+Stop retains prior checkpoints, labels and transcripts; the frontend reconciles
+from disk even when a completion event was missed. A document-scoped guard prevents
+overlapping resolution jobs. Cache/commit keys include only that microphone's
+source mappings, so another lane becoming available cannot reject its transcript.
+Completed waveforms and the audition clock survive unrelated resolution updates.
+
 `linked_probe.rs` batches bounded `mxf-info` header inspection in the existing
 pyaaf2 sidecar. Fingerprinted header caches provide a local identity index for
 renamed files. Material track IDs are resolved from SourcePackage UMID plus source
@@ -176,6 +188,10 @@ binding. MultipleDescriptor children are matched by LinkedSlotID, not array orde
 Nonzero internal MXF origins and unsupported nested MXF edits fail explicitly
 until their additional time transforms are supported. FFmpeg decodes only bounded
 PCM windows; no full-file transcode or new library is required.
+Empty audio-mapping headers are not successful persistent cache entries and are
+reported separately from an actual UMID mismatch. Both standard and legacy Sound
+data definitions are recognized. Per-file header start/end events, elapsed times,
+validation timings and memory/disk cache-hit totals appear in Multitrack Pipeline.
 
 Source files have no arbitrary size ceiling. AAF and MXF fingerprints use
 64-bit seeks and two 64 KiB reads regardless of total size. Graph/header bounds,
@@ -224,6 +240,20 @@ and no capability grants. Asynchronous AppKit pagination writes a private stagin
 PDF; only a completed, validated PDF is atomically copied to the chosen path.
 The separate `print_transcript` command opens the native print dialog and does not
 claim that a file was saved. Neither route uses Tauri's data-URL HTML rewrite.
+
+Group-alternative Avid exports target the original parent **sequence** track,
+resolved through graph IDs with cycle/missing-parent checks. They do not address
+source-group branches and never invent flattened Avid track numbers. A single
+microphone uses Save As; selected/all exports containing alternatives split into
+one TXT per microphone. The grouped bulk action also splits by microphone rather
+than merging equal person names. Ordinary sequence/person exports are unchanged.
+`multitrack-avid-files.ts` plans these files and a separate import guide identifying
+each destination, group, branch and actual collision-safe filename. Import one
+microphone file per parent track at a time (or use sequence copies); marker import
+does not switch the audible branch. Same-destination microphones cannot enter one
+marker file. Scope IDs are captured before the dialog, committed results are read
+after it, and sequential atomic unique writes preserve earlier exports and report
+partial failures. Native Avid import remains a manual acceptance check.
 
 ### Clip and Review media
 

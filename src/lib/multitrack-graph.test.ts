@@ -30,8 +30,9 @@ describe("AAF group routing", () => {
     const doc=groupFixture(); doc.transcripts=[multitrackTranscript()];
     expect(multitrackAvidMarkers(doc)).toContain("A1");
     doc.transcripts.push(multitrackTranscript("track-2"));
-    expect(() => multitrackAvidMarkers(doc)).toThrow(/group alternatives/);
+    expect(() => multitrackAvidMarkers(doc)).toThrow(/separate Avid marker files/);
     expect(multitrackAvidMarkers(multitrackScope(doc,["track-1"]))).toContain("A1");
+    expect(multitrackAvidMarkers(multitrackScope(doc,["track-2"]))).toContain("\tA1\tred\t[Group alternative:");
   });
   it("exports alternative provenance without confusing it with a sequence track", () => {
     const doc=groupFixture(); doc.transcripts=[multitrackTranscript("track-2")];

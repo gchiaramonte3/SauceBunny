@@ -6,6 +6,25 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 static ACTIVE_JOBS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+static RESOLVING_DOCUMENTS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+pub struct ResolutionGuard(String);
+impl ResolutionGuard {
+    pub fn begin(document: &str) -> Result<Self, AppError> {
+        let mut documents = RESOLVING_DOCUMENTS.lock().map_err(|_| AppError::internal("Media resolution lock unavailable"))?;
+        if !documents.get_or_insert_with(HashSet::new).insert(document.into()) {
+            return Err(AppError::invalid("This document's media is already being checked. Stop that check before relinking."));
+        }
+        Ok(Self(document.into()))
+    }
+}
+impl Drop for ResolutionGuard {
+    fn drop(&mut self) {
+        if let Ok(mut documents) = RESOLVING_DOCUMENTS.lock() {
+            if let Some(documents) = documents.as_mut() { documents.remove(&self.0); }
+        }
+    }
+}
 
 pub struct JobGuard { app: AppHandle, id: String }
 impl JobGuard {
@@ -111,6 +130,17 @@ async fn run_inner(app: &AppHandle, job: &str, stage: &str, name: &str, args: Ve
                 result.stdout.push('\n');
             }
             Some(CommandEvent::Stderr(bytes)) => {
+                if stage == "inspect-mxf" {
+                    for line in String::from_utf8_lossy(&bytes).lines() {
+                        if let Some(json) = line.strip_prefix("AAF_MXF_EVENT ") {
+                            if let Ok(event) = serde_json::from_str::<MxfEvent>(json) {
+                                let detail = if event.phase == "start" { "Inspecting header".into() }
+                                else { format!("{} audio mappings · {} ms{}", event.tracks.unwrap_or(0), event.elapsed_ms.unwrap_or(0), event.error.as_ref().map(|e| format!(" · {e}")).unwrap_or_default()) };
+                                super::diagnostics::log(app, job, if event.error.is_some() { "warn" } else { "info" }, "mxf-file", &format!("{} · {detail}", event.path));
+                            }
+                        }
+                    }
+                }
                 result.stderr.push_str(&String::from_utf8_lossy(&bytes));
                 result.stderr.push('\n');
                 if result.stderr.len() > 65_536 {
@@ -143,3 +173,6 @@ async fn run_inner(app: &AppHandle, job: &str, stage: &str, name: &str, args: Ve
         }
     }
 }
+
+#[derive(serde::Deserialize)]
+struct MxfEvent { path: String, phase: String, elapsed_ms: Option<u64>, tracks: Option<usize>, error: Option<String> }

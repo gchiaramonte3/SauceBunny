@@ -25,7 +25,7 @@ export function MultitrackTrackActions({ document: doc, target, disabled, onClos
     <div className="cp-multitrack-track-menu-title">{owner}</div>
     <button role="menuitem" disabled={disabled || busy || !laneReady(doc, target.id)} onClick={() => { onClose(); onRegenerate(target.id); }}>{transcript ? "Regenerate…" : "Generate…"}</button>
     <button role="menuitem" disabled={busy || !(timed || untimed)} onClick={() => void output.download("txt", [target.id], owner)}>Download text file…</button>
-    <button role="menuitem" disabled={busy || !timed || alternativeLane(doc, target.id)} title={alternativeLane(doc, target.id) ? "Group-alternative marker destinations are not supported yet" : undefined} onClick={() => void output.download("avid", [target.id], owner)}>Export Avid markers…</button>
+    <button role="menuitem" disabled={busy || !timed} title={alternativeLane(doc, target.id) ? "Export this microphone to its parent sequence track, not inside the source group" : undefined} onClick={() => void output.download("avid", [target.id], owner)}>Export Avid markers…</button>
     {busy && <p role="status">Exporting…</p>}{output.status && <p role="status">{output.status}</p>}{output.error && <p role="alert">{output.error}</p>}
   </div>, document.body);
 }

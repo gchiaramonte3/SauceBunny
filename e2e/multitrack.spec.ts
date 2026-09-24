@@ -1,14 +1,15 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { EXPECTED_BACKEND_BUILD_ID } from "../src/lib/build-id";
-import { multitrackFixture, multitrackTranscript } from "../src/test/multitrack-fixture";
+import { multitrackFixture, multitrackLinkedFixture, multitrackTranscript } from "../src/test/multitrack-fixture";
 import { tauriMockInit } from "./tauri-mock";
 
 test.use({ browserName: process.env.SAUCE_AUDIO_BROWSER === "webkit" ? "webkit" : "chromium" });
 
-async function boot(page: Page, trackCount = 3, audible = false, grouped = false) {
+async function boot(page: Page, trackCount = 3, audible = false, grouped = false, pendingMedia = false) {
   const fixture = multitrackFixture();
   fixture.manifest.tracks = Array.from({ length: trackCount }, (_, index) => ({ ...structuredClone(multitrackFixture().manifest.tracks[index % 3]), id: `track-${index + 1}`, name: index < 3 ? multitrackFixture().manifest.tracks[index].name : `Mic ${index + 1}` }));
   if (grouped) fixture.manifest.graph = { sequence_id: "group", sources: [], positions: [], markers: [], picture_tracks: [], path_mappings: [], lanes: fixture.manifest.tracks.map((track, index) => ({ track_id: track.id, parent_track_id: index < 14 ? null : `track-${Math.floor((index-14)/6)+1}`, branch_id: index < 14 ? null : `branch-${index}`, group_name: "Generated group", availability: "ready" })) };
+  if (pendingMedia) { fixture.manifest = multitrackLinkedFixture().manifest; fixture.transcripts = [multitrackTranscript()]; }
   // Silent, duration-correct PCM exercises browser decoding without private
   // media or a nonexistent asset:// URL masking unrelated UI failures.
   await page.route("**/e2e-mock/solo-*.wav", (route) => {
@@ -39,6 +40,9 @@ async function boot(page: Page, trackCount = 3, audible = false, grouped = false
       if (command === "write_text_to_path") return Promise.resolve(args.path);
       if (command === "print_transcript" || command === "export_transcript_pdf") return Promise.resolve();
       if (command === "aaf_import" || command === "aaf_open") return Promise.resolve(fixture);
+      // Deliberately never finishes: opening the timeline and reading saved
+      // dialogue must not depend on a slow or disconnected MXF mount.
+      if (command === "aaf_resolve_media") return new Promise(() => {});
       if (command === "aaf_save_labels") { fixture.labels = args.labels as typeof fixture.labels; return Promise.resolve(fixture); }
       if (command === "aaf_waveform") return Promise.resolve({ track_id: args.trackId, peaks: Array.from({ length: 400 }, (_, index) => { const height = (index % 19) / 20; return [-height, height]; }) });
       if (command === "parakeet_model_downloaded") return Promise.resolve(true);
@@ -56,6 +60,34 @@ async function boot(page: Page, trackCount = 3, audible = false, grouped = false
   await expect(page.locator(".cp-view-home")).toBeVisible();
   await page.locator(".cp-nav-item").filter({ hasText: "Multitrack" }).click();
   await expect(page.getByRole("heading", { name: "Multitrack", exact: true })).toBeVisible();
+}
+
+for (const [width, scale] of [[1100, 1], [1100, 1.25], [1920, 1]] as const) {
+  test(`linked media never blocks the timeline or saved transcript at ${width}/${scale}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 820 }); await boot(page, 3, false, false, true);
+    if (scale !== 1) await page.evaluate(scale => {
+      for (const name of ["--text-base", "--text-md", "--text-lg", "--text-3xl"]) {
+        const size = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+        document.documentElement.style.setProperty(name, `${size * scale}px`);
+      }
+    }, scale);
+    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+    const status = region.getByRole("status").filter({ hasText: "Checking linked media" });
+    await expect(status).toBeVisible();
+    await expect(region.getByRole("button", { name: "Current timecode" })).toBeVisible();
+    await expect(region.getByText("This is the first answer.", { exact: true }).first()).toBeVisible();
+    await expect(status.getByRole("button", { name: "Stop", exact: true })).toBeInViewport();
+    expect(await region.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: test.info().outputPath("progressive-aaf-open.png") });
+    await status.getByRole("button", { name: "Stop", exact: true }).click();
+    await expect(status).toBeHidden();
+    await expect(region.getByText("This is the first answer.", { exact: true }).first()).toBeVisible();
+    const calls = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls);
+    const checks = calls.filter(call => call.command === "aaf_resolve_media");
+    expect(checks).toHaveLength(1);
+    expect(calls.some(call => call.command === "cancel_job" && call.args.jobId === checks[0].args.jobId)).toBe(true);
+  });
 }
 
 for (const scale of [1, 1.25]) {
@@ -152,6 +184,30 @@ test("98 grouped microphones expand without implicit audition or transcription",
   await expect.poll(async()=>(await calls()).filter(c=>c.command==='aaf_transcribe_track').length,{timeout:20000}).toBe(98);
   await expect(region.getByRole('status').filter({hasText:'Selected range saved for every track'})).toBeVisible();
   await expect(region.locator('.cp-multitrack-saved-status[role="img"]')).toHaveCount(98);
+  await region.getByRole('combobox',{name:'Transcript export format'}).selectOption('avid');
+  await region.getByRole('button',{name:'Export selected (98)',exact:true}).click();
+  await expect(region.getByRole('status').filter({hasText:'98 files saved in /exports'})).toBeVisible();
+  const exports = (await calls()).filter(c => c.command === 'write_text_to_path');
+  const markers = exports.filter(c => String(c.args.path).endsWith('.txt'));
+  expect(markers).toHaveLength(98); expect(exports).toHaveLength(99);
+  expect(new Set(markers.map(c => c.args.path)).size).toBe(98);
+  for (const [index, file] of markers.entries()) {
+    const fields = String(file.args.text).trim().split('\t');
+    expect(fields).toHaveLength(5);
+    expect(fields[2]).toBe(`A${index < 14 ? index + 1 : Math.floor((index - 14) / 6) + 1}`);
+    expect(file.args).toMatchObject({ atomic: true, unique: true });
+  }
+  expect(exports.at(-1)!.args.text).toContain('one microphone file per parent track');
+  await expect(region.getByRole('button',{name:'Avid files by microphone'})).toBeInViewport();
+  expect(await region.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  // A single alternative's context action remains a named Save As, not a folder.
+  await region.getByRole('button',{name:'Track actions for Mic 98'}).click();
+  const menu = page.getByRole('menu',{name:'Actions for Mic 98'});
+  await menu.getByRole('menuitem',{name:'Export Avid markers…'}).click();
+  await expect(menu.getByRole('status')).toContainText('Saved to /exports/transcript.txt');
+  const single = (await calls()).filter(c => c.command === 'write_text_to_path').at(-1)!;
+  expect(single.args.text).toContain('\tA14\tred\t[Group alternative:');
+  await menu.getByRole('menuitem',{name:'Export Avid markers…'}).press('Escape');
   await test.info().attach('group-stress',{contentType:'application/json',body:JSON.stringify({lanes:98,roots:14,expandedMs,note:'Real browser mixer and controls, mocked native PCM/recognition; not packaged NEXIS certification.'})});
   await page.screenshot({path:test.info().outputPath('98-grouped-lanes.png')});
 });

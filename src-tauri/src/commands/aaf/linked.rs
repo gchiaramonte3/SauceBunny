@@ -84,7 +84,8 @@ fn refresh_binding(source: &mut AafSource) -> bool {
     true
 }
 
-pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Option<&str>, selected: Option<&Path>, job: &str) -> Result<(), AppError> {
+pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Option<&str>, selected: Option<&Path>, job: &str,
+    mut checkpoint: impl FnMut(&AafGraph) -> Result<(), AppError>) -> Result<(), AppError> {
     let Some(graph) = document.manifest.graph.as_mut() else { return Ok(()); };
     diagnostics::log(app, job, "info", "media", &format!("Resolve {} linked sources · {} saved path mappings", graph.sources.len(), graph.path_mappings.len()));
     if source_id.is_some_and(|id| !graph.sources.iter().any(|s| s.id == id)) { return Err(AppError::invalid("Unknown AAF media source")); }
@@ -93,12 +94,17 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
     let root = selected.filter(|p| p.is_dir());
     if selected.is_some_and(|p| p.is_file()) && source_id.is_none() { return Err(AppError::invalid("Choose the source to relink first")); }
     let mut cache = ProbeCache::default();
-    let total = graph.sources.len() as i64;
-    // Batch header discovery once for known paths, avoiding one frozen-runtime
-    // startup per microphone when a group references dozens of mono MXFs.
+    // Visible sequence microphones first; alternatives never delay them. Small
+    // batches amortize runtime startup without holding all 396 sources hostage.
+    let order = resolution_order(&document.manifest.tracks, graph, source_id);
+    let total = order.len() as i64;
+    let mut completed = 0;
+    process::progress(app, job, None, "resolving", 0, total);
+    for batch in order.chunks(8) {
     let mut direct_mxfs = BTreeSet::new();
-    for source in &graph.sources {
-        if source_id.is_some_and(|id| id != source.id) || (selected.is_none() && source.resolved.is_some()) { continue; }
+    for &index in batch {
+        let source = &graph.sources[index];
+        if selected.is_none() && source.resolved.is_some() { continue; }
         let mut paths = linked_paths::candidates(source, &graph.path_mappings);
         if let Some(root) = root { paths.extend(linked_paths::under_root(source, root).into_iter().filter(|p| linked_paths::contained(p, root))); }
         if let Some(file) = selected.filter(|p| p.is_file()) { paths = BTreeSet::from([file.to_path_buf()]); }
@@ -110,14 +116,12 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
         }
     }
     cache.index(app, job, &direct_mxfs.into_iter().collect::<Vec<_>>()).await?;
-    for (index, source) in graph.sources.iter_mut().enumerate() {
+    for &index in batch {
+        let source = &mut graph.sources[index];
         process::check_cancelled(app, job)?;
-        if source_id.is_some_and(|id| id != source.id) { continue; }
         if selected.is_none() && refresh_binding(source) {
             diagnostics::log(app, job, if source.status == "ready" { "ok" } else { "warn" }, "media", &format!("{} · {} · {}", source.id, source.status, source.resolution_note.as_deref().unwrap_or("Verified saved binding")));
-            continue;
-        }
-        process::progress(app, job, None, "resolving", index as i64, total);
+        } else {
         let mut candidates = linked_paths::candidates(source, &graph.path_mappings);
         if let Some(resolved) = &source.resolved { candidates.insert(PathBuf::from(&resolved.path)); }
         if let Some(root) = root {
@@ -126,6 +130,13 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
         if let Some(path) = selected.filter(|p| p.is_file()) { candidates = BTreeSet::from([path.to_path_buf()]); }
         choose(app, job, source, candidates, &mut cache).await?;
         if selected.is_some() && source.status == "ready" { linked_paths::remember(source, &mut graph.path_mappings); }
+        }
+        completed += 1;
+        process::progress(app, job, None, "resolving", completed, total);
+    }
+    process::check_cancelled(app, job)?;
+    refresh_lanes(&document.manifest.tracks, graph);
+    checkpoint(graph)?;
     }
     // Most NEXIS relinks finish above, without enumerating a workspace. Only
     // unresolved sources trigger a bounded scan of the folder the user chose.
@@ -142,7 +153,10 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
                 let mxfs: Vec<_> = folder.values().flatten().filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("mxf")) && linked_paths::contained(p, root)).cloned().collect();
                 let index_all = mxfs.len() <= 5000;
                 if index_all { cache.index(app, job, &mxfs).await?; }
-                for source in &mut graph.sources {
+                for batch in order.chunks(8) {
+                for &index in batch {
+                    let source = &mut graph.sources[index];
+                    process::check_cancelled(app, job)?;
                     if source.status == "ready" || source_id.is_some_and(|id| id != source.id) { continue; }
                     let mut candidates: BTreeSet<_> = cache.matches(source).into_iter().filter(|p| linked_paths::contained(p, root)).collect();
                     for locator in linked_paths::locators(source) {
@@ -151,6 +165,10 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
                     choose(app, job, source, candidates, &mut cache).await?;
                     if source.status == "ready" { linked_paths::remember(source, &mut graph.path_mappings); }
                     else if !index_all { source.resolution_note = Some("More than 5,000 MXFs in this folder. Choose a numbered MXF subfolder to search renamed files by identity.".into()); }
+                }
+                refresh_lanes(&document.manifest.tracks, graph);
+                process::check_cancelled(app, job)?;
+                checkpoint(graph)?;
                 }
             }
             Err(AppError::Cancelled) => return Err(AppError::Cancelled),
@@ -163,9 +181,22 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
         }
     }
     refresh_lanes(&document.manifest.tracks, graph);
+    process::check_cancelled(app, job)?;
+    checkpoint(graph)?;
+    cache.report(app, job);
     let ready = graph.sources.iter().filter(|s| s.status == "ready" && s.resolved.is_some()).count();
     diagnostics::log(app, job, if ready == graph.sources.len() { "ok" } else { "warn" }, "media", &format!("{ready}/{} linked sources available; unavailable media is not timeline silence. Saved transcripts are retained.", graph.sources.len()));
     Ok(())
+}
+
+fn resolution_order(tracks: &[AafTrack], graph: &AafGraph, source_id: Option<&str>) -> Vec<usize> {
+    let selected: BTreeSet<_> = tracks.iter()
+        .filter(|t| graph.lanes.iter().any(|l| l.track_id == t.id && l.parent_track_id.is_none()))
+        .flat_map(|t| t.clips.iter().filter_map(|c| c.source_id.as_deref())).collect();
+    let mut order: Vec<_> = graph.sources.iter().enumerate()
+        .filter(|(_, s)| source_id.is_none_or(|id| id == s.id)).map(|(i, _)| i).collect();
+    order.sort_by_key(|&i| !selected.contains(graph.sources[i].id.as_str()));
+    order
 }
 
 async fn choose(app: &AppHandle, job: &str, source: &mut AafSource, candidates: BTreeSet<PathBuf>, cache: &mut ProbeCache) -> Result<(), AppError> {
@@ -173,6 +204,7 @@ async fn choose(app: &AppHandle, job: &str, source: &mut AafSource, candidates: 
     let mut valid = BTreeMap::new();
     let mut reason = if candidates.is_empty() && source.status == "needs_relink" { source.resolution_note.clone() } else { None };
     for candidate in candidates {
+        let started = std::time::Instant::now();
         process::check_cancelled(app, job)?;
         match std::fs::metadata(&candidate) {
             Ok(meta) if meta.is_file() => diagnostics::log(app, job, "info", "candidate", &format!("{} · {} · {} bytes", source.id, candidate.display(), meta.len())),
@@ -186,12 +218,12 @@ async fn choose(app: &AppHandle, job: &str, source: &mut AafSource, candidates: 
         }
         match cache.probe(app, job, source, &candidate).await {
             Ok(binding) => {
-                diagnostics::log(app, job, "ok", "candidate", &format!("{} · {} · verified stream {}, channel {}", source.id, binding.path, binding.stream_index, source.channel + 1));
+                diagnostics::log(app, job, "ok", "candidate", &format!("{} · {} · verified stream {}, channel {} · {} ms", source.id, binding.path, binding.stream_index, source.channel + 1, started.elapsed().as_millis()));
                 valid.insert(binding.path.clone(), binding);
             },
             Err(AppError::Cancelled) => return Err(AppError::Cancelled),
             Err(error) => {
-                diagnostics::log(app, job, "warn", "candidate", &format!("{} · {} · rejected: {error}", source.id, candidate.display()));
+                diagnostics::log(app, job, "warn", "candidate", &format!("{} · {} · rejected: {error} · {} ms", source.id, candidate.display(), started.elapsed().as_millis()));
                 reason = Some(error.to_string().chars().take(2000).collect::<String>());
             },
         }

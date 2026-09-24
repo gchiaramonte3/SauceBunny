@@ -42,11 +42,12 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String, sequence_i
         cast_member_id: None, color: None, gender: None, marker_color: None,
     }).collect();
     let id = blake3::hash(crate::stream_proxy::mint_token()?.as_bytes()).to_hex().to_string();
-    let mut document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, id,
+    let document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, id,
         source_path: source.to_string_lossy().into_owned(), source_size: metadata.len(),
         source_modified_ms: store::modified_ms(&metadata), manifest, labels, transcripts: Vec::new() };
     store::source_ready(&document)?;
-    linked::resolve(&app, &mut document, None, None, &job_id).await?;
+    // Reopen an unchanged document (including all committed transcripts) or
+    // commit the offline timeline before any linked-media I/O begins.
     let document = app.state::<JobRegistry>().while_active(&job_id, || store::import(&root, document))?;
     let _ = app.emit("saucebunny:multitrack-changed", &document.id);
     diagnostics::log(&app, &job_id, "ok", "saved", &format!("Timeline saved: {} · {} lanes · {} committed transcripts", document.manifest.name, document.manifest.tracks.len(), document.transcripts.len()));
@@ -68,9 +69,10 @@ pub async fn aaf_sequences(app: AppHandle, path: String, job_id: String) -> Resu
 pub async fn aaf_resolve_media(app: AppHandle, document_id: String, source_id: Option<String>, path: Option<String>, job_id: String) -> Result<AafDocument, AppError> {
     diagnostics::operation(&app, &job_id, "relink", &format!("Document {document_id} · source {} · {}", source_id.as_deref().unwrap_or("all"), path.as_deref().unwrap_or("refresh known paths")), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
+    let _resolution = process::ResolutionGuard::begin(&document_id)?;
     let root = store::root(&app)?;
     let mut document = store::load(&root, &document_id)?;
-    let revision = store::cache_key(&document, "all", "relink");
+    let mut revision = store::cache_key(&document, "all", "relink");
     store::source_ready(&document)?;
     if document.manifest.schema_version < SCHEMA_VERSION {
         if let Some(graph) = &document.manifest.graph {
@@ -81,11 +83,18 @@ pub async fn aaf_resolve_media(app: AppHandle, document_id: String, source_id: O
             store::upgrade_graph(&mut document, serde_json::from_str(&result.stdout)?)?;
         }
     }
-    linked::resolve(&app, &mut document, source_id.as_deref(), path.as_deref().map(std::path::Path::new), &job_id).await?;
-    store::source_ready(&document)?;
-    let saved = app.state::<JobRegistry>().while_active(&job_id, || store::save_graph(&root, &document, &revision))?;
-    let _ = app.emit("saucebunny:multitrack-changed", &document_id);
-    Ok(saved)
+    let mut checkpoint = document.clone();
+    linked::resolve(&app, &mut document, source_id.as_deref(), path.as_deref().map(std::path::Path::new), &job_id, |graph| {
+        checkpoint.manifest.graph = Some(graph.clone());
+        store::source_ready(&checkpoint)?;
+        // Merge graph-only changes into the latest document. Concurrent label
+        // edits/transcription commits survive; a competing relink is rejected.
+        let saved = app.state::<JobRegistry>().while_active(&job_id, || store::save_graph(&root, &checkpoint, &revision))?;
+        revision = store::cache_key(&saved, "all", "relink");
+        let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+        Ok(())
+    }).await?;
+    store::load(&root, &document_id)
     }).await
 }
 

@@ -22,6 +22,12 @@ media. Disable an export with no meaningful saved content in its selected scope.
 The save dialog retains editable names, and an open export keeps its chosen track
 IDs even if selection changes while saving. Reuse the footer's wrapping controls.
 
+For grouped AAFs, the existing bulk action reads **Avid by mic**. Group alternatives
+are independently exportable from their track menu. Native dialog titles and the
+saved import guide identify the parent-sequence destination; there is no new
+persistent footer explanation or fabricated sequence-track numbering. Multi-mic
+Avid exports containing alternatives choose a folder and keep each mic separate.
+
 ### Multitrack transcription options · 2026-09-22
 
 Whisper keeps Engine and Model visible, with a collapsed Options disclosure

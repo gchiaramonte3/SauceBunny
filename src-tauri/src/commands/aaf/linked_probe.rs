@@ -1,6 +1,6 @@
 //! Cached, read-only MXF package identities. A cache hit is tied to the current
 //! file fingerprint; final FFprobe validation still runs before any relink.
-use super::{linked, model::*, process, store};
+use super::{diagnostics, linked, model::*, process, store};
 use crate::AppError;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::{Path, PathBuf}};
@@ -22,24 +22,33 @@ struct Headers { schema_version: u32, files: Vec<Header> }
 pub struct ProbeCache {
     headers: BTreeMap<PathBuf, Header>,
     probes: BTreeMap<(String, String), String>,
+    memory_hits: usize,
+    disk_hits: usize,
+    misses: usize,
 }
 impl ProbeCache {
     pub async fn index(&mut self, app: &AppHandle, job: &str, paths: &[PathBuf]) -> Result<(), AppError> {
         let root = store::cache(app)?;
-        for chunk in paths.chunks(256) {
+        for chunk in paths.chunks(8) {
             let mut pending = BTreeMap::new();
             for path in chunk {
+                let started = std::time::Instant::now();
                 process::check_cancelled(app, job)?;
+                diagnostics::log(app, job, "info", "mxf-cache", &format!("{} · checking fingerprint", path.display()));
                 let Ok(path) = std::fs::canonicalize(path) else { continue; };
                 let Ok(fingerprint) = store::source_fingerprint(&path) else { continue; };
-                if self.headers.get(&path).is_some_and(|h| h.fingerprint == fingerprint) { continue; }
+                if self.headers.get(&path).is_some_and(|h| h.fingerprint == fingerprint) { self.memory_hits += 1; continue; }
                 let cache = root.join(format!("mxf-header-v1-{fingerprint}.json"));
                 if let Ok(mut header) = store::read_json::<Header>(&cache) {
-                    if header.fingerprint == fingerprint && header.error.is_none() && header.tracks.len() <= 256 {
+                    if reusable_header(&header, &fingerprint) {
+                        self.disk_hits += 1;
+                        diagnostics::log(app, job, "ok", "mxf-cache", &format!("{} · disk hit · {} ms", path.display(), started.elapsed().as_millis()));
                         header.path = path.to_string_lossy().into_owned();
                         self.headers.insert(path, header); continue;
                     }
                 }
+                self.misses += 1;
+                diagnostics::log(app, job, "info", "mxf-cache", &format!("{} · miss · fingerprint {} ms", path.display(), started.elapsed().as_millis()));
                 pending.insert(path, (fingerprint, cache));
             }
             if pending.is_empty() { continue; }
@@ -56,13 +65,20 @@ impl ProbeCache {
                 if store::source_fingerprint(&path)? != expected { return Err(AppError::invalid("MXF changed during inspection. Refresh availability.")); }
                 if header.error.is_none() {
                     if header.fingerprint != expected || header.tracks.len() > 256 { return Err(AppError::invalid("Invalid MXF inspection identity")); }
-                    crate::commands::system::write_bytes_impl(&cache.to_string_lossy(), &serde_json::to_vec(&header)?, false, false, true)?;
+                    if !header.tracks.is_empty() {
+                        crate::commands::system::write_bytes_impl(&cache.to_string_lossy(), &serde_json::to_vec(&header)?, false, false, true)?;
+                    }
                 }
                 header.fingerprint = expected;
                 self.headers.insert(path, header);
             }
         }
+        self.report(app, job);
         Ok(())
+    }
+
+    pub fn report(&self, app: &AppHandle, job: &str) {
+        diagnostics::log(app, job, "info", "mxf-cache", &format!("MXF header cache: {} memory hits · {} disk hits · {} misses", self.memory_hits, self.disk_hits, self.misses));
     }
 
     pub fn matches(&self, source: &AafSource) -> Vec<PathBuf> {
@@ -98,6 +114,7 @@ impl ProbeCache {
 }
 
 pub fn material_track(tracks: &[MxfTrack], source: &AafSource) -> Result<u32, AppError> {
+    if tracks.is_empty() { return Err(AppError::invalid("MXF header has no recognized audio source mappings. This does not establish a source-identity mismatch. Export diagnostics for this file.")); }
     let matches: Vec<_> = tracks.iter().filter(|t| linked::umid(&t.mob_id) == linked::umid(&source.mob_id) && t.slot_id == source.slot_id).collect();
     if matches.len() != 1 {
         let observed = tracks.iter().take(8).map(|t| format!("{} slot {} → material track {}", t.mob_id, t.slot_id, t.material_track_id)).collect::<Vec<_>>().join("; ");
@@ -105,4 +122,23 @@ pub fn material_track(tracks: &[MxfTrack], source: &AafSource) -> Result<u32, Ap
     }
     if !matches[0].aligned { return Err(AppError::invalid("MXF has a nonzero internal audio origin that needs an additional timing transform. This source has not been relinked.")); }
     Ok(matches[0].material_track_id)
+}
+
+fn reusable_header(header: &Header, fingerprint: &str) -> bool {
+    header.fingerprint == fingerprint && header.error.is_none() && (1..=256).contains(&header.tracks.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn empty_failed_or_changed_headers_are_never_persistent_cache_hits() {
+        let mut header = Header { path: "audio.mxf".into(), fingerprint: "one".into(), tracks: vec![], error: None };
+        assert!(!reusable_header(&header, "one"));
+        header.tracks.push(MxfTrack { material_track_id: 1, mob_id: "abcd".into(), slot_id: 1, aligned: true });
+        assert!(reusable_header(&header, "one"));
+        assert!(!reusable_header(&header, "two"));
+        header.error = Some("Unreadable".into());
+        assert!(!reusable_header(&header, "one"));
+    }
 }

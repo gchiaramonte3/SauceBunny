@@ -6,8 +6,15 @@ that a source slot equals an FFmpeg stream index. The native caller then uses
 ffprobe's i:<track-id> stream selector and validates the actual decoded format.
 """
 from pathlib import Path
+import json
+import queue
+import sys
+import threading
+import time
 from aaf2 import mxf
 from reader import fail, fingerprint, ReaderError
+
+SOUND_DEFS = {'DataDef_Sound', 'DataDef_LegacySound'}
 
 
 class Header(mxf.MXFFile):
@@ -52,7 +59,7 @@ def inspect(path):
     tracks = []
     for track in materials[0].iter_strong_refs('Slots'):
         segment = track.resolve_ref('Segment')
-        if segment.data.get('DataDef') != 'DataDef_Sound':
+        if segment.data.get('DataDef') not in SOUND_DEFS:
             continue
         children = list(segment.iter_strong_refs('Components')) if isinstance(segment, mxf.MXFSequence) else [segment]
         if len(children) != 1 or not isinstance(children[0], mxf.MXFSourceClip):
@@ -63,7 +70,7 @@ def inspect(path):
         if len(sources) != 1:
             fail('MXF audio source package is missing or ambiguous.', 'invalid_media')
         slots = [s for s in sources[0].iter_strong_refs('Slots') if s.data.get('SlotID') == slot_id]
-        if len(slots) != 1 or slots[0].resolve_ref('Segment').data.get('DataDef') != 'DataDef_Sound':
+        if len(slots) != 1 or slots[0].resolve_ref('Segment').data.get('DataDef') not in SOUND_DEFS:
             fail('MXF audio source slot is missing or ambiguous.', 'invalid_media')
         # Nonzero material/source origins need an additional time transform.
         # Do not apply an AAF offset to a different MXF time origin silently.
@@ -72,6 +79,8 @@ def inspect(path):
                        'slot_id': slot_id, 'aligned': aligned})
     if len(tracks) > 256:
         fail('MXF exceeds 256 audio streams.', 'limit_exceeded')
+    if not tracks:
+        fail('MXF header has no recognized audio source mappings. The media is not confirmed to be a wrong recording; export diagnostics for this file.', 'unsupported_media')
     if fingerprint(path) != before:
         fail('MXF changed during inspection.', 'source_changed')
     return {'path': str(path), 'fingerprint': before, 'tracks': tracks}
@@ -80,16 +89,49 @@ def inspect(path):
 def inspect_many(paths):
     if not 1 <= len(paths) <= 256:
         fail('Inspect at most 256 MXFs per batch.', 'limit_exceeded')
-    results = []
-    for path in paths:
-        try:
-            results.append(inspect(path))
-        except ReaderError as error:
-            if error.code == 'cancelled':
-                raise
-            results.append({'path': path, 'error': str(error)})
-        except Exception:
-            # Third-party header parsing can raise generic exceptions for bad
-            # strong references. Never expose tracebacks or accept partial data.
-            results.append({'path': path, 'error': 'MXF header could not be read safely.'})
+    tasks, finished = queue.Queue(), queue.Queue()
+    stopped, output_lock = threading.Event(), threading.Lock()
+    for index, path in enumerate(paths):
+        tasks.put((index, path))
+
+    def report(path, phase, **details):
+        with output_lock:
+            print('AAF_MXF_EVENT ' + json.dumps({'path': str(path), 'phase': phase, **details}), file=sys.stderr, flush=True)
+
+    def worker():
+        while not stopped.is_set():
+            try:
+                index, path = tasks.get_nowait()
+            except queue.Empty:
+                return
+            started = time.monotonic()
+            report(path, 'start')
+            try:
+                result = inspect(path)
+            except ReaderError as error:
+                if error.code == 'cancelled':
+                    stopped.set()
+                    finished.put((index, error))
+                    return
+                result = {'path': path, 'error': str(error)}
+            except Exception:
+                result = {'path': path, 'error': 'MXF header could not be read safely.'}
+            report(path, 'finish', elapsed_ms=round((time.monotonic()-started)*1000),
+                   tracks=len(result.get('tracks', [])), error=result.get('error'))
+            finished.put((index, result))
+
+    # Header I/O overlaps at most two files. Daemon workers let SIGTERM unwind
+    # the main reader immediately even if a disconnected mount blocks a read.
+    # No worker writes media/cache files; the native owner commits results.
+    results = [None] * len(paths)
+    for _ in range(min(2, len(paths))):
+        threading.Thread(target=worker, daemon=True).start()
+    try:
+        for _ in paths:
+            index, result = finished.get()
+            if isinstance(result, ReaderError):
+                raise result
+            results[index] = result
+    finally:
+        stopped.set()
     return {'schema_version': 1, 'files': results}

@@ -11,6 +11,7 @@ import { audioTrackLabel, trackOwner } from "../lib/multitrack";
 export function MultitrackMedia({ document, disabled, onBusy }: { document: AafDocument; disabled?: boolean; onBusy?: (busy: boolean) => void }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [result, setResult] = useState<AafDocument | null>(null);
+  useEffect(() => { setResult(null); }, [document]);
   const job = useRef<string | null>(null), mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; if (job.current) void invoke("cancel_job", { jobId: job.current }).catch(() => {}); onBusy?.(false); }; }, [onBusy]);
   const graph = (result ?? document).manifest.graph;

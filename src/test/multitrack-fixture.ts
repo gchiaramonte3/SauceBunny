@@ -21,3 +21,15 @@ export function multitrackGroupFixture(): AafDocument {
   doc.manifest.tracks.forEach((track, index) => { track.physical_track_number = 1; track.clips[0].source_id = `source-${index}`; });
   return doc;
 }
+
+export function multitrackLinkedFixture(ready = false): AafDocument {
+  const doc = multitrackGroupFixture();
+  doc.manifest.graph!.sources = doc.manifest.tracks.map((_, index) => ({
+    id: `source-${index}`, mob_id: `mob-${index}`, slot_id: index + 1, locators: [`/fixtures/mic-${index}.mxf`], ancestors: [],
+    channel: 0, channels: 1, sample_rate: 48000, sample_width: 3, sample_count: 48048000, descriptor: "PCMDescriptor",
+    status: ready ? "ready" : "offline",
+    ...(ready ? { resolved: { path: `/fixtures/mic-${index}.mxf`, fingerprint: String(index).repeat(64), stream_index: 0, size: 144144000, modified_ms: 1 } } : {}),
+  }));
+  doc.manifest.graph!.lanes.forEach(lane => { lane.availability = ready ? "ready" : "offline"; });
+  return doc;
+}
