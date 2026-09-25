@@ -46,7 +46,10 @@ impl ProbeCache {
             for path in self.prefetch_fingerprints(chunk).await {
                 let started = std::time::Instant::now();
                 process::check_cancelled(app, job)?;
-                let Ok(fingerprint) = self.fingerprint(&path) else { continue; };
+                let fingerprint = match self.fingerprint(&path) {
+                    Ok(fingerprint) => fingerprint,
+                    Err(error) => { diagnostics::log(app, job, "warn", "mxf-file", &format!("{} · {error} · skipped", path.display())); continue; }
+                };
                 if self.headers.get(&path).is_some_and(|h| h.fingerprint == fingerprint) { self.memory_hits += 1; continue; }
                 let cache = root.join(format!("mxf-header-v2-{fingerprint}.json"));
                 if let Ok(mut header) = store::read_json::<Header>(&cache) {
@@ -74,7 +77,7 @@ impl ProbeCache {
                 match result {
                     Ok(inspection) => {
                         let Some((expected, cache)) = pending.remove(&path) else { continue; };
-                        if self.fingerprint(&path)? != expected { return Err(AppError::invalid("MXF changed during inspection. Refresh availability.")); }
+                        if !self.unchanged(app, job, &path, &expected) { continue; }
                         diagnostics::log(app, job, "info", "mxf-file", &format!("{} · {} audio mappings · {ms} ms", path.display(), inspection.tracks.len()));
                         let header = Header { path: path.to_string_lossy().into_owned(), fingerprint: expected, tracks: inspection.tracks, sound: inspection.sound, error: None };
                         crate::commands::system::write_bytes_impl(&cache.to_string_lossy(), &serde_json::to_vec(&header)?, false, false, true)?;
@@ -97,9 +100,15 @@ impl ProbeCache {
                 let path = PathBuf::from(&header.path);
                 let Some((expected, cache)) = pending.remove(&path) else { return Err(AppError::invalid("Unexpected MXF inspection path")); };
                 process::check_cancelled(app, job)?;
-                if self.fingerprint(&path)? != expected { return Err(AppError::invalid("MXF changed during inspection. Refresh availability.")); }
+                // The sidecar hashes the file itself, so a mismatch is the same
+                // mid-capture change the stat check catches, seen from its side.
+                if !self.unchanged(app, job, &path, &expected) { continue; }
+                if header.error.is_none() && header.fingerprint != expected {
+                    diagnostics::log(app, job, "warn", "mxf-file", &format!("{} · changed during inspection · skipped", path.display()));
+                    continue;
+                }
                 if header.error.is_none() {
-                    if header.fingerprint != expected || header.tracks.len() > 256 { return Err(AppError::invalid("Invalid MXF inspection identity")); }
+                    if header.tracks.len() > 256 { return Err(AppError::invalid("Invalid MXF inspection identity")); }
                     if !header.tracks.is_empty() {
                         crate::commands::system::write_bytes_impl(&cache.to_string_lossy(), &serde_json::to_vec(&header)?, false, false, true)?;
                     }
@@ -119,25 +128,40 @@ impl ProbeCache {
     /// Canonicalize a chunk and fill the fingerprint memo concurrently. Each
     /// fingerprint reads both ends of the file, so on NEXIS a chunk used to pay
     /// one serial round trip per file (all of them on a warm, all-disk-hit
-    /// relink) before a single header read began. Returns the paths that
-    /// canonicalized, in order; a failed fingerprint is retried by the caller.
+    /// relink) before a single header read began. Returns the chunk's paths,
+    /// canonical where possible, in order; a failed fingerprint is retried and
+    /// reported by the caller.
     async fn prefetch_fingerprints(&mut self, chunk: &[PathBuf]) -> Vec<PathBuf> {
         let known: std::sync::Arc<BTreeMap<PathBuf, (u64, u64)>> = std::sync::Arc::new(
             self.fingerprints.iter().map(|(path, (len, modified, _))| (path.clone(), (*len, *modified))).collect());
         let found: Vec<_> = stream::iter(chunk.to_vec()).map(|path| { let known = known.clone(); async move {
             tauri::async_runtime::spawn_blocking(move || {
-                let path = std::fs::canonicalize(path).ok()?;
+                // An unreadable path is kept so the caller logs why, rather than
+                // the file silently leaving identity matching.
+                let path = std::fs::canonicalize(&path).unwrap_or(path);
                 let metadata = std::fs::metadata(&path).ok();
                 let stamp = metadata.as_ref().map(|m| (m.len(), store::modified_ms(m)));
                 let fresh = stamp.filter(|stamp| known.get(&path) != Some(stamp))
                     .and_then(|stamp| store::source_fingerprint(&path).ok().map(|value| (stamp, value)));
-                Some((path, fresh))
-            }).await.ok().flatten()
+                (path, fresh)
+            }).await.ok()
         }}).buffered(NATIVE_READS).collect().await;
         found.into_iter().flatten().map(|(path, fresh)| {
             if let Some(((len, modified), value)) = fresh { self.fingerprints.insert(path.clone(), (len, modified, value)); }
             path
         }).collect()
+    }
+
+    /// A file that changed while its header was read (another workstation is
+    /// still capturing into the workspace) is left out of this pass rather than
+    /// ending the relink for every other source. A later probe of that path
+    /// re-reads it from scratch.
+    fn unchanged(&mut self, app: &AppHandle, job: &str, path: &Path, expected: &str) -> bool {
+        match self.fingerprint(path) {
+            Ok(current) if current == expected => true,
+            Ok(_) => { diagnostics::log(app, job, "warn", "mxf-file", &format!("{} · changed during inspection · skipped", path.display())); false }
+            Err(error) => { diagnostics::log(app, job, "warn", "mxf-file", &format!("{} · {error} · skipped", path.display())); false }
+        }
     }
 
     /// Fingerprint once per file per job. The fingerprint reads both ends of
@@ -255,16 +279,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prefetch_fills_the_memo_in_order_and_skips_unreadable_paths() {
+    async fn prefetch_fills_the_memo_in_order_and_keeps_unreadable_paths() {
         let dir = std::env::temp_dir().join(format!("probe-prefetch-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();
         let files: Vec<_> = (0..12).map(|i| { let path = dir.join(format!("{i}.mxf")); std::fs::write(&path, vec![b'x'; i + 1]).unwrap(); path }).collect();
         let mut chunk = files.clone(); chunk.insert(3, dir.join("missing.mxf"));
         let mut cache = ProbeCache::default();
         let found = cache.prefetch_fingerprints(&chunk).await;
-        assert_eq!(found, files.iter().map(|p| std::fs::canonicalize(p).unwrap()).collect::<Vec<_>>());
+        let mut expected: Vec<_> = files.iter().map(|p| std::fs::canonicalize(p).unwrap()).collect();
+        expected.insert(3, dir.join("missing.mxf"));
+        assert_eq!(found, expected, "an unreadable path is kept so the caller can report it");
         assert_eq!(cache.fingerprints.len(), files.len());
-        for path in &found { assert_eq!(cache.fingerprint(path).unwrap(), store::source_fingerprint(path).unwrap()); }
+        for path in found.iter().filter(|p| p.exists()) { assert_eq!(cache.fingerprint(path).unwrap(), store::source_fingerprint(path).unwrap()); }
         std::fs::remove_dir_all(dir).unwrap();
     }
 

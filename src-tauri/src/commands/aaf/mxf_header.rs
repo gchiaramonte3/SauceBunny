@@ -169,13 +169,13 @@ pub fn parse(metadata: &[u8]) -> Result<Inspection, AppError> {
         let start = clip.props.get(&0x1201).map_or(Ok(0), |v| i64_be(v))?;
         tracks.push(MxfTrack { material_track_id: u32_be(get(track, 0x4801)?)?, mob_id, slot_id,
             aligned: origin(track)? == 0 && origin(slots[0])? == 0 && start == 0 });
-        sound_package = Some((package, slot_id));
+        sound_package = Some(package);
     }
     if tracks.is_empty() { return Err(invalid("no recognized audio source mappings")); }
     if tracks.len() > 256 { return Err(invalid("more than 256 audio streams")); }
     // Descriptor facts are only offered for the single-track case ffprobe
     // would otherwise confirm; anything richer keeps the full probe.
-    let sound = if tracks.len() == 1 { sound_package.and_then(|(package, slot)| descriptor(&sets, package, slot)) } else { None };
+    let sound = if tracks.len() == 1 { sound_package.and_then(|package| descriptor(&sets, package)) } else { None };
     Ok(Inspection { tracks, sound })
 }
 
@@ -183,15 +183,12 @@ fn get<'a>(set: &Set<'a>, tag: u16) -> Result<&'a [u8], AppError> {
     set.props.get(&tag).copied().ok_or_else(|| invalid("missing property"))
 }
 
-fn descriptor(sets: &HashMap<&[u8], Set>, package: &Set, slot: u32) -> Option<MxfSound> {
-    let mut descriptor = sets.get(*package.props.get(&0x4701)?)?;
-    if descriptor.kind == MULTIPLE_DESCRIPTOR {
-        let children: Vec<&Set> = refs(descriptor.props.get(&0x3F01)?).ok()?.into_iter().filter_map(|id| sets.get(id)).collect();
-        let linked: Vec<_> = children.into_iter().filter(|d| SOUND_DESCRIPTORS.contains(&d.kind) && d.props.get(&0x3006).and_then(|v| u32_be(v).ok()) == Some(slot)).collect();
-        if linked.len() != 1 { return None; }
-        descriptor = linked[0];
-    }
-    if !SOUND_DESCRIPTORS.contains(&descriptor.kind) { return None; }
+fn descriptor(sets: &HashMap<&[u8], Set>, package: &Set) -> Option<MxfSound> {
+    let descriptor = sets.get(*package.props.get(&0x4701)?)?;
+    // Only a lone sound descriptor (true OP-Atom) proves the file's only stream
+    // is this audio. A MultipleDescriptor file can carry video as stream 0, and
+    // the caller binds stream 0 without ffprobe, so it must be probed instead.
+    if descriptor.kind == MULTIPLE_DESCRIPTOR || !SOUND_DESCRIPTORS.contains(&descriptor.kind) { return None; }
     let field = |tag| descriptor.props.get(&tag).copied();
     let (rate_n, rate_d) = rational(field(0x3D03)?).ok()?;
     let (edit_n, edit_d) = rational(field(0x3001)?).ok()?;

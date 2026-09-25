@@ -123,7 +123,12 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
     for &index in batch {
         let source = &mut graph.sources[index];
         process::check_cancelled(app, job)?;
-        if selected.is_none() && refresh_binding(source) {
+        // A bulk relink to a chosen folder is for what is missing: a binding
+        // that still verifies stays, or a copy under that folder would demote
+        // it to "2 matching files found" and block its transcription.
+        let keep = if selected.is_none() { refresh_binding(source) }
+            else { root.is_some() && source_id.is_none() && source.resolved.is_some() && refresh_binding(source) && source.status == "ready" };
+        if keep {
             diagnostics::log(app, job, if source.status == "ready" { "ok" } else { "warn" }, "media", &format!("{} · {} · {}", source.id, source.status, source.resolution_note.as_deref().unwrap_or("Verified saved binding")));
         } else {
         let mut candidates = linked_paths::candidates(source, &graph.path_mappings);
@@ -154,7 +159,10 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
             Ok(folder) => {
                 // Header cache doubles as a source-identity index for renamed
                 // MXFs. Never match a recorder ancestor or use filename alone.
-                let mxfs: Vec<_> = folder.values().flatten().filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("mxf")) && linked_paths::contained(p, root)).cloned().collect();
+                // The walk starts at the canonical root and never follows a
+                // symlink, so its paths are inside it without a canonicalize
+                // (a network round trip each, for up to 20,000 files).
+                let mxfs: Vec<_> = folder.values().flatten().filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("mxf"))).cloned().collect();
                 let index_all = mxfs.len() <= 5000;
                 if index_all { cache.index(app, job, &mxfs).await?; }
                 for batch in order.chunks(RESOLVE_BATCH) {
@@ -162,9 +170,9 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
                     let source = &mut graph.sources[index];
                     process::check_cancelled(app, job)?;
                     if source.status == "ready" || source_id.is_some_and(|id| id != source.id) { continue; }
-                    let mut candidates: BTreeSet<_> = cache.matches(source).into_iter().filter(|p| linked_paths::contained(p, root)).collect();
+                    let mut candidates: BTreeSet<_> = cache.matches(source).into_iter().filter(|p| p.starts_with(root)).collect();
                     for locator in linked_paths::locators(source) {
-                        if let Some(matches) = locator.path.file_name().and_then(|n| folder.get(n.to_string_lossy().as_ref())) { candidates.extend(matches.iter().filter(|p| linked_paths::contained(p, root)).cloned()); }
+                        if let Some(matches) = locator.path.file_name().and_then(|n| folder.get(n.to_string_lossy().as_ref())) { candidates.extend(matches.iter().cloned()); }
                     }
                     choose(app, job, source, candidates, &mut cache).await?;
                     if source.status == "ready" { linked_paths::remember(source, &mut graph.path_mappings); }
