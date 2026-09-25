@@ -163,12 +163,12 @@ pub async fn aaf_waveform(app: AppHandle, document_id: String, track_id: String,
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let document = store::load(&store::root(&app)?, &document_id)?;
     match (start_frame, duration_frames) {
-        (None, None) => peaks::waveform(&app, &document, &track_id, 0, document.manifest.duration_frames, &job_id).await,
+        (None, None) => peaks::waveform(&app, &document, &track_id, 0, document.manifest.duration_frames, true, &job_id).await,
         (Some(start), Some(duration)) => {
             if start < 0 || duration <= 0 || start.checked_add(duration).is_none_or(|end| end > document.manifest.duration_frames) {
                 return Err(AppError::invalid("Waveform interval is outside the sequence"));
             }
-            peaks::waveform(&app, &document, &track_id, start, duration, &job_id).await
+            peaks::waveform(&app, &document, &track_id, start, duration, false, &job_id).await
         },
         _ => Err(AppError::invalid("Waveform detail requires both a start and duration")),
     }

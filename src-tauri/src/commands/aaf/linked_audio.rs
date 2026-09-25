@@ -24,6 +24,13 @@ fn header(samples: u64) -> Result<Vec<u8>, AppError> {
 pub async fn render(app: &AppHandle, document: &AafDocument, id: &str, start: i64, duration: i64, job: &str, output: &Path) -> Result<u64, AppError> {
     super::audio::validate_range(document, start, duration)?;
     let _permit = super::audio::preparation(app, job).await?;
+    render_window(app, document, id, start, duration, job, output).await
+}
+
+/// The caller holds whichever gate governs this work: a playback permit, or
+/// the overview build gate for the chunks of a waveform.
+async fn render_window(app: &AppHandle, document: &AafDocument, id: &str, start: i64, duration: i64, job: &str, output: &Path) -> Result<u64, AppError> {
+    super::audio::validate_range(document, start, duration)?;
     process::check_cancelled(app, job)?;
     let track = store::track(document, id)?;
     linked::check_sources(document, track)?;
@@ -78,12 +85,19 @@ pub async fn render(app: &AppHandle, document: &AafDocument, id: &str, start: i6
     Ok(total)
 }
 
-pub async fn waveform(app: &AppHandle, document: &AafDocument, id: &str, start: i64, duration: i64, job: &str) -> Result<AafWaveform, AppError> {
+pub async fn waveform(app: &AppHandle, document: &AafDocument, id: &str, start: i64, duration: i64, may_build: bool, job: &str) -> Result<AafWaveform, AppError> {
     let track = store::track(document, id)?; linked::check_sources(document, track)?;
     let path = store::cache(app)?.join(format!("{}.peaks-v2.bin", store::cache_key(document, id, "linked-pyramid")));
     let rate = &document.manifest.edit_rate;
     let total = sample(document.manifest.duration_frames, rate);
-    if let Ok(peaks) = super::peaks::query(&path, sample(start,rate), sample(start+duration,rate), total, HZ) { return Ok(AafWaveform { track_id:id.into(), peaks }); }
+    let cached = || super::peaks::query(&path, sample(start,rate), sample(start+duration,rate), total, HZ).map(|peaks| AafWaveform { track_id:id.into(), peaks });
+    if let Ok(waveform) = cached() { return Ok(waveform); }
+    // Reading every source for an hour-long track is the heaviest thing this
+    // app does on NEXIS. Only the overview request builds it; zoomed detail
+    // waits for that result instead of starting its own copy.
+    if !may_build { return Err(AppError::invalid("The waveform overview for this track is still being prepared")); }
+    let _build = super::audio::acquire(app, job, &super::peaks::BUILD).await?;
+    if let Ok(waveform) = cached() { return Ok(waveform); }
     let work = WorkDir::new(app, job)?;
     let mut values = Vec::new(); let (mut low, mut high, mut bucket) = (0_i16, 0_i16, 0_u64);
     let chunk = (60*u64::from(rate.numerator)/u64::from(rate.denominator)) as i64;
@@ -91,7 +105,7 @@ pub async fn waveform(app: &AppHandle, document: &AafDocument, id: &str, start: 
     while first < document.manifest.duration_frames {
         let count = chunk.min(document.manifest.duration_frames-first);
         let wav = work.0.join("window.wav");
-        let samples = render(app, document, id, first, count, job, &wav).await?;
+        let samples = render_window(app, document, id, first, count, job, &wav).await?;
         let mut file = std::fs::File::open(&wav)?; file.seek(SeekFrom::Start(44))?;
         let mut bytes = vec![0; (samples*3) as usize]; file.read_exact(&mut bytes)?;
         for sample in bytes.chunks_exact(3) {

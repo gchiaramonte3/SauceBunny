@@ -80,7 +80,6 @@ impl ProbeCache {
                 self.headers.insert(path, header);
             }
         }
-        self.report(app, job);
         Ok(())
     }
 

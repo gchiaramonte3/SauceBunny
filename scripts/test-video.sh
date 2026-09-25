@@ -2,7 +2,8 @@
 # CPU/index/decoder regressions only. No weights, GPU, or media library access.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VIDEO_TEST_PYTHON="${VIDEO_TEST_PYTHON:-${VIDEO_PYTHON:-${AAF_PYTHON:-python3}}}"
+# Prefer the pinned build interpreter when it is on PATH; CI's python3 is 3.12.
+VIDEO_TEST_PYTHON="${VIDEO_TEST_PYTHON:-${VIDEO_PYTHON:-${AAF_PYTHON:-$(command -v python3.12 || echo python3)}}}"
 if ! "${VIDEO_TEST_PYTHON}" -c 'import sys; assert sys.version_info >= (3,12)' 2>/dev/null; then
   echo 'Video worker tests need Python 3.12+. Set VIDEO_TEST_PYTHON=/path/to/python3.12 (build/test only; the app bundles its interpreter).' >&2
   exit 1

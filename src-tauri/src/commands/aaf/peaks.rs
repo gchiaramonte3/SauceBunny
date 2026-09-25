@@ -9,7 +9,8 @@ use tauri::AppHandle;
 const BASE: u64 = 256;
 const POINTS: u64 = 2048;
 const HEADER: u64 = 32;
-static BUILD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// One overview build at a time, shared by native and linked media.
+pub(super) static BUILD: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 fn sample(bytes: &[u8]) -> i16 {
     // Round outwards below when reducing. Retain low-amplitude activity even
@@ -78,9 +79,11 @@ pub fn query(path: &Path, first: u64, end: u64, expected_samples: u64, hz: u32) 
     }).collect())
 }
 
-pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64, job: &str) -> Result<AafWaveform, AppError> {
+/// `may_build` is false for zoomed detail requests: on linked media they read the
+/// finished overview and never start an hour-long build of their own.
+pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64, may_build: bool, job: &str) -> Result<AafWaveform, AppError> {
     store::track(document, track)?; store::source_ready(document)?;
-    if super::linked_audio::needed(document) { return super::linked_audio::waveform(app, document, track, start, duration, job).await; }
+    if super::linked_audio::needed(document) { return super::linked_audio::waveform(app, document, track, start, duration, may_build, job).await; }
     let reader = pcm::get(app, document, job).await?;
     let selected = reader.index.track(track)?;
     let first = reader.index.sample(start, selected.sample_rate);
@@ -92,13 +95,12 @@ pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, star
     }
     // Cancellation is checked after waiting and once per bounded read. No detached
     // scans survive tab changes; a new request can rebuild a cancelled partial.
-    let _build = BUILD.lock().await;
+    let _build = super::audio::acquire(app, job, &BUILD).await?;
     process::check_cancelled(app, job)?;
     if path.is_file() {
         if let Ok(peaks) = query(&path, first, end, total, selected.sample_rate) { return Ok(AafWaveform { track_id: track.into(), peaks }); }
     }
     let work = WorkDir::new(app, job)?; let partial = work.0.join("peaks.bin");
-    let _permit = super::audio::preparation(app, job).await?;
     let (app2, job2, track2, partial2) = (app.clone(), job.to_owned(), track.to_owned(), partial.clone());
     tauri::async_runtime::spawn_blocking(move || build(&reader, reader.index.track(&track2)?, &partial2, || process::check_cancelled(&app2, &job2))).await
         .map_err(|e| AppError::internal(e.to_string()))??;

@@ -30,16 +30,30 @@ export function MultitrackPipeline({ documentId, error, loading }: { documentId?
     let disposed = false;
     const buffered: AafDiagnosticEvent[] = [];
     let hydrated = false;
+    // A relink logs several rows per source. Merging and re-rendering 1,500
+    // rows per event saturated the webview, so rows are applied in batches.
+    let pending: AafDiagnosticEvent[] = [];
+    let flush: number | null = null;
+    function applyPending() {
+      flush = null;
+      const batch = pending; pending = [];
+      if (disposed || !batch.length) return;
+      setRows(previous => mergeMultitrackLogs(previous, batch));
+      const lifecycle = batch.filter(row => row.active !== null);
+      if (lifecycle.length) setActive(previous => {
+        const next = new Set(previous);
+        for (const row of lifecycle) { if (row.active) next.add(row.job_id); else next.delete(row.job_id); }
+        return next;
+      });
+      if (batch.some(row => row.level === "err")) setOpen(true);
+    }
     function onAafDiagnostic({ payload }: Event<AafDiagnosticEvent>) {
       if (disposed) return;
       if (!hydrated) { buffered.push(payload); if (buffered.length > 1500) buffered.shift(); }
-      setRows(previous => mergeMultitrackLogs(previous, [payload]));
-      if (payload.active !== null) setActive(previous => {
-        const next = new Set(previous);
-        if (payload.active) next.add(payload.job_id); else next.delete(payload.job_id);
-        return next;
-      });
-      if (payload.level === "err") setOpen(true);
+      pending.push(payload);
+      // Errors are rare and open the panel, so they never wait for the batch.
+      if (payload.level === "err") { if (flush !== null) clearTimeout(flush); applyPending(); }
+      else if (flush === null) flush = window.setTimeout(applyPending, 250);
     }
     const subscription = listen<AafDiagnosticEvent>("aaf-diagnostic", onAafDiagnostic);
     void subscription.then(async () => {
@@ -56,7 +70,7 @@ export function MultitrackPipeline({ documentId, error, loading }: { documentId?
       hydrated = true; buffered.length = 0;
       if (!disposed) add(`Cannot load native diagnostics: ${formatError(cause)}`, "err");
     });
-    return () => { disposed = true; mounted.current = false; void subscription.then(unlisten => unlisten()).catch(() => {}); };
+    return () => { disposed = true; mounted.current = false; if (flush !== null) clearTimeout(flush); void subscription.then(unlisten => unlisten()).catch(() => {}); };
   }, [add]);
   useEffect(() => { if (error) add(error, "err"); }, [error, add]);
 

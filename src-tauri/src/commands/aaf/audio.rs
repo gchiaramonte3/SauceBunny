@@ -4,12 +4,24 @@ use crate::AppError;
 use std::{io::{Read, Seek, SeekFrom}, path::{Path, PathBuf}};
 use tauri::{AppHandle, Manager};
 
+/// Playback windows and transcription extracts. Waveform overviews have their
+/// own gate, so an hour-long build never holds up audition on a network volume.
 static PREPARATION: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 pub async fn preparation(app: &AppHandle, job: &str) -> Result<tokio::sync::SemaphorePermit<'static>, AppError> {
+    acquire(app, job, &PREPARATION).await
+}
+
+/// Wait for a permit, but leave the queue as soon as the job is stopped. A
+/// plain `acquire().await` keeps cancelled requests queued behind live work.
+pub async fn acquire(app: &AppHandle, job: &str, gate: &'static tokio::sync::Semaphore) -> Result<tokio::sync::SemaphorePermit<'static>, AppError> {
+    acquire_until(gate, || process::check_cancelled(app, job)).await
+}
+
+async fn acquire_until(gate: &'static tokio::sync::Semaphore, check: impl Fn() -> Result<(), AppError>) -> Result<tokio::sync::SemaphorePermit<'static>, AppError> {
     loop {
-        process::check_cancelled(app, job)?;
+        check()?;
         tokio::select! {
-            permit = PREPARATION.acquire() => return permit.map_err(|_| AppError::internal("Audio preparation unavailable")),
+            permit = gate.acquire() => return permit.map_err(|_| AppError::internal("Audio preparation unavailable")),
             _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {},
         }
     }
@@ -189,6 +201,24 @@ pub fn inspect_wav(path: &Path) -> Result<WavInfo, AppError> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn a_stopped_waiter_leaves_the_queue_and_playback_is_not_gated_by_waveforms() {
+        static GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        let held = GATE.acquire().await.unwrap();
+        let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = stopped.clone();
+        let waiter = tokio::spawn(acquire_until(&GATE, move || if flag.load(std::sync::atomic::Ordering::SeqCst) { Err(AppError::Cancelled) } else { Ok(()) }));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), waiter).await.expect("a stopped waiter must not stay queued").unwrap();
+        assert!(matches!(result, Err(AppError::Cancelled)));
+        drop(held);
+        // A running overview build holds its own gate, never a playback permit.
+        let _overview = super::super::peaks::BUILD.acquire().await.unwrap();
+        let playback = tokio::time::timeout(std::time::Duration::from_secs(1), acquire_until(&PREPARATION, || Ok(()))).await;
+        assert!(playback.is_ok_and(|permit| permit.is_ok()));
+    }
+
     use super::*;
     fn wav(samples: &[i16]) -> Vec<u8> {
         let size = (samples.len() * 2) as u32;

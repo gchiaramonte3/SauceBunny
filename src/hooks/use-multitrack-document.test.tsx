@@ -63,6 +63,31 @@ describe("multitrack document ownership", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("cancel_job", { jobId });
   });
 
+  it("a checkpoint that readies another mic does not cancel an in-flight waveform build", async () => {
+    const disk = multitrackLinkedFixture(), ready = multitrackLinkedFixture(true), base = mocks.invoke.getMockImplementation()!;
+    const first = deferred<{ peaks: number[][] }>();
+    mocks.invoke.mockImplementation((command, args) => {
+      if (command === "aaf_open" || command === "aaf_import") return Promise.resolve(structuredClone(disk));
+      if (command === "aaf_resolve_media") return new Promise(() => {});
+      if (command === "aaf_waveform" && args.trackId === "track-1") return first.promise;
+      return base(command, args);
+    });
+    const { result } = renderHook(() => useMultitrackDocument(true)); await act(async () => result.current.load());
+    act(() => result.current.showTracks(["track-1", "track-2"]));
+    disk.manifest.graph!.sources[0] = ready.manifest.graph!.sources[0]; disk.manifest.graph!.lanes[0].availability = "ready";
+    await act(async () => mocks.listeners.get("saucebunny:multitrack-changed")?.({ payload: disk.id }));
+    await waitFor(() => expect(mocks.invoke.mock.calls.filter(([c, a]) => c === "aaf_waveform" && a.trackId === "track-1")).toHaveLength(1));
+    const { jobId } = mocks.invoke.mock.calls.find(([c, a]) => c === "aaf_waveform" && a.trackId === "track-1")![1];
+    // The next checkpoint changes the document but not track-1's media.
+    disk.manifest.graph!.sources[1] = ready.manifest.graph!.sources[1]; disk.manifest.graph!.lanes[1].availability = "ready";
+    await act(async () => mocks.listeners.get("saucebunny:multitrack-changed")?.({ payload: disk.id }));
+    expect(mocks.invoke).not.toHaveBeenCalledWith("cancel_job", { jobId });
+    await act(async () => first.resolve({ peaks: [[-.25, .25]] }));
+    await waitFor(() => expect(result.current.waveforms["track-1"]).toEqual([[-.25, .25]]));
+    await waitFor(() => expect(mocks.invoke.mock.calls.some(([c, a]) => c === "aaf_waveform" && a.trackId === "track-2")).toBe(true));
+    expect(mocks.invoke.mock.calls.filter(([c, a]) => c === "aaf_waveform" && a.trackId === "track-1")).toHaveLength(1);
+  });
+
   it("cancels background checks on navigation and ignores their late responses", async () => {
     const disk = multitrackLinkedFixture(), other = { ...multitrackFixture(), id: "other" };
     const pending = deferred<typeof disk>(), base = mocks.invoke.getMockImplementation()!;

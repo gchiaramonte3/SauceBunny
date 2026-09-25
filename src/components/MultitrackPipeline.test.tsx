@@ -57,3 +57,12 @@ it("shows native-log and export failures and still offers a fallback report", as
   await waitFor(() => expect(screen.getByText(/Diagnostics export failed/)).toBeTruthy());
   expect(mocks.invoke).toHaveBeenCalledWith("write_text_to_path", expect.objectContaining({ text: expect.stringContaining("Native context unavailable") }));
 });
+it("applies a burst of ordinary rows in one batch rather than one render per event", async () => {
+  render(<MultitrackPipeline />);
+  await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("aaf_diagnostics", { documentId: null }));
+  fireEvent.click(screen.getByLabelText("Pipeline log"));
+  act(() => { for (let index = 0; index < 50; index++) receive({ payload: { ...event, id: `row-${index}`, level: "info", message: `checked mic ${index}`, active: null } }); });
+  expect(screen.queryByText(/checked mic 49/)).toBeNull();
+  await waitFor(() => expect(screen.getByText(/checked mic 49/)).toBeTruthy());
+  expect(screen.getAllByText(/checked mic/)).toHaveLength(50);
+});

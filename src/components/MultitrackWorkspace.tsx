@@ -63,7 +63,7 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
   useEffect(() => { clampPane((width) => width); }, [clampPane]);
   const [view, setView] = useState({ start: 0, span: document.manifest.duration_frames, enabled: false });
   const onView = useCallback((start: number, span: number, enabled: boolean) => setView((prior) => prior.start === start && prior.span === span && prior.enabled === enabled ? prior : { start, span, enabled }), []);
-  const detail = useMultitrackDetail(document, view.start, view.span, active && view.enabled, visible);
+  const detail = useMultitrackDetail(document, view.start, view.span, active && view.enabled, visible, Object.keys(waveforms));
   const audio = useMultitrackAudition(document, active && !relinking);
   useVideoForegroundPriority(audio.playing || audio.busy);
   const transcription = useMultitrackTranscription(document, onTranscript, active);
