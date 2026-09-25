@@ -8,6 +8,7 @@ import { multitrackTextLayout } from "../lib/multitrack-text-layout";
 import { alternativeLane, laneMetadata, laneReady, laneStatus, visibleLanes } from "../lib/multitrack-graph";
 import { IconChevronRight, IconChevronDown, IconCircleCheck, IconAlert } from "./Icons";
 
+export type TimelineView = { zoom?: number; density?: string; text?: string[] };
 type Props = {
   document: AafDocument; waveforms: Record<string, number[][]>; waveformErrors: Record<string, string>;
   detail?: { start: number; span: number; peaks: Record<string, number[][]> }; onView?: (start: number, span: number, enabled: boolean) => void;
@@ -17,6 +18,8 @@ type Props = {
   onTrackMenu?: (id: string, x: number, y: number) => void;
   onOwnerMenu?: (id: string) => void;
   expanded?: Set<string>; onExpand?: (id: string, all?: boolean) => void;
+  /** Last zoom, track size and text overlays for this sequence; reported back as they change. */
+  initialView?: TimelineView; onViewState?: (view: Required<TimelineView>) => void;
   frame: number; onSeek: (frame: number, trackId?: string) => void; onScrub?: (frame: number) => void;
   onScrubEnd?: (frame: number, resume: boolean) => void; playing?: boolean; showWaveforms?: boolean; transport?: ReactNode;
 };
@@ -39,9 +42,10 @@ function TranscriptStatus({ transcript, owner, duration }: { transcript?: AafTra
     {review ? <IconAlert size={16} /> : <IconCircleCheck size={16} />}
   </span>;
 }
-export function MultitrackTimeline({ document, waveforms, waveformErrors, selected, onSelect, onRename, solo, muted = new Set(), onSolo, onMute, levels = {}, onLevel, onTrackMenu, onOwnerMenu, frame, onSeek, onScrub, onScrubEnd, playing = false, showWaveforms = true, transport, detail, onView, expanded = new Set(), onExpand }: Props) {
-  const [zoom, setZoom] = useState(1), [start, setStart] = useState(0), [density, setDensity] = useState("small");
-  const [textTracks, setTextTracks] = useState(new Set<string>()), [dragging, setDragging] = useState(false), [hover, setHover] = useState<number | null>(null);
+export function MultitrackTimeline({ document, waveforms, waveformErrors, selected, onSelect, onRename, solo, muted = new Set(), onSolo, onMute, levels = {}, onLevel, onTrackMenu, onOwnerMenu, frame, onSeek, onScrub, onScrubEnd, playing = false, showWaveforms = true, transport, detail, onView, expanded = new Set(), onExpand, initialView, onViewState }: Props) {
+  const [zoom, setZoom] = useState(initialView?.zoom ?? 1), [start, setStart] = useState(0), [density, setDensity] = useState(initialView?.density ?? "small");
+  const [textTracks, setTextTracks] = useState(() => new Set(initialView?.text ?? [])), [dragging, setDragging] = useState(false), [hover, setHover] = useState<number | null>(null);
+  useEffect(() => { onViewState?.({ zoom, density, text: [...textTracks] }); }, [onViewState, zoom, density, textTracks]);
   const gesture = useRef<{ pointer: number; resume: boolean; frame: number } | null>(null);
   const rulerRef = useRef<HTMLDivElement>(null), [laneWidth, setLaneWidth] = useState(800);
   useEffect(() => {

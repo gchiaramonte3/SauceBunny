@@ -16,6 +16,10 @@ All notable changes to Sauce Bunny. Format loosely follows
   groups. Option-click a group's checkbox to set that mic and all of its
   alternatives together; Option-click a group's disclosure triangle to open or
   close every group.
+- AAF Audio remembers each sequence's mix and view: solo, mute and per-mic
+  gain, zoom, track size, text overlays, open groups, checked mics and the
+  waveform toggle come back when the sequence is reopened (the 50 most recently
+  used sequences are kept).
 
 ## [0.5.1] - 2026-09-22
 

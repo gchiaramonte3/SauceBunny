@@ -5,7 +5,7 @@ import { multitrackFixture, multitrackLinkedFixture } from "../test/multitrack-f
 import { audibleTracks, useMultitrackAudition } from "./use-multitrack-audition";
 const controls = vi.hoisted(() => ({ warm: vi.fn().mockResolvedValue(undefined), seek: vi.fn().mockResolvedValue(undefined), shuttle: vi.fn(), pause: vi.fn(), suspend: vi.fn(), close: vi.fn(), setTracks: vi.fn(), setLevel: vi.fn(), setTrackLevel: vi.fn(), setScrubbing: vi.fn(), scrub: vi.fn() }));
 vi.mock("../lib/multitrack-audio", () => ({ MultitrackAudio: class { constructor() { return controls; } } }));
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
 describe("multitrack audition controls", () => {
   it("keeps the audio clock when other microphones become available but invalidates changed recordings", () => {
     const doc = multitrackLinkedFixture(true);
@@ -26,6 +26,16 @@ describe("multitrack audition controls", () => {
     act(() => result.current.toggleSolo("track-1")); expect([...result.current.solo]).toEqual(["track-2"]);
     act(() => result.current.toggleSolo("track-2"));
     expect(audibleTracks(["track-1", "track-2", "track-3"], result.current.solo, result.current.mute)).toEqual(["track-1", "track-3"]);
+  });
+  it("brings back a sequence's solo, mute and gain when it is reopened", () => {
+    const fixture = multitrackFixture();
+    const first = renderHook(() => useMultitrackAudition(fixture, true));
+    act(() => { first.result.current.toggleSolo("track-1"); first.result.current.toggleMute("track-3"); first.result.current.setTrackLevel("track-2", -6); });
+    first.unmount();
+    const { result } = renderHook(() => useMultitrackAudition(fixture, true));
+    expect([...result.current.solo]).toEqual(["track-1"]);
+    expect([...result.current.mute]).toEqual(["track-3"]);
+    expect(result.current.levels).toEqual({ "track-2": -6 });
   });
   it("defaults audio scrub on, keeps seek independent of solo, and suspends on departure", async () => {
     const fixture = multitrackFixture();

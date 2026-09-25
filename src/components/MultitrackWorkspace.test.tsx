@@ -9,7 +9,7 @@ vi.mock("../hooks/use-multitrack-audition", () => ({ useMultitrackAudition: () =
 vi.mock("../hooks/use-multitrack-detail", () => ({ useMultitrackDetail: () => ({}) }));
 vi.mock("./MultitrackCast", () => ({ MultitrackCast: () => <div>Save Mic Owners as Cast</div> }));
 vi.mock("./MultitrackTranscript", () => ({ MultitrackTranscript: () => null }));
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
 afterEach(cleanup);
 it("group disclosure never selects an alternative or starts playback/transcription", () => {
   const visible = vi.fn();
@@ -175,4 +175,17 @@ it("Select all includes collapsed alternatives; Option-click sets one group and 
   expect(screen.getByRole("checkbox", { name: "Select Sam mic" })).toBeTruthy();
   fireEvent.click(disclosure, { altKey: true });
   expect(screen.queryByRole("checkbox", { name: "Select Sam mic" })).toBeNull();
+});
+it("reopening a sequence restores its zoom, track size, open groups, checked mics and waveform toggle", () => {
+  const doc = multitrackGroupFixture();
+  const first = render(<MultitrackWorkspace document={doc} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  fireEvent.click(screen.getByRole("button", { name: "Alternative microphones for A1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Sam mic" }));
+  fireEvent.click(screen.getByRole("button", { name: "Waveforms" }));
+  first.unmount();
+  render(<MultitrackWorkspace document={doc} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  expect(screen.getByText("2×")).toBeTruthy();
+  expect((screen.getByRole("checkbox", { name: "Select Sam mic" }) as HTMLInputElement).checked).toBe(true);
+  expect(screen.getByRole("button", { name: "Waveforms" }).getAttribute("aria-pressed")).toBe("false");
 });

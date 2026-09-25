@@ -21,6 +21,7 @@ import { MultitrackRegenerate } from "./MultitrackRegenerate";
 import type { RenameMic } from "./CastMarkerFields";
 import { MultitrackTimecodeDialog } from "./MultitrackTimecodeDialog";
 import { alternativeLane, laneMetadata, laneReady, laneSelectable, visibleLanes } from "../lib/multitrack-graph";
+import { loadViewState, saveViewState } from "../lib/multitrack-view-state";
 
 type Props = {
   document: AafDocument; active: boolean; waveforms: Record<string, number[][]>; waveformErrors: Record<string, string>;
@@ -32,8 +33,9 @@ type Props = {
   openRequest?: { id: string; tick: number; frame?: number; trackId?: string } | null;
 };
 export function MultitrackWorkspace({ document, active, waveforms, waveformErrors, labelStatus, onRename, onTranscript, onOpenSettings, onJobState, settingsOpen, onCloseSettings, aiModelId, openRequest, onVisibleTracks, resolvingMedia }: Props) {
-  const [selected, setSelected] = useState(() => new Set(document.manifest.tracks.filter(track => !alternativeLane(document, track.id)).map((track) => track.id)));
-  const [expanded, setExpanded] = useState(new Set<string>());
+  const [saved] = useState(() => loadViewState(document.id, document.manifest.tracks.map(track => track.id)));
+  const [selected, setSelected] = useState(() => new Set(saved?.selected ?? document.manifest.tracks.filter(track => !alternativeLane(document, track.id)).map((track) => track.id)));
+  const [expanded, setExpanded] = useState(() => new Set(saved?.expanded ?? []));
   const [relinking, setRelinking] = useState(false);
   const visible = visibleLanes(document, expanded).map(track => track.id);
   const visibleKey = visible.join("|");
@@ -43,7 +45,9 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
   const eligible = document.manifest.tracks.map(track => track.id).filter(id => laneSelectable(document, id));
   const groupOf = (id: string) => document.manifest.tracks.map(track => track.id).filter(child => laneMetadata(document, child)?.parent_track_id === id && laneSelectable(document, child));
   const chosen = [...selected].filter(id => laneReady(document, id));
-  const [showWaveforms, setShowWaveforms] = useState(true);
+  const [showWaveforms, setShowWaveforms] = useState(saved?.waveforms ?? true);
+  useEffect(() => { saveViewState(document.id, { selected: [...selected], expanded: [...expanded], waveforms: showWaveforms }); }, [document.id, selected, expanded, showWaveforms]);
+  const saveTimelineView = useCallback((view: { zoom: number; density: string; text: string[] }) => saveViewState(document.id, view), [document.id]);
   const [timecodeEntry, setTimecodeEntry] = useState<string | null>(null);
   const closeTimecode = useCallback(() => setTimecodeEntry(null), []);
   const [castTrack, setCastTrack] = useState<string | null>(null);
@@ -120,7 +124,7 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
       <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={waveformErrors} selected={selected} onSelect={toggleTrack} onRename={onRename} onOwnerMenu={setCastTrack} onView={onView} detail={{ ...view, peaks: detail }}
         solo={audio.solo} muted={audio.mute} onSolo={audio.toggleSolo} onMute={audio.toggleMute} levels={audio.levels} onLevel={audio.setTrackLevel} onTrackMenu={(id, x, y) => setTrackMenu({ id, x, y })} frame={audio.frame} onSeek={seek} onScrub={audio.scrub}
         onScrubEnd={(frame, resume) => { void audio.seek(frame, undefined, resume); }} playing={audio.playing} showWaveforms={showWaveforms} transport={transport}
-        expanded={expanded} onExpand={expandGroup} />
+        expanded={expanded} onExpand={expandGroup} initialView={saved ?? undefined} onViewState={saveTimelineView} />
       {audio.error && <p className="cp-multitrack-error" role="alert">{audio.error}</p>}
       </div>
       <div className="cp-multitrack-generation">
