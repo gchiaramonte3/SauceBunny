@@ -1,7 +1,9 @@
 """Real generated OP1a/OP-Atom media, with independently audible microphones."""
 import json
 import math
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -14,8 +16,23 @@ from mxf_info import HEADER_WORKERS, inspect, inspect_many
 from reader import fingerprint, ReaderError
 
 BINS = Path(__file__).resolve().parents[1]/'src-tauri'/'binaries'
-FFMPEG = BINS/'ffmpeg-aarch64-apple-darwin'
-FFPROBE = BINS/'ffprobe-aarch64-apple-darwin'
+
+
+def tool(name):
+    """The bundled sidecar when `npm run setup` has installed it; otherwise
+    MXF_TEST_<NAME> or PATH. CI has no bundled binaries (they are gitignored,
+    and the cargo job's are zero-byte stubs), so it installs ffmpeg instead."""
+    bundled = BINS/f'{name}-aarch64-apple-darwin'
+    if bundled.is_file() and bundled.stat().st_size > 0:
+        return bundled
+    found = os.environ.get(f'MXF_TEST_{name.upper()}') or shutil.which(name)
+    if not found:
+        raise RuntimeError(f'{name} not found: run `npm run setup`, or put {name} on PATH')
+    return Path(found)
+
+
+FFMPEG = tool('ffmpeg')
+FFPROBE = tool('ffprobe')
 
 
 def generate(path, atom=False):
