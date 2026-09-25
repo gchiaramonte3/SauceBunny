@@ -43,10 +43,9 @@ impl ProbeCache {
         let root = store::cache(app)?;
         for chunk in paths.chunks(INSPECT_BATCH) {
             let mut pending = BTreeMap::new();
-            for path in chunk {
+            for path in self.prefetch_fingerprints(chunk).await {
                 let started = std::time::Instant::now();
                 process::check_cancelled(app, job)?;
-                let Ok(path) = std::fs::canonicalize(path) else { continue; };
                 let Ok(fingerprint) = self.fingerprint(&path) else { continue; };
                 if self.headers.get(&path).is_some_and(|h| h.fingerprint == fingerprint) { self.memory_hits += 1; continue; }
                 let cache = root.join(format!("mxf-header-v2-{fingerprint}.json"));
@@ -115,6 +114,30 @@ impl ProbeCache {
     pub fn report(&self, app: &AppHandle, job: &str) {
         diagnostics::log(app, job, "info", "mxf-cache", &format!("MXF header cache: {} memory hits · {} disk hits · {} misses · headers {} ms · ffprobe {} ms",
             self.memory_hits, self.disk_hits, self.misses, self.header_ms, self.ffprobe_ms));
+    }
+
+    /// Canonicalize a chunk and fill the fingerprint memo concurrently. Each
+    /// fingerprint reads both ends of the file, so on NEXIS a chunk used to pay
+    /// one serial round trip per file (all of them on a warm, all-disk-hit
+    /// relink) before a single header read began. Returns the paths that
+    /// canonicalized, in order; a failed fingerprint is retried by the caller.
+    async fn prefetch_fingerprints(&mut self, chunk: &[PathBuf]) -> Vec<PathBuf> {
+        let known: std::sync::Arc<BTreeMap<PathBuf, (u64, u64)>> = std::sync::Arc::new(
+            self.fingerprints.iter().map(|(path, (len, modified, _))| (path.clone(), (*len, *modified))).collect());
+        let found: Vec<_> = stream::iter(chunk.to_vec()).map(|path| { let known = known.clone(); async move {
+            tauri::async_runtime::spawn_blocking(move || {
+                let path = std::fs::canonicalize(path).ok()?;
+                let metadata = std::fs::metadata(&path).ok();
+                let stamp = metadata.as_ref().map(|m| (m.len(), store::modified_ms(m)));
+                let fresh = stamp.filter(|stamp| known.get(&path) != Some(stamp))
+                    .and_then(|stamp| store::source_fingerprint(&path).ok().map(|value| (stamp, value)));
+                Some((path, fresh))
+            }).await.ok().flatten()
+        }}).buffered(NATIVE_READS).collect().await;
+        found.into_iter().flatten().map(|(path, fresh)| {
+            if let Some(((len, modified), value)) = fresh { self.fingerprints.insert(path.clone(), (len, modified, value)); }
+            path
+        }).collect()
     }
 
     /// Fingerprint once per file per job. The fingerprint reads both ends of
@@ -229,6 +252,20 @@ mod tests {
         std::fs::write(&path, b"longer replacement contents").unwrap();
         assert_ne!(cache.fingerprint(&path).unwrap(), first);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn prefetch_fills_the_memo_in_order_and_skips_unreadable_paths() {
+        let dir = std::env::temp_dir().join(format!("probe-prefetch-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let files: Vec<_> = (0..12).map(|i| { let path = dir.join(format!("{i}.mxf")); std::fs::write(&path, vec![b'x'; i + 1]).unwrap(); path }).collect();
+        let mut chunk = files.clone(); chunk.insert(3, dir.join("missing.mxf"));
+        let mut cache = ProbeCache::default();
+        let found = cache.prefetch_fingerprints(&chunk).await;
+        assert_eq!(found, files.iter().map(|p| std::fs::canonicalize(p).unwrap()).collect::<Vec<_>>());
+        assert_eq!(cache.fingerprints.len(), files.len());
+        for path in &found { assert_eq!(cache.fingerprint(path).unwrap(), store::source_fingerprint(path).unwrap()); }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
