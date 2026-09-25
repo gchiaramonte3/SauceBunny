@@ -349,8 +349,11 @@ mod tests {
     fn bundled_ffprobe_validates_generated_wave_and_mxf_pcm() {
         use std::process::Command;
         let root=std::env::temp_dir().join(format!("aaf-codec-{}",uuid::Uuid::new_v4()));std::fs::create_dir(&root).unwrap();
-        let bins=Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
-        let ffmpeg=bins.join("ffmpeg-aarch64-apple-darwin");let ffprobe=bins.join("ffprobe-aarch64-apple-darwin");
+        // The bundled sidecar when setup installed it; CI only has zero-byte
+        // stubs (which "run" and print nothing), so it falls back to PATH.
+        let tool=|name:&str| { let bundled=Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries").join(format!("{name}-aarch64-apple-darwin"));
+            if bundled.metadata().map(|m| m.len()>0).unwrap_or(false) { bundled } else { std::path::PathBuf::from(name) } };
+        let ffmpeg=tool("ffmpeg");let ffprobe=tool("ffprobe");
         let mut s=source(); s.channels=1;s.channel=0;s.sample_width=3;
         for (extension,format) in [("wav","wav"),("mxf","mxf_opatom")] {
             let path=root.join(format!("generated.{extension}"));

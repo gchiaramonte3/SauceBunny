@@ -83,6 +83,9 @@ jobs:
       - run: npm ci
       - run: cargo check
         working-directory: src-tauri
+      # linked.rs generates WAV/MXF fixtures with ffmpeg; the stubs above are
+      # empty, so the test falls back to the one on PATH.
+      - run: brew install ffmpeg
       # Unit tests (proxy parsing, error truncation) + the ts-rs binding
       # exports, which double as a stale-bindings check.
       - run: cargo test --lib
