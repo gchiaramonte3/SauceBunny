@@ -68,7 +68,7 @@ fn refs(value: &[u8]) -> Result<Vec<&[u8]>, AppError> {
     if value.len() < 8 { return Err(invalid("bad reference batch")); }
     let (count, size) = (u32_be(&value[..4])? as usize, u32_be(&value[4..8])? as usize);
     if size != 16 || value.len() != 8 + count * 16 { return Err(invalid("bad reference batch")); }
-    Ok(value[8..].chunks_exact(16).collect())
+    Ok(value[8..].as_chunks::<16>().0.iter().map(|id| id.as_slice()).collect())
 }
 fn umid(value: &[u8]) -> Result<String, AppError> {
     if value.len() != 32 { return Err(invalid("bad package UMID")); }

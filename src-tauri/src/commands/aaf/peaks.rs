@@ -68,7 +68,7 @@ pub fn query(path: &Path, first: u64, end: u64, expected_samples: u64, hz: u32) 
     if hi - lo > POINTS * 2 + 2 || offset + hi * 4 > file.metadata()?.len() { return Err(bad()); }
     file.seek(SeekFrom::Start(offset + lo * 4))?;
     let mut bytes = vec![0; ((hi-lo)*4) as usize]; file.read_exact(&mut bytes)?;
-    let pairs: Vec<[i16;2]> = bytes.chunks_exact(4).map(|p| [i16::from_le_bytes([p[0],p[1]]),i16::from_le_bytes([p[2],p[3]])]).collect();
+    let pairs: Vec<[i16;2]> = bytes.as_chunks::<4>().0.iter().map(|p| [i16::from_le_bytes([p[0],p[1]]),i16::from_le_bytes([p[2],p[3]])]).collect();
     if pairs.iter().any(|p| p[0] > p[1]) { return Err(bad()); }
     let points = POINTS.min(end-first);
     Ok((0..points).map(|x| {

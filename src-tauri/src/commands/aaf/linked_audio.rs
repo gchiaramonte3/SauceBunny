@@ -108,7 +108,7 @@ pub async fn waveform(app: &AppHandle, document: &AafDocument, id: &str, start: 
         let samples = render_window(app, document, id, first, count, job, &wav).await?;
         let mut file = std::fs::File::open(&wav)?; file.seek(SeekFrom::Start(44))?;
         let mut bytes = vec![0; (samples*3) as usize]; file.read_exact(&mut bytes)?;
-        for sample in bytes.chunks_exact(3) {
+        for sample in bytes.as_chunks::<3>().0 {
             let value = i16::from_le_bytes([sample[1],sample[2]]);
             low = low.min(value); high = high.max(value.saturating_add(i16::from(sample[0] != 0))); bucket += 1;
             if bucket == 256 { values.push([low,high]); low=0; high=0; bucket=0; }

@@ -65,8 +65,8 @@ impl Collector {
                     if !encoded.is_empty() && encoded.len() != (MUSIC_LABELS * 4).div_ceil(3) * 4 { return Err(invalid()); }
                     let bytes = STANDARD.decode(encoded).map_err(|_| invalid())?;
                     if !bytes.is_empty() && bytes.len() != MUSIC_LABELS * 4 { return Err(invalid()); }
-                    for chunk in bytes.chunks_exact(4) {
-                        let score = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    for chunk in bytes.as_chunks::<4>().0 {
+                        let score = f32::from_le_bytes(*chunk);
                         if !score.is_finite() || !(0.0..=1.0).contains(&score) { return Err(invalid()); }
                         scores.push(score);
                     }
