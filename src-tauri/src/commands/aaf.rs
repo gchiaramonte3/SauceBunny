@@ -9,6 +9,7 @@ mod linked;
 mod linked_paths;
 mod linked_probe;
 mod linked_audio;
+mod mxf_header;
 pub mod model;
 mod process;
 mod store;

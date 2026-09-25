@@ -1,18 +1,21 @@
 //! Cached, read-only MXF package identities. A cache hit is tied to the current
-//! file fingerprint; final FFprobe validation still runs before any relink.
-use super::{diagnostics, linked, model::*, process, store};
+//! file fingerprint. Headers are read natively (`mxf_header`), falling back to
+//! the sidecar's full parser; FFprobe confirms any format the header cannot.
+use super::{diagnostics, linked, model::*, mxf_header::{self, MxfSound}, process, store};
+use futures_util::{stream, StreamExt};
 use crate::AppError;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::{Path, PathBuf}};
 use tauri::AppHandle;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct MxfTrack { pub material_track_id: u32, pub mob_id: String, pub slot_id: u32, pub aligned: bool }
 #[derive(Clone, Deserialize, Serialize)]
 struct Header {
     path: String,
     #[serde(default)] fingerprint: String,
     #[serde(default)] tracks: Vec<MxfTrack>,
+    #[serde(default)] sound: Option<MxfSound>,
     #[serde(default)] error: Option<String>,
 }
 #[derive(Deserialize)]
@@ -30,9 +33,11 @@ pub struct ProbeCache {
     ffprobe_ms: u128,
 }
 
-/// Headers read per sidecar launch. One launch per few files was most of an
-/// import on NEXIS; a bigger batch still checkpoints and honours Stop.
+/// Headers read per pass. A bigger batch still checkpoints and honours Stop.
 const INSPECT_BATCH: usize = 32;
+/// Native header reads in flight. Each is one or two small reads, so on a
+/// network volume the wait is latency and overlapping them is the win.
+const NATIVE_READS: usize = 8;
 impl ProbeCache {
     pub async fn index(&mut self, app: &AppHandle, job: &str, paths: &[PathBuf]) -> Result<(), AppError> {
         let root = store::cache(app)?;
@@ -44,7 +49,7 @@ impl ProbeCache {
                 let Ok(path) = std::fs::canonicalize(path) else { continue; };
                 let Ok(fingerprint) = self.fingerprint(&path) else { continue; };
                 if self.headers.get(&path).is_some_and(|h| h.fingerprint == fingerprint) { self.memory_hits += 1; continue; }
-                let cache = root.join(format!("mxf-header-v1-{fingerprint}.json"));
+                let cache = root.join(format!("mxf-header-v2-{fingerprint}.json"));
                 if let Ok(mut header) = store::read_json::<Header>(&cache) {
                     if reusable_header(&header, &fingerprint) {
                         self.disk_hits += 1;
@@ -55,6 +60,30 @@ impl ProbeCache {
                 }
                 self.misses += 1;
                 pending.insert(path, (fingerprint, cache));
+            }
+            if pending.is_empty() { continue; }
+            let native: Vec<_> = stream::iter(pending.keys().cloned().collect::<Vec<_>>()).map(|path| async move {
+                let started = std::time::Instant::now();
+                let read = path.clone();
+                let result = tauri::async_runtime::spawn_blocking(move || mxf_header::read(&read)).await
+                    .map_err(|e| AppError::internal(e.to_string())).and_then(|r| r);
+                (path, result, started.elapsed().as_millis())
+            }).buffered(NATIVE_READS).collect().await;
+            for (path, result, ms) in native {
+                process::check_cancelled(app, job)?;
+                self.header_ms += ms;
+                match result {
+                    Ok(inspection) => {
+                        let Some((expected, cache)) = pending.remove(&path) else { continue; };
+                        if self.fingerprint(&path)? != expected { return Err(AppError::invalid("MXF changed during inspection. Refresh availability.")); }
+                        diagnostics::log(app, job, "info", "mxf-file", &format!("{} · {} audio mappings · {ms} ms", path.display(), inspection.tracks.len()));
+                        let header = Header { path: path.to_string_lossy().into_owned(), fingerprint: expected, tracks: inspection.tracks, sound: inspection.sound, error: None };
+                        crate::commands::system::write_bytes_impl(&cache.to_string_lossy(), &serde_json::to_vec(&header)?, false, false, true)?;
+                        self.headers.insert(path, header);
+                    }
+                    // Unusual layouts go to the full parser; nothing is rejected here.
+                    Err(error) => diagnostics::log(app, job, "info", "mxf-file", &format!("{} · {error} · using the full parser", path.display())),
+                }
             }
             if pending.is_empty() { continue; }
             let mut args = vec!["mxf-info".into(), "--input".into()];
@@ -117,7 +146,16 @@ impl ProbeCache {
             self.index(app, job, std::slice::from_ref(&path)).await?;
             let header = self.headers.get(&path).ok_or_else(|| AppError::invalid("MXF is unreadable. Check the mounted workspace and file permissions."))?;
             if let Some(error) = &header.error { return Err(AppError::invalid(error.clone())); }
-            format!("i:{}", material_track(&header.tracks, source)?)
+            let track = material_track(&header.tracks, source)?;
+            // A single-track PCM header that states this source's exact format
+            // is the proof ffprobe would give, without a process per file.
+            // Playback still decodes through ffmpeg, so a lying file fails loudly.
+            if header.tracks.len() == 1 && header.sound.as_ref().is_some_and(|sound| header_proves_format(sound, source)) {
+                if self.fingerprint(&path)? != fingerprint { return Err(AppError::invalid("Media changed while relinking. Refresh availability.")); }
+                return Ok(AafResolvedSource { path: path.to_string_lossy().into_owned(), fingerprint, stream_index: 0,
+                    size: metadata.len(), modified_ms: store::modified_ms(&metadata) });
+            }
+            format!("i:{track}")
         } else { "a".into() };
         let key = (fingerprint.clone(), selector.clone());
         if !self.probes.contains_key(&key) {
@@ -148,6 +186,12 @@ pub fn material_track(tracks: &[MxfTrack], source: &AafSource) -> Result<u32, Ap
     Ok(matches[0].material_track_id)
 }
 
+fn header_proves_format(sound: &MxfSound, source: &AafSource) -> bool {
+    sound.pcm && sound.sample_rate == source.sample_rate && sound.bits == source.sample_width * 8
+        && sound.channels == source.channels && source.channel < source.channels
+        && sound.samples.abs_diff(source.sample_count) <= 2
+}
+
 fn same_source(track: &MxfTrack, source: &AafSource) -> bool {
     linked::umid(&track.mob_id) == linked::umid(&source.mob_id) && track.slot_id == source.slot_id
 }
@@ -161,7 +205,7 @@ mod tests {
     use super::*;
     #[test]
     fn empty_failed_or_changed_headers_are_never_persistent_cache_hits() {
-        let mut header = Header { path: "audio.mxf".into(), fingerprint: "one".into(), tracks: vec![], error: None };
+        let mut header = Header { path: "audio.mxf".into(), fingerprint: "one".into(), tracks: vec![], sound: None, error: None };
         assert!(!reusable_header(&header, "one"));
         header.tracks.push(MxfTrack { material_track_id: 1, mob_id: "abcd".into(), slot_id: 1, aligned: true });
         assert!(reusable_header(&header, "one"));
@@ -185,5 +229,17 @@ mod tests {
         std::fs::write(&path, b"longer replacement contents").unwrap();
         assert_ne!(cache.fingerprint(&path).unwrap(), first);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn only_an_exact_single_channel_pcm_header_skips_ffprobe() {
+        let source: AafSource = serde_json::from_value(serde_json::json!({"id":"s","mob_id":"mob","slot_id":1,"locators":[],"ancestors":[],"channel":0,"channels":1,
+            "sample_rate":48000,"sample_width":3,"sample_count":96000,"descriptor":"PCMDescriptor","status":"offline"})).unwrap();
+        let exact = MxfSound { sample_rate: 48000, bits: 24, channels: 1, samples: 96001, pcm: true };
+        assert!(header_proves_format(&exact, &source));
+        for other in [MxfSound { pcm: false, ..exact.clone() }, MxfSound { bits: 16, ..exact.clone() }, MxfSound { sample_rate: 44100, ..exact.clone() },
+            MxfSound { channels: 2, ..exact.clone() }, MxfSound { samples: 96010, ..exact.clone() }] {
+            assert!(!header_proves_format(&other, &source));
+        }
     }
 }

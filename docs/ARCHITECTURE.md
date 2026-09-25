@@ -170,14 +170,27 @@ an explicit file choice. A scan failure does not discard direct-path successes.
 AAF import saves/reopens the timeline before linked-media validation. The page
 publishes that document immediately and owns a separate cancellable background
 resolution job; opening a saved document does not wait for the server. Resolution
-prioritizes original sequence lanes, processes eight sources per checkpoint, and
-overlaps at most two MXF header reads inside the existing sidecar. Each atomic
+prioritizes original sequence lanes and processes 32 sources per checkpoint. MXF
+identity is read natively (`aaf/mxf_header.rs`): the partition pack's
+`HeaderByteCount` bounds the header metadata, so each file costs one or two small
+reads, eight in flight. Anything the native reader does not recognise falls back
+to the sidecar's full pyaaf2 parser, which stays the reference its tests compare
+against (`aaf-sidecar/make_mxf_header_fixtures.py`). On NEXIS the Python parse
+was ~4.7 s per file and serialized by the GIL. A single-track PCM header that
+states the source's exact rate, bits, channels and duration is bound without
+ffprobe; everything else is still confirmed by ffprobe. Each atomic
 graph-only checkpoint merges into the latest document and notifies the library.
 Stop retains prior checkpoints, labels and transcripts; the frontend reconciles
 from disk even when a completion event was missed. A document-scoped guard prevents
 overlapping resolution jobs. Cache/commit keys include only that microphone's
 source mappings, so another lane becoming available cannot reject its transcript.
 Completed waveforms and the audition clock survive unrelated resolution updates.
+The overview loader outlives re-renders and cancels a build only when that
+track's own media changes or it leaves view: checkpoints arrive faster than an
+hour-long linked overview can be read, and restarting on every one meant no
+build ever finished. Overview builds run one at a time on their own cancellable
+gate, never on the two playback permits, and zoomed detail reads a finished
+overview rather than starting a full build per scroll.
 
 `linked_probe.rs` batches bounded `mxf-info` header inspection in the existing
 pyaaf2 sidecar. Fingerprinted header caches provide a local identity index for
