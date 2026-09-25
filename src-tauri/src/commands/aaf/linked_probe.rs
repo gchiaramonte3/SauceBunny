@@ -25,7 +25,7 @@ struct Headers { schema_version: u32, files: Vec<Header> }
 pub struct ProbeCache {
     headers: BTreeMap<PathBuf, Header>,
     probes: BTreeMap<(String, String), String>,
-    fingerprints: BTreeMap<PathBuf, (u64, u64, String)>,
+    fingerprints: BTreeMap<PathBuf, (u64, u128, String)>,
     memory_hits: usize,
     disk_hits: usize,
     misses: usize,
@@ -131,8 +131,8 @@ impl ProbeCache {
     /// relink) before a single header read began. Returns the chunk's paths,
     /// canonical where possible, in order; a failed fingerprint is retried and
     /// reported by the caller.
-    async fn prefetch_fingerprints(&mut self, chunk: &[PathBuf]) -> Vec<PathBuf> {
-        let known: std::sync::Arc<BTreeMap<PathBuf, (u64, u64)>> = std::sync::Arc::new(
+    pub(super) async fn prefetch_fingerprints(&mut self, chunk: &[PathBuf]) -> Vec<PathBuf> {
+        let known: std::sync::Arc<BTreeMap<PathBuf, (u64, u128)>> = std::sync::Arc::new(
             self.fingerprints.iter().map(|(path, (len, modified, _))| (path.clone(), (*len, *modified))).collect());
         let found: Vec<_> = stream::iter(chunk.to_vec()).map(|path| { let known = known.clone(); async move {
             tauri::async_runtime::spawn_blocking(move || {
@@ -140,7 +140,7 @@ impl ProbeCache {
                 // the file silently leaving identity matching.
                 let path = std::fs::canonicalize(&path).unwrap_or(path);
                 let metadata = std::fs::metadata(&path).ok();
-                let stamp = metadata.as_ref().map(|m| (m.len(), store::modified_ms(m)));
+                let stamp = metadata.as_ref().map(stamp);
                 let fresh = stamp.filter(|stamp| known.get(&path) != Some(stamp))
                     .and_then(|stamp| store::source_fingerprint(&path).ok().map(|value| (stamp, value)));
                 (path, fresh)
@@ -167,9 +167,8 @@ impl ProbeCache {
     /// Fingerprint once per file per job. The fingerprint reads both ends of
     /// the file, which is a network round trip on NEXIS; a stat that still
     /// shows the same size and mtime reuses it, any change rehashes.
-    fn fingerprint(&mut self, path: &Path) -> Result<String, AppError> {
-        let metadata = std::fs::metadata(path)?;
-        let stamp = (metadata.len(), store::modified_ms(&metadata));
+    pub(super) fn fingerprint(&mut self, path: &Path) -> Result<String, AppError> {
+        let stamp = stamp(&std::fs::metadata(path)?);
         if let Some((len, modified, value)) = self.fingerprints.get(path) {
             if (*len, *modified) == stamp { return Ok(value.clone()); }
         }
@@ -241,6 +240,12 @@ fn header_proves_format(sound: &MxfSound, source: &AafSource) -> bool {
 
 fn same_source(track: &MxfTrack, source: &AafSource) -> bool {
     linked::umid(&track.mob_id) == linked::umid(&source.mob_id) && track.slot_id == source.slot_id
+}
+
+/// Size and nanosecond mtime: the same resolution the fingerprint hashes, so a
+/// same-size rewrite within one millisecond is still seen as a change.
+fn stamp(metadata: &std::fs::Metadata) -> (u64, u128) {
+    (metadata.len(), metadata.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos()))
 }
 
 fn reusable_header(header: &Header, fingerprint: &str) -> bool {

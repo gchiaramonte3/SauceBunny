@@ -72,9 +72,9 @@ fn folder_candidates(root: &Path, check: impl Fn() -> Result<(), AppError>) -> R
 
 /// A verified user choice wins over a later same-name match. Keep its identity
 /// while disconnected so reconnecting cannot quietly choose a different take.
-fn refresh_binding(source: &mut AafSource) -> bool {
+fn refresh_binding(source: &mut AafSource, cache: &mut ProbeCache) -> bool {
     let Some(binding) = &source.resolved else { return false; };
-    let (status, note) = match store::source_fingerprint(Path::new(&binding.path)) {
+    let (status, note) = match cache.fingerprint(Path::new(&binding.path)) {
         Ok(fingerprint) if fingerprint == binding.fingerprint => ("ready", None),
         Ok(_) => ("needs_relink", Some("Previously linked media changed. Locate the original recording again.".to_owned())),
         Err(error) => ("offline", Some(format!("Previously linked media is unavailable: {} · {error}. Reconnect the workspace, then refresh; or locate its new folder.", binding.path))),
@@ -120,14 +120,21 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
         }
     }
     cache.index(app, job, &direct_mxfs.into_iter().collect::<Vec<_>>()).await?;
+    // Saved bindings are re-verified below, one fingerprint each. Fetch the
+    // batch's together: in series that was ~4 NEXIS round trips per source on
+    // every refresh, run on the async executor.
+    if selected.is_none() || root.is_some() && source_id.is_none() {
+        let bound: Vec<_> = batch.iter().filter_map(|&index| graph.sources[index].resolved.as_ref().map(|b| PathBuf::from(&b.path))).collect();
+        cache.prefetch_fingerprints(&bound).await;
+    }
     for &index in batch {
         let source = &mut graph.sources[index];
         process::check_cancelled(app, job)?;
         // A bulk relink to a chosen folder is for what is missing: a binding
         // that still verifies stays, or a copy under that folder would demote
         // it to "2 matching files found" and block its transcription.
-        let keep = if selected.is_none() { refresh_binding(source) }
-            else { root.is_some() && source_id.is_none() && source.resolved.is_some() && refresh_binding(source) && source.status == "ready" };
+        let keep = if selected.is_none() { refresh_binding(source, &mut cache) }
+            else { root.is_some() && source_id.is_none() && source.resolved.is_some() && refresh_binding(source, &mut cache) && source.status == "ready" };
         if keep {
             diagnostics::log(app, job, if source.status == "ready" { "ok" } else { "warn" }, "media", &format!("{} · {} · {}", source.id, source.status, source.resolution_note.as_deref().unwrap_or("Verified saved binding")));
         } else {
@@ -288,12 +295,15 @@ mod tests {
         std::fs::write(&path,b"first recording").unwrap(); let mut s=source();
         s.resolved=Some(AafResolvedSource { path:path.to_string_lossy().into_owned(),fingerprint:store::source_fingerprint(&path).unwrap(),stream_index:0,size:15,modified_ms:0 });
         let binding=s.resolved.as_ref().unwrap().fingerprint.clone();
-        assert!(refresh_binding(&mut s)); assert_eq!(s.status,"ready");
+        // One cache across every refresh, as a relink uses it: its memo must
+        // still see a same-size rewrite made in the same millisecond.
+        let mut c=ProbeCache::default();
+        assert!(refresh_binding(&mut s,&mut c)); assert_eq!(s.status,"ready");
         let parked=path.with_extension("offline"); std::fs::rename(&path,&parked).unwrap();
-        assert!(refresh_binding(&mut s)); assert_eq!(s.status,"offline"); assert_eq!(s.resolved.as_ref().unwrap().fingerprint,binding);
-        std::fs::rename(&parked,&path).unwrap(); refresh_binding(&mut s); assert_eq!(s.status,"ready");
-        std::fs::write(&path,b"other recording").unwrap(); refresh_binding(&mut s); assert_eq!(s.status,"needs_relink");
-        refresh_binding(&mut s); assert_eq!(s.status,"needs_relink"); assert_eq!(s.resolved.as_ref().unwrap().fingerprint,binding);
+        assert!(refresh_binding(&mut s,&mut c)); assert_eq!(s.status,"offline"); assert_eq!(s.resolved.as_ref().unwrap().fingerprint,binding);
+        std::fs::rename(&parked,&path).unwrap(); refresh_binding(&mut s,&mut c); assert_eq!(s.status,"ready");
+        std::fs::write(&path,b"other recording").unwrap(); refresh_binding(&mut s,&mut c); assert_eq!(s.status,"needs_relink");
+        refresh_binding(&mut s,&mut c); assert_eq!(s.status,"needs_relink"); assert_eq!(s.resolved.as_ref().unwrap().fingerprint,binding);
         std::fs::remove_file(path).unwrap();
     }
     #[test]
