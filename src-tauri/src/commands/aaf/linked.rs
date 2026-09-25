@@ -366,7 +366,16 @@ mod tests {
     }
     #[test]
     fn bundled_ffprobe_validates_generated_wave_and_mxf_pcm() {
-        use std::process::Command;
+        use std::{os::unix::process::CommandExt, process::Command};
+        // OBS tests pass pipe writers over sockets, and a descriptor received
+        // that way is not close-on-exec on macOS. A child spawned in that window
+        // inherits it and holds the pipe open for its whole run, so the OBS test
+        // waiting for EOF sees WouldBlock. Close every inheritable descriptor
+        // above stdio before exec; close-on-exec ones (std's own exec-error
+        // pipe among them) are left alone.
+        let isolated = |program: &Path| { let mut command = Command::new(program);
+            unsafe { command.pre_exec(|| { for fd in 3..libc::getdtablesize() { let flags = libc::fcntl(fd, libc::F_GETFD); if flags >= 0 && flags & libc::FD_CLOEXEC == 0 { libc::close(fd); } } Ok(()) }); }
+            command };
         let root=std::env::temp_dir().join(format!("aaf-codec-{}",uuid::Uuid::new_v4()));std::fs::create_dir(&root).unwrap();
         // The bundled sidecar when setup installed it; CI only has zero-byte
         // stubs (which "run" and print nothing), so it falls back to PATH.
@@ -376,9 +385,9 @@ mod tests {
         let mut s=source(); s.channels=1;s.channel=0;s.sample_width=3;
         for (extension,format) in [("wav","wav"),("mxf","mxf_opatom")] {
             let path=root.join(format!("generated.{extension}"));
-            let result=Command::new(&ffmpeg).args(["-v","error","-f","lavfi","-i","sine=frequency=440:sample_rate=48000:duration=2","-c:a","pcm_s24le","-f",format]).arg(&path).output().unwrap();
+            let result=isolated(&ffmpeg).args(["-v","error","-f","lavfi","-i","sine=frequency=440:sample_rate=48000:duration=2","-c:a","pcm_s24le","-f",format]).arg(&path).output().unwrap();
             assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
-            let result=Command::new(&ffprobe).args(["-v","error","-show_streams","-show_format","-of","json"]).arg(&path).output().unwrap();
+            let result=isolated(&ffprobe).args(["-v","error","-show_streams","-show_format","-of","json"]).arg(&path).output().unwrap();
             assert!(result.status.success()); let mut probe:serde_json::Value=serde_json::from_slice(&result.stdout).unwrap();
             // Generated MXF's file-package ID becomes the authoritative AAF ID.
             if let Some(id)=probe["format"]["tags"]["file_package_umid"].as_str() { s.mob_id=id.into(); }
