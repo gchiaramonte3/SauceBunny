@@ -30,6 +30,9 @@ All notable changes to Sauce Bunny. Format loosely follows
 - AAF Audio shows link status above the timeline ("412 of 495 media files
   linked · 60 offline") with Relink folder…, Refresh and Details, so relinking
   no longer means opening Settings. It hides once everything is linked.
+- When several files match one source, AAF Audio now lists every verified
+  copy in Linked media with "Use this copy", instead of leaving the source
+  offline and asking you to browse for it.
 
 ## [0.5.1] - 2026-09-22
 

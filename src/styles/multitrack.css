@@ -33,6 +33,7 @@
 .cp-multitrack-ruler-row, .cp-multitrack-lane { display: grid; }
 .cp-multitrack-ruler-row { position: sticky; top: 0; z-index: 2; background: var(--bg-1); border-bottom: 1px solid var(--line-1); }
 .cp-multitrack-lane-heading { color: var(--fg-4); font-size: var(--text-base); }
+.cp-multitrack-media-candidates p { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 0; }
 .cp-multitrack-media-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line-1); border-radius: var(--r-md); color: var(--fg-2); font-size: var(--text-sm); }
 .cp-multitrack-media-status > [role="status"] { flex: 1 1 auto; min-width: 0; font-variant-numeric: tabular-nums; }
 /* The marked transcription range, in the marker colour Clip and the reader use for in/out. */

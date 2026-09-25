@@ -15,7 +15,7 @@ it("stays out of the way when everything is linked", () => {
 
 it("counts what is missing and relinks from the workspace", async () => {
   const doc = multitrackLinkedFixture(true);
-  doc.manifest.graph!.sources[1].status = "offline"; doc.manifest.graph!.sources[1].resolved = null;
+  doc.manifest.graph!.sources[1].status = "offline"; doc.manifest.graph!.sources[1].resolved = undefined;
   mocks.invoke.mockResolvedValue(doc); mocks.open.mockResolvedValue("/Volumes/NEXIS/Show/Avid MediaFiles/MXF/1");
   const details = vi.fn();
   render(<MultitrackMediaStatus document={doc} onDetails={details} />);

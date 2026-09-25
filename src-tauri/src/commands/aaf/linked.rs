@@ -248,9 +248,10 @@ async fn choose(app: &AppHandle, job: &str, source: &mut AafSource, candidates: 
         }
     }
     if valid.len() == 1 {
-        source.resolved = valid.into_values().next(); source.status = "ready".into(); source.resolution_note = None;
+        source.resolved = valid.into_values().next(); source.status = "ready".into(); source.resolution_note = None; source.candidates = None;
     } else {
-        if valid.len() > 1 { reason = Some(format!("{} matching files found. Use Locate file to choose the intended copy.", valid.len())); }
+        if valid.len() > 1 { reason = Some(format!("{} matching files found. Choose the intended copy.", valid.len())); }
+        source.candidates = (valid.len() > 1).then(|| valid.keys().cloned().collect());
         source.status = if reason.is_some() { "needs_relink" } else { "offline" }.into();
         source.resolution_note = Some(reason.unwrap_or_else(|| "Referenced media was not found. Choose its mounted workspace or media folder.".into()));
         diagnostics::log(app, job, "warn", "media", &format!("{} · {} · {}", source.id, source.status, source.resolution_note.as_deref().unwrap_or("Unavailable")));
@@ -287,7 +288,7 @@ mod tests {
     fn source() -> AafSource {
         AafSource { id:"source:1".into(), mob_id:"urn:smpte:umid:abcd".into(), slot_id:1,
             locators:vec![], ancestors:vec![], channel:1, channels:2, sample_rate:48000,
-            sample_width:2, sample_count:96000, descriptor:"PCMDescriptor".into(), status:"offline".into(), resolved:None, resolution_note:None }
+            sample_width:2, sample_count:96000, descriptor:"PCMDescriptor".into(), status:"offline".into(), resolved:None, resolution_note:None, candidates:None }
     }
     #[test]
     fn verified_binding_survives_disconnection_but_never_silently_accepts_changed_media() {

@@ -357,6 +357,11 @@ pub struct AafSource {
     #[serde(default)]
     #[ts(optional)]
     pub resolved: Option<AafResolvedSource>,
+    /// Every file that verified when more than one did, so the user can pick
+    /// the intended copy instead of browsing for it. Cleared once bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub candidates: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

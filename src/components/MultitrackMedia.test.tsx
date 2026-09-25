@@ -39,11 +39,20 @@ it("file choice is scoped to the source, and native mismatches stay actionable",
   expect(mocks.invoke).toHaveBeenCalledWith("aaf_resolve_media",expect.objectContaining({sourceId:"source-0",path:"/chosen/roll.wav"}));
 });
 it("keeps source-specific relink diagnostics inside its existing disclosure",async()=>{
-  const doc=fixture(); doc.manifest.graph!.sources[0].resolution_note="2 matching files found. Use Locate file to choose the intended copy.";
+  const doc=fixture(); doc.manifest.graph!.sources[0].resolution_note="2 matching files found. Choose the intended copy.";
   render(<MultitrackMedia document={doc}/>);
   const note=screen.getByText(/2 matching files found/);
   expect(note.closest("details")?.open).toBe(false);
   fireEvent.click(note.closest("details")!.querySelector("summary")!);
   expect(note.closest("details")?.open).toBe(true);
   expect(mocks.invoke).not.toHaveBeenCalled();
+});
+it("binds exactly the copy the user picks when several files match", async()=>{
+  const doc=fixture(); const source=doc.manifest.graph!.sources[0];
+  source.status="needs_relink"; source.resolution_note="2 matching files found. Choose the intended copy.";
+  source.candidates=["/Volumes/NEXIS/A/roll.mxf","/Volumes/Backup/A/roll.mxf"];
+  render(<MultitrackMedia document={doc}/>);
+  fireEvent.click(screen.getByRole("button",{name:"Use this copy: /Volumes/Backup/A/roll.mxf"}));
+  await waitFor(()=>expect(mocks.invoke).toHaveBeenCalledWith("aaf_resolve_media",expect.objectContaining({sourceId:"source-0",path:"/Volumes/Backup/A/roll.mxf"})));
+  expect(mocks.open).not.toHaveBeenCalled();
 });
