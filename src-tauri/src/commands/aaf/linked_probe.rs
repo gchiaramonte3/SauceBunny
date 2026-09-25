@@ -43,7 +43,7 @@ impl ProbeCache {
         let root = store::cache(app)?;
         for chunk in paths.chunks(INSPECT_BATCH) {
             let mut pending = BTreeMap::new();
-            for path in self.prefetch_fingerprints(chunk).await {
+            for path in process::until_cancelled(app, job, self.prefetch_fingerprints(chunk)).await? {
                 let started = std::time::Instant::now();
                 process::check_cancelled(app, job)?;
                 let fingerprint = match self.fingerprint(&path) {
@@ -64,13 +64,13 @@ impl ProbeCache {
                 pending.insert(path, (fingerprint, cache));
             }
             if pending.is_empty() { continue; }
-            let native: Vec<_> = stream::iter(pending.keys().cloned().collect::<Vec<_>>()).map(|path| async move {
+            let native: Vec<_> = process::until_cancelled(app, job, stream::iter(pending.keys().cloned().collect::<Vec<_>>()).map(|path| async move {
                 let started = std::time::Instant::now();
                 let read = path.clone();
                 let result = tauri::async_runtime::spawn_blocking(move || mxf_header::read(&read)).await
                     .map_err(|e| AppError::internal(e.to_string())).and_then(|r| r);
                 (path, result, started.elapsed().as_millis())
-            }).buffered(NATIVE_READS).collect().await;
+            }).buffered(NATIVE_READS).collect()).await?;
             for (path, result, ms) in native {
                 process::check_cancelled(app, job)?;
                 self.header_ms += ms;

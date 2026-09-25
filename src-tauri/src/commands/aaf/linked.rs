@@ -125,7 +125,7 @@ pub async fn resolve(app: &AppHandle, document: &mut AafDocument, source_id: Opt
     // every refresh, run on the async executor.
     if selected.is_none() || root.is_some() && source_id.is_none() {
         let bound: Vec<_> = batch.iter().filter_map(|&index| graph.sources[index].resolved.as_ref().map(|b| PathBuf::from(&b.path))).collect();
-        cache.prefetch_fingerprints(&bound).await;
+        process::until_cancelled(app, job, cache.prefetch_fingerprints(&bound)).await?;
     }
     for &index in batch {
         let source = &mut graph.sources[index];

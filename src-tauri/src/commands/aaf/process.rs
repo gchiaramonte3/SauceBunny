@@ -55,6 +55,20 @@ pub fn check_cancelled(app: &AppHandle, job: &str) -> Result<(), AppError> {
     if app.state::<JobRegistry>().is_cancelled(job) { Err(AppError::Cancelled) } else { Ok(()) }
 }
 
+/// Await work that cannot be cancelled itself (blocking reads on a network
+/// volume), polling Stop so a stalled mount cannot hold the job until the SMB
+/// timeout. Abandoned reads finish or fail on their own threads; nothing waits.
+pub async fn until_cancelled<T>(app: &AppHandle, job: &str, work: impl std::future::Future<Output = T>) -> Result<T, AppError> {
+    tokio::pin!(work);
+    let mut poll = tokio::time::interval(Duration::from_millis(250));
+    loop {
+        tokio::select! {
+            output = &mut work => return Ok(output),
+            _ = poll.tick() => check_cancelled(app, job)?,
+        }
+    }
+}
+
 pub fn progress(app: &AppHandle, job: &str, track: Option<&str>, phase: &str, completed: i64, total: i64) {
     if app.state::<JobRegistry>().is_cancelled(job) { return; }
     let _ = app.emit("aaf-progress", AafProgress {
