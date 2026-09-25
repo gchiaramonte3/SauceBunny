@@ -270,7 +270,7 @@ pub fn refresh_lanes(tracks: &[AafTrack], graph: &mut AafGraph) {
 }
 
 pub fn check_sources(document: &AafDocument, track: &AafTrack) -> Result<(), AppError> {
-    if track.clips.iter().any(|c| c.kind == "unavailable") { return Err(AppError::invalid("This lane contains unsupported processing. See Multitrack settings.")); }
+    if track.clips.iter().any(|c| c.kind == "unavailable") { return Err(AppError::invalid("This lane contains unsupported processing. See AAF Audio settings.")); }
     if let Some(graph) = &document.manifest.graph {
         for source in graph.sources.iter().filter(|s| track.clips.iter().any(|c| c.source_id.as_deref() == Some(&s.id))) {
             if source.status != "ready" { return Err(AppError::not_found("Audio is unavailable. Refresh or locate media first.")); }

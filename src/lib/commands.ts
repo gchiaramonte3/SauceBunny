@@ -319,7 +319,7 @@ export function buildCommands(d: CommandDeps): Command[] {
       keywords: ["transcript", "transcripts", "reader", "read", "srt", "text", "nav"],
       disabled: d.activeView === "reader",
       run: () => d.onNavigateView("reader") },
-    { id: "view.multitrack", label: "Go to Multitrack", group: "View",
+    { id: "view.multitrack", label: "Go to AAF Audio", group: "View",
       hotkey: "⌘6", description: "Read AAF tracks and transcribe each microphone",
       keywords: ["aaf", "avid", "audio", "tracks", "transcribe", "nav"],
       disabled: d.activeView === "multitrack",

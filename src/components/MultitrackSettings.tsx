@@ -9,8 +9,8 @@ export function MultitrackSettings({ document, waveformErrors, onClose, disabled
   const ref = useRef<HTMLDivElement>(null); useModalFocus(true, ref);
   const warnings = [...new Set([...document.manifest.warnings, ...document.manifest.tracks.flatMap((track) => track.warnings), ...document.transcripts.flatMap((track) => track.warnings), ...Object.values(waveformErrors)])];
   return createPortal(<div className="cp-modal-scrim" onMouseDown={onClose}>
-    <div ref={ref} className="cp-multitrack-settings" role="dialog" aria-modal="true" aria-label="Multitrack settings" tabIndex={-1} onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
-      <header><h2>Multitrack settings</h2><button className="btn btn-ghost" aria-label="Close multitrack settings" onClick={onClose}>×</button></header>
+    <div ref={ref} className="cp-multitrack-settings" role="dialog" aria-modal="true" aria-label="AAF Audio settings" tabIndex={-1} onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
+      <header><h2>AAF Audio settings</h2><button className="btn btn-ghost" aria-label="Close AAF Audio settings" onClick={onClose}>×</button></header>
       <MultitrackShootDate document={document} />
       <MultitrackMedia document={document} disabled={disabled} onBusy={onBusy} />
       {!!document.manifest.graph?.lanes.some(lane => lane.parent_track_id) && <details><summary>Group microphones</summary><p>Expand a sequence track to reveal alternative microphones. Alternatives begin muted and unchecked. Solo a microphone to hear it alone, or unmute it to include it in the mix. Identical parent and alternative source mappings play only once. Expanding alone does not add voices to playback or transcription.</p><p>Group alternatives retain their source identity when you rename a person. Avid marker export is available only for original sequence lanes.</p></details>}

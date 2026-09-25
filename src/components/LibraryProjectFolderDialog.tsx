@@ -41,7 +41,7 @@ export function LibraryProjectFolderDialog({ folder, data, onClose, onSaved }: {
         {draft.rule && <fieldset disabled={busy}><legend>Match all rules</legend>
           <label>Name contains<input className="cp-rowmenu-input" value={draft.rule.query} onChange={(event) => patchRule({ query: event.target.value })} /></label>
           <label>Item type<select className="cp-select" value={draft.rule.kind} onChange={(event) => patchRule({ kind: event.target.value as SmartFolderRule["kind"] })}>
-            <option value="all">All types</option><option value="file">Local media</option><option value="web">Web links</option><option value="transcript">Transcripts</option><option value="multitrack">Multitrack</option>
+            <option value="all">All types</option><option value="file">Local media</option><option value="web">Web links</option><option value="transcript">Transcripts</option><option value="multitrack">AAF Audio</option>
           </select></label>
           <label>Finder tag<input className="cp-rowmenu-input" value={draft.rule.tag} placeholder="Any tag" onChange={(event) => patchRule({ tag: event.target.value })} /></label>
           <label>Status<select className="cp-select" value={draft.rule.status} onChange={(event) => patchRule({ status: event.target.value as SmartFolderRule["status"] })}>

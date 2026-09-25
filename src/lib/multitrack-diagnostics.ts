@@ -10,7 +10,7 @@ export function mergeMultitrackLogs(...batches: AafDiagnosticEvent[][]): AafDiag
 
 export function multitrackDiagnosticsText(snapshot: AafDiagnostics, rows: AafDiagnosticEvent[], userAgent: string, now = new Date()): string {
   return [
-    "Sauce Bunny · Multitrack diagnostics", `Generated: ${now.toISOString()}`,
+    "Sauce Bunny · AAF Audio diagnostics", `Generated: ${now.toISOString()}`,
     `Frontend build: ${EXPECTED_BACKEND_BUILD_ID}`, `WebView: ${userAgent}`,
     "Includes media paths, AAF source/track metadata and recent operations. No transcript text or media samples.",
     "This report is saved locally and is not uploaded automatically.",

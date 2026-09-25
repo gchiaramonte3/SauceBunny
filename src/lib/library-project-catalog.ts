@@ -21,7 +21,7 @@ export type ProjectCatalog = {
   errors: string[];
 };
 export const unknownAssetFacts: LibraryAssetFacts = { tags: [], transcribed: null, needsReview: null, offline: null };
-export const assetKindLabel: Record<LibraryAssetKind, string> = { file: "Local media", web: "Web link", transcript: "Transcript", multitrack: "Multitrack" };
+export const assetKindLabel: Record<LibraryAssetKind, string> = { file: "Local media", web: "Web link", transcript: "Transcript", multitrack: "AAF Audio" };
 export function libraryAsset(kind: LibraryAssetKind, locator: string, title?: string): LibraryAsset {
   return { id: `item:${assetKey({ kind, locator })}`, kind, locator, title: title || locator.split("/").pop() || locator };
 }
@@ -37,7 +37,7 @@ export async function loadProjectCatalog(trees: LibraryFolder[], references: Lib
   };
   const [web, sequences, files] = await Promise.all([
     read("Web library", invoke<CachedWebItem[]>("list_cached_web")),
-    read("Multitrack", invoke<AafDocumentSummary[]>("aaf_list")),
+    read("AAF Audio", invoke<AafDocumentSummary[]>("aaf_list")),
     transcriptLibrary ? read("Transcripts", invoke<TranscriptFile[]>("scan_transcript_library", { path: transcriptLibrary })) : Promise.resolve([] as TranscriptFile[]),
   ]);
   signal?.throwIfAborted();
@@ -73,7 +73,7 @@ export async function loadProjectCatalog(trees: LibraryFolder[], references: Lib
     const sequence = asset.kind === "multitrack" ? sequencesById.get(asset.locator) : undefined;
     const review = reviewStatusForKey(asset.locator);
     facts.set(assetKey(asset), { tags: local ? tags.get(pathKey(asset.locator)) ?? [] : [],
-      offline: local ? status.get(pathKey(asset.locator)) ?? null : asset.kind === "multitrack" ? (errors.some((e) => e.startsWith("Multitrack:")) ? null : !sequence) : null,
+      offline: local ? status.get(pathKey(asset.locator)) ?? null : asset.kind === "multitrack" ? (errors.some((e) => e.startsWith("AAF Audio:")) ? null : !sequence) : null,
       transcribed: asset.kind === "transcript" ? true : asset.kind === "multitrack" ? (sequence ? sequence.transcribed_tracks > 0 : null) : asset.kind === "file" ? transcribedPaths.has(pathKey(asset.locator)) : transcribedUrls.has(asset.locator),
       needsReview: review ? review.state === "changes" : null,
     });

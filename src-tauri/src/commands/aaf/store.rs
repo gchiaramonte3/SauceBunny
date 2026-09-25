@@ -32,7 +32,7 @@ fn document_path(root: &Path, id: &str) -> Result<PathBuf, AppError> {
 
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, AppError> {
     if std::fs::metadata(path)?.len() > MAX_DOCUMENT_BYTES {
-        return Err(AppError::invalid("Multitrack document is too large"));
+        return Err(AppError::invalid("AAF Audio document is too large"));
     }
     Ok(serde_json::from_slice(&std::fs::read(path)?)?)
 }
@@ -42,7 +42,7 @@ pub fn load(root: &Path, id: &str) -> Result<AafDocument, AppError> {
     if !(1..=DOCUMENT_SCHEMA_VERSION).contains(&document.schema_version) {
         return Err(AppError::invalid("This multitrack document was saved by an unsupported version. Update Sauce Bunny."));
     }
-    if document.id != id { return Err(AppError::invalid("Multitrack document identity does not match its filename")); }
+    if document.id != id { return Err(AppError::invalid("AAF Audio document identity does not match its filename")); }
     validate_manifest(&document.manifest)?;
     document.schema_version = DOCUMENT_SCHEMA_VERSION;
     Ok(document)
@@ -59,20 +59,20 @@ fn write(root: &Path, document: &AafDocument) -> Result<(), AppError> {
         let _: AafDocument = load(root, &document.id)?;
     }
     let json = serde_json::to_vec_pretty(&document)?;
-    if json.len() as u64 > MAX_DOCUMENT_BYTES { return Err(AppError::invalid("Multitrack document exceeds the save limit")); }
+    if json.len() as u64 > MAX_DOCUMENT_BYTES { return Err(AppError::invalid("AAF Audio document exceeds the save limit")); }
     crate::commands::system::write_bytes_impl(&path.to_string_lossy(), &json, false, false, true)?;
     Ok(())
 }
 
 #[cfg(test)]
 pub fn create(root: &Path, document: &AafDocument) -> Result<(), AppError> {
-    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("Multitrack save lock unavailable"))?;
-    if document_path(root, &document.id)?.exists() { return Err(AppError::invalid("Multitrack document already exists")); }
+    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
+    if document_path(root, &document.id)?.exists() { return Err(AppError::invalid("AAF Audio document already exists")); }
     write(root, document)
 }
 
 pub fn import(root: &Path, document: AafDocument) -> Result<AafDocument, AppError> {
-    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("Multitrack save lock unavailable"))?;
+    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
     if let Some(mut existing) = reopen(root, &document)? {
         if document.manifest.recording_dates.is_some() { existing.manifest.recording_dates = document.manifest.recording_dates.clone(); }
         if existing.manifest.graph.is_none() && document.manifest.graph.is_some() {
@@ -88,7 +88,7 @@ pub fn import(root: &Path, document: AafDocument) -> Result<AafDocument, AppErro
         write(root, &existing)?;
         return Ok(existing);
     }
-    if document_path(root, &document.id)?.exists() { return Err(AppError::invalid("Multitrack document already exists")); }
+    if document_path(root, &document.id)?.exists() { return Err(AppError::invalid("AAF Audio document already exists")); }
     write(root, &document)?;
     Ok(document)
 }
@@ -120,7 +120,7 @@ pub fn reopen(root: &Path, incoming: &AafDocument) -> Result<Option<AafDocument>
 }
 
 pub fn metadata(root: &Path, id: &str, override_date: Option<String>, dates: Option<Vec<AafRecordingDate>>) -> Result<AafDocument, AppError> {
-    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("Multitrack save lock unavailable"))?;
+    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
     let mut document = load(root, id)?;
     if let Some(dates) = dates { document.manifest.recording_dates = Some(dates); }
     else { document.shoot_date_override = override_date; }
@@ -144,7 +144,7 @@ pub fn valid_date(value: &str) -> bool {
 }
 
 pub fn labels(root: &Path, id: &str, labels: Vec<AafTrackLabel>) -> Result<AafDocument, AppError> {
-    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("Multitrack save lock unavailable"))?;
+    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
     let mut document = load(root, id)?;
     let mut seen = std::collections::HashSet::new();
     if labels.len() != document.manifest.tracks.len() {
@@ -163,7 +163,7 @@ pub fn labels(root: &Path, id: &str, labels: Vec<AafTrackLabel>) -> Result<AafDo
 }
 
 pub fn save_transcript(root: &Path, expected: &AafDocument, transcript: AafTrackTranscript) -> Result<(), AppError> {
-    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("Multitrack save lock unavailable"))?;
+    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
     let mut document = load(root, &expected.id)?;
     if cache_key(&document, &transcript.track_id, "commit") != cache_key(expected, &transcript.track_id, "commit") {
         return Err(AppError::invalid("Media resolution changed during transcription. The previous saved result is unchanged."));
@@ -290,7 +290,7 @@ fn warn_changed_routing(document: &mut AafDocument, fresh: &AafManifest) {
 }
 
 pub fn save_graph(root: &Path, update: &AafDocument, expected_revision: &str) -> Result<AafDocument, AppError> {
-    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("Multitrack save lock unavailable"))?;
+    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
     let mut current = load(root, &update.id)?;
     if cache_key(&current, "all", "relink") != expected_revision { return Err(AppError::invalid("Media resolution changed in another operation. Refresh availability and try again.")); }
     if current.manifest.source_fingerprint != update.manifest.source_fingerprint { return Err(AppError::invalid("The AAF changed during relinking")); }

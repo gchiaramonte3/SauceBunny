@@ -58,8 +58,8 @@ async function boot(page: Page, trackCount = 3, audible = false, grouped = false
   }, { document: fixture, transcript: multitrackTranscript() });
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible();
-  await page.locator(".cp-nav-item").filter({ hasText: "Multitrack" }).click();
-  await expect(page.getByRole("heading", { name: "Multitrack", exact: true })).toBeVisible();
+  await page.locator(".cp-nav-item").filter({ hasText: "AAF Audio" }).click();
+  await expect(page.getByRole("heading", { name: "AAF Audio", exact: true })).toBeVisible();
 }
 
 for (const [width, scale] of [[1100, 1], [1100, 1.25], [1920, 1]] as const) {
@@ -71,7 +71,7 @@ for (const [width, scale] of [[1100, 1], [1100, 1.25], [1920, 1]] as const) {
         document.documentElement.style.setProperty(name, `${size * scale}px`);
       }
     }, scale);
-    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    const region = page.getByRole("region", { name: "AAF Audio", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
     const status = region.getByRole("status").filter({ hasText: "Checking linked media" });
     await expect(status).toBeVisible();
@@ -100,7 +100,7 @@ for (const scale of [1, 1.25]) {
         document.documentElement.style.setProperty(name, `${size * scale}px`);
       }
     }, scale);
-    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    const region = page.getByRole("region", { name: "AAF Audio", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
     await region.getByRole("combobox", { name: "Engine", exact: true }).selectOption("whisper");
     const options = region.locator(".cp-multitrack-asr-options");
@@ -137,7 +137,7 @@ test("Multitrack Pipeline remains available after a failed import and exports se
     app.__TAURI_INTERNALS__.invoke = (command, args) => command === "aaf_sequences"
       ? Promise.reject({ kind: "Invalid", data: "Unable to inspect AAF" }) : original(command, args);
   });
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   await expect(region.getByRole("alert")).toBeVisible();
   await page.evaluate(() => {
@@ -159,7 +159,7 @@ test("Multitrack Pipeline remains available after a failed import and exports se
 
 test("98 grouped microphones expand without implicit audition or transcription", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 850 }); await boot(page,98,true,true);
-  const region=page.getByRole("region",{name:"Multitrack",exact:true});
+  const region=page.getByRole("region",{name:"AAF Audio",exact:true});
   await region.getByRole("button",{name:"Import AAF…",exact:true}).first().click();
   await expect(region.locator('.cp-multitrack-lane')).toHaveCount(14);
   await expect(region.getByRole("button",{name:"Generate 14 tracks",exact:true})).toBeEnabled();
@@ -231,7 +231,7 @@ test("50-track output has signal, solo 47 stays audible, and native controls sta
     }));
   });
   await boot(page, 50, true);
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   for (const selector of ["html", ".cp-multitrack-scroll", 'input[type="checkbox"]']) {
     const elements = page.locator(selector);
@@ -269,7 +269,7 @@ for (const width of [1100, 1680]) {
   test(`Selected-track export follows checkboxes, not person, search or Solo at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 }); await boot(page);
     if (width === 1100) await page.evaluate(() => document.documentElement.style.zoom = "1.25");
-    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    const region = page.getByRole("region", { name: "AAF Audio", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
     const selected = region.getByRole("button", { name: "Export selected (3)", exact: true });
     await expect(selected).toBeDisabled();
@@ -309,7 +309,7 @@ for (const width of [1100, 1680]) {
 
 test("Entire transcript exports every source lane in the selected format despite person/search filters", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 850 }); await boot(page);
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   await region.getByRole("button", { name: "Generate 3 tracks" }).click();
   await expect(region.getByRole("status").filter({ hasText: "Selected range saved for every track" })).toBeVisible();
@@ -341,7 +341,7 @@ for (const width of [1100, 1680]) {
         document.documentElement.style.setProperty(name, `${size * 1.25}px`);
       }
     });
-    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    const region = page.getByRole("region", { name: "AAF Audio", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
     const tc = region.getByRole("button", { name: "Current timecode", exact: true });
     const play = region.getByRole("button", { name: "Play tracks", exact: true });
@@ -383,7 +383,7 @@ for (const width of [1100, 1680]) {
   test(`Transcript picker stays compact and fixed beside overflowing tabs at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 }); await boot(page, 20);
     if (width === 1100) await page.evaluate(() => document.documentElement.style.setProperty("--text-md", "15px"));
-    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    const region = page.getByRole("region", { name: "AAF Audio", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
     const picker = region.getByRole("combobox", { name: "Choose transcript" }), tabs = region.getByRole("tablist", { name: "Transcripts by person" });
     const before = (await picker.boundingBox())!, list = (await tabs.boundingBox())!;
@@ -421,7 +421,7 @@ test("Local AI transcript search uses the existing bar, preserves original resul
       return original(command, args);
     };
   });
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   await region.getByRole("button", { name: "Generate 3 tracks" }).click();
   await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
@@ -465,7 +465,7 @@ for (const width of [1100, 1920]) {
         finish: () => pending?.resolve({ ...transcript, track_id: pending.args.trackId }),
       };
     }, { transcript: multitrackTranscript(), largeText: width === 1100 });
-    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    const region = page.getByRole("region", { name: "AAF Audio", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
     const generate = region.getByRole("button", { name: "Generate 20 tracks", exact: true });
     const trackStatus = region.locator('.cp-multitrack-saved-status[role="img"]');
@@ -519,7 +519,7 @@ for (const width of [1100, 1920]) {
 for (const viewport of [{ width: 1100, height: 740 }, { width: 1680, height: 1020 }]) {
   test(`Multitrack import and whole-sequence transcript flow at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport); await boot(page);
-    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    const region = page.getByRole("region", { name: "AAF Audio", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
     await expect(region.getByRole("heading", { name: "Interview", exact: true })).toBeVisible();
     await expect(region.getByRole("slider", { name: /^Seek / })).toHaveCount(3);
@@ -553,7 +553,7 @@ for (const viewport of [{ width: 1100, height: 740 }, { width: 1680, height: 102
 
 test("Saved transcript icons survive failed regeneration and reopening without marking failed-only tracks", async ({ page }) => {
   await boot(page);
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   await page.evaluate(() => {
     const app = window as unknown as { __TAURI_INTERNALS__: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> } };
@@ -584,7 +584,7 @@ test("Saved transcript icons survive failed regeneration and reopening without m
 
 test("Mic edits do not gate Generate, and typing does not invoke JKL playback", async ({ page }) => {
   await boot(page);
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   await region.getByRole("textbox", { name: "Mic owner for track-1" }).fill("Updated Alex");
   await region.getByRole("heading", { name: "Interview", exact: true }).click();
@@ -599,7 +599,7 @@ test("Mic edits do not gate Generate, and typing does not invoke JKL playback", 
 
 test("Twenty compact tracks, centered transport, additive Solo/Mute and settings", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 }); await boot(page, 20);
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   const lanes = region.locator(".cp-multitrack-lanes"), last = region.locator(".cp-multitrack-lane").last();
   await expect(last).toBeVisible();
@@ -631,15 +631,15 @@ test("Twenty compact tracks, centered transport, additive Solo/Mute and settings
   await region.getByRole("button", { name: "Waveforms", exact: true }).click();
   await expect(region.locator("canvas.cp-track-wave")).toHaveCount(20);
   await page.screenshot({ path: test.info().outputPath("twenty-track-toolbar.png") });
-  await region.getByRole("button", { name: "Multitrack settings", exact: true }).click();
-  const settings = page.getByRole("dialog", { name: "Multitrack settings" }); await expect(settings).toBeVisible();
+  await region.getByRole("button", { name: "AAF Audio settings", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "AAF Audio settings" }); await expect(settings).toBeVisible();
   await settings.press("Escape"); await expect(settings).toBeHidden();
-  await expect(region.getByRole("button", { name: "Multitrack settings", exact: true })).toBeFocused();
+  await expect(region.getByRole("button", { name: "AAF Audio settings", exact: true })).toBeFocused();
 });
 
 test("Pointer drag tracks continuously, zoom centers its position, and Text shows timed cues", async ({ page }) => {
   await page.setViewportSize({ width: 1680, height: 1020 }); await boot(page);
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   const slider = region.getByRole("slider", { name: "Seek Alex mic", exact: true });
   const box = await slider.boundingBox();
@@ -661,7 +661,7 @@ test("Pointer drag tracks continuously, zoom centers its position, and Text show
 
 test("Transcript divider resizes at its actual boundary and Cast fields stay compact", async ({ page }) => {
   await page.setViewportSize({ width: 1680, height: 1020 }); await boot(page);
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   const handle = region.getByRole("separator", { name: "Resize track transcripts" });
   const pane = region.locator(".cp-multitrack-transcript-pane");
@@ -693,7 +693,7 @@ test("Transcript divider resizes at its actual boundary and Cast fields stay com
 
 test("Person navigation, per-track levels, context regeneration and safe exports", async ({ page }) => {
   await page.setViewportSize({ width: 1680, height: 1020 }); await boot(page, 20);
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   await region.getByRole("button", { name: "Generate 20 tracks" }).click();
   await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
@@ -735,7 +735,7 @@ for (const width of [1100, 1920]) {
     if (width === 1100) await page.evaluate(() => {
       for (const [token, size] of Object.entries({ sm: 12.5, base: 13.75, md: 15 })) document.documentElement.style.setProperty(`--text-${token}`, `${size}px`);
     });
-    const region = page.getByRole("region", { name: "Multitrack", exact: true });
+    const region = page.getByRole("region", { name: "AAF Audio", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
     await region.getByRole("combobox", { name: "Track size" }).selectOption("small");
     const level = region.getByRole("button", { name: "Mic 20 volume: 0 dB", exact: true });
@@ -817,7 +817,7 @@ async function waveformInk(canvas: Locator) {
 
 test("Track gain redraws cached waveforms at every density and zoom without changing other tracks", async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 }); await boot(page, 20);
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   const canvases = region.locator("canvas.cp-track-wave"), first = canvases.first();
   await expect(canvases).toHaveCount(20);
@@ -868,7 +868,7 @@ test("Full workspace stays usable with enlarged text at 1100px", async ({ page }
   await page.evaluate(() => {
     for (const [token, value] of Object.entries({ xs: 11.875, sm: 12.5, base: 13.75, md: 15, lg: 16.25, xl: 17.5, "2xl": 18.75, "3xl": 22.5 })) document.documentElement.style.setProperty(`--text-${token}`, `${value}px`);
   });
-  const region = page.getByRole("region", { name: "Multitrack", exact: true });
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   await region.getByRole("button", { name: "Generate 20 tracks" }).click();
   await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);

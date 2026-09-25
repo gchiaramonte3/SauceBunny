@@ -119,8 +119,8 @@ test("saved Multitrack and transcript references open their actual existing view
   await boot(page, true);
   await page.locator("[data-project-source='show']").click();
   await page.locator(".cp-project-item-open").filter({ hasText: "Saved microphones" }).click();
-  await expect(page.getByRole("region", { name: "Multitrack", exact: true })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Open saved multitrack" })).toHaveValue("sequence-test");
+  await expect(page.getByRole("region", { name: "AAF Audio", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Open saved AAF" })).toHaveValue("sequence-test");
   await page.keyboard.press("Meta+2");
   await page.locator(".cp-project-item-open").filter({ hasText: "Interview words" }).click();
   // Library transcript opening deliberately uses the same Clip + transcript

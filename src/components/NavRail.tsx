@@ -109,12 +109,12 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libr
         type="button"
         className={"cp-nav-item" + (active === "multitrack" ? " active" : "")}
         onClick={() => onNavigate("multitrack")}
-        title={multitrackShortcut ? `Multitrack (${multitrackShortcut})` : "Multitrack"}
-        aria-label="Multitrack"
+        title={multitrackShortcut ? `AAF Audio (${multitrackShortcut})` : "AAF Audio"}
+        aria-label="AAF Audio"
         aria-current={active === "multitrack" ? "page" : undefined}
       >
         <IconMultitrack />
-        <span className="cp-nav-label">Multitrack</span>
+        <span className="cp-nav-label">AAF Audio</span>
       </button>
       <div className="cp-nav-spacer" />
       <button

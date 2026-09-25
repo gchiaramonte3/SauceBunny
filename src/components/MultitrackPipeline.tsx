@@ -84,7 +84,7 @@ export function MultitrackPipeline({ documentId, error, loading }: { documentId?
     if (savingRef.current) return;
     savingRef.current = true; setSaving(true);
     try {
-      const path = await save({ title: "Save Multitrack diagnostics", defaultPath: diagnosticsFilename(new Date()).replace("diagnostics", "multitrack-diagnostics"), filters: [{ name: "Text", extensions: ["txt"] }] });
+      const path = await save({ title: "Save AAF Audio diagnostics", defaultPath: diagnosticsFilename(new Date()).replace("diagnostics", "aaf-audio-diagnostics"), filters: [{ name: "Text", extensions: ["txt"] }] });
       if (!path) return;
       const text = await report();
       await invoke("write_text_to_path", { path, text, atomic: true });

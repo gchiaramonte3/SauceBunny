@@ -1,6 +1,7 @@
 # Multitrack AAF transcription
 
-Multitrack is a separate local workspace beside Transcripts. It reads an AAF
+The app shows this workspace as **AAF Audio**; code, storage and this document
+still call it Multitrack. Multitrack is a separate local workspace beside Transcripts. It reads an AAF
 without modifying it, presents its audio lanes on the sequence time axis, and
 runs Whisper or Parakeet independently on selected microphone tracks. It does
 not run speaker diarization or change Clip, Review, NDI, or capture playback.
