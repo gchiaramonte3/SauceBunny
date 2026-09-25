@@ -27,6 +27,9 @@ All notable changes to Sauce Bunny. Format loosely follows
   is replaced, where before any run replaced the whole transcript.
 - Retry buttons for a waveform that failed to build and for mic labels that
   failed to save.
+- AAF Audio shows link status above the timeline ("412 of 495 media files
+  linked · 60 offline") with Relink folder…, Refresh and Details, so relinking
+  no longer means opening Settings. It hides once everything is linked.
 
 ## [0.5.1] - 2026-09-22
 

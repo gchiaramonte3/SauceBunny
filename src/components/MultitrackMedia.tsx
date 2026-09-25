@@ -1,33 +1,15 @@
-import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { useEffect } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
-import { formatError } from "../lib/error-format";
-import { newJobId } from "../lib/job-id";
+import { useMultitrackRelink } from "../hooks/use-multitrack-relink";
 import { audioTrackLabel, trackOwner } from "../lib/multitrack";
 
-/** Resolution is document-local and explicit. Never mount a server or launch a
- * URL from metadata. Closing this inspector cancels unfinished resolution. */
+/** Every source with its links and actions. Resolution is document-local and
+ * explicit; closing this inspector cancels unfinished resolution. */
 export function MultitrackMedia({ document, disabled, onBusy }: { document: AafDocument; disabled?: boolean; onBusy?: (busy: boolean) => void }) {
-  const [busy, setBusy] = useState(false), [error, setError] = useState("");
-  const [result, setResult] = useState<AafDocument | null>(null);
-  useEffect(() => { setResult(null); }, [document]);
-  const job = useRef<string | null>(null), mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; if (job.current) void invoke("cancel_job", { jobId: job.current }).catch(() => {}); onBusy?.(false); }; }, [onBusy]);
+  const { busy, error, result, clearResult, stop, resolve } = useMultitrackRelink(document.id, onBusy);
+  useEffect(() => { clearResult(); }, [document, clearResult]);
   const graph = (result ?? document).manifest.graph;
   if (!graph?.sources.length) return null;
-  const stop = () => { const id = job.current; job.current = null; setBusy(false); onBusy?.(false); if (id) void invoke("cancel_job", { jobId: id }).catch(cause => setError(formatError(cause))); };
-  const resolve = async (kind: "refresh" | "folder" | "file", sourceId?: string) => {
-    if (job.current) return;
-    const jobId = newJobId(); job.current = jobId; setBusy(true); onBusy?.(true); setError("");
-    try {
-      const path = kind === "refresh" ? null : await open({ multiple: false, directory: kind === "folder", title: kind === "folder" ? "Locate AAF media folder" : "Locate AAF audio source", ...(kind === "file" ? { filters: [{ name: "PCM audio", extensions: ["wav", "bwf", "mxf"] }] } : {}) });
-      if (job.current !== jobId || !mounted.current || (kind !== "refresh" && typeof path !== "string")) return;
-      const next = await invoke<AafDocument>("aaf_resolve_media", { documentId: document.id, sourceId: sourceId ?? null, path, jobId });
-      if (mounted.current && job.current === jobId) setResult(next);
-    } catch (cause) { if (mounted.current && job.current === jobId) setError(formatError(cause)); }
-    finally { if (mounted.current && job.current === jobId) { job.current = null; setBusy(false); onBusy?.(false); } }
-  };
   return <details className="cp-multitrack-media" open><summary>Linked media · {graph.sources.filter(source => source.status === "ready" && source.resolved).length}/{graph.sources.length} available</summary>
     <div className="cp-multitrack-media-actions"><button className="btn btn-ghost" disabled={busy || disabled} onClick={() => void resolve("folder")}>Locate media folder…</button><button className="btn btn-ghost" disabled={busy || disabled} onClick={() => void resolve("refresh")}>Refresh availability</button>{busy && <button className="btn btn-ghost" onClick={stop}>Stop</button>}</div>
     {busy && <p role="status">Checking media…</p>}{error && <p className="cp-multitrack-error" role="alert">{error}</p>}

@@ -20,20 +20,21 @@ import { MultitrackTrackActions, type MultitrackMenuTarget } from "./MultitrackT
 import { MultitrackRegenerate } from "./MultitrackRegenerate";
 import type { RenameMic } from "./CastMarkerFields";
 import { MultitrackTimecodeDialog } from "./MultitrackTimecodeDialog";
+import { MultitrackMediaStatus } from "./MultitrackMediaStatus";
 import { alternativeLane, laneMetadata, laneReady, laneSelectable, visibleLanes } from "../lib/multitrack-graph";
 import { loadViewState, saveViewState } from "../lib/multitrack-view-state";
 
 type Props = {
   document: AafDocument; active: boolean; waveforms: Record<string, number[][]>; waveformErrors: Record<string, string>;
   labelStatus: string; onRename: RenameMic; onTranscript: (transcript: AafTrackTranscript) => void;
-  onRetryLabels?: () => void; onRetryWaveform?: (trackId: string) => void;
+  onRetryLabels?: () => void; onRetryWaveform?: (trackId: string) => void; onOpenMedia?: () => void;
   onOpenSettings?: () => void; onJobState?: (running: boolean) => void; settingsOpen?: boolean; onCloseSettings?: () => void;
   aiModelId?: string | null;
   resolvingMedia?: boolean;
   onVisibleTracks?: (ids: string[]) => void;
   openRequest?: { id: string; tick: number; frame?: number; trackId?: string } | null;
 };
-export function MultitrackWorkspace({ document, active, waveforms, waveformErrors, labelStatus, onRename, onTranscript, onRetryLabels, onRetryWaveform, onOpenSettings, onJobState, settingsOpen, onCloseSettings, aiModelId, openRequest, onVisibleTracks, resolvingMedia }: Props) {
+export function MultitrackWorkspace({ document, active, waveforms, waveformErrors, labelStatus, onRename, onTranscript, onRetryLabels, onRetryWaveform, onOpenMedia, onOpenSettings, onJobState, settingsOpen, onCloseSettings, aiModelId, openRequest, onVisibleTracks, resolvingMedia }: Props) {
   const [saved] = useState(() => loadViewState(document.id, document.manifest.tracks.map(track => track.id)));
   const [selected, setSelected] = useState(() => new Set(saved?.selected ?? document.manifest.tracks.filter(track => !alternativeLane(document, track.id)).map((track) => track.id)));
   const [expanded, setExpanded] = useState(() => new Set(saved?.expanded ?? []));
@@ -129,6 +130,7 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
     <div className="cp-multitrack-editor">
       <div className="cp-multitrack-editor-content">
       <div className="cp-multitrack-sequence-head"><h2 title={document.manifest.name}>{document.manifest.name}</h2><span className="cp-multitrack-note">{sequenceFps(document.manifest).toFixed(3).replace(/\.?0+$/, "")} fps</span><span className="cp-multitrack-note" role="status">{labelStatus}</span>{labelStatus === "Labels not saved" && onRetryLabels && <button className="btn btn-ghost" onClick={onRetryLabels}>Retry saving labels</button>}</div>
+      <MultitrackMediaStatus document={document} resolving={resolvingMedia} disabled={transcription.loading} onBusy={setRelinking} onDetails={onOpenMedia} />
       <MultitrackCast document={document} active={active} onRename={onRename} editTrack={castTrack} onCloseEdit={() => setCastTrack(null)} />
       <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={waveformErrors} onRetryWaveform={onRetryWaveform} selected={selected} onSelect={toggleTrack} onRename={onRename} onOwnerMenu={setCastTrack} onView={onView} detail={{ ...view, peaks: detail }}
         solo={audio.solo} muted={audio.mute} onSolo={audio.toggleSolo} onMute={audio.toggleMute} levels={audio.levels} onLevel={audio.setTrackLevel} onTrackMenu={(id, x, y) => setTrackMenu({ id, x, y })} frame={audio.frame} onSeek={seek} onScrub={audio.scrub}
