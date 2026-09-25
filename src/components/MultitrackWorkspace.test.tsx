@@ -154,3 +154,25 @@ it("Escape abandons an edited mic name without committing it on blur", () => {
   input.focus(); fireEvent.change(input, { target: { value: "Saved owner" } }); fireEvent.keyDown(input, { key: "Enter" });
   expect(rename).toHaveBeenCalledWith("track-1", "Saved owner");
 });
+it("Select all includes collapsed alternatives; Option-click sets one group and Option-disclosure opens every group", () => {
+  const doc = multitrackGroupFixture();
+  render(<MultitrackWorkspace document={doc} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  fireEvent.click(screen.getByRole("button", { name: "Generate 3 tracks" }));
+  expect(mocks.start).toHaveBeenLastCalledWith(["track-1", "track-2", "track-3"], 0, 24000);
+  fireEvent.click(screen.getByRole("button", { name: "Deselect all" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Alex mic" }), { altKey: true });
+  fireEvent.click(screen.getByRole("button", { name: "Generate 3 tracks" }));
+  expect(mocks.start).toHaveBeenLastCalledWith(["track-1", "track-2", "track-3"], 0, 24000);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Alex mic" }), { altKey: true });
+  expect((screen.getByRole("button", { name: "Generate 0 tracks" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Alex mic" }));
+  fireEvent.click(screen.getByRole("button", { name: "Generate 1 track" }));
+  expect(mocks.start).toHaveBeenLastCalledWith(["track-1"], 0, 24000);
+  const disclosure = screen.getByRole("button", { name: "Alternative microphones for A1" });
+  fireEvent.click(disclosure, { altKey: true });
+  expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByRole("checkbox", { name: "Select Sam mic" })).toBeTruthy();
+  fireEvent.click(disclosure, { altKey: true });
+  expect(screen.queryByRole("checkbox", { name: "Select Sam mic" })).toBeNull();
+});

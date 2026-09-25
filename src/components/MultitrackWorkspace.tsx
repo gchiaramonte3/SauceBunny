@@ -20,7 +20,7 @@ import { MultitrackTrackActions, type MultitrackMenuTarget } from "./MultitrackT
 import { MultitrackRegenerate } from "./MultitrackRegenerate";
 import type { RenameMic } from "./CastMarkerFields";
 import { MultitrackTimecodeDialog } from "./MultitrackTimecodeDialog";
-import { alternativeLane, laneReady, laneSelectable, visibleLanes } from "../lib/multitrack-graph";
+import { alternativeLane, laneMetadata, laneReady, laneSelectable, visibleLanes } from "../lib/multitrack-graph";
 
 type Props = {
   document: AafDocument; active: boolean; waveforms: Record<string, number[][]>; waveformErrors: Record<string, string>;
@@ -38,7 +38,10 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
   const visible = visibleLanes(document, expanded).map(track => track.id);
   const visibleKey = visible.join("|");
   useEffect(() => { onVisibleTracks?.(visibleKey.split("|")); }, [visibleKey, onVisibleTracks]);
-  const eligible = visible.filter(id => laneSelectable(document, id));
+  // Select all covers alternatives inside collapsed groups too: hiding a lane
+  // is a view choice, not a statement that it should be left out.
+  const eligible = document.manifest.tracks.map(track => track.id).filter(id => laneSelectable(document, id));
+  const groupOf = (id: string) => document.manifest.tracks.map(track => track.id).filter(child => laneMetadata(document, child)?.parent_track_id === id && laneSelectable(document, child));
   const chosen = [...selected].filter(id => laneReady(document, id));
   const [showWaveforms, setShowWaveforms] = useState(true);
   const [timecodeEntry, setTimecodeEntry] = useState<string | null>(null);
@@ -77,9 +80,20 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
     handledSeek.current = openRequest.tick;
     void seekAudio(openRequest.frame, openRequest.trackId, false);
   }, [active, document.id, openRequest, seekAudio]);
-  const toggleTrack = (trackId: string) => setSelected((prior) => { const next = new Set(prior); if (next.has(trackId)) next.delete(trackId); else next.add(trackId); return next; });
+  // Option-click on a group's main mic applies its new state to that group's
+  // alternatives as well, and leaves every other lane alone.
+  const toggleTrack = (trackId: string, withGroup = false) => setSelected((prior) => {
+    const next = new Set(prior), on = !prior.has(trackId);
+    for (const id of [trackId, ...(withGroup ? groupOf(trackId) : [])]) { if (on) next.add(id); else next.delete(id); }
+    return next;
+  });
+  // Option-click on any disclosure opens every group, or closes them all when this one was open.
+  const expandGroup = (id: string, all = false) => setExpanded(prior => {
+    if (all) return prior.has(id) ? new Set() : new Set(document.manifest.graph?.lanes.flatMap(lane => lane.parent_track_id ? [lane.parent_track_id] : []) ?? []);
+    const next = new Set(prior); if (next.has(id)) next.delete(id); else next.add(id); return next;
+  });
   const cannotGenerate = !chosen.length || !transcription.ready || relinking;
-  const transport = <div className="cp-multitrack-transport" aria-label="Multitrack playback controls">
+  const transport = <div className="cp-multitrack-transport" aria-label="AAF Audio playback controls">
     <div className="cp-multitrack-toolbar-options">
       <button className="btn btn-ghost" aria-pressed={audio.scrubbing} title="Hear short audio excerpts while scrubbing" onClick={() => audio.setScrubbing(!audio.scrubbing)}>Audio scrub</button>
       <button className="btn btn-ghost" aria-pressed={showWaveforms} onClick={() => setShowWaveforms(!showWaveforms)}>Waveforms</button>
@@ -106,7 +120,7 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
       <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={waveformErrors} selected={selected} onSelect={toggleTrack} onRename={onRename} onOwnerMenu={setCastTrack} onView={onView} detail={{ ...view, peaks: detail }}
         solo={audio.solo} muted={audio.mute} onSolo={audio.toggleSolo} onMute={audio.toggleMute} levels={audio.levels} onLevel={audio.setTrackLevel} onTrackMenu={(id, x, y) => setTrackMenu({ id, x, y })} frame={audio.frame} onSeek={seek} onScrub={audio.scrub}
         onScrubEnd={(frame, resume) => { void audio.seek(frame, undefined, resume); }} playing={audio.playing} showWaveforms={showWaveforms} transport={transport}
-        expanded={expanded} onExpand={(id) => setExpanded(prior => { const next = new Set(prior); if (next.has(id)) next.delete(id); else next.add(id); return next; })} />
+        expanded={expanded} onExpand={expandGroup} />
       {audio.error && <p className="cp-multitrack-error" role="alert">{audio.error}</p>}
       </div>
       <div className="cp-multitrack-generation">

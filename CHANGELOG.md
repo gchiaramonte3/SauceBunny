@@ -5,6 +5,18 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+- The Multitrack page is now called **AAF Audio** in the app (nav rail, ⌘K,
+  settings, diagnostics and Library labels). Saved sequences, the
+  `Transcripts/Multitrack` folder, shortcuts and stored preferences are
+  unchanged.
+
+### Added
+- AAF Audio: Select all now includes alternative microphones inside collapsed
+  groups. Option-click a group's checkbox to set that mic and all of its
+  alternatives together; Option-click a group's disclosure triangle to open or
+  close every group.
+
 ## [0.5.1] - 2026-09-22
 
 ### Added

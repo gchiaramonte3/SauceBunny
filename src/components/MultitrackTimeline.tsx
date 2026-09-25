@@ -11,12 +11,12 @@ import { IconChevronRight, IconChevronDown, IconCircleCheck, IconAlert } from ".
 type Props = {
   document: AafDocument; waveforms: Record<string, number[][]>; waveformErrors: Record<string, string>;
   detail?: { start: number; span: number; peaks: Record<string, number[][]> }; onView?: (start: number, span: number, enabled: boolean) => void;
-  selected: Set<string>; onSelect: (trackId: string) => void; onRename: (trackId: string, owner: string) => void;
+  selected: Set<string>; onSelect: (trackId: string, withGroup?: boolean) => void; onRename: (trackId: string, owner: string) => void;
   solo: Set<string>; muted?: Set<string>; onSolo?: (id: string) => void; onMute?: (id: string) => void;
   levels?: Record<string, number>; onLevel?: (id: string, value: number) => void;
   onTrackMenu?: (id: string, x: number, y: number) => void;
   onOwnerMenu?: (id: string) => void;
-  expanded?: Set<string>; onExpand?: (id: string) => void;
+  expanded?: Set<string>; onExpand?: (id: string, all?: boolean) => void;
   frame: number; onSeek: (frame: number, trackId?: string) => void; onScrub?: (frame: number) => void;
   onScrubEnd?: (frame: number, resume: boolean) => void; playing?: boolean; showWaveforms?: boolean; transport?: ReactNode;
 };
@@ -100,9 +100,9 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
         return <div className={`cp-multitrack-lane${child ? " is-alternative" : ""}${!ready ? " is-unavailable" : ""}${solo.has(track.id) ? " is-solo" : solo.size ? " is-unsoloed" : ""}${muted.has(track.id) ? " is-muted" : ""}${textTracks.has(track.id) ? " has-text" : ""}`} key={track.id}
           onContextMenu={onTrackMenu ? (event) => { event.preventDefault(); const trigger = event.currentTarget.querySelector<HTMLButtonElement>(".cp-multitrack-track-menu-trigger"); trigger?.focus(); onTrackMenu(track.id, event.clientX, event.clientY); } : undefined}>
           <div className="cp-multitrack-lane-label">
-            {children > 0 && <button className="cp-icon-btn cp-multitrack-disclosure" aria-label={`Alternative microphones for ${audioTrackLabel(document, track.id)}`} aria-expanded={expanded.has(track.id)} title={`${children} alternative microphones`} onClick={() => onExpand?.(track.id)}>{expanded.has(track.id) ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}</button>}
+            {children > 0 && <button className="cp-icon-btn cp-multitrack-disclosure" aria-label={`Alternative microphones for ${audioTrackLabel(document, track.id)}`} aria-expanded={expanded.has(track.id)} title={`${children} alternative microphones. Option-click to open or close every group.`} onClick={(event) => onExpand?.(track.id, event.altKey)}>{expanded.has(track.id) ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}</button>}
             {child && <span className="cp-multitrack-branch" title={laneMetadata(document, track.id)?.group_name ?? "Group alternative"}>↳</span>}
-            <label className="cp-multitrack-check" title="Include in transcription and selected-track exports"><input type="checkbox" disabled={!ready && !savedTranscripts.has(track.id)} checked={selected.has(track.id)} onChange={() => onSelect(track.id)} aria-label={`Select ${track.name}`} /><span>{audioTrackLabel(document, track.id)}</span></label>
+            <label className="cp-multitrack-check" title={children > 0 ? "Include in transcription and selected-track exports. Option-click to set its alternative microphones too." : "Include in transcription and selected-track exports"}><input type="checkbox" disabled={!ready && !savedTranscripts.has(track.id)} checked={selected.has(track.id)} onChange={(event) => onSelect(track.id, (event.nativeEvent as MouseEvent).altKey === true)} aria-label={`Select ${track.name}`} /><span>{audioTrackLabel(document, track.id)}</span></label>
             <div className="cp-multitrack-owner-status">
               <TrackLabel key={trackOwner(document, track.id)} document={document} trackId={track.id} onRename={onRename} onOwnerMenu={onOwnerMenu} />
               <TranscriptStatus transcript={savedTranscripts.get(track.id)} owner={trackOwner(document, track.id)} duration={duration} />
