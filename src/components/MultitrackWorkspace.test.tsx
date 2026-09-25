@@ -189,3 +189,21 @@ it("reopening a sequence restores its zoom, track size, open groups, checked mic
   expect((screen.getByRole("checkbox", { name: "Select Sam mic" }) as HTMLInputElement).checked).toBe(true);
   expect(screen.getByRole("button", { name: "Waveforms" }).getAttribute("aria-pressed")).toBe("false");
 });
+it("I/O marks switch generation to the marked range and G returns it to the whole sequence", () => {
+  render(<MultitrackWorkspace document={multitrackFixture()} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  const scope = screen.getByRole("combobox", { name: "Transcription range" }) as HTMLSelectElement;
+  expect(scope.value).toBe("all");
+  fireEvent.keyDown(window, { key: "o" });
+  expect(scope.value).toBe("marked");
+  expect(scope.selectedOptions[0].textContent).toBe("Marked range 01:00:00:00 to 01:00:00:00");
+  fireEvent.click(screen.getByRole("button", { name: /^Generate/ }));
+  expect(mocks.start).toHaveBeenLastCalledWith(expect.any(Array), 0, 1);
+  fireEvent.change(scope, { target: { value: "all" } });
+  fireEvent.click(screen.getByRole("button", { name: /^Generate/ }));
+  expect(mocks.start).toHaveBeenLastCalledWith(expect.any(Array), 0, 24000);
+  fireEvent.keyDown(window, { key: "i" });
+  expect(scope.value).toBe("marked");
+  fireEvent.keyDown(window, { key: "g" });
+  expect(scope.value).toBe("all");
+  expect((scope.options[1] as HTMLOptionElement).disabled).toBe(true);
+});

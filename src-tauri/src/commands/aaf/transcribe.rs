@@ -256,9 +256,9 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
             "Recognition uses bounded audio chunks with one second of context.".into(),
             speech_note.into(), format!("Decoding: {}. Model reuse: up to {batch_size} windows per load.", if fast && whisper { "Fast" } else { "Accurate" })] };
     let root = store::root(app)?;
-    app.state::<JobRegistry>().while_active(job, || store::save_transcript(&root, document, transcript.clone()))?;
+    let saved = app.state::<JobRegistry>().while_active(job, || store::save_transcript(&root, document, transcript))?;
     let _ = tauri::Emitter::emit(app, "saucebunny:multitrack-changed", &document.id);
-    Ok(transcript)
+    Ok(saved)
 }
 
 #[cfg(test)]

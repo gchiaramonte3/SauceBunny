@@ -162,7 +162,9 @@ pub fn labels(root: &Path, id: &str, labels: Vec<AafTrackLabel>) -> Result<AafDo
     Ok(document)
 }
 
-pub fn save_transcript(root: &Path, expected: &AafDocument, transcript: AafTrackTranscript) -> Result<(), AppError> {
+/// Commit a run and return what the track now holds. A run over part of the
+/// sequence is spliced into the saved transcript rather than replacing it.
+pub fn save_transcript(root: &Path, expected: &AafDocument, transcript: AafTrackTranscript) -> Result<AafTrackTranscript, AppError> {
     let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
     let mut document = load(root, &expected.id)?;
     if cache_key(&document, &transcript.track_id, "commit") != cache_key(expected, &transcript.track_id, "commit") {
@@ -171,9 +173,42 @@ pub fn save_transcript(root: &Path, expected: &AafDocument, transcript: AafTrack
     if !document.manifest.tracks.iter().any(|track| track.id == transcript.track_id) {
         return Err(AppError::invalid("Transcript track is not in this document"));
     }
-    document.transcripts.retain(|item| item.track_id != transcript.track_id);
-    document.transcripts.push(transcript);
-    write(root, &document)
+    let previous = document.transcripts.iter().position(|item| item.track_id == transcript.track_id).map(|index| document.transcripts.remove(index));
+    let merged = merge_transcript(previous, transcript, &document.manifest.edit_rate)?;
+    document.transcripts.push(merged.clone());
+    write(root, &document)?;
+    Ok(merged)
+}
+
+/// Splice a run over [start, end) into the track's saved transcript: saved
+/// cues and untimed text outside the run are kept, everything the run covers
+/// is replaced. A run covering all of the saved one simply replaces it.
+pub fn merge_transcript(previous: Option<AafTrackTranscript>, run: AafTrackTranscript, rate: &AafRate) -> Result<AafTrackTranscript, AppError> {
+    let Some(previous) = previous else { return Ok(run); };
+    let (run_end, previous_end) = (run.start_frame + run.duration_frames, previous.start_frame + previous.duration_frames);
+    if run.start_frame <= previous.start_frame && run_end >= previous_end { return Ok(run); }
+    let (low, high) = (frame_samples(run.start_frame, rate)?, frame_samples(run_end, rate)?);
+    let outside = |start: i64, end: i64| end <= low || start >= high;
+    let mut cues: Vec<AafCue> = previous.cues.into_iter().filter(|cue| outside(cue.start_sample, cue.end_sample)).collect();
+    let mut timing_issues: Vec<AafTimingIssue> = previous.timing_issues.into_iter()
+        .filter(|issue| issue.chunk_start_frame < run.start_frame || issue.chunk_start_frame >= run_end).collect();
+    // Ids name a processing chunk and its cue index, so a run starting on the
+    // same chunk boundary as a saved one can reuse an id; make them unique.
+    let mut taken: std::collections::HashSet<String> = cues.iter().map(|cue| cue.id.clone()).chain(timing_issues.iter().map(|issue| issue.id.clone())).collect();
+    let mut unique = |id: String| { let mut candidate = id.clone(); let mut n = 1; while !taken.insert(candidate.clone()) { n += 1; candidate = format!("{id}~{n}"); } candidate };
+    cues.extend(run.cues.into_iter().map(|cue| AafCue { id: unique(cue.id.clone()), ..cue }));
+    timing_issues.extend(run.timing_issues.into_iter().map(|issue| AafTimingIssue { id: unique(issue.id.clone()), ..issue }));
+    cues.sort_by_key(|cue| (cue.start_sample, cue.end_sample));
+    let start_frame = run.start_frame.min(previous.start_frame);
+    let status = if !timing_issues.is_empty() { AafTranscriptStatus::Review } else if cues.is_empty() { AafTranscriptStatus::Empty } else { AafTranscriptStatus::Completed };
+    let mut warnings = run.warnings;
+    warnings.push(format!("Saved results outside this run were kept from an earlier {} {} run.", engine_name(&previous.engine), previous.model_id));
+    Ok(AafTrackTranscript { track_id: run.track_id, start_frame, duration_frames: run_end.max(previous_end) - start_frame,
+        engine: run.engine, model_id: run.model_id, status, sample_rate: run.sample_rate, cues, timing_issues, warnings })
+}
+
+fn engine_name(engine: &AafEngine) -> &'static str {
+    match engine { AafEngine::Parakeet => "Parakeet", AafEngine::Whisper => "Whisper" }
 }
 
 pub fn list(root: &Path) -> Result<Vec<AafDocumentSummary>, AppError> {
@@ -305,6 +340,45 @@ pub fn save_graph(root: &Path, update: &AafDocument, expected_revision: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn run(start: i64, duration: i64, cues: &[(&str, i64, i64)], issues: &[(&str, i64)]) -> AafTrackTranscript {
+        AafTrackTranscript { track_id: "10".into(), start_frame: start, duration_frames: duration, engine: AafEngine::Parakeet, model_id: "m".into(),
+            status: AafTranscriptStatus::Completed, sample_rate: ASR_RATE as u32, warnings: vec![],
+            cues: cues.iter().map(|(id, a, b)| AafCue { id: (*id).into(), start_sample: *a, end_sample: *b, text: (*id).into(), boundary_review: false }).collect(),
+            timing_issues: issues.iter().map(|(id, frame)| AafTimingIssue { id: (*id).into(), text: "t".into(), reported_timing: "x".into(), chunk_start_frame: *frame, reason: "r".into() }).collect() }
+    }
+    #[test]
+    fn a_range_run_replaces_only_what_it_covers() {
+        let rate = AafRate { numerator: 25, denominator: 1 }; // 640 samples per frame at 16 kHz
+        let full = run(0, 100, &[("a", 0, 640), ("b", 20 * 640, 21 * 640), ("c", 29 * 640, 31 * 640), ("d", 60 * 640, 61 * 640)], &[("early", 5), ("inside", 25)]);
+        let part = run(20, 10, &[("a", 22 * 640, 23 * 640)], &[]);
+        let merged = merge_transcript(Some(full), part, &rate).unwrap();
+        let texts: Vec<_> = merged.cues.iter().map(|c| (c.text.as_str(), c.id.as_str())).collect();
+        // b sat inside the run and c straddled its end: both are replaced. a and d survive.
+        assert_eq!(texts, vec![("a", "a"), ("a", "a~2"), ("d", "d")]);
+        assert_eq!(merged.timing_issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["early"]);
+        assert_eq!((merged.start_frame, merged.duration_frames), (0, 100));
+        assert!(matches!(merged.status, AafTranscriptStatus::Review));
+        assert!(merged.warnings.iter().any(|w| w.contains("kept from an earlier Parakeet m run")));
+    }
+    #[test]
+    fn a_run_covering_the_saved_transcript_replaces_it_and_a_first_run_is_kept_as_is() {
+        let rate = AafRate { numerator: 25, denominator: 1 };
+        let part = run(20, 10, &[("x", 22 * 640, 23 * 640)], &[]);
+        let full = run(0, 100, &[("y", 0, 640)], &[]);
+        let merged = merge_transcript(Some(part.clone()), full, &rate).unwrap();
+        assert_eq!(merged.cues.len(), 1); assert_eq!(merged.cues[0].id, "y"); assert!(merged.warnings.is_empty());
+        let first = merge_transcript(None, part, &rate).unwrap();
+        assert_eq!((first.start_frame, first.duration_frames, first.cues.len()), (20, 10, 1));
+    }
+    #[test]
+    fn a_later_range_extends_the_envelope_and_keeps_the_earlier_range() {
+        let rate = AafRate { numerator: 25, denominator: 1 };
+        let early = run(0, 10, &[("e", 640, 2 * 640)], &[]);
+        let late = run(50, 10, &[("l", 51 * 640, 52 * 640)], &[]);
+        let merged = merge_transcript(Some(early), late, &rate).unwrap();
+        assert_eq!(merged.cues.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["e", "l"]);
+        assert_eq!((merged.start_frame, merged.duration_frames), (0, 60));
+    }
     fn fixture() -> AafDocument {
         AafDocument { schema_version: 1, shoot_date_override: None, id: "a".repeat(64), source_path: "/tmp/source.aaf".into(),
             source_size: 1, source_modified_ms: 0,

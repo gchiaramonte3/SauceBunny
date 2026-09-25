@@ -226,6 +226,17 @@ export function useMultitrackDocument(active: boolean) {
   }, [wantedKey, pumpWaveforms]);
   useEffect(() => () => { const jobId = waveformJob.current; if (jobId) void invoke("cancel_job", { jobId }).catch(() => {}); }, []);
 
+  const persistLabels = useCallback((documentId: string, labels: AafTrackLabel[]) => {
+    setLabelStatus("Saving labels…");
+    // Serialize writes so an older blur cannot overwrite a newer mic label.
+    const save = (saves.current.get(documentId) ?? Promise.resolve()).then(async () => {
+      try {
+        await invoke<AafDocument>("aaf_save_labels", { documentId, labels });
+        if (mounted.current && current.current?.id === documentId && saves.current.get(documentId) === save) setLabelStatus("Labels saved locally");
+      } catch (cause) { if (mounted.current && current.current?.id === documentId) { setLabelStatus("Labels not saved"); setError(formatError(cause)); } }
+    });
+    saves.current.set(documentId, save);
+  }, []);
   const rename = useCallback((trackId: string, ownerName: string, castMemberId?: string | null, color?: string | null, preferences?: Pick<AafTrackLabel, "gender" | "marker_color">) => {
     const before = current.current;
     if (!before) return;
@@ -234,21 +245,23 @@ export function useMultitrackDocument(active: boolean) {
       ...(preferences?.gender !== undefined ? { gender: preferences.gender } : {}),
       ...(preferences?.marker_color !== undefined ? { marker_color: preferences.marker_color } : {}),
       track_id: trackId, owner_name: ownerName.trim().normalize("NFC"), cast_member_id: castMemberId === undefined ? existing?.cast_member_id ?? null : castMemberId, color: color === undefined ? existing?.color ?? null : color }];
-    const next = { ...before, labels }; current.current = next; setDocument(next); setLabelStatus("Saving labels…");
-    // Serialize writes so an older blur cannot overwrite a newer mic label.
-    const save = (saves.current.get(before.id) ?? Promise.resolve()).then(async () => {
-      try {
-        await invoke<AafDocument>("aaf_save_labels", { documentId: before.id, labels });
-        if (mounted.current && current.current?.id === before.id && saves.current.get(before.id) === save) setLabelStatus("Labels saved locally");
-      } catch (cause) { if (mounted.current && current.current?.id === before.id) { setLabelStatus("Labels not saved"); setError(formatError(cause)); } }
-    });
-    saves.current.set(before.id, save);
-  }, []);
+    const next = { ...before, labels }; current.current = next; setDocument(next);
+    persistLabels(before.id, labels);
+  }, [persistLabels]);
+  /** Resend the labels on screen after a failed save. */
+  const retryLabels = useCallback(() => { const doc = current.current; if (doc) { setError(null); persistLabels(doc.id, doc.labels); } }, [persistLabels]);
+  /** Forget a track's failed waveform build and ask for it again. */
+  const retryWaveform = useCallback((trackId: string) => {
+    const key = wantedRef.current.find(entry => entry.id === trackId)?.key;
+    if (key) loader.current.failed.delete(key);
+    setWaveformErrors(prior => { const next = { ...prior }; delete next[trackId]; return next; });
+    pumpWaveforms();
+  }, [pumpWaveforms]);
   const acceptTranscript = useCallback((transcript: AafTrackTranscript) => {
     const before = current.current;
     if (!before) return;
     const next = mergeTrackTranscript(before, transcript); current.current = next; setDocument(next);
   }, []);
-  return { document, saved, loading, resolving, mediaProgress, stopResolution, error, labelStatus, waveforms, waveformErrors, load, cancelImport, rename, acceptTranscript, showTracks,
+  return { document, saved, loading, resolving, mediaProgress, stopResolution, error, labelStatus, waveforms, waveformErrors, load, cancelImport, rename, retryLabels, retryWaveform, acceptTranscript, showTracks,
     sequenceChoices, chooseSequence: (id: string) => { if (sequenceChoices) void load(undefined, sequenceChoices.path, id); }, cancelChoice: () => setSequenceChoices(null) };
 }

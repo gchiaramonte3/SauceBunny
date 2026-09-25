@@ -90,3 +90,11 @@ it("preserves overlay visibility, clipping, toggles and document replacements", 
   fireEvent.click(screen.getByRole("button", { name: "Text overlay Alex mic" }));
   expect(screen.queryByText("No transcript in this view")).toBeNull();
 });
+it("a failed waveform offers a retry for that track and shows the error on hover", () => {
+  const document = multitrackFixture(), retry = vi.fn();
+  render(<MultitrackTimeline document={document} waveforms={{}} waveformErrors={{ "track-1": "Decoder failed" }} selected={new Set()} solo={new Set()} onSelect={vi.fn()} onRename={vi.fn()} onSeek={vi.fn()} frame={0} onRetryWaveform={retry} />);
+  const button = screen.getByRole("button", { name: `Retry waveform for ${document.manifest.tracks[0].name}` });
+  expect(button.parentElement?.getAttribute("title")).toBe("Decoder failed");
+  fireEvent.click(button);
+  expect(retry).toHaveBeenCalledWith("track-1");
+});

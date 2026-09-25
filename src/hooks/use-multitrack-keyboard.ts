@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
 type Controls = { frame: number; pause: () => void; toggle: () => void; shuttle: (direction: 1 | -1) => void; seek: (frame: number, track?: string, play?: boolean) => Promise<void> };
-export function useMultitrackKeyboard(active: boolean, controls: Controls, onTimecode?: (digit: string) => void) {
-  const latest = useRef({ ...controls, onTimecode }); latest.current = { ...controls, onTimecode };
+/** Clip's marking keys: I and O mark, G clears, Q and W go to the marks. */
+export type MarkKeys = { markIn: () => void; markOut: () => void; clear: () => void; gotoIn: () => void; gotoOut: () => void };
+export function useMultitrackKeyboard(active: boolean, controls: Controls, onTimecode?: (digit: string) => void, marks?: MarkKeys) {
+  const latest = useRef({ ...controls, onTimecode, marks }); latest.current = { ...controls, onTimecode, marks };
   useEffect(() => {
     if (!active) return;
     let kHeld = false;
@@ -14,6 +16,10 @@ export function useMultitrackKeyboard(active: boolean, controls: Controls, onTim
       else if (key === "k") { kHeld = true; current.pause(); }
       else if (key === "j" || key === "l") { const direction = key === "j" ? -1 : 1; if (kHeld) void current.seek(current.frame + direction, undefined, false); else if (!event.repeat) current.shuttle(direction); }
       else if (key === " " && !event.repeat) current.toggle();
+      else if (current.marks && (key === "i" || key === "o" || key === "g" || key === "q" || key === "w")) {
+        const { markIn, markOut, clear, gotoIn, gotoOut } = current.marks;
+        ({ i: markIn, o: markOut, g: clear, q: gotoIn, w: gotoOut } as Record<string, () => void>)[key]();
+      }
       else if ((key === "arrowleft" || key === "arrowright") && !(target instanceof HTMLElement && target.closest('[role="slider"]'))) void current.seek(current.frame + (key === "arrowleft" ? -1 : 1) * (event.shiftKey ? 10 : 1), undefined, false);
       else return;
       event.preventDefault();

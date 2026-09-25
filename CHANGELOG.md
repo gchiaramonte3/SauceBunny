@@ -20,6 +20,13 @@ All notable changes to Sauce Bunny. Format loosely follows
   gain, zoom, track size, text overlays, open groups, checked mics and the
   waveform toggle come back when the sequence is reopened (the 50 most recently
   used sequences are kept).
+- AAF Audio can transcribe part of a sequence. Mark in and out with I and O
+  (G clears, Q and W go to the marks, as in Clip); the marked span shows on the
+  ruler and Generate offers "Marked range". A range run is spliced into the
+  track's saved transcript: cues outside the range are kept and only the range
+  is replaced, where before any run replaced the whole transcript.
+- Retry buttons for a waveform that failed to build and for mic labels that
+  failed to save.
 
 ## [0.5.1] - 2026-09-22
 
