@@ -96,6 +96,23 @@ class GraphTests(unittest.TestCase):
             for track in timeline.tracks:
                 data=b''.join(timeline.blocks(track,3,42))
                 self.assertEqual(data,(-2400).to_bytes(2,'little',signed=True)*(42*2002))
+    def test_marker_whose_described_slots_has_no_data_does_not_fail_the_import(self):
+        # Media Composer 23.12 writes a span marker on the timecode track with
+        # DescribedSlots present but empty. pyaaf2 will not WRITE a property
+        # with no data, so the fixture blanks it in memory before reading.
+        path=self.root/'markers.aaf'; grouped_fixture(path)
+        with aaf2.open(str(path),'rw') as file:
+            comp=next(file.content.toplevel()); slot=comp.create_timeline_slot('24000/1001')
+            markers=file.create.Sequence(media_kind='DescriptiveMetadata')
+            marker=file.create.DescriptiveMarker(); marker['Position'].value=12; marker['Comment'].value='Span on the timecode track'
+            marker['DescribedSlots'].value={1}; markers.components.append(marker); slot.segment=markers
+            file.dictionary.lookup_datadef('DescriptiveMetadata').name='Descriptive Metadata'
+        with aaf2.open(str(path),'r') as file:
+            comp=next(file.content.toplevel())
+            blank=next(s for s in comp.slots if s.segment.media_kind.lower()=='descriptive metadata')
+            next(iter(blank.segment.components))['DescribedSlots'].data=None
+            data=GraphTimeline(file).manifest(reader.fingerprint(path))
+        self.assertEqual(data['graph']['markers'],[{'position':12,'comment':'Span on the timecode track','described_slots':[],'attributes':{}}])
     def test_legacy_embedded_track_ids_and_bytes_unchanged(self):
         path=self.root/'legacy.aaf'; fixture(path)
         with aaf2.open(str(path),'r') as file:

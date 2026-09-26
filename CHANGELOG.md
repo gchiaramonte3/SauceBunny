@@ -44,6 +44,8 @@ All notable changes to Sauce Bunny. Format loosely follows
   offline and asking you to browse for it.
 
 ### Fixed
+- An AAF exported from Media Composer 23.12 with a marker on the timecode
+  track no longer fails to import as "could not be read safely".
 - AAF Audio transcription no longer throws away a whole run when the engine
   returns a cue whose text contains a blank line; the text stays with its cue.
 - A stray file in the AAF Audio folder (an iCloud "copy 2", a Finder duplicate,

@@ -157,13 +157,17 @@ class GraphTimeline(Timeline):
         for slot in chosen.slots:
             if slot.segment.media_kind.lower() != 'descriptive metadata':
                 continue
-            for marker in value(slot.segment, 'Components', []):
+            # `or []`, not a default: Media Composer 23.12 writes a span marker
+            # on the timecode track whose DescribedSlots property is PRESENT
+            # with no data, so value() returns None rather than the default,
+            # and iterating it failed the whole import as invalid_aaf.
+            for marker in value(slot.segment, 'Components') or []:
                 if type(marker).__name__ != 'DescriptiveMarker':
                     continue
-                self.markers.append({'position': value(marker, 'Position', 0),
-                    'comment': str(value(marker, 'Comment', ''))[:20000],
-                    'described_slots': list(value(marker, 'DescribedSlots', [])),
-                    'attributes': {str(t.name): str(t.value)[:20000] for t in value(marker, 'CommentMarkerAttributeList', [])}})
+                self.markers.append({'position': value(marker, 'Position') or 0,
+                    'comment': str(value(marker, 'Comment') or '')[:20000],
+                    'described_slots': list(value(marker, 'DescribedSlots') or []),
+                    'attributes': {str(t.name): str(t.value)[:20000] for t in value(marker, 'CommentMarkerAttributeList') or []}})
 
     def group_name(self, seg):
         if isinstance(seg, aaf2.components.SourceClip) and seg.mob:
