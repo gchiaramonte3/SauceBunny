@@ -111,7 +111,7 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
         }
       }
       if (ownsRun()) {
-        setStatus(current.cancelled ? `Stopped. ${outcome.saved} tracks saved.` : outcome.failures.length ? `${outcome.saved} tracks saved · ${outcome.failures.length} failed. See Get Info.` : outcome.review ? `${outcome.saved} tracks saved · ${outcome.review} need timing review.` : "Selected range saved for every track");
+        setStatus(current.cancelled ? `Stopped. ${outcome.saved} tracks saved.` : outcome.failures.length ? `${outcome.saved} tracks saved · ${outcome.failures.length} failed. See Transcript info.` : outcome.review ? `${outcome.saved} tracks saved · ${outcome.review} need timing review.` : "Selected range saved for every track");
         setResolution(current.cancelled || outcome.review ? null : outcome.failures.length ? "error" : "success");
       }
     } catch (cause) {

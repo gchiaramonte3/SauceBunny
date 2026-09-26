@@ -5,6 +5,14 @@ import { tauriMockInit } from "./tauri-mock";
 
 test.use({ browserName: process.env.SAUCE_AUDIO_BROWSER === "webkit" ? "webkit" : "chromium" });
 
+/** Pick a person's transcript whether their tab is drawn or sits behind "N more". */
+async function chooseTranscript(page: Page, region: Locator, name: string) {
+  const tab = region.getByRole("tab", { name, exact: true });
+  if (await tab.count()) { await tab.click(); return; }
+  await region.getByRole("button", { name: /^\d+ more people$/ }).click();
+  await page.getByRole("menuitemradio", { name, exact: true }).click();
+}
+
 async function boot(page: Page, trackCount = 3, audible = false, grouped = false, pendingMedia = false) {
   const fixture = multitrackFixture();
   fixture.manifest.tracks = Array.from({ length: trackCount }, (_, index) => ({ ...structuredClone(multitrackFixture().manifest.tracks[index % 3]), id: `track-${index + 1}`, name: index < 3 ? multitrackFixture().manifest.tracks[index].name : `Mic ${index + 1}` }));
@@ -276,7 +284,7 @@ for (const width of [1100, 1680]) {
     await region.getByRole("button", { name: "Generate 3 tracks" }).click();
     await expect(selected).toBeEnabled();
     await region.getByRole("checkbox", { name: "Select Sam mic", exact: true }).uncheck();
-    await region.getByRole("combobox", { name: "Choose transcript" }).selectOption({ label: "Sam mic" });
+    await chooseTranscript(page, region, "Sam mic");
     await region.getByRole("button", { name: "Solo Sam mic", exact: true }).click();
     await region.getByRole("searchbox", { name: "Search track transcripts" }).fill("no matching words");
     const format = region.getByRole("combobox", { name: "Transcript export format" });
@@ -313,7 +321,7 @@ test("Entire transcript exports every source lane in the selected format despite
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   await region.getByRole("button", { name: "Generate 3 tracks" }).click();
   await expect(region.getByRole("status").filter({ hasText: "Selected range saved for every track" })).toBeVisible();
-  await region.getByRole("combobox", { name: "Choose transcript" }).selectOption({ label: "Sam mic" });
+  await chooseTranscript(page, region, "Sam mic");
   await region.getByRole("searchbox", { name: "Search track transcripts" }).fill("no matching words");
   const format = region.getByRole("combobox", { name: "Transcript export format" });
   for (const selected of ["avid", "csv", "txt", "srt", "pdf"]) {
@@ -380,29 +388,55 @@ for (const width of [1100, 1680]) {
     await page.keyboard.press("Shift+Numpad1"); await expect(dialog).toBeHidden();
   });
 
-  test(`Transcript picker stays compact and fixed beside overflowing tabs at ${width}px`, async ({ page }) => {
+  test(`Person tabs never scroll: the rest sit behind "N more" at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 }); await boot(page, 20);
     if (width === 1100) await page.evaluate(() => document.documentElement.style.setProperty("--text-md", "15px"));
     const region = page.getByRole("region", { name: "AAF Audio", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
-    const picker = region.getByRole("combobox", { name: "Choose transcript" }), tabs = region.getByRole("tablist", { name: "Transcripts by person" });
-    const before = (await picker.boundingBox())!, list = (await tabs.boundingBox())!;
-    expect(before.width).toBe(28); expect(before.height).toBeGreaterThanOrEqual(24);
-    expect(list.x + list.width).toBeCloseTo(before.x, 1);
-    await picker.selectOption({ label: "Mic 20" });
-    await expect(region.getByRole("tab", { name: "Mic 20", exact: true })).toBeInViewport();
-    expect((await picker.boundingBox())!).toEqual(before);
-    expect(await picker.evaluate((element) => { const box = element.getBoundingClientRect(); return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) === element; })).toBe(true);
-    await region.getByRole("tab", { name: "Mic 20", exact: true }).press("Home");
+    const tabs = region.getByRole("tablist", { name: "Transcripts by person" }), more = region.getByRole("button", { name: /^\d+ more people$/ });
+    await expect(more).toBeVisible();
+    const fits = async () => tabs.evaluate((element) => {
+      const strip = element.parentElement!.getBoundingClientRect(), style = getComputedStyle(element);
+      return element.scrollWidth <= element.clientWidth + 1 && style.overflowX !== "auto" && style.overflowX !== "scroll"
+        && [...element.children].every((tab) => { const box = tab.getBoundingClientRect(); return box.left >= strip.left - 1 && box.right <= strip.right + 1; });
+    });
+    expect(await fits()).toBe(true);
+    const drawn = await region.getByRole("tab").count();
+    expect(drawn).toBeGreaterThan(1); expect(drawn).toBeLessThan(21);
+    expect(await more.textContent()).toBe(`${21 - drawn} more`);
+    await more.click();
+    await page.getByRole("menuitemradio", { name: "Mic 20", exact: true }).click();
+    await expect(page.getByRole("menu")).toBeHidden();
+    const chosen = region.getByRole("tab", { name: "Mic 20", exact: true });
+    await expect(chosen).toHaveAttribute("aria-selected", "true"); await expect(chosen).toBeFocused(); await expect(chosen).toBeInViewport();
+    await expect(region.getByRole("tabpanel", { name: "Mic 20" })).toBeVisible();
+    expect(await fits()).toBe(true);
+    await chosen.press("Home");
     await expect(region.getByRole("tab", { name: "All voices" })).toBeFocused();
-    expect((await picker.boundingBox())!).toEqual(before);
-    await picker.focus(); expect(await picker.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("solid");
+    await region.getByRole("tab", { name: "All voices" }).press("End");
+    await expect(region.getByRole("tab", { name: "Mic 20", exact: true })).toBeFocused();
+    await more.focus(); await more.press("Enter");
+    await expect(page.getByRole("menu")).toBeVisible();
+    await page.keyboard.press("Escape"); await expect(page.getByRole("menu")).toBeHidden(); await expect(more).toBeFocused();
     const checkbox = region.getByRole("checkbox", { name: "Search with AI" });
     await checkbox.focus(); await checkbox.press("Space"); await expect(checkbox).toBeChecked();
     await expect(region.getByRole("button", { name: "Search", exact: true })).toBeDisabled();
     expect(await region.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
-    await page.screenshot({ path: test.info().outputPath("multitrack-compact-picker.png") });
+    await page.screenshot({ path: test.info().outputPath("multitrack-tab-overflow.png") });
   });
+
+  test(`Transcript info opens as a dialog from the info button at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 }); await boot(page);
+    const region = page.getByRole("region", { name: "AAF Audio", exact: true });
+    await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+    await expect(region.getByText("Get Info")).toHaveCount(0);
+    const info = region.getByRole("button", { name: "Transcript info" });
+    await info.click();
+    const dialog = page.getByRole("dialog", { name: "Transcript info" });
+    await expect(dialog).toBeVisible(); await expect(dialog.getByText(/Saved sequences/)).toBeVisible();
+    await page.keyboard.press("Escape"); await expect(dialog).toBeHidden(); await expect(info).toBeFocused();
+  });
+
 }
 
 test("Local AI transcript search uses the existing bar, preserves original results and leaves text mode available", async ({ page }) => {
@@ -697,7 +731,7 @@ test("Person navigation, per-track levels, context regeneration and safe exports
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
   await region.getByRole("button", { name: "Generate 20 tracks" }).click();
   await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
-  await region.getByRole("combobox", { name: "Choose transcript" }).selectOption({ label: "Mic 20" });
+  await chooseTranscript(page, region, "Mic 20");
   await expect(region.getByRole("tabpanel", { name: "Mic 20" })).toBeVisible();
   await expect(region.getByRole("tab", { name: "Mic 20", exact: true })).toBeInViewport();
   await region.getByRole("button", { name: "Solo Alex mic", exact: true }).click();

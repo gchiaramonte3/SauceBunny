@@ -712,6 +712,26 @@ and enlarged text at narrow and wide desktop sizes before adoption.
 
 ---
 
+## Tabs · 2026-09-26
+
+A tab strip never scrolls sideways. A Mac that always shows scrollbars (a mouse
+attached, and most older machines) draws a permanent bar under a scrolling
+strip, and on every Mac the tabs past the edge are hidden behind a swipe.
+
+- **Fixed set** (the drawer, Document/Analysis, search modes): the labels fit.
+  If a narrow panel can squeeze them, collapse them the way the drawer does
+  (icons under a container query), never wrap and never scroll.
+- **A set that grows with the data** (people in an AAF transcript): use
+  `TabStrip`. It draws the tabs that fit, in order, then **N more**, a menu of
+  the rest. The chosen tab is always drawn; picking one from the menu brings it
+  onto the strip. Arrow keys, Home and End walk the whole list, not only what
+  is drawn.
+- Long reference information is not a disclosure under the content. Put it
+  behind an info button (the (i) icon) that opens a dialog, and keep only a
+  one-line status inline.
+
+`tablist-overflow-contract` fails any `role="tablist"` whose class scrolls.
+
 ## Voice
 
 Terse and plain. **No em dashes** anywhere in user-facing copy. No

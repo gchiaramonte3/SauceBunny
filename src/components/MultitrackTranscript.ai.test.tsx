@@ -70,7 +70,7 @@ it.each(["edit", "toggle", "tab", "hide", "replace", "unmount", "stop"])("reject
   const signal = vi.mocked(streamChat).mock.calls[0][3];
   if (change === "edit") fireEvent.change(screen.getByRole("searchbox"), { target: { value: "budget" } });
   if (change === "toggle") fireEvent.click(screen.getByRole("checkbox", { name: "Search with AI" }));
-  if (change === "tab") fireEvent.change(screen.getByRole("combobox", { name: "Choose transcript" }), { target: { value: "track:track-2" } });
+  if (change === "tab") fireEvent.click(screen.getByRole("tab", { name: "Sam mic" }));
   if (change === "hide") view.rerender(<MultitrackTranscript {...view.props} active={false} />);
   if (change === "replace") view.rerender(<MultitrackTranscript {...view.props} document={{ ...view.props.document, transcripts: [] }} />);
   if (change === "unmount") view.unmount();

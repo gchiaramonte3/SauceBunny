@@ -96,7 +96,8 @@
 .cp-multitrack-transcript { min-width: 0; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line-1); background: var(--bg-0); }
 .cp-multitrack-transcript-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; }
 .cp-multitrack-transcript-head h2 { margin: 0; color: var(--fg-1); font-size: var(--text-xl); font-weight: var(--weight-semibold); }
-.cp-multitrack-transcript-head > span { color: var(--fg-3); font-size: var(--text-base); }
+.cp-multitrack-transcript-head > span { margin-left: auto; color: var(--fg-3); font-size: var(--text-base); }
+.cp-multitrack-info { flex: none; }
 .cp-multitrack-search { padding: 0 20px; }
 .cp-multitrack-search input[type=search] { width: 100%; }
 .cp-multitrack-search-options { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
@@ -282,9 +283,12 @@
 .cp-multitrack-resize { left: -5px; top: 0; bottom: 0; }
 .cp-multitrack-run-info { margin: 8px 20px 12px; color: var(--fg-3); font-size: var(--text-base); line-height: var(--leading-normal); }
 .cp-multitrack-run-info p { margin: 8px 0; overflow-wrap: anywhere; }
-.cp-multitrack-run-info details[open] { max-height: 200px; overflow-y: auto; padding: 2px; }
-.cp-multitrack-run-info summary { cursor: pointer; color: var(--fg-2); padding: 4px 0; }
-.cp-multitrack-run-info ul { margin: 8px 0; padding-left: 16px; overflow-wrap: anywhere; }
+.cp-multitrack-run-details h3 { margin: 16px 0 6px; color: var(--fg-1); font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.cp-multitrack-run-details ul { margin: 6px 0; padding-left: 16px; overflow-wrap: anywhere; }
+.cp-multitrack-run-details p { overflow-wrap: anywhere; }
+.cp-multitrack-run-tracks { list-style: none; padding-left: 0; }
+.cp-multitrack-run-tracks li { display: grid; gap: 2px; padding: 6px 0; border-top: 1px solid var(--line-1); }
+.cp-multitrack-run-tracks strong { color: var(--fg-1); }
 .cp-multitrack-untimed { padding: 12px; border-top: 1px solid var(--line-1); }
 .cp-multitrack-untimed h3 { font-size: var(--text-md); color: var(--fg-2); font-weight: var(--weight-semibold); }
 .cp-multitrack-untimed article { margin-top: 16px; }
@@ -308,14 +312,7 @@
 .cp-multitrack-export-all { display: flex; gap: var(--s-2) var(--s-1); flex-wrap: wrap; }
 .cp-multitrack-export-all .btn { flex: 1; white-space: nowrap; min-height: 28px; padding: 4px 8px; font-size: var(--text-base); }
 .cp-multitrack-export > p { margin: 0; max-height: 64px; overflow: auto; overflow-wrap: anywhere; }
-.cp-multitrack-person-nav { display: grid; grid-template-columns: minmax(0, 1fr) 28px; min-width: 0; border-bottom: 1px solid var(--line-1); margin-bottom: 12px; padding: 0 8px; }
-.cp-multitrack-person-tabs { display: flex; flex: 1; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
-.cp-multitrack-person-tabs .cp-tab { flex: none; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 8px 10px; }
-.cp-multitrack-person-nav .cp-multitrack-person-picker { width: 28px; min-width: 0; height: 100%; color: transparent; padding: 0; border: 0; border-left: 1px solid var(--line-1); border-radius: 0; background-color: var(--bg-1); background-position: center; box-shadow: none; }
-.cp-multitrack-person-nav .cp-multitrack-person-picker:hover { background-color: var(--bg-3); }
-.cp-multitrack-person-nav .cp-multitrack-person-picker:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -2px; }
-.cp-multitrack-person-picker option { color: var(--fg-1); background-color: var(--bg-2); }
-.cp-multitrack-person-color { display: inline-block; width: 8px; height: 8px; border-radius: var(--r-pill); margin-right: 6px; }
+.cp-multitrack-person-nav { min-width: 0; border-bottom: 1px solid var(--line-1); margin-bottom: 12px; padding: 0 8px; }
 .cp-multitrack-track-menu { position: fixed; z-index: var(--z-popover); width: 260px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 6px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); color: var(--fg-2); font-size: var(--text-md); }
 .cp-multitrack-track-menu-title { padding: 8px 10px; color: var(--fg-3); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; }
 .cp-multitrack-track-menu [role=menuitem] { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-sm); background: transparent; text-align: left; color: inherit; font: inherit; cursor: pointer; }

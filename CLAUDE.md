@@ -745,7 +745,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and twelve rules in this file are checked by a test rather than remembered. If you
+One hundred and thirteen rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -901,6 +901,7 @@ written after finding the rule already broken somewhere.
 | `download-concurrency-contract` | No yt-dlp command passes `--download-sections`, and every path that asks for concurrent fragments keeps them. The flag switches yt-dlp onto a single throttled connection and makes `--concurrent-fragments` inert: measured at 285 KB/s against 47.3 MB/s, so the WHOLE 1.18 GB file arrived in under 25s while a 60s section took 54.5s. transcript.rs found this and wrote it down; both export paths kept the flag anyway, one under a comment calling the concurrency it had just disabled "the actual 10x speedup" |
 | `green-contract` | `--accent` is a NEUTRAL, and green survives only on a positive outcome, a live feed or the brand mark. Green had been removed by hand three times and returned every time, because `--accent` was aliased to the brand green and is read 137 times: every active, selected, running and count surface inherited it from one line |
 | `abort-handle-contract` | Every AI run arms its AbortController BEFORE its first await. The Stop button is drawn from a different piece of state than the one that arms it, so a run could show an enabled Stop that ran `?.abort()` against null for the whole model load |
+| `tablist-overflow-contract` | No `role="tablist"` scrolls sideways. On a Mac that always shows scrollbars (a mouse attached, and most older machines) the AAF Audio person tabs wore a permanent scrollbar; a strip that can grow uses `TabStrip`, which draws the tabs that fit and puts the rest behind "N more". Read from source because headless Chromium draws overlay scrollbars, so no rendered test could see it |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:

@@ -6,6 +6,15 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Changed
+- Tab strips no longer scroll sideways, so a Mac that always shows scrollbars
+  no longer draws one under them. The AAF Audio person tabs show the people
+  that fit and put the rest behind an **N more** menu; the chosen person is
+  always on the strip.
+- AAF Audio's transcript details (where results are saved, failures, and each
+  track's engine and range) moved from the Get Info disclosure to an info (i)
+  button beside the track count, which opens them in a dialog.
+- Renaming a mic owner no longer switches the transcript pane to a different
+  person.
 - The Multitrack page is now called **AAF Audio** in the app (nav rail, ⌘K,
   settings, diagnostics and Library labels). Saved sequences, the
   `Transcripts/Multitrack` folder, shortcuts and stored preferences are
