@@ -7,7 +7,12 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager};
 
 static DOCUMENT_WRITER: Mutex<()> = Mutex::new(());
-const MAX_DOCUMENT_BYTES: u64 = 32 * 1024 * 1024;
+/// Transcripts live inside the document, about 170 bytes per cue. At 32 MiB
+/// (and pretty-printed JSON, ~250 bytes per cue) a 30-mic, 8-hour sequence
+/// could not save its later tracks: every run after the cap failed only at
+/// commit, once all the recognition work was done. The cap stays as a guard
+/// against a corrupt or hostile file, sized well above real sequences.
+const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
 
 pub fn root(app: &AppHandle) -> Result<PathBuf, AppError> {
     let path = app.path().document_dir().map_err(|e| AppError::internal(e.to_string()))?
@@ -58,8 +63,9 @@ fn write(root: &Path, document: &AafDocument) -> Result<(), AppError> {
         // Refuse newer files before overwrite, even if the in-memory copy is older.
         let _: AafDocument = load(root, &document.id)?;
     }
-    let json = serde_json::to_vec_pretty(&document)?;
-    if json.len() as u64 > MAX_DOCUMENT_BYTES { return Err(AppError::invalid("AAF Audio document exceeds the save limit")); }
+    // Compact: indentation cost about a third of the file for nothing a reader needs.
+    let json = serde_json::to_vec(&document)?;
+    if json.len() as u64 > MAX_DOCUMENT_BYTES { return Err(AppError::invalid("This sequence's saved transcripts have reached the 256 MB an AAF Audio document can hold, so this run was not saved. Export the finished tracks before generating more.")); }
     crate::commands::system::write_bytes_impl(&path.to_string_lossy(), &json, false, false, true)?;
     Ok(())
 }
@@ -217,7 +223,18 @@ pub fn list(root: &Path) -> Result<Vec<AafDocumentSummary>, AppError> {
         let path = entry?.path();
         if path.extension().is_none_or(|ext| ext != "json") { continue; }
         let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue; };
-        let document = load(root, id)?;
+        // A listing needs names and counts, not every cue of every sequence:
+        // counting the arrays without building them keeps a shelf of large
+        // multi-mic documents from costing gigabytes each time it refreshes.
+        #[derive(serde::Deserialize)]
+        struct Manifest { name: String, tracks: Vec<serde::de::IgnoredAny> }
+        #[derive(serde::Deserialize)]
+        struct Summary { schema_version: u32, id: String, source_path: String, manifest: Manifest, transcripts: Vec<serde::de::IgnoredAny> }
+        let document: Summary = read_json(&document_path(root, id)?)?;
+        if !(1..=DOCUMENT_SCHEMA_VERSION).contains(&document.schema_version) {
+            return Err(AppError::invalid("This multitrack document was saved by an unsupported version. Update Sauce Bunny."));
+        }
+        if document.id != id { return Err(AppError::invalid("AAF Audio document identity does not match its filename")); }
         results.push(AafDocumentSummary { id: document.id, name: document.manifest.name,
             track_count: document.manifest.tracks.len() as u32,
             transcribed_tracks: document.transcripts.len() as u32, source_path: document.source_path,
