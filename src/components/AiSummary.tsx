@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CutMarkerChange } from "../lib/cut-markers";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { parseSrt, groupIntoTurns, fmtTime } from "../lib/srt";
 import { loadSpeakerOverrides, prepareCues, resolveSpeakerName, SPEAKERS_CHANGED_EVENT } from "./transcript/helpers";
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
+import { ensureLocalAiServer, selectLocalAiModel } from "../lib/local-ai-server";
 import { loadAiProvider, cloudChat } from "../lib/ai-provider";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
@@ -13,6 +15,10 @@ import { useMenuKeys } from "../hooks/use-menu-keys";
 import { IconAiSummary } from "./Icons";
 import { Markdown } from "./Markdown";
 import { AiChapters } from "./AiChapters";
+import { ShotIntelligence } from "./ShotIntelligence";
+import { ModelDownloadProgress } from "./ModelDownloadProgress";
+import { IconSettings } from "./Icons";
+import { shotIntelligenceEnabled } from "../lib/scene-analysis/rollout";
 import type { LlmModel } from "../bindings/LlmModel";
 import { buildSourcePrefix } from "../lib/prompt-prefix";
 import type { LlmServerInfo } from "../bindings/LlmServerInfo";
@@ -49,6 +55,11 @@ type Props = {
   style?: SummaryStyle;
   /** Open Settings → AI Summary (manage / switch / download models). */
   onOpenSettings?: () => void;
+  /** Completed local source only. Never a live input or unverified playback proxy. */
+  videoPath?: string | null;
+  fps?: number;
+  onOpenVideoSettings?: () => void;
+  videoForegroundBusy?: boolean;
   /** Seek playback to a timestamp (seconds) — makes summary [m:ss] clickable. */
   onSeek?: (seconds: number) => void;
   /** Auto-chapters: source identity to persist under (App's reviewSourceKey). */
@@ -61,6 +72,7 @@ type Props = {
   /** Auto-chapters: notify the host after a generate/delete — the popped-out
    *  panel forwards this over the panel bus so main's timeline re-reads. */
   onChaptersChanged?: () => void;
+  onCutMarkersChanged?: (change: CutMarkerChange) => void;
 };
 
 import { matchPrompts, slashQuery } from "../lib/transcript-prompts";
@@ -160,10 +172,42 @@ export function buildTaskInstruction(
   ].filter(Boolean).join("\n");
 }
 
-export function AiSummary({
+export function AiSummary(props: Props) {
+  const [videoEnabled] = useState(shotIntelligenceEnabled);
+  const [advanced, setAdvanced] = useState(false);
+  const [visitedAdvanced, setVisitedAdvanced] = useState(false);
+  const [textBusy, setTextBusy] = useState(false);
+  const [videoBusy, setVideoBusy] = useState(false);
+  const [videoInfoHost, setVideoInfoHost] = useState<HTMLSpanElement | null>(null);
+  if (!videoEnabled) return <TextSummary {...props} active onBusyChange={setTextBusy} />;
+  return <div className="cp-ai-modes">
+    <div className="cp-ai-mode-switch">
+      <span>Text</span>
+      <button type="button" className={`cp-toggle-switch${advanced ? " on" : ""}`} role="switch" aria-label="Advanced Intelligence" aria-checked={advanced}
+        disabled={textBusy || videoBusy} onClick={() => { setAdvanced(value => !value); setVisitedAdvanced(true); }} />
+      <span>Advanced Intelligence</span>
+      <div className="cp-ai-mode-tools" hidden={!advanced}>
+        <span ref={setVideoInfoHost} />
+        {props.onOpenVideoSettings && <button type="button" className="btn btn-ghost cp-ai-model-settings" aria-label="Advanced Intelligence settings" title="Advanced Intelligence settings" disabled={videoBusy} onClick={props.onOpenVideoSettings}><IconSettings size={16} /></button>}
+      </div>
+    </div>
+    <div className="cp-ai-mode-body" hidden={advanced}>
+      <TextSummary {...props} active={!advanced} warmable={props.warmable && !advanced} onBusyChange={setTextBusy} />
+    </div>
+    {visitedAdvanced && <div className="cp-ai-mode-body" hidden={!advanced}>
+      <ShotIntelligence videoPath={props.videoPath ?? null} transcriptPath={props.transcriptPath} fps={props.fps} infoHost={advanced ? videoInfoHost : null}
+        foregroundBusy={props.videoForegroundBusy}
+        sourceKey={props.sourceKey} reloadToken={props.reloadToken} onSeek={props.onSeek}
+        onCutMarkersChanged={props.onCutMarkersChanged}
+        onOpenSettings={props.onOpenVideoSettings} onBusyChange={setVideoBusy} />
+    </div>}
+  </div>;
+}
+
+function TextSummary({
   transcriptPath, reloadToken, warmable, selectedModelId, style, onOpenSettings, onSeek,
-  sourceKey, sourceDescription, durationSec, onChaptersChanged,
-}: Props) {
+  sourceKey, sourceDescription, durationSec, onChaptersChanged, active, onBusyChange,
+}: Props & { active: boolean; onBusyChange: (busy: boolean) => void }) {
   // ── Transcript text (timestamped, model-friendly) ────────────────
   const [raw, setRaw] = useState<string | null>(null);
   const loadKey = transcriptPath ? `${transcriptPath}#${reloadToken ?? 0}` : null;
@@ -247,38 +291,19 @@ export function AiSummary({
   // The model to run: the Settings-chosen one if downloaded, else the
   // recommended/first downloaded as a fallback.
   const activeModel = useMemo(
-    () =>
-      downloaded.find((m) => m.id === selectedModelId)
-      ?? downloaded.find((m) => m.recommended)
-      ?? downloaded[0],
+    () => selectLocalAiModel(downloaded, selectedModelId),
     [downloaded, selectedModelId],
   );
-  // Track which model the resident server is actually running, so switching the
-  // choice in Settings restarts the sidecar onto the new model.
-  const serverModelRef = useRef<string | null>(null);
-
   // Bring the server up for the active model (idempotent backend-side; restarts
   // when the chosen model changed).
   const ensureServer = useCallback(async (signal?: AbortSignal): Promise<LlmServerInfo | null> => {
     const model = activeModel;
     if (!model) return null;
-    if (server && serverModelRef.current === model.id) return server;
     setPhase("starting");
     setPhaseMsg(`Loading ${model.name} into memory…`);
-    // Loading a multi-GB model into memory is the longest wait these features
-    // impose, and it was the one thing Stop could not touch: an abort signal
-    // only ever reached the token stream, which has not started yet. Shutting
-    // the server down IS the cancel - `start_llm_server` polls for exactly
-    // this state between health checks and returns "server start cancelled".
-    // That path was written and then never called by anything.
-    const cancelStart = () => { void invoke("stop_llm_server").catch(() => { /* already gone */ }); };
-    signal?.addEventListener("abort", cancelStart, { once: true });
     try {
-      const info = await invoke<LlmServerInfo>("start_llm_server", { modelId: model.id });
-      // Won the race: the server came up after the user stopped. Put it back
-      // down rather than leaving GBs resident for a run nobody wants.
-      if (signal?.aborted) { cancelStart(); setPhase("idle"); setPhaseMsg(null); return null; }
-      serverModelRef.current = model.id;
+      const info = await ensureLocalAiServer(model.id, signal);
+      if (signal?.aborted) { setPhase("idle"); setPhaseMsg(null); return null; }
       setServer(info); setPhase("ready"); setPhaseMsg(null);
       return info;
     } catch (e) {
@@ -286,10 +311,8 @@ export function AiSummary({
       if (signal?.aborted) { setPhase("idle"); setPhaseMsg(null); return null; }
       setPhase("error"); setPhaseMsg(formatError(e));
       return null;
-    } finally {
-      signal?.removeEventListener("abort", cancelStart);
     }
-  }, [server, activeModel]);
+  }, [activeModel]);
 
   // ── Chat ─────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -300,6 +323,10 @@ export function AiSummary({
   // on `chatBusy`, and this mirrors its busy state back so the composer can't
   // fire a second request at the single llama-server mid-detection.
   const [chaptersBusy, setChaptersBusy] = useState(false);
+  useEffect(() => {
+    onBusyChange(streaming || chaptersBusy || !!downloadingId);
+    return () => onBusyChange(false);
+  }, [streaming, chaptersBusy, downloadingId, onBusyChange]);
 
   const inputRef = useRef<HTMLInputElement>(null);
   /** Which slash suggestion the keyboard is on. */
@@ -416,6 +443,11 @@ export function AiSummary({
   // mounting IS the intent signal. Cloud providers have nothing to warm.
   const primedRef = useRef<string | null>(null);
   const primeAbortRef = useRef<AbortController | null>(null);
+  // Mode changes preserve the conversation, but cannot leave a text warm-up
+  // competing with video analysis. This does not unload the resident model.
+  useEffect(() => {
+    if (!active) { primeAbortRef.current?.abort(); primedRef.current = null; }
+  }, [active]);
   // Read inside the effect WITHOUT depending on it. transcriptForModel is a
   // useMemo keyed on `server?.ctx`, and the warm-up itself sets `server` - so
   // depending on the object made the effect re-run the instant the server came
@@ -700,10 +732,7 @@ export function AiSummary({
                 <div className="cp-ai-model-blurb">{m.blurb}</div>
               </div>
               {downloadingId === m.id ? (
-                <div className="cp-ai-dl">
-                  <div className="cp-ai-dl-bar"><div className="cp-ai-dl-fill" style={{ width: `${downloadPct}%` }} /></div>
-                  <div className="cp-ai-dl-pct">{Math.round(downloadPct)}%</div>
-                </div>
+                <ModelDownloadProgress name={m.name} percent={downloadPct} />
               ) : (
                 <button className="btn btn-primary" onClick={() => startDownload(m.id)}>
                   Download · {(m.size_bytes / 1e9).toFixed(1)} GB
@@ -863,4 +892,3 @@ export function AiSummary({
     </div>
   );
 }
-

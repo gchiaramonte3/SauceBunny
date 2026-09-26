@@ -75,6 +75,20 @@ beforeEach(() => setPlayheadFrames(0));
 afterEach(() => vi.clearAllMocks());
 
 describe("seeking", () => {
+  it.each([24000 / 1001, 30000 / 1001, 60000 / 1001])("seeks, steps and scrubs at the real %s fps", async fps => {
+    const { result, player } = setup({ fps, durationFrames: 240000 });
+    await act(async () => result.current.onSeek(108000));
+    expect(player.seekTo).toHaveBeenLastCalledWith(108000 / fps);
+    await act(async () => result.current.onStep(1));
+    expect(player.seekTo).toHaveBeenLastCalledWith(108001 / fps);
+    act(() => result.current.onScrubStart());
+    act(() => result.current.onScrub(108002));
+    await act(async () => result.current.onScrubEnd(108003));
+    expect(player.endScrub).toHaveBeenLastCalledWith(108003 / fps);
+    expect(getPlayheadFrames()).toBe(108003);
+    await act(async () => result.current.onChaseSeekConfirmed(108004));
+    expect(player.seekTo).toHaveBeenLastCalledWith(108004 / fps);
+  });
   it("clamps into range and moves the store and the player together", () => {
     const { result, player } = setup();
     act(() => result.current.onSeek(1500));

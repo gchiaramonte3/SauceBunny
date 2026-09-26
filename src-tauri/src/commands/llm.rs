@@ -266,6 +266,10 @@ pub struct LlmServerInfo {
 }
 
 impl LlmServer {
+    /// Includes a cold load before /health publishes server info.
+    pub(crate) fn has_process(&self) -> bool {
+        self.child.lock().map(|child| child.is_some()).unwrap_or(true)
+    }
     /// Kill the running server, if any. Called by stop + on app exit.
     pub fn shutdown(&self) {
         if let Ok(mut g) = self.child.lock() {
@@ -329,6 +333,7 @@ pub async fn start_llm_server(
     model_id: String,
 ) -> Result<LlmServerInfo, crate::AppError> {
     // Already running with this model → reuse.
+    super::video_intelligence::yield_video_background(&app);
     if let Some(info) = state.current() {
         if info.model_id == model_id {
             return Ok(info);

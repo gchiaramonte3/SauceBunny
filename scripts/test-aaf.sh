@@ -14,3 +14,5 @@ if ! "${AAF_PYTHON}" -c 'import aaf2; assert aaf2.__version__ == "1.7.1"' 2>/dev
   fi
 fi
 PYTHONDONTWRITEBYTECODE=1 "${AAF_PYTHON}" "${ROOT_DIR}/aaf-sidecar/test_reader.py"
+PYTHONDONTWRITEBYTECODE=1 "${AAF_PYTHON}" "${ROOT_DIR}/aaf-sidecar/test_graph.py"
+PYTHONDONTWRITEBYTECODE=1 "${AAF_PYTHON}" "${ROOT_DIR}/aaf-sidecar/test_mxf.py"

@@ -33,7 +33,12 @@
 .cp-multitrack-ruler-row, .cp-multitrack-lane { display: grid; }
 .cp-multitrack-ruler-row { position: sticky; top: 0; z-index: 2; background: var(--bg-1); border-bottom: 1px solid var(--line-1); }
 .cp-multitrack-lane-heading { color: var(--fg-4); font-size: var(--text-base); }
-.cp-multitrack-ruler { display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; padding: 0 8px; color: var(--fg-3); font-size: var(--text-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cp-multitrack-media-candidates p { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 0; }
+.cp-multitrack-media-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line-1); border-radius: var(--r-md); color: var(--fg-2); font-size: var(--text-sm); }
+.cp-multitrack-media-status > [role="status"] { flex: 1 1 auto; min-width: 0; font-variant-numeric: tabular-nums; }
+/* The marked transcription range, in the marker colour Clip and the reader use for in/out. */
+.cp-multitrack-mark-range { position: absolute; top: 0; bottom: 0; pointer-events: none; background: color-mix(in srgb, var(--marker) 30%, transparent); border-left: 1px solid var(--marker); border-right: 1px solid var(--marker); }
+.cp-multitrack-ruler { position: relative; display: flex; justify-content: space-between; align-items: center; gap: 8px; overflow: hidden; padding: 0 8px; color: var(--fg-3); font-size: var(--text-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cp-multitrack-lane { border-bottom: 1px solid var(--line-1); }
 .cp-multitrack-lane-label { min-width: 0; }
 .cp-multitrack-track-switches { display: flex; align-items: center; justify-content: space-between; }
@@ -55,6 +60,17 @@
 .cp-multitrack-tc { min-width: 100px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cp-multitrack-generation { border-top: 1px solid var(--line-1); }
 .cp-multitrack-confirm { margin-bottom: 16px; }
+.cp-multitrack-reader { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.cp-multitrack-date { font-size: var(--text-base); width: 100%; }
+.cp-multitrack-date summary { cursor: pointer; min-height: 26px; padding: 4px 0; }
+.cp-multitrack-date-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.cp-multitrack-date-controls label { display: grid; gap: 4px; }
+.cp-multitrack-date-controls input { min-height: 30px; color: var(--fg-1); background: var(--bg-0); border: 1px solid var(--line-2); border-radius: var(--r-md); padding: 4px 8px; font: inherit; }
+.cp-multitrack-reader > .cp-multitrack-transcript { flex: 1; min-height: 0; width: auto; }
+.cp-multitrack-reader-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px; border-bottom: 1px solid var(--line-1); }
+.cp-multitrack-reader-head > span { min-width: 0; overflow-wrap: anywhere; }
+.cp-multitrack-reader-head .btn { flex-shrink: 0; }
+.cp-multitrack-library-heading { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .cp-multitrack-cast { margin-top: 8px; font-size: var(--text-base); color: var(--fg-3); }
 .cp-multitrack-cast summary { cursor: pointer; }
 .cp-multitrack-cast-actions { display: flex; align-items: center; gap: 8px; }
@@ -80,9 +96,15 @@
 .cp-multitrack-transcript { min-width: 0; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line-1); background: var(--bg-0); }
 .cp-multitrack-transcript-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; }
 .cp-multitrack-transcript-head h2 { margin: 0; color: var(--fg-1); font-size: var(--text-xl); font-weight: var(--weight-semibold); }
-.cp-multitrack-transcript-head > span { color: var(--fg-3); font-size: var(--text-base); }
+.cp-multitrack-transcript-head > span { margin-left: auto; color: var(--fg-3); font-size: var(--text-base); }
+.cp-multitrack-info { flex: none; }
 .cp-multitrack-search { padding: 0 20px; }
-.cp-multitrack-search input { width: 100%; }
+.cp-multitrack-search input[type=search] { width: 100%; }
+.cp-multitrack-search-options { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.cp-multitrack-search-options label { display: flex; align-items: center; gap: 6px; min-height: 26px; color: var(--fg-3); font-size: var(--text-base); cursor: pointer; }
+.cp-multitrack-search-options input { width: auto; flex: none; margin: 0; }
+.cp-multitrack-search-options .btn { min-height: 26px; padding: 2px 8px; font-size: var(--text-base); white-space: nowrap; }
+.cp-multitrack-search > p { margin: 6px 0 0; overflow-wrap: anywhere; }
 .cp-multitrack-transcript-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 16px; }
 .cp-multitrack-transcript-empty { margin: 48px 12px; text-align: center; }
 .cp-multitrack-transcript-empty h3 { color: var(--fg-2); font-size: var(--text-lg); font-weight: var(--weight-semibold); }
@@ -135,16 +157,24 @@
 .cp-multitrack-cast[open] { max-width: 560px; padding: 3px 4px 12px; box-sizing: border-box; max-height: 240px; overflow-y: auto; }
 .cp-multitrack-cast-actions { margin-top: 8px; }
 .cp-multitrack-transport { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; padding: 8px 16px; border-top: 0; }
-.cp-multitrack-transport-center, .cp-multitrack-toolbar-options, .cp-multitrack-toolbar-end { display: flex; align-items: center; gap: 6px; }
-.cp-multitrack-toolbar-end { justify-content: flex-end; }
+.cp-multitrack-transport-center { display: grid; grid-template-columns: repeat(2, 34px) 46px repeat(2, 34px); justify-content: center; align-items: center; gap: 6px; }
+.cp-multitrack-transport-buttons { display: contents; }
+.cp-multitrack-transport-buttons > button { grid-row: 2; }
+.cp-multitrack-toolbar-options, .cp-multitrack-audition-status { display: flex; align-items: center; gap: 6px; }
+.cp-multitrack-toolbar-end { display: grid; justify-items: end; align-content: center; gap: 6px; min-width: 0; }
+.cp-multitrack-trt { display: flex; align-items: baseline; gap: 6px; color: var(--fg-3); font-size: var(--text-base); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cp-multitrack-trt > :first-child { color: var(--fg-4); font-size: var(--text-2xs); }
+.cp-multitrack-timecode-dialog { position: relative; inset: auto; transform: none; pointer-events: auto; max-width: calc(100vw - 32px); box-sizing: border-box; }
+.cp-multitrack-timecode-dialog:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: 2px; }
 @container (max-width: 720px) {
   .cp-multitrack-transport-center { grid-column: 1 / -1; grid-row: 1; justify-self: center; }
-  .cp-multitrack-toolbar-options { grid-row: 2; grid-column: 1 / 3; }
-  .cp-multitrack-toolbar-end { grid-row: 2; grid-column: 3; }
+  .cp-multitrack-toolbar-options { grid-row: 2; grid-column: 1 / 2; }
+  .cp-multitrack-toolbar-end { grid-row: 2; grid-column: 2 / 4; }
 }
 .cp-multitrack-toolbar-options .btn { min-height: 28px; padding: 0 8px; font-size: var(--text-base); }
 .cp-multitrack-toolbar-options [aria-pressed=true] { background: var(--bg-4); color: var(--fg-1); }
-.cp-multitrack-transport-center .cp-tc { margin-right: 6px; }
+.cp-multitrack-transport-center .cp-tc { grid-column: 3; justify-self: center; margin: 0; cursor: pointer; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.cp-multitrack-transport-center .cp-tc:hover { border-color: var(--line-3); color: var(--fg-1); }
 .cp-multitrack-timeline { min-height: 140px; }
 .cp-multitrack-timeline-tools { padding: 4px 16px 8px; justify-content: flex-start; }
 .cp-multitrack-density { margin-left: auto; display: flex; align-items: center; gap: 8px; }
@@ -160,21 +190,25 @@
 .cp-multitrack-check input { margin: 0; width: 13px; height: 13px; flex-shrink: 0; }
 .cp-multitrack-page input.cp-multitrack-owner { min-height: 24px; max-height: 24px; height: 24px; min-width: 0; box-sizing: border-box; padding: 2px 4px; border: 1px solid transparent; background: transparent; font-size: var(--text-base); text-overflow: ellipsis; cursor: default; }
 .cp-multitrack-page input.cp-multitrack-owner:focus { cursor: text; }
+.cp-multitrack-owner-status { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.cp-multitrack-saved-status { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; width: 16px; height: 16px; }
+.cp-multitrack-saved-status.is-saved { color: var(--success); }
+.cp-multitrack-saved-status.needs-review { color: var(--warning); }
 .cp-multitrack-track-switches { gap: 4px; }
 .cp-multitrack-track-switches .btn { min-width: 24px; width: 24px; min-height: 24px; max-height: 24px; height: 24px; box-sizing: border-box; line-height: var(--leading-none); padding: 0; font-size: var(--text-base); }
 .cp-multitrack-track-switches .cp-multitrack-text-toggle { width: 36px; }
 .cp-multitrack-track-switches .cp-multitrack-level { width: 24px; height: 24px; flex-shrink: 0; }
-.cp-multitrack-level-popover { position: fixed; z-index: var(--z-popover); display: grid; justify-items: center; gap: 12px; width: 168px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; box-sizing: border-box; padding: 12px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); color: var(--fg-2); font-size: var(--text-base); }
+.cp-multitrack-level-popover { position: fixed; z-index: var(--z-popover); display: grid; justify-items: center; gap: 6px; width: 120px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; box-sizing: border-box; padding: 8px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); color: var(--fg-2); font-size: var(--text-base); }
 .cp-multitrack-level-heading { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cp-multitrack-fader { display: flex; align-items: stretch; gap: 12px; height: 208px; padding-block: 8px; }
-.cp-multitrack-level-popover .cp-multitrack-gain-slider { writing-mode: vertical-lr; direction: rtl; width: 28px; height: 208px; padding: 0; margin: 0; accent-color: var(--fg-2); cursor: ns-resize; }
-.cp-multitrack-gain-ticks { position: relative; width: 48px; margin-block: 8px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.cp-multitrack-fader { display: flex; align-items: stretch; gap: 8px; height: 132px; }
+.cp-multitrack-level-popover .cp-multitrack-gain-slider { writing-mode: vertical-lr; direction: rtl; width: 28px; height: 132px; padding: 0; margin: 0; accent-color: var(--fg-2); cursor: ns-resize; }
+.cp-multitrack-gain-ticks { position: relative; width: 56px; margin-block: 8px; color: var(--fg-3); font-variant-numeric: tabular-nums; line-height: var(--leading-none); }
 .cp-multitrack-gain-ticks > span { position: absolute; transform: translateY(-50%); white-space: nowrap; }
 .cp-multitrack-gain-ticks > span::before { content: ""; display: inline-block; width: 6px; margin-right: 6px; border-top: 1px solid var(--line-3); vertical-align: middle; }
 .cp-multitrack-gain-ticks .cp-multitrack-gain-unity { color: var(--fg-1); font-weight: var(--weight-semibold); }
-.cp-multitrack-level-popover .cp-multitrack-gain-value { width: 100%; min-width: 0; min-height: 28px; box-sizing: border-box; text-align: center; font-family: var(--font-ui); font-size: var(--text-md); font-variant-numeric: tabular-nums; }
+.cp-multitrack-gain-reset { position: absolute; left: calc(100% + 4px); top: 50%; transform: translateY(-50%); width: 24px; height: 24px; }
+.cp-multitrack-level-popover .cp-multitrack-gain-value { width: 100%; min-width: 0; height: 26px; min-height: 26px; box-sizing: border-box; text-align: center; font-family: var(--font-ui); font-size: var(--text-md); font-variant-numeric: tabular-nums; }
 .cp-multitrack-gain-value.is-boosted { color: var(--warning); }
-.cp-multitrack-gain-hint { color: var(--fg-3); font-size: var(--text-sm); }
 .cp-multitrack-track-switches [aria-pressed=true] { background: var(--bg-5); color: var(--fg-1); border-color: var(--line-3); }
 .cp-multitrack-lane-audio { cursor: default; touch-action: none; user-select: none; }
 .cp-multitrack-clip, .cp-multitrack-lane.is-solo .cp-multitrack-clip { top: 2px; bottom: 2px; background: color-mix(in srgb, var(--novella-violet) 12%, var(--bg-2)); border-radius: var(--r-2xs); border-left: 1px solid var(--line-2); }
@@ -202,8 +236,24 @@
 .cp-multitrack-generation .cp-multitrack-options { margin: 0; align-items: center; gap: 10px; }
 .cp-multitrack-options label { flex-direction: row; align-items: center; gap: 6px; }
 .cp-multitrack-options .cp-select { min-width: 100px; max-width: 160px; }
+.cp-multitrack-asr-options { min-width: 0; max-width: 280px; color: var(--fg-3); font-size: var(--text-base); }
+.cp-multitrack-asr-options summary { min-height: 30px; align-content: center; cursor: pointer; padding: 4px 6px; border-radius: var(--r-sm); }
+.cp-multitrack-asr-options summary:hover { color: var(--fg-1); background: var(--bg-3); }
+.cp-multitrack-asr-options summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.cp-multitrack-asr-options > div { padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.cp-multitrack-asr-options p { margin: 0; line-height: var(--leading-normal); }
+.cp-multitrack-asr-options label { min-height: 26px; }
+.cp-multitrack-asr-options input { margin: 0; flex-shrink: 0; }
 .cp-multitrack-options > .btn { margin-left: 0; }
-.cp-multitrack-generate-row { min-width: 200px; flex: 1; }
+.cp-multitrack-generate-row { min-width: 0; max-width: 100%; flex: 0 1 auto; margin-left: auto; padding-left: 14px; }
+.cp-multitrack-generate-row > .cp-gen-btn { flex: 0 1 240px; width: 240px; min-width: 0; }
+.cp-multitrack-generate-row > .btn { flex-shrink: 0; }
+/* Both labels contribute to the same line's width. The shared CTA otherwise
+   positions its loading label inside the shorter idle label's rectangle. */
+.cp-multitrack-generate-row .cp-gen-txt { display: grid; min-width: 0; max-width: calc(100% - 23px); font-variant-numeric: tabular-nums; }
+.cp-multitrack-generate-row .cp-gen-idle,
+.cp-multitrack-generate-row .cp-gen-load { grid-area: 1 / 1; position: static; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-multitrack-generate-row .cp-gen-load { display: block; }
 .cp-multitrack-settings { width: min(560px, calc(100vw - 48px)); max-height: calc(100vh - 64px); overflow: auto; padding: 20px; border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--shadow-modal); background: var(--bg-1); color: var(--fg-2); font-size: var(--text-md); line-height: var(--leading-normal); }
 .cp-multitrack-settings header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .cp-multitrack-settings h2 { margin: 0; font-size: var(--text-3xl); font-weight: var(--weight-semibold); }
@@ -211,10 +261,20 @@
 .cp-multitrack-settings summary { cursor: pointer; padding: 8px 0; color: var(--fg-1); }
 .cp-multitrack-settings p, .cp-multitrack-settings li { color: var(--fg-3); }
 .cp-multitrack-settings footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+.cp-multitrack-disclosure.cp-icon-btn { flex: 0 0 24px; width: 24px; height: 24px; }
+.cp-multitrack-lane-label:has(> .cp-multitrack-disclosure), .cp-multitrack-lane-label:has(> .cp-multitrack-branch) { grid-template-columns: 24px 44px minmax(0, 1fr) auto; gap: 4px; }
+.cp-multitrack-branch { flex: 0 0 24px; text-align: center; color: var(--fg-4); }
+.cp-multitrack-lane.is-alternative .cp-multitrack-lane-label { border-left: 2px solid var(--line-2); }
+.cp-multitrack-lane.is-unavailable .cp-multitrack-clip { background: var(--bg-2); border-bottom: 1px dashed var(--line-3); }
+.cp-multitrack-media-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-multitrack-media-list { max-height: 300px; overflow-y: auto; margin-top: 12px; }
+.cp-multitrack-media-list > details { border-top: 1px solid var(--line-1); padding: 4px 0; }
+.cp-multitrack-media-list > details > summary > span:first-child { margin-right: 12px; }
+.cp-multitrack-media-list > details > summary > span:last-child { color: var(--fg-3); }
+.cp-multitrack-media-path { display: block; overflow-wrap: anywhere; white-space: pre-wrap; }
 @media (max-width: 1250px) {
   .cp-multitrack-transport { grid-template-columns: 1fr auto 1fr; gap: 6px; }
   .cp-multitrack-toolbar-options { flex-wrap: wrap; }
-  .cp-multitrack-toolbar-end > span { max-width: 72px; }
   .cp-multitrack-options { flex-wrap: wrap; }
 }
 
@@ -223,9 +283,12 @@
 .cp-multitrack-resize { left: -5px; top: 0; bottom: 0; }
 .cp-multitrack-run-info { margin: 8px 20px 12px; color: var(--fg-3); font-size: var(--text-base); line-height: var(--leading-normal); }
 .cp-multitrack-run-info p { margin: 8px 0; overflow-wrap: anywhere; }
-.cp-multitrack-run-info details[open] { max-height: 200px; overflow-y: auto; padding: 2px; }
-.cp-multitrack-run-info summary { cursor: pointer; color: var(--fg-2); padding: 4px 0; }
-.cp-multitrack-run-info ul { margin: 8px 0; padding-left: 16px; overflow-wrap: anywhere; }
+.cp-multitrack-run-details h3 { margin: 16px 0 6px; color: var(--fg-1); font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.cp-multitrack-run-details ul { margin: 6px 0; padding-left: 16px; overflow-wrap: anywhere; }
+.cp-multitrack-run-details p { overflow-wrap: anywhere; }
+.cp-multitrack-run-tracks { list-style: none; padding-left: 0; }
+.cp-multitrack-run-tracks li { display: grid; gap: 2px; padding: 6px 0; border-top: 1px solid var(--line-1); }
+.cp-multitrack-run-tracks strong { color: var(--fg-1); }
 .cp-multitrack-untimed { padding: 12px; border-top: 1px solid var(--line-1); }
 .cp-multitrack-untimed h3 { font-size: var(--text-md); color: var(--fg-2); font-weight: var(--weight-semibold); }
 .cp-multitrack-untimed article { margin-top: 16px; }
@@ -246,15 +309,10 @@
 .cp-multitrack-export { display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; gap: 8px; padding: 10px 12px; }
 .cp-multitrack-export-current { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; }
 .cp-multitrack-export-current .btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cp-multitrack-export-all { display: flex; gap: 8px; flex-wrap: wrap; }
+.cp-multitrack-export-all { display: flex; gap: var(--s-2) var(--s-1); flex-wrap: wrap; }
 .cp-multitrack-export-all .btn { flex: 1; white-space: nowrap; min-height: 28px; padding: 4px 8px; font-size: var(--text-base); }
 .cp-multitrack-export > p { margin: 0; max-height: 64px; overflow: auto; overflow-wrap: anywhere; }
-.cp-multitrack-person-nav { display: flex; min-width: 0; border-bottom: 1px solid var(--line-1); margin-bottom: 12px; padding: 0 8px; gap: 4px; }
-.cp-multitrack-person-tabs { display: flex; flex: 1; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
-.cp-multitrack-person-tabs .cp-tab { flex: none; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 8px 10px; }
-.cp-multitrack-person-nav .cp-multitrack-person-picker { width: 44px; flex: 0 0 44px; min-width: 0; color: transparent; padding-inline: 8px; background-position: center; }
-.cp-multitrack-person-picker option { color: var(--fg-1); background-color: var(--bg-2); }
-.cp-multitrack-person-color { display: inline-block; width: 8px; height: 8px; border-radius: var(--r-pill); margin-right: 6px; }
+.cp-multitrack-person-nav { min-width: 0; border-bottom: 1px solid var(--line-1); margin-bottom: 12px; padding: 0 8px; }
 .cp-multitrack-track-menu { position: fixed; z-index: var(--z-popover); width: 260px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 6px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); color: var(--fg-2); font-size: var(--text-md); }
 .cp-multitrack-track-menu-title { padding: 8px 10px; color: var(--fg-3); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; }
 .cp-multitrack-track-menu [role=menuitem] { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-sm); background: transparent; text-align: left; color: inherit; font: inherit; cursor: pointer; }
@@ -265,3 +323,8 @@
   .cp-multitrack-editor, .cp-multitrack-transcript-pane, .cp-multitrack-transcript { display: flex; flex-direction: column; }
   .cp-multitrack-transcript-content { flex: 1; }
 }
+.cp-multitrack-cast-preferences { max-height: 280px; overflow: auto; margin-block: 12px; }
+.cp-multitrack-cast-preference { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(220px, 1.4fr); gap: 12px; align-items: center; padding: 4px 0; }
+.cp-multitrack-cast-preference > span { overflow: hidden; text-overflow: ellipsis; }
+.cp-cast-marker-fields { display: flex; gap: 8px; min-width: 0; }
+.cp-cast-marker-fields > select { flex: 1; min-width: 0; }

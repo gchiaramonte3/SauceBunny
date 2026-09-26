@@ -19,23 +19,30 @@ struct Clip { start_frame: i64, duration_frames: i64, kind: String, source_id: O
 #[derive(Deserialize)]
 struct Position { numerator: i64, denominator: i64 }
 #[derive(Deserialize)]
-struct Source { extents: Vec<[u64; 2]>, data_offset: u64, sample_count: u64, sample_rate: u32, sample_width: u32 }
+struct Source {
+    extents: Vec<[u64; 2]>, data_offset: u64, sample_count: u64, sample_rate: u32, sample_width: u32,
+    #[serde(default = "mono")] channels: u32,
+    #[serde(default)] channel: u32,
+}
+fn mono() -> u32 { 1 }
 pub struct Reader { pub index: Index, file: Mutex<File> }
 type Readers = tokio::sync::Mutex<Vec<(String, Arc<Reader>)>>;
 static READERS: OnceLock<Readers> = OnceLock::new();
 
 pub async fn get(app: &AppHandle, document: &AafDocument, job: &str) -> Result<Arc<Reader>, AppError> {
     store::source_ready(document)?;
-    let key = format!("{}:{}", document.source_path, document.manifest.source_fingerprint);
+    let key = store::cache_key(document, "all", "pcm-v2");
     // One index build at a time; failed/cancelled owners do not poison the cache.
     let mut readers = READERS.get_or_init(Default::default).lock().await;
     process::check_cancelled(app, job)?;
     if let Some((_, reader)) = readers.iter().find(|(id, _)| id == &key) { return Ok(reader.clone()); }
-    let path = store::cache(app)?.join(format!("{}.index-v1.json", store::cache_key(document, "all", "pcm")));
+    let path = store::cache(app)?.join(format!("{key}.index-v2.json"));
     let cached = store::read_json::<Index>(&path).ok().filter(|index| index.validate(document).is_ok());
     let index: Index = if let Some(index) = cached { index } else {
-        let result = process::run(app, job, "index", "saucebunny-aaf", vec!["index".into(), "--input".into(), document.source_path.clone(),
-            "--expected-fingerprint".into(), document.manifest.source_fingerprint.clone()]).await?;
+        let mut args = vec!["index".into(), "--input".into(), document.source_path.clone(),
+            "--expected-fingerprint".into(), document.manifest.source_fingerprint.clone()];
+        if let Some(graph) = &document.manifest.graph { args.extend(["--graph".into(), "--sequence".into(), graph.sequence_id.clone()]); }
+        let result = process::run(app, job, "index", "saucebunny-aaf", args).await?;
         result.require_success("saucebunny-aaf")?;
         let index: Index = serde_json::from_str(&result.stdout)?;
         index.validate(document)?;
@@ -56,19 +63,20 @@ pub async fn get(app: &AppHandle, document: &AafDocument, job: &str) -> Result<A
 impl Index {
     fn validate(&self, document: &AafDocument) -> Result<(), AppError> {
         let bad = || AppError::invalid("Invalid embedded PCM index; re-import the AAF");
-        if self.schema_version != 1 || self.source_fingerprint != document.manifest.source_fingerprint
+        if !(1..=2).contains(&self.schema_version) || self.source_fingerprint != document.manifest.source_fingerprint
             || self.duration_frames != document.manifest.duration_frames
             || self.edit_rate.numerator != document.manifest.edit_rate.numerator
             || self.edit_rate.denominator != document.manifest.edit_rate.denominator
             || self.tracks.len() != document.manifest.tracks.len() || self.sources.len() > 10000 { return Err(bad()); }
         if self.sources.values().map(|s| s.extents.len()).sum::<usize>() > 200000 { return Err(bad()); }
         for source in self.sources.values() {
+            if !(1..=256).contains(&source.channels) || source.channel >= source.channels || ![2,3,4].contains(&source.sample_width) { return Err(bad()); }
             let mut size = 0_u64;
             for [offset, count] in &source.extents {
                 if *count == 0 || offset.checked_add(*count).is_none_or(|end| end > document.source_size) { return Err(bad()); }
                 size = size.checked_add(*count).ok_or_else(bad)?;
             }
-            if source.sample_count.checked_mul(u64::from(source.sample_width)).and_then(|bytes| source.data_offset.checked_add(bytes)).is_none_or(|end| end > size) { return Err(bad()); }
+            if source.sample_count.checked_mul(u64::from(source.sample_width)*u64::from(source.channels)).and_then(|bytes| source.data_offset.checked_add(bytes)).is_none_or(|end| end > size) { return Err(bad()); }
         }
         let mut ids = std::collections::HashSet::new();
         for track in &self.tracks {
@@ -86,7 +94,7 @@ impl Index {
                     if position.numerator < 0 || position.denominator <= 0 || position.denominator > 1_000_000_000 || source.sample_rate != track.sample_rate
                         || source.sample_width != track.sample_width
                         || source.data_offset > document.source_size || source.sample_count > document.source_size / u64::from(track.sample_width) { return Err(bad()); }
-                } else if clip.kind != "gap" || clip.source_id.is_some() || clip.source_sample_position.is_some() { return Err(bad()); }
+                } else if !matches!(clip.kind.as_str(), "gap" | "unavailable") || clip.source_id.is_some() || clip.source_sample_position.is_some() { return Err(bad()); }
             }
             if end != self.duration_frames { return Err(bad()); }
         }
@@ -111,6 +119,7 @@ impl Reader {
         for clip in &track.clips {
             let first = start.max(clip.start_frame); let end = (start + duration).min(clip.start_frame + clip.duration_frames);
             if first >= end { continue; }
+            if clip.kind == "unavailable" { return Err(AppError::invalid("This range contains unsupported processing")); }
             let count = self.index.sample(end, hz) - self.index.sample(first, hz);
             let source = clip.source_id.as_ref().and_then(|id| self.index.sources.get(id));
             let offset = if let Some(source) = source {
@@ -120,14 +129,25 @@ impl Reader {
                     + i128::from(first - clip.start_frame) * i128::from(hz) * i128::from(rate.denominator) * i128::from(p.denominator);
                 let sample = rounded(n, i128::from(p.denominator) * i128::from(rate.numerator));
                 if sample.checked_add(count).is_none_or(|end| end > source.sample_count) { return Err(AppError::invalid("PCM interval exceeds embedded audio")); }
-                source.data_offset.checked_add(sample * width).ok_or_else(|| AppError::invalid("PCM offset overflow"))?
+                source.data_offset.checked_add(sample * width * u64::from(source.channels)).ok_or_else(|| AppError::invalid("PCM offset overflow"))?
             } else { 0 };
             let mut emitted = 0;
             while emitted < count * width {
-                let size = (count * width - emitted).min(bytes.len() as u64) as usize;
+                let channels = source.map_or(1, |s| s.channels) as usize;
+                let limit = bytes.len() / (channels * width as usize) * width as usize;
+                let size = (count * width - emitted).min(limit as u64) as usize;
                 if let Some(source) = source {
                     let mut file = self.file.lock().map_err(|_| AppError::internal("PCM reader unavailable"))?;
-                    source.read(&mut file, offset + emitted, &mut bytes[..size])?;
+                    if source.channels == 1 { source.read(&mut file, offset + emitted, &mut bytes[..size])?; }
+                    else {
+                        let stride = width as usize * source.channels as usize;
+                        let mut interleaved = vec![0; size * source.channels as usize];
+                        source.read(&mut file, offset + emitted*u64::from(source.channels), &mut interleaved)?;
+                        for (input, output) in interleaved.chunks_exact(stride).zip(bytes[..size].chunks_exact_mut(width as usize)) {
+                            let channel = source.channel as usize * width as usize;
+                            output.copy_from_slice(&input[channel..channel+width as usize]);
+                        }
+                    }
                 } else { bytes[..size].fill(0); }
                 consume(&bytes[..size])?; emitted += size as u64;
             }
@@ -170,12 +190,27 @@ impl Source {
 mod tests {
     use super::*;
     #[test]
+    fn multichannel_native_reader_isolates_slot_channel_across_blocks_and_frames() {
+        let path = std::env::temp_dir().join(format!("pcm-channels-{}", uuid::Uuid::new_v4()));
+        let samples = 120_120_u64;
+        let bytes: Vec<u8> = (0..samples).flat_map(|i| [1234_i16, -((i%10000) as i16)].into_iter().flat_map(i16::to_le_bytes)).collect();
+        std::fs::write(&path,&bytes).unwrap();
+        let source = Source { extents:vec![[0,bytes.len() as u64]],data_offset:0,sample_count:samples,sample_rate:48000,sample_width:2,channels:2,channel:1 };
+        let index = Index { schema_version:2,source_fingerprint:"f".repeat(64),edit_rate:AafRate { numerator:24000,denominator:1001 },duration_frames:60,
+            sources:HashMap::from([("pcm".into(),source)]),tracks:vec![Track { id:"1".into(),sample_rate:48000,sample_width:2,clips:vec![Clip {
+                start_frame:0,duration_frames:60,kind:"audio".into(),source_id:Some("pcm".into()),source_sample_position:Some(Position { numerator:0,denominator:1 }) }] }] };
+        let reader=Reader { index,file:Mutex::new(File::open(&path).unwrap()) };
+        let mut actual=vec![]; reader.blocks(reader.index.track("1").unwrap(),3,55,|block| { assert!(block.len()<=192*1024); actual.extend_from_slice(block); Ok(()) }).unwrap();
+        let expected:Vec<u8>=(6006..116116).flat_map(|i| (-(i%10000) as i16).to_le_bytes()).collect();
+        assert_eq!(actual,expected); std::fs::remove_file(path).unwrap();
+    }
+    #[test]
     fn rational_offsets_gaps_peaks_and_cancellation_remain_truthful() {
         let root = std::env::temp_dir().join(format!("pcm-pyramid-{}",uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap(); let path = root.join("source.pcm");
         let samples: Vec<i16> = (0..20000).map(|index| if index == 100 { i16::MIN } else if index == 8100 { i16::MAX } else { (index % 100) as i16 }).collect();
         let bytes: Vec<u8> = samples.iter().flat_map(|sample| sample.to_le_bytes()).collect(); std::fs::write(&path,&bytes).unwrap();
-        let source = Source { extents: vec![[0,bytes.len() as u64]], data_offset:0, sample_count:20000, sample_rate:48000, sample_width:2 };
+        let source = Source { extents: vec![[0,bytes.len() as u64]], data_offset:0, sample_count:20000, sample_rate:48000, sample_width:2, channels:1, channel:0 };
         let index = Index { schema_version:1, source_fingerprint:"f".repeat(64), edit_rate:AafRate { numerator:24,denominator:1 }, duration_frames:8,
             sources:HashMap::from([("pcm".into(),source)]), tracks:vec![Track { id:"1".into(),sample_rate:48000,sample_width:2,clips:vec![
                 Clip { start_frame:0,duration_frames:4,kind:"audio".into(),source_id:Some("pcm".into()),source_sample_position:Some(Position { numerator:0,denominator:1 }) },
@@ -199,7 +234,7 @@ mod tests {
     fn fragmented_extents_cross_boundaries_without_following_paths() {
         let path = std::env::temp_dir().join(format!("pcm-{}", uuid::Uuid::new_v4()));
         std::fs::write(&path, b"xxxabcdefxxxxxghij").unwrap();
-        let source = Source { extents: vec![[3,6],[14,4]], data_offset: 0, sample_count: 5, sample_rate: 48000, sample_width: 2 };
+        let source = Source { extents: vec![[3,6],[14,4]], data_offset: 0, sample_count: 5, sample_rate: 48000, sample_width: 2, channels:1, channel:0 };
         let mut file = File::open(&path).unwrap(); let mut bytes = [0;6];
         source.read(&mut file, 4, &mut bytes).unwrap(); assert_eq!(&bytes, b"efghij");
         assert!(source.read(&mut file, 9, &mut bytes).is_err());
@@ -213,7 +248,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var("SB_AAF_BENCH_DIR").unwrap());
         let manifest: AafManifest = serde_json::from_slice(&std::fs::read(std::env::var("SB_AAF_REAL_INDEX").unwrap()).unwrap()).unwrap();
         let metadata = std::fs::metadata(&source).unwrap();
-        let document = AafDocument { schema_version: 1, id: "f".repeat(64), source_path: source.clone(), source_size: metadata.len(), source_modified_ms: store::modified_ms(&metadata), manifest, labels: vec![], transcripts: vec![] };
+        let document = AafDocument { schema_version: 1, shoot_date_override: None, id: "f".repeat(64), source_path: source.clone(), source_size: metadata.len(), source_modified_ms: store::modified_ms(&metadata), manifest, labels: vec![], transcripts: vec![] };
         index.validate(&document).unwrap(); store::source_ready(&document).unwrap();
         let reader = Reader { index, file: Mutex::new(File::open(&source).unwrap()) };
         let track = reader.index.track("10").unwrap();

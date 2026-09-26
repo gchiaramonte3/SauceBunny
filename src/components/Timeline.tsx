@@ -1,3 +1,4 @@
+import { frameRate, secondsToFrames, secondsToTc } from "../lib/timecode";
 import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { AppStatus, ReviewRangeDraft } from "../types";
 import { secondsToHms } from "../lib/timecode";
@@ -9,6 +10,7 @@ import { getPlayheadFrames, usePlayheadFrames, setScrubbing } from "../lib/playh
 import { getGhosts, subscribeGhosts } from "../lib/ghost-store";
 import { loadReviewer, reviewerColorFor } from "../lib/review";
 import { isRealSpan } from "../lib/review-range";
+import type { CutMarker } from "../lib/cut-markers";
 
 /** Scrub-track height (px) when a filmstrip is shown — matches
  *  `.cp-track.has-filmstrip` in transport.css; also sizes the decoded thumbs. */
@@ -67,11 +69,11 @@ function PlayheadCursor({ durationFrames, fps, onMouseDown, onSeek }: {
 }) {
   const frames = usePlayheadFrames();
   const left = durationFrames > 0 ? (frames / durationFrames) * 100 : 0;
-  const rate = Math.max(1, Math.round(fps));
+  const rate = frameRate(fps);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (durationFrames <= 0) return;
-    const second = rate;
+    const second = Math.round(rate);
     let next: number | null = null;
     switch (e.key) {
       case "ArrowLeft":  next = frames - (e.shiftKey ? second : 1); break;
@@ -125,7 +127,7 @@ function RangeDraftBand({ draft, fps, durationFrames }: {
   fps: number;
   durationFrames: number;
 }) {
-  const r = Math.max(1, Math.round(fps));
+  const r = frameRate(fps);
   // Only a live draft needs the clock; a locked one is two fixed numbers.
   const playhead = usePlayheadFrames();
   // A live draft too short to be a span will POST as a point comment, so it
@@ -190,6 +192,10 @@ type Props = {
    *  the track, a title chip on hover, click → seek. Deliberately unlike the
    *  reviewer-tinted comment dots (which sit mid-track). */
   chapterMarkers?: { time: number; title: string }[];
+  /** Detected shot changes: bottom-edge ticks, never chapters. */
+  cutMarkers?: CutMarker[];
+  /** Source seconds retain the detector's precision at fractional frame rates. */
+  onCutSeek?: (seconds: number) => void;
   onSeek: (f: number) => void;
   onScrubStart?: () => void;
   onScrub?: (f: number) => void;
@@ -205,7 +211,7 @@ function TimelineGhosts({ fps, pct }: { fps: number; pct: (f: number) => number 
   const ghosts = useSyncExternalStore(subscribeGhosts, getGhosts);
   if (ghosts.length === 0) return null;
   const me = loadReviewer();
-  const r = Math.max(1, Math.round(fps));
+  const r = frameRate(fps);
   return (
     <>
       {ghosts.map((g) => (
@@ -225,7 +231,7 @@ function TimelineGhosts({ fps, pct }: { fps: number; pct: (f: number) => number 
 export function Timeline({
   status, durationFrames, inFrames, outFrames, fps,
   queuedRanges, onRangeClick, commentMarkers, reviewRangeDraft, filmstripPath, waveformOn, speakerLanes,
-  chapterMarkers, onSeek, onScrubStart, onScrub, onScrubEnd, onHeightChange,
+  chapterMarkers, cutMarkers, onCutSeek, onSeek, onScrubStart, onScrub, onScrubEnd, onHeightChange,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -425,7 +431,7 @@ export function Timeline({
               <div className={"tick " + (major ? "major" : "minor")} style={{ left: `${left}%` }} />
               {major && (
                 <div className="tick-label" style={{ left: `${left}%` }}>
-                  {secondsToHms(frames / Math.max(1, Math.round(fps)))}
+                  {secondsToHms(frames / frameRate(fps))}
                 </div>
               )}
             </Fragment>
@@ -456,7 +462,7 @@ export function Timeline({
         {speakerLanes && speakerLanes.length > 0 && !dim && (
           <div className="cp-track-lanes" aria-hidden>
             {speakerLanes.map((lane, i) => {
-              const r = Math.max(1, Math.round(fps));
+              const r = frameRate(fps);
               const left = pct((lane.startMs / 1000) * r);
               const width = Math.max(0, pct(((lane.endMs - lane.startMs) / 1000) * r));
               return (
@@ -536,7 +542,7 @@ export function Timeline({
                 never obscure the filmstrip, waveform, or speaker lanes below.
                 Hover reveals the title chip; click seeks to the chapter. */}
             {chapterMarkers?.map((c, i) => {
-              const r = Math.max(1, Math.round(fps));
+              const r = frameRate(fps);
               return (
                 <div
                   key={`ch-${c.time}-${i}`}
@@ -548,12 +554,24 @@ export function Timeline({
                 </div>
               );
             })}
+            {cutMarkers?.map((cut) => (
+              <button key={`cut-${cut.time}`} type="button" className="cp-track-cut"
+                style={{ left: `${pct(cut.time * frameRate(fps))}%` }}
+                aria-label={`Cut at ${secondsToTc(cut.time, fps)}`}
+                title={`Cut at ${secondsToTc(cut.time, fps)}`}
+                onMouseDown={e => e.stopPropagation()}
+                onClick={e => {
+                  e.stopPropagation();
+                  if (onCutSeek) onCutSeek(cut.time);
+                  else onSeek(secondsToFrames(cut.time, fps));
+                }} />
+            ))}
             {/* Review comment RANGES — a thin reviewer-tinted bar with bracket
                 caps in the comment lane. Deliberately unlike the orange clip
                 selection: it sits low on the track and carries the note's
                 colour. Drawn before the dots so the anchor dot reads on top. */}
             {commentMarkers?.map((m) => {
-              const r = Math.max(1, Math.round(fps));
+              const r = frameRate(fps);
               if (m.timeEnd == null || m.timeEnd <= m.time) return null;
               return (
                 <div
@@ -572,7 +590,7 @@ export function Timeline({
             )}
             {/* Review comment markers — click a dot to jump to that note. */}
             {commentMarkers?.map((m) => {
-              const r = Math.max(1, Math.round(fps));
+              const r = frameRate(fps);
               return (
                 <div
                   key={m.id}

@@ -4,6 +4,92 @@ The current application rulebook. Source contracts enforce many of these
 rules, but cannot prove rendered geometry, dynamic names or complete keyboard
 behavior. Use the catalog and browser checks alongside those contracts.
 
+### Multitrack saved-transcript indicators · 2026-09-22
+
+Each track reserves a small status-icon slot beside its editable mic-owner name.
+Show a circle check only for a committed transcript, including an empty result;
+use the existing review icon when timing needs attention. Hover text and accessible
+names identify saved results, no-speech outcomes and selected-range coverage.
+Derive status from the document, not an in-flight job. Keep it on reopening,
+offline lanes and failed/cancelled regeneration while an earlier result remains.
+Do not shift Solo/Mute or waveform alignment as individual tracks finish.
+
+Multitrack's export footer also offers **Selected (N)** using the timeline
+checkboxes and current export format. Person tabs, search and Solo/Mute do not
+change that scope. Preserve the per-person and entire-transcript actions. Enable
+selection for offline tracks with saved results; generation still requires ready
+media. Disable an export with no meaningful saved content in its selected scope.
+The save dialog retains editable names, and an open export keeps its chosen track
+IDs even if selection changes while saving. Reuse the footer's wrapping controls.
+
+For grouped AAFs, the existing bulk action reads **Avid by mic**. Group alternatives
+are independently exportable from their track menu. Native dialog titles and the
+saved import guide identify the parent-sequence destination; there is no new
+persistent footer explanation or fabricated sequence-track numbering. Multi-mic
+Avid exports containing alternatives choose a folder and keep each mic separate.
+
+### Multitrack transcription options · 2026-09-22
+
+Whisper keeps Engine and Model visible, with a collapsed Options disclosure
+beside them. Accurate remains the default. Fast decoding and Skip non-speech
+are independent choices, remembered locally and snapshotted for an entire run.
+Explain the speed/accuracy tradeoff and quiet-voice risk inside the disclosure,
+not in a new persistent status row. Missing cached speech detection falls back
+to full audio and reports that in Pipeline. Never download a model implicitly.
+Use the same controls in Generate/Regenerate; disable them during recognition.
+Hide Whisper-only choices for Parakeet without erasing the user's preferences.
+Automatic model reuse is an implementation detail, not another switch.
+
+### Advanced Intelligence disclosure · 2026-09-21
+
+Keep the analysis results compact. Source and picture-model selection remain
+visible. Add cut markers follows Audio in the evidence toolbar, outside its
+tablist, and wraps without clipping at narrow widths. Count stays above results.
+Cut-marker confirmations borrow the existing timeline hint line for three
+seconds, then fade out and restore the current hint without shifting layout.
+Do not reserve a confirmation row in AI Summary. Repeat clicks restart that
+brief feedback; source changes discard it. Reduced motion omits the fade, not
+the expiration. Save failures remain visible beside the action until retried.
+Use the existing info icon beside the settings gear for run status, model used,
+audio status, timecode conventions, cut-marker guidance and collapsed technical
+details. The anchored popup escapes the drawer scroller, stays in the viewport,
+and supports Escape and focus return. An incomplete run marks the info trigger
+and offers Retry analysis; it must not look complete or discard partial results.
+Use terse empty cells, preserving the distinction between missing picture
+analysis and missing supplied dialogue. No model, decoder, or persistence change
+is implied by this presentation update.
+
+### Progressive analysis results · 2026-09-21
+
+Completed shot descriptions fill their existing cells immediately. Keep column
+widths stable as text arrives, preserve row keys and scroll position, and leave
+unfinished picture cells Pending. Dialogue can arrive first from local Whisper,
+then gain speaker labels after diarization. Distinguish Transcribing, No dialogue,
+Unavailable and Stopped; missing results are not evidence of silence. Keep
+speech-model errors behind Analysis info, alongside existing diagnostics.
+
+Shot start and end timecodes are separate seek buttons using Clip's bordered
+`cp-tc` readout, with a compact gap, hover feedback and white keyboard focus.
+Each goes to its own source timestamp; duration stays passive. Keep both
+buttons legible and contained at narrow widths and enlarged text sizes.
+
+Video Intelligence settings groups downloads into Picture analysis, Audio
+analysis and Video search. Only compatible picture models offer Use as default;
+reuse the transcription model-row action and Default badge. The existing saved
+picture choice is shared with Clip and detached panels, without downloading or
+loading a model. Changes apply to the next run; an active run keeps its model
+label. Audio classifiers, embeddings and rerankers are not picture-model options.
+
+Audio uses neutral microphone/music icons with Speech, Music or Speech + Music
+labels, and a compact SFX mark for supported environmental/non-speech sounds.
+Keep Unclassified, Not analyzed, and measured Silence distinct. Audio-tab ranges
+are visible without a disclosure; All keeps a compact expandable summary. Each
+range has separate bordered start/end seek controls on the source-frame grid.
+Sub-frame fragments remain in Info instead of zero-length rows. Raw audio times
+and scores are unchanged. Scores, classifier/window limitations, tentative genres
+and diagnostics belong in the header Info popup, not the result list. An audio
+window is not a frame-accurate sound-event boundary or a confirmed sound verdict.
+
 ### Review usability corrections · 2026-09-12
 
 The user approved the Review-page audit fixes, not a new theme or global
@@ -464,6 +550,32 @@ padding or a transparent `::before` — not the icon.
 
 ## Specialty controls are part of the system
 
+**Multitrack timecode:** center the current source timecode directly above Play.
+Keep the passive TRT readout at the right of the transport, separate from the
+AAF's start-timecode offset. Clicking current timecode or typing a digit opens
+the existing Clip-style numeric HUD. Digits fill from the right; Return commits
+a frame-aligned seek, Escape cancels, and letters never enter the value. Names,
+search fields, menus and other modals retain their keyboard ownership. The HUD
+uses the sequence's rate and drop-frame numbering, restores focus on close, and
+does not seek while typing. Its catalog example changes only local fixture state.
+
+**Always dark, including native controls.** The document declares a dark color
+scheme before React loads; the root uses `color-scheme: only dark`. Tauri pins
+both the app appearance and main window to Dark. OS Light/Auto must not make
+scrollbar tracks, transcript tabs, form controls or new panels white. Preserve
+the reader's existing WebKit scrollbar rules; do not replace them globally
+with standard scrollbar properties that suppress those rules in Safari.
+
+**Model downloads:** use `ModelDownloadProgress` for Whisper, Parakeet,
+diarization, text AI and Video Intelligence, including inline AI setup. Its
+4px rail is bounded to 280px and uses `--progress-track` / `--progress-fill`
+(neutral dark gray / secondary gray), not system accent blue, bright white,
+or success green. Show actual percentage and bytes when available; otherwise
+show the static indeterminate rail without an invented percentage. Metadata
+may wrap below the rail at narrow widths. Removing/checking a model is not
+a download. This passive indicator does not replace Generate/Export controls
+or alter download, cancellation or completion semantics.
+
 Consistency does not mean every button has the same geometry or paint.
 Preserve these existing, named exceptions:
 
@@ -600,6 +712,26 @@ and enlarged text at narrow and wide desktop sizes before adoption.
 
 ---
 
+## Tabs · 2026-09-26
+
+A tab strip never scrolls sideways. A Mac that always shows scrollbars (a mouse
+attached, and most older machines) draws a permanent bar under a scrolling
+strip, and on every Mac the tabs past the edge are hidden behind a swipe.
+
+- **Fixed set** (the drawer, Document/Analysis, search modes): the labels fit.
+  If a narrow panel can squeeze them, collapse them the way the drawer does
+  (icons under a container query), never wrap and never scroll.
+- **A set that grows with the data** (people in an AAF transcript): use
+  `TabStrip`. It draws the tabs that fit, in order, then **N more**, a menu of
+  the rest. The chosen tab is always drawn; picking one from the menu brings it
+  onto the strip. Arrow keys, Home and End walk the whole list, not only what
+  is drawn.
+- Long reference information is not a disclosure under the content. Put it
+  behind an info button (the (i) icon) that opens a dialog, and keep only a
+  one-line status inline.
+
+`tablist-overflow-contract` fails any `role="tablist"` whose class scrolls.
+
 ## Voice
 
 Terse and plain. **No em dashes** anywhere in user-facing copy. No
@@ -611,6 +743,20 @@ not "Operation failed: directory not empty". Singular and plural both get
 written — "1 transcripts" is the tell that nobody read the string.
 
 ---
+
+## Editable shot analysis
+
+The analysis table has a compact **Edit** mode. Outside Edit, boxed start/end
+timecodes retain click-to-seek. In Edit, each shot label, boundary, duration,
+picture, dialogue, and transcript-summary cell opens a focused field editor.
+Timecode accepts digits/colons only and validates against the source frame rate.
+Changing duration changes end, never neighboring rows. Explicit Save/Cancel and
+Reset field preserve user intent; save failures retain the draft. Do not turn
+model output into contenteditable DOM or silently autosave discarded drafts.
+Corrections are a separate durable layer over immutable model evidence. Existing
+timeline cuts stay unchanged; Add cut markers explicitly adds corrected starts.
+The editor uses the shared inputs, buttons, neutral tokens, focus trap, and
+modal tier, with a 440px maximum width and viewport-bounded height.
 
 ## Naming
 

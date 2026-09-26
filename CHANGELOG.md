@@ -5,11 +5,114 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+- Tab strips no longer scroll sideways, so a Mac that always shows scrollbars
+  no longer draws one under them. The AAF Audio person tabs show the people
+  that fit and put the rest behind an **N more** menu; the chosen person is
+  always on the strip.
+- AAF Audio's transcript details (where results are saved, failures, and each
+  track's engine and range) moved from the Get Info disclosure to an info (i)
+  button beside the track count, which opens them in a dialog.
+- Renaming a mic owner no longer switches the transcript pane to a different
+  person.
+- The Multitrack page is now called **AAF Audio** in the app (nav rail, ⌘K,
+  settings, diagnostics and Library labels). Saved sequences, the
+  `Transcripts/Multitrack` folder, shortcuts and stored preferences are
+  unchanged.
+
 ### Added
+- AAF Audio: Select all now includes alternative microphones inside collapsed
+  groups. Option-click a group's checkbox to set that mic and all of its
+  alternatives together; Option-click a group's disclosure triangle to open or
+  close every group.
+- AAF Audio remembers each sequence's mix and view: solo, mute and per-mic
+  gain, zoom, track size, text overlays, open groups, checked mics and the
+  waveform toggle come back when the sequence is reopened (the 50 most recently
+  used sequences are kept).
+- AAF Audio can transcribe part of a sequence. Mark in and out with I and O
+  (G clears, Q and W go to the marks, as in Clip); the marked span shows on the
+  ruler and Generate offers "Marked range". A range run is spliced into the
+  track's saved transcript: cues outside the range are kept and only the range
+  is replaced, where before any run replaced the whole transcript.
+- Retry buttons for a waveform that failed to build and for mic labels that
+  failed to save.
+- AAF Audio shows link status above the timeline ("412 of 495 media files
+  linked · 60 offline") with Relink folder…, Refresh and Details, so relinking
+  no longer means opening Settings. It hides once everything is linked.
+- When several files match one source, AAF Audio now lists every verified
+  copy in Linked media with "Use this copy", instead of leaving the source
+  offline and asking you to browse for it.
+
+### Fixed
+- An AAF exported from Media Composer 23.12 with a marker on the timecode
+  track no longer fails to import as "could not be read safely".
+- AAF Audio transcription no longer throws away a whole run when the engine
+  returns a cue whose text contains a blank line; the text stays with its cue.
+- A stray file in the AAF Audio folder (an iCloud "copy 2", a Finder duplicate,
+  a half-synced file) no longer empties Saved sequences or blocks every import.
+- Transcribing two separate ranges of a track no longer marks the frames
+  between them as transcribed; the track status and Transcript info say which
+  part is missing.
+- Saving a transcript no longer holds up every other job's Stop while the whole
+  AAF Audio document is re-read and written.
+- AAF bins with more than 64 sequences can be opened; record timecode wrapped
+  in a sequence is read, and an extra timecode track no longer fails the
+  import; very heavily cut multi-mic sequences are no longer refused as too
+  large.
+- Two relinks (the media strip and Settings) can no longer clear each other's
+  busy state, which had let playback and Generate resume mid-relink.
+- Changing the marker export frame rate no longer leaves an invalid Start TC
+  that silently exported every marker an hour early.
+- Copying a large file in the Library no longer freezes the app; deleting a
+  project folder no longer removes hidden files before refusing; a case-only
+  rename can no longer overwrite a different file on a case-sensitive volume.
+- Stop between two steps of an audio clip export or a caption retry now stops
+  it, instead of the job finishing and reporting success.
+- Sidecars that iCloud stripped of their execute bit now include Deno and the
+  AAF reader in the repair sweep.
+- Clicking "Save a copy" in a co-review call now saves even when "Save a copy
+  while watching" is off; that setting only governs automatic copies.
+- Speaker renames made in the popped-out panel now survive a file move or a
+  re-transcription, like renames made in the main window.
+- Chapters and speaker names no longer split between the two ways macOS can
+  spell an accented filename.
+- Stopping or failing a batch transcription no longer leaves a listener
+  behind for every item; a Library folder removed mid-scan stays removed.
+
+## [0.5.1] - 2026-09-22
+
+### Added
+- Library Projects organize references to local media, web links, transcripts
+  and saved Multitrack sequences in nested in-app folders. Favorites, smart
+  rules, keyboard/pointer filing and scoped undo/redo persist without moving
+  originals. Explicit relinking and rename continuity retain item identities;
+  failed or conflicting writes do not replace saved organization. The disk
+  browser exposes all scanned files in pages, loads deeper folders on demand,
+  and provides a full move-destination picker. Home remains unchanged.
+- Multitrack exports now keep source audio lanes in Avid markers (A1, A2, etc.)
+  instead of V1, including person-only exports and simultaneous microphones.
+  New AAF imports preserve physical track numbers; older imports use the lane
+  numbers already shown. Entire transcript honors the selected format: Avid
+  markers, CSV, plain text, SRT captions, or PDF through the native print dialog.
+  SRT uses sequence-relative timing and combines simultaneous voices; text,
+  CSV and PDF retain passages needing timing review.
+- Multitrack transcript tabs keep a compact, fixed dropdown beside the scrolling
+  names. An optional Search with AI checkbox searches original passages by
+  meaning through the shared local model runtime, with cancellable, bounded
+  sections, original seek timing and ordinary text search preserved.
+- Multitrack transcription keeps a steady track-count label and forward-only
+  progress across audio chunks, without alternating worker-phase text or
+  wrapping the loading label inside the Generate bar. The action is compact
+  and right-aligned, with separation from the settings and Stop beside it.
 - Multitrack audition levels use the existing speaker icon and a vertical dB
   fader with an editable readout, attenuation, silence, and boost up to +36 dB.
   Signed values with an optional dB suffix replace the selected readout; Reset
   restores 0 dB. Gain changes affect live audition only, not AAF media or ASR.
+  Track waveforms now grow or shrink with that gain, reusing cached peaks at
+  every zoom and lane size. Silence leaves the centre line; boosted peaks stay
+  inside the lane. Master monitoring volume and Solo/Mute retain their behavior.
+  The gain popover takes roughly half the previous space while retaining readable
+  labels, the editable dB value, and keyboard/pointer controls.
 - In-development Multitrack workspace reads embedded-audio AAF sequences into
   aligned microphone lanes with Clip-style canvas waveforms, additive Solo/Mute,
   editable cast labels, source timecode, and local Whisper/Parakeet transcription.

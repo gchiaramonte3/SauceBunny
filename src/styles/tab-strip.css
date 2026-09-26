@@ -1,0 +1,93 @@
+/* ── Tab strip (TabStrip.tsx) ──
+   A tab strip never scrolls sideways. On a Mac set to show scrollbars always
+   (the default with a mouse, and what older machines tend to run) a scrolling
+   strip wears a permanent scrollbar under its tabs. So the strip keeps the
+   tabs that fit and hands the rest to an "N more" button; the chosen tab is
+   always among the drawn ones. See lib/tab-overflow.ts. */
+.cp-tabstrip {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+.cp-tabstrip-list { display: flex; min-width: 0; }
+.cp-tabstrip .cp-tab {
+  max-width: 180px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 10px;
+}
+.cp-tabstrip-swatch {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+}
+.cp-tabstrip-more {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 32px;
+  padding: 0 10px;
+  margin-left: auto;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cp-tabstrip-more:hover, .cp-tabstrip-more[aria-expanded="true"] { color: var(--fg-1); background: var(--bg-3); }
+.cp-tabstrip-more:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -2px; }
+.cp-tabstrip-more[hidden] { display: none; }
+/* The invisible copy every tab is measured from. Same classes as the real
+   tabs, so a tab behind the menu is measured exactly like one on screen. */
+.cp-tabstrip-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+.cp-tabstrip-measure .cp-tabstrip-more { margin-left: 0; }
+.cp-tabstrip-menu {
+  position: fixed;
+  z-index: var(--z-popover);
+  display: grid;
+  min-width: 160px;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: min(420px, calc(100vh - 16px));
+  overflow-y: auto;
+  padding: var(--s-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-card);
+}
+.cp-tabstrip-menu > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: var(--s-1) var(--s-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.cp-tabstrip-menu > button:hover { background: var(--bg-3); }
+.cp-tabstrip-menu > button[aria-checked="true"] { background: var(--sel-fill); color: var(--sel-ink); }
+.cp-tabstrip-menu > button:focus-visible { outline: 2px solid var(--fg-1); outline-offset: -2px; }

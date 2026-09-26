@@ -77,9 +77,9 @@ describe("playhead-store", () => {
 });
 
 describe("playheadFramesToSeconds", () => {
-  it("divides by the rounded fps", () => {
+  it("divides by the actual source fps, not its nominal timecode base", () => {
     expect(playheadFramesToSeconds(60, 30)).toBe(2);
-    expect(playheadFramesToSeconds(90, 29.97)).toBe(3); // rounds to 30
+    expect(playheadFramesToSeconds(90, 30000 / 1001)).toBeCloseTo(3.003, 10);
   });
 
   it("clamps a degenerate fps to 1 instead of dividing by zero", () => {

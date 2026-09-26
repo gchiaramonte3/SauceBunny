@@ -1,3 +1,4 @@
+import { frameRate } from "../lib/timecode";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useDismiss } from "../hooks/use-dismiss";
 import { reportStorageProblem } from "../lib/storage";
@@ -52,6 +53,8 @@ import {
   cloneOverrides,
   EMPTY_OVERRIDES,
   cueKey,
+  speakerOverridesKey,
+  readSpeakerOverridesRaw,
   type SpeakerOverrides,
 } from "./transcript/helpers";
 
@@ -249,7 +252,7 @@ export function TranscriptViewer({
 
   // ── Speaker overrides ───────────────────────────────────────────
   // (Type + layer semantics documented at module scope, above the component.)
-  const storageKey = path ? `saucebunny.speakerNames.${path}` : null;
+  const storageKey = path ? speakerOverridesKey(path) : null;
   const [overrides, setOverrides] = useState<SpeakerOverrides>(EMPTY);
 
   // Load overrides when the path changes.
@@ -275,7 +278,7 @@ export function TranscriptViewer({
       if (p && p !== path) return;
       let next: SpeakerOverrides = EMPTY;
       try {
-        const raw = localStorage.getItem(storageKey);
+        const raw = path ? readSpeakerOverridesRaw(path) : null;
         if (raw) {
           next = loadSpeakerOverrides(path);
         }
@@ -490,7 +493,7 @@ export function TranscriptViewer({
     useCallback(() => {
       if (!playheadActive || flatCues.length === 0) return -1;
       const seconds = playheadFramesToSeconds(getPlayheadFrames(), fps);
-      const eps = 1 / Math.max(1, Math.round(fps)); // one frame, in seconds
+      const eps = 1 / frameRate(fps); // one frame, in seconds
       let lo = 0, hi = flatCues.length - 1;
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;

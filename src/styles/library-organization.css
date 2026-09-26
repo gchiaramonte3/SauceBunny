@@ -1,0 +1,55 @@
+/* Reference-only organization; reuse the Library's surfaces and type tokens. */
+.cp-lib-tree-scroll { padding-inline-end: var(--s-4); }
+.cp-project-section-title { margin: var(--s-3) var(--s-2) var(--s-1); color: var(--fg-3); font: var(--weight-semibold) var(--text-sm) var(--font-ui); }
+.cp-project-root { display: block; width: calc(100% - 16px); text-align: left; border: 0; background: none; padding: var(--s-2); border-radius: var(--r-sm); cursor: pointer; }
+.cp-project-tree-row { display: flex; align-items: center; gap: var(--s-1); min-height: 32px; padding-left: calc(min(var(--depth, 0), 6) * 12px); border-radius: var(--r-sm); }
+.cp-project-location { min-width: 0; flex: 1; display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-1); text-align: left; background: none; border: 0; color: var(--fg-2); font: inherit; cursor: pointer; }
+.cp-project-location span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-project-location svg { flex-shrink: 0; }
+.cp-project-location small { color: var(--fg-3); font-size: var(--text-sm); }
+.cp-project-tree-row.selected, .cp-project-root.selected, .cp-project-item.selected { background: var(--bg-3); }
+.cp-project-tree-row:hover, .cp-project-root:hover { background: var(--bg-2); }
+.cp-project-tree-row.dropping, .cp-project-folder.dropping { outline: 1px solid var(--focus-ring); background: var(--bg-3); }
+.cp-project-open { transform: rotate(90deg); }
+.cp-project-pane { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.cp-project-toolbar, .cp-project-inline, .cp-project-pages { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.cp-project-toolbar { padding: var(--s-3); border-bottom: 1px solid var(--line-1); }
+.cp-project-toolbar input { width: 180px; min-width: 100px; flex: 1; max-width: 280px; }
+.cp-project-breadcrumbs { display: flex; flex: 1 1 150px; align-items: center; gap: var(--s-1); flex-wrap: wrap; min-width: 0; }
+.cp-project-breadcrumbs button { max-width: 200px; overflow: hidden; text-overflow: ellipsis; color: var(--fg-2); border: 0; background: none; padding: var(--s-1); cursor: pointer; font: inherit; }
+.cp-project-breadcrumbs button + button::before { content: '/'; margin-right: var(--s-2); color: var(--fg-4); }
+.cp-project-help { margin: var(--s-2) var(--s-3); color: var(--fg-3); font-size: var(--text-md); line-height: var(--leading-normal); }
+.cp-project-error { margin: var(--s-2) var(--s-3); color: var(--danger-text); overflow-wrap: anywhere; font-size: var(--text-md); }
+.cp-project-error button { margin-left: var(--s-2); }
+.cp-project-content { flex: 1; min-height: 0; overflow: auto; padding: var(--s-2) var(--s-3); }
+.cp-project-folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--s-2); margin-bottom: var(--s-3); }
+.cp-project-folder { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2); padding: var(--s-3); background: var(--bg-1); border: 1px solid var(--line-2); border-radius: var(--r-md); color: var(--fg-2); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.cp-project-folder span { overflow-wrap: anywhere; }
+.cp-project-item { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2); border-bottom: 1px solid var(--line-1); }
+.cp-project-item > input[type="checkbox"], .cp-project-catalog input[type="checkbox"] { accent-color: var(--sel-fill); flex-shrink: 0; cursor: pointer; }
+.cp-project-item-open { flex: 1; min-width: 0; background: none; border: 0; color: var(--fg-1); font: inherit; text-align: left; cursor: pointer; padding: var(--s-1); }
+.cp-project-item-open span { display: block; overflow-wrap: anywhere; }
+.cp-project-item-open small { display: block; color: var(--fg-3); font-size: var(--text-sm); margin-top: var(--s-1); }
+.cp-project-pages { padding: var(--s-2) var(--s-3); color: var(--fg-3); font-size: var(--text-sm); }
+.cp-project-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; box-sizing: border-box; }
+.cp-project-dialog label { display: flex; flex-direction: column; gap: var(--s-1); margin: var(--s-2) 0; color: var(--fg-2); font-size: var(--text-md); }
+.cp-project-dialog form, .cp-project-dialog fieldset { min-width: 0; }
+.cp-project-dialog fieldset { border: 1px solid var(--line-2); border-radius: var(--r-sm); margin: var(--s-3) 0; }
+.cp-project-dialog input, .cp-project-dialog select { max-width: 100%; min-width: 0; box-sizing: border-box; }
+.cp-project-dialog .cp-project-inline input { flex: 1; }
+.cp-project-catalog { max-height: 260px; overflow-y: auto; border: 1px solid var(--line-1); border-radius: var(--r-sm); padding: var(--s-2); }
+.cp-project-catalog label { flex-direction: row; align-items: center; gap: var(--s-2); overflow-wrap: anywhere; }
+.cp-project-catalog label input { flex: 0 0 auto; }
+.cp-project-catalog label small { display: block; color: var(--fg-3); font-size: var(--text-sm); }
+.cp-project-inline form { flex: 1; }
+.cp-project-dialog > input[type="search"] { margin: var(--s-2) 0; width: 100%; }
+.cp-project-catalog .cp-rowmenu-folder { display: block; width: 100%; }
+.cp-project-picked { max-height: 160px; overflow-y: auto; font-size: var(--text-md); }
+.cp-project-picked div { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.cp-project-picked span, .cp-project-destination { overflow-wrap: anywhere; }
+.cp-project-dialog .cp-rowmenu-actions { flex-wrap: wrap; }
+.cp-lib-browse .cp-lib-bar, .cp-lib-browse .cp-lib-bar-controls, .cp-lib-browse .cp-newfolder-form { flex-wrap: wrap; min-width: 0; }
+.cp-lib-browse .cp-newfolder-form { flex-shrink: 1; }
+.cp-lib-browse .cp-newfolder-form select { max-width: 240px; }
+.cp-lib-browse .cp-newfolder-err { white-space: normal; }
+.cp-lib-statusbar { flex-wrap: wrap; }

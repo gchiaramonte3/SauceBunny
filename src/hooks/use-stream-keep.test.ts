@@ -107,4 +107,30 @@ describe("useStreamKeep wiring", () => {
     });
     expect(result.current.state.phase).not.toBe("failed");
   });
+
+  describe("with the automatic-copy preference off", () => {
+    beforeEach(() => { localStorage.setItem("saucebunny.streamKeep", "false"); });
+    afterEach(() => { localStorage.removeItem("saucebunny.streamKeep"); });
+
+    it("still saves when the user clicked Save a copy", async () => {
+      // The preference governs copies nobody asked for. A click on the chip
+      // was swallowed as "declined" and the button simply did nothing.
+      // Hoisted: a fresh object per render would re-fire the watch effect.
+      const explicitWatch = { ...WATCH, explicit: true };
+      const { result } = renderHook(() =>
+        useStreamKeep({ watching: explicitWatch, onHandOff: () => {} }),
+      );
+      expect(result.current.enabled).toBe(false);
+      await act(async () => { vi.advanceTimersByTime(11_000); });
+      expect(fetches()).toBe(1);
+      expect(result.current.state.phase).toBe("keeping");
+    });
+
+    it("does not start an automatic copy", async () => {
+      const { result } = mount();
+      await act(async () => { vi.advanceTimersByTime(11_000); });
+      expect(fetches()).toBe(0);
+      expect(result.current.state.reason).toBe("declined");
+    });
+  });
 });

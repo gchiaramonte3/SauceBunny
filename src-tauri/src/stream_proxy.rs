@@ -307,6 +307,12 @@ pub(crate) fn is_safe_upstream(url: &str) -> bool {
                 || ip.is_unspecified() || ip.is_broadcast())
         }
         Some(url::Host::Ipv6(ip)) => {
+            // `::ffff:127.0.0.1` is loopback wearing a v6 costume, and none of
+            // the v6 checks below see it as such. Judge it by the v4 rules.
+            if let Some(v4) = ip.to_ipv4_mapped() {
+                return !(v4.is_loopback() || v4.is_private() || v4.is_link_local()
+                    || v4.is_unspecified() || v4.is_broadcast());
+            }
             // fc00::/7 unique-local + fe80::/10 link-local via segment math
             // (avoids not-yet-stable std helpers).
             let seg0 = ip.segments()[0];
@@ -1465,14 +1471,16 @@ fn serve_local_file(request: tiny_http::Request, path: std::path::PathBuf) -> st
             ) {
                 headers.push(h);
             }
-            request.respond(
-                tiny_http::Response::from_string("range not satisfiable")
-                    .with_status_code(416)
-                    .with_header(
-                        tiny_http::Header::from_bytes("Access-Control-Allow-Origin".as_bytes(), cors.as_bytes())
-                            .expect("static header"),
-                    ),
-            )
+            // `headers` already carries the CORS origin; the Content-Range
+            // above is what tells the client the real length (RFC 9110 15.5.17).
+            let body = "range not satisfiable";
+            request.respond(tiny_http::Response::new(
+                tiny_http::StatusCode(416),
+                headers,
+                body.as_bytes(),
+                Some(body.len()),
+                None,
+            ))
         }
         // No Range → the whole file.
         None => {
@@ -1525,14 +1533,8 @@ fn decode_upstream(url_path: &str) -> Option<String> {
     // token still stands in front of it, so this is defence in depth rather
     // than an open door - but "the token holds" is exactly the assumption the
     // other two routes decline to make.
-    if !is_safe_upstream(&url) {
-        return None;
-    }
-    if url.starts_with("http://") || url.starts_with("https://") {
-        Some(url)
-    } else {
-        None
-    }
+    // It also refuses every scheme but http(s), so no separate check follows.
+    is_safe_upstream(&url).then_some(url)
 }
 
 #[cfg(test)]
@@ -1885,6 +1887,7 @@ mod tests {
 
         assert!(is_safe_upstream("https://rr3---sn-example.googlevideo.com/videoplayback?x=1"));
         assert!(is_safe_upstream("http://93.184.216.34/stream.mp4")); // public v4 literal
+        assert!(is_safe_upstream("http://[::ffff:93.184.216.34]/stream.mp4")); // public v4-mapped
         // Everything the proxy must never be a bounce into:
         for bad in [
             "http://127.0.0.1:8080/llm",
@@ -1899,6 +1902,9 @@ mod tests {
             "http://[::1]/x",
             "http://[fc00::1]/x",
             "http://[fe80::1]/x",
+            "http://[::ffff:127.0.0.1]/x", // v4-mapped loopback
+            "http://[::ffff:192.168.1.10]/x", // v4-mapped private
+            "http://[::ffff:169.254.169.254]/x", // v4-mapped link-local
             "http://user:pass@example.com/x", // credential-bearing
             "ftp://example.com/x",             // wrong scheme
             "file:///etc/passwd",

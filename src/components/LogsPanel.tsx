@@ -13,6 +13,9 @@ type Props = {
   /** Save a diagnostics report (versions + settings + this log) to a file —
    *  the local, no-telemetry way to hand support the context of a bug. */
   onExportDiagnostics?: () => void;
+  emptyMessage?: string;
+  activityLabel?: string;
+  actionsDisabled?: boolean;
   /** Optional secondary phase that overrides the status pill when active. */
   transcriptState?: "idle" | "running" | "done" | "error";
   transcriptProgress?: number;
@@ -31,6 +34,7 @@ type Props = {
    */
   metadataLoading?: boolean;
   playbackPrepBusy?: boolean;
+  analysisStatus?: "analyzing" | "stopping";
   /** Cancel button shown in the header while something is running. */
   canStop?: boolean;
   onStop?: () => void;
@@ -68,8 +72,9 @@ function transcriptPillLabel(
 export function LogsPanel({
   open, onToggle, status, progress, lines, onClear, onCopy, onExportDiagnostics,
   transcriptState, transcriptProgress, transcriptPhase, transcriptEngine,
-  metadataLoading, playbackPrepBusy,
+  metadataLoading, playbackPrepBusy, analysisStatus,
   canStop, onStop,
+  emptyMessage, activityLabel, actionsDisabled,
 }: Props) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -84,7 +89,8 @@ export function LogsPanel({
   //   2. Whisper     — long transcription, shows %.
   //   3. Playback prep — ffmpeg transcoding a local import.
   //   4. Resolving   — yt-dlp probing manifests after optimistic IFrame mount.
-  //   5. Default status pill (ready / idle / error / etc.).
+  //   5. Video analysis — background work, never masks foreground operations.
+  //   6. Default status pill (ready / idle / error / etc.).
   const whisperRunning = transcriptState === "running";
   const pill = status === "exporting"
     ? { label: `EXPORTING · ${Math.round(progress)}%`, cls: "working" }
@@ -94,7 +100,9 @@ export function LogsPanel({
         ? { label: "PREPARING PLAYBACK", cls: "working" }
         : metadataLoading
           ? { label: "RESOLVING METADATA", cls: "working" }
-          : pillFor(status);
+          : analysisStatus
+            ? { label: analysisStatus === "stopping" ? "STOPPING ANALYSIS" : "ANALYZING", cls: "working" }
+            : pillFor(status);
   // Parakeet is one-shot (no per-segment %), so don't show a pinned 0% bar for
   // it — except the model download, which does report bytes. Whisper + export
   // keep their real progress bars.
@@ -125,7 +133,7 @@ export function LogsPanel({
       >
         <IconChevronDown size={11} className="chev" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }} />
         <span className="title">Pipeline</span>
-        <span className={"status-pill " + pill.cls}>{pill.label}</span>
+        <span className={"status-pill " + pill.cls}>{activityLabel ?? pill.label}</span>
         {showProgress && (
           <div className="progress">
             <div className="progress-bar" style={{ width: `${shownProgress}%` }} />
@@ -150,13 +158,14 @@ export function LogsPanel({
               type="button"
               className="btn btn-ghost btn-compact"
               onClick={onExportDiagnostics}
+              disabled={actionsDisabled}
               title="Save a diagnostics report (app + sidecar versions, settings, recent log) to attach to a bug report"
             >
               Export diagnostics
             </button>
           )}
-          <button type="button" className="btn btn-ghost btn-compact" onClick={onCopy}>Copy</button>
-          <button type="button" className="btn btn-ghost btn-compact" onClick={onClear}>Clear</button>
+          <button type="button" className="btn btn-ghost btn-compact" disabled={actionsDisabled} onClick={onCopy}>Copy</button>
+          <button type="button" className="btn btn-ghost btn-compact" disabled={actionsDisabled} onClick={onClear}>Clear</button>
         </div>
       </div>
       {open && (
@@ -165,7 +174,7 @@ export function LogsPanel({
             <div className="log-line">
               <span className="ts">—</span>
               <span className="tag info">idle</span>
-              <span className="msg">Awaiting source. Logs will populate during fetch and export.</span>
+              <span className="msg">{emptyMessage ?? "Awaiting source. Logs will populate during fetch and export."}</span>
             </div>
           ) : lines.map((l) => (
             <div className="log-line" key={l.id}>

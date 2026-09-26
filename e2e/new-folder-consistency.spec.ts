@@ -48,15 +48,19 @@ test("the web shelf offers it too, named for what it makes", async ({ page }) =>
   await expect(btn).toHaveText(/New collection/);
 });
 
-test("the Library offers it inside a folder, and not at All", async ({ page }) => {
+test("the Library asks for an explicit disk destination at All", async ({ page }) => {
   await boot(page);
   await page.keyboard.press("Meta+2");
   await expect(page.locator(".cp-view-library")).toBeVisible();
   await page.locator(".cp-lib-statusbar").first().waitFor({ timeout: 10_000 });
 
-  // "All" is a union of every root: there is no single directory a new folder
-  // would belong to, so the control is honestly absent.
-  await expect(page.locator(".cp-lib-bar " + BTN)).toHaveCount(0);
+  await page.getByRole("button", { name: "New disk folder", exact: true }).click();
+  await page.getByRole("textbox", { name: "New disk folder name" }).fill("Selects");
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Choose where");
+  await page.getByRole("combobox", { name: "New folder destination" }).selectOption("/e2e-mock/Footage");
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "New disk folder name" })).toHaveCount(0);
 
   await page.getByRole("treeitem", { name: "Footage" }).first().click();
   await expect(page.locator(".cp-lib-bar " + BTN)).toBeVisible();

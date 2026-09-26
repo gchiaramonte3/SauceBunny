@@ -4,11 +4,17 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueueDrawer } from "./QueueDrawer";
 import { loadActiveTab, loadTabOrder, saveActiveTab, saveTabOrder, TAB_IDS } from "../lib/tab-state";
+import { createReviewSession } from "../lib/review-session";
+import { createPlaybackSessionController } from "../lib/playback-session-controller";
+import type { PlayerHandle } from "./player-handle";
 
 // Exercise the actual drawer's focus, persistence and keep-alive boundaries;
 // its content fixtures never invoke native jobs, read media or start capture.
 vi.mock("./TranscriptViewer", () => ({ TranscriptViewer: () => <input aria-label="Transcript fixture draft"/> }));
-vi.mock("./AiSummary", () => ({ AiSummary: () => <input aria-label="AI fixture draft"/> }));
+vi.mock("./AiSummary", () => ({ AiSummary: ({ onSeek }: { onSeek: (seconds: number) => void }) => <>
+  <input aria-label="AI fixture draft"/>
+  <button onClick={() => onSeek(1.001)}>Seek fractional shot fixture</button>
+</> }));
 vi.mock("./ReviewPanel", () => ({ ReviewPanel: () => <input aria-label="Review fixture draft"/> }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => null) }));
 
@@ -42,6 +48,39 @@ function navigate(from: string, key: string, to: string) {
 }
 beforeEach(() => localStorage.clear());
 afterEach(() => { cleanup(); vi.restoreAllMocks(); document.body.classList.remove("cp-tab-dragging"); });
+
+describe("AI source-time seeks", () => {
+  it("preserves a 23.976 cut's exact PTS through the drawer, session and player controller", () => {
+    const seekTo = vi.fn(async (seconds: number) => ({
+      requestedSeconds: seconds, presentedSeconds: seconds, status: "presented" as const,
+    }));
+    const player = { seekTo, isReady: () => true, isPlaying: () => false } as unknown as PlayerHandle;
+    const controller = createPlaybackSessionController(() => player);
+    controller.setSource("generated-colors", 2.002);
+    const session = createReviewSession(controller);
+    session.setSourceIdentity("generated-colors");
+    const nominalFrameSeek = vi.fn();
+    saveActiveTab("ai");
+    render(<QueueDrawer {...props({ fps: 24000 / 1001, reviewSession: session, onTranscriptSeek: nominalFrameSeek })}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Seek fractional shot fixture" }));
+    // The legacy nominal-frame path rounds this down to 1.000s: still red.
+    expect(seekTo).toHaveBeenCalledExactlyOnceWith(1.001);
+    expect(nominalFrameSeek).not.toHaveBeenCalled();
+
+    // A hidden file must remain protected when live/private inspection owns the monitor.
+    session.setInspectionBlock("Return to room");
+    fireEvent.click(screen.getByRole("button", { name: "Seek fractional shot fixture" }));
+    expect(seekTo).toHaveBeenCalledOnce();
+  });
+
+  it("keeps exact-second relay callbacks working in detached panels", () => {
+    const relay = vi.fn();
+    saveActiveTab("ai");
+    render(<QueueDrawer {...props({ embedded: true, onTranscriptSeek: relay })}/>);
+    fireEvent.click(screen.getByRole("button", { name: "Seek fractional shot fixture" }));
+    expect(relay).toHaveBeenCalledExactlyOnceWith(1.001);
+  });
+});
 
 describe("drawer keyboard tabs", () => {
   it("has one tab stop and arrows wrap while Home/End select and focus the edges", () => {

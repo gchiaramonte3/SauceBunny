@@ -1,3 +1,4 @@
+import { frameRate, secondsToFrames } from "./lib/timecode";
 import { RoomAccessDialog } from "./components/RoomAccessDialog";
 import { MultitrackPage } from "./components/MultitrackPage";
 import { lazy, Suspense, type ComponentProps } from "react";
@@ -7,6 +8,8 @@ import { PeerStageVideo } from "./components/PeerStageVideo"; import { MediaSpik
 import { SourceShareMenu, type ShareOption } from "./components/SourceShareMenu"; import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "./lib/import-extensions"; import {   findForSource, touchEntry, renameEntryPath as renameTranscriptEntryPath, notifyTranscriptsChanged, getHistory as getTranscriptHistory, type TranscriptHistoryEntry, } from "./lib/transcript-history"; import { prepareCues, renameSpeakerOverridesPath } from "./components/transcript/helpers"; import {   deriveOnboardingSteps, onboardingComplete, loadOnboardingDismissed, saveOnboardingDismissed, type OnboardingStepId, } from "./lib/onboarding"; import type { Command } from "./lib/commands"; import { buildCommands } from "./lib/commands"; import { markRangeFromSeconds as markRange } from "./lib/mark-range"; import { useBatchTranscribe } from "./hooks/use-batch-transcribe"; import { TranscriptSearchModal } from "./components/TranscriptSearchModal"; import { batchSummary } from "./lib/batch-queue"; import {   loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides, } from "./lib/keybindings"; import { migrateLegacyStorageKeys } from "./lib/migrate-storage"; import { sanitizePlaybackRate, stepPlaybackRate } from "./lib/playback-rate"; import { parseSrt } from "./lib/srt"; import { speakerLanes } from "./lib/speaker-stats"; import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers"; import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity"; import { MediaInfoModal } from "./components/MediaInfoModal"; import { loadReview, saveReview, ensureVersion, setActiveVersion, removeVersion, unlinkFingerprint, canUnlinkVersion, carriedComments, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, receivedReviewKey,  AUTHOR_KEY,
 } from "./lib/review";
 import { loadChapters, adoptSourceChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
+import { announceCutMarkers, loadCutMarkers, CUT_MARKERS_CHANGED_EVENT, type CutMarker } from "./lib/cut-markers";
+import { TimelineHint } from "./components/TimelineHint";
 import { appUndo } from "./lib/undo";
 import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage";
 import { useClipExportListeners } from "./hooks/use-clip-export-listeners";
@@ -37,7 +40,7 @@ import {
   durationToTc, framesToTc, tcToFrames, isCompleteTc,
   tcDigitsToDisplay,
 } from "./lib/timecode";
-import { currentQueueSource, queuedRangesForSource } from "./lib/queue-ranges";
+import { currentQueueSource, queuedRangesForSource, queueFrameRate } from "./lib/queue-ranges";
 import { hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
 import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { decodeHtmlEntities } from "./lib/text";
@@ -55,6 +58,8 @@ import { webPosterFor, setWebPoster } from "./lib/web-poster-store";
 import { migrateCaptionFont } from "./lib/caption-font";
 import { isMissingCommandError, staleBinaryMessage } from "./lib/stale-backend";
 import { newJobId } from "./lib/job-id";
+import { useVideoForegroundPriority } from "./hooks/use-video-intelligence";
+import { useAnalysisPipeline } from "./hooks/use-analysis-pipeline";
 import { DEFAULT_STUN_URL } from "./lib/ice-servers";
   // Cookie access is checked in Web sources or for an explicit authenticated
   // retry. Opening cached/public media never opens system permission settings.
@@ -631,7 +636,7 @@ export default function App() {
   // Effective fps and duration in frames.
   const fps = metadata?.fps && metadata.fps > 0 ? metadata.fps : fallbackFps;
   const durationFrames = useMemo(
-    () => metadata?.duration != null ? Math.floor(metadata.duration * Math.max(1, Math.round(fps))) : 0,
+    () => metadata?.duration != null ? secondsToFrames(metadata.duration, fps) : 0,
     [metadata, fps]
   );
   const durationTc = useMemo(() => durationToTc(metadata?.duration ?? 0, fps), [metadata, fps]);
@@ -654,6 +659,7 @@ export default function App() {
   const screenProgramActive = useSyncExternalStore(reviewSession.subscribeProgram,
     () => reviewSession.getProgramSource()?.kind === "screen");
   const [isPlaying, setIsPlaying] = useState(false);
+  useVideoForegroundPriority(isPlaying);
   const ndiInput = useNdiInput();
   const ndiProgram = ndiInput.program;
   const ndiRoomSource = ndiInput.roomSource;
@@ -688,6 +694,7 @@ export default function App() {
     void getCurrentWindow().show().then(() => getCurrentWindow().setFocus()).catch(() => {});
   });
   const [sessionsRequestTick,setSessionsRequestTick] = useState(0);
+  const [multitrackOpenRequest, setMultitrackOpenRequest] = useState<{ id: string; tick: number; frame?: number; trackId?: string } | null>(null);
   const previewStatus = ndiInput.previewState.phase === "error" ? "Preview needs attention · Not shared with room"
     : ndiInput.snapshot.candidate?.decodedReady && ndiInput.snapshot.candidate.encodedReady ? "Preview ready · Not shared with room" : "Preview connecting · Not shared with room";
   const ndiMonitorRef = useRef<ReviewProgramSurfacesHandle>(null);
@@ -1001,6 +1008,7 @@ export default function App() {
    * value before touching state — drops stale writes from previous loads.
    */
   const sourceSeqRef = useRef(0);
+  const videoMomentRef = useRef<{ sequence: number; path: string; seconds: number } | null>(null);
   /**
    * Cancel-token for the in-flight mediabunny local export. The token is
    * a tiny mutable object the export loop polls every ~150ms; flipping
@@ -1190,7 +1198,7 @@ export default function App() {
     if (!import.meta.env.DEV) return false;
     try { return localStorage.getItem("saucebunny.devPeerStream") === "1"; } catch { return false; }
   });
-  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "commands" | "about" | "integrations">("general");
+  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "video-intelligence" | "commands" | "about" | "integrations">("general");
 
   // ====== Media info modal ======
   // Deep inspector over the ORIGINAL local source file (never the ffmpeg
@@ -1376,6 +1384,8 @@ export default function App() {
     });
   }, []);
 
+  const analysisPipelineStatus = useAnalysisPipeline(appendLog);
+
   /**
    * Run a cookie-taking yt-dlp command, then RETRY once WITHOUT cookies if it
    * failed while cookies were actually applied. Public social posts (LinkedIn,
@@ -1479,7 +1489,7 @@ export default function App() {
     pushNotification,
     // Playhead at dispatch time, for the download fallback's position
     // handoff (RC4). fps via ref-free read: round at call time.
-    getPlayheadSeconds: () => getPlayheadFrames() / Math.max(1, Math.round(fpsRef.current)),
+    getPlayheadSeconds: () => getPlayheadFrames() / frameRate(fpsRef.current),
     maybePromptYtAuth,
     cookiesBrowser: cookiesBrowserOrNone,
     previewMaxHeight: defaults.previewMaxHeight,
@@ -1728,12 +1738,16 @@ export default function App() {
     playbackController.reportPresented(seconds);
   }, [playbackController]);
 
-  useEffect(() => playbackController.subscribe(() => {
-    const snapshot = playbackController.getSnapshot();
-    const seconds = snapshot.phase === "landing" || snapshot.phase === "scrubbing"
-      ? snapshot.requestedSeconds : snapshot.presentedSeconds;
-    publishPlayheadFrames(playheadSecondsToFrames(seconds, fps));
-  }), [fps, playbackController]);
+  useEffect(() => {
+    const publish = () => {
+      const snapshot = playbackController.getSnapshot();
+      const seconds = snapshot.phase === "landing" || snapshot.phase === "scrubbing"
+        ? snapshot.requestedSeconds : snapshot.presentedSeconds;
+      publishPlayheadFrames(playheadSecondsToFrames(seconds, fps));
+    };
+    publish();
+    return playbackController.subscribe(publish);
+  }, [fps, playbackController]);
 
   const onPlayerStateChange = useCallback((playing: boolean) => {
     playbackController.reportPlaying(playing);
@@ -1752,6 +1766,12 @@ export default function App() {
     webOnPlayerReady();
     // Player is up → drop the resolving/buffering overlay (r62).
     setPlayerReady(true);
+    const videoMoment = videoMomentRef.current;
+    if (videoMoment && videoMoment.sequence !== sourceSeqRef.current) videoMomentRef.current = null;
+    else if (videoMoment && videoMoment.path === localFilePath) {
+      videoMomentRef.current = null;
+      void playbackController.seekTo(videoMoment.seconds);
+    }
     // RC4 position handoff: the download fallback carried the playhead the
     // stream died at through the machine (downloading → cached). The cached
     // LocalMediaPlayer boots at 0 — seek it back before the user notices.
@@ -1793,7 +1813,7 @@ export default function App() {
         return { ...prev, duration: dur };
       });
     }
-  }, [volume, muted, playbackRate, playbackController, webOnPlayerReady, webConsumeResume]);
+  }, [volume, muted, playbackRate, playbackController, webOnPlayerReady, webConsumeResume, localFilePath]);
 
   // ====== Actions ======
   /**
@@ -2424,7 +2444,7 @@ export default function App() {
 
   const handleSnapshot = useCallback(async () => {
     if (!metadata || snapshotBusy) return;
-    const r = Math.max(1, Math.round(fps));
+    const r = frameRate(fps);
     // Action-time store read: grab the frame that's on screen when the user
     // clicks, not a closure value from the last App render.
     const playheadNow = getPlayheadFrames();
@@ -2570,7 +2590,7 @@ export default function App() {
    * be the wrong trade.
    */
   const grabFaceFromFrame = useCallback(async (): Promise<string | null> => {
-    const seconds = getPlayheadFrames() / Math.max(1, Math.round(fps));
+    const seconds = getPlayheadFrames() / frameRate(fps);
     // 1. The active player's own decoder — zero file IO (MediaBunnyPlayer).
     let blob = (await playerRef.current?.getFrameBlob?.(seconds).catch(() => null)) ?? null;
     // 2. A fresh mediabunny pass on the original file.
@@ -2714,6 +2734,13 @@ export default function App() {
   }, [handleOpenRecentSource, navigateView]);
   const handleLibraryOpenLocalPath = useCallback((path: string) => {
     void loadLocalPath(path); // navigates via openSourceView
+  }, [loadLocalPath]);
+  const handleVideoMoment = useCallback((path: string, seconds: number) => {
+    if (!Number.isFinite(seconds) || seconds < 0) return;
+    const opening = loadLocalPath(path);
+    const pending = { sequence: sourceSeqRef.current, path, seconds };
+    videoMomentRef.current = pending;
+    void opening.then((failure) => { if (failure && videoMomentRef.current === pending) videoMomentRef.current = null; });
   }, [loadLocalPath]);
 
   const handleLibraryOpenRecent = useCallback((entry: RecentSource) => {
@@ -3533,7 +3560,7 @@ export default function App() {
     : null;
   // Source duration in seconds for the auto-chapters clamp (null = unknown).
   const sourceDurationSec = durationFrames > 0
-    ? durationFrames / Math.max(1, Math.round(fps))
+    ? durationFrames / frameRate(fps)
     : null;
 
   // Review comment markers for the monitor timeline — re-read whenever the
@@ -3601,7 +3628,7 @@ export default function App() {
   // Live reviews own notes, not the hidden file's frame marks. Changing the
   // publication must neither copy those marks into an NDI pass nor restore
   // old live-pass values over the still-mounted file's marks.
-  useSourceMarks({ reviewSourceKey: mediaReviewSourceKey, durationFrames, inFrames, outFrames, setInFrames, setOutFrames });
+  useSourceMarks({ reviewSourceKey: mediaReviewSourceKey, fps, durationFrames, inFrames, outFrames, setInFrames, setOutFrames });
 
   /**
    * Version stacks: absorb the OPEN file into `oldKey`'s review doc as its
@@ -3723,16 +3750,23 @@ export default function App() {
   // the NEXT path change. Registered once; reads current path/fp through a ref.
   const speakerBridgeRef = useRef<{ path: string | null; fp: string | null }>({ path: null, fp: null });
   speakerBridgeRef.current = { path: transcriptPath, fp: speakerFp };
+  // Both channels: the window CustomEvent covers renames made in this window,
+  // and the Tauri event covers the popped-out panel, whose renames otherwise
+  // never reached the index (the CustomEvent does not cross windows).
   useEffect(() => {
-    const onChange = (e: Event) => {
+    const link = (evPath: string | null | undefined) => {
       const { path, fp } = speakerBridgeRef.current;
       if (!path || !fp) return;
-      const evPath = (e as CustomEvent<{ path?: string }>).detail?.path;
       if (evPath && evPath !== path) return;
       linkSpeakerOverridesToFingerprint(path, fp);
     };
+    const onChange = (e: Event) => link((e as CustomEvent<{ path?: string }>).detail?.path);
     window.addEventListener(SPEAKERS_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+    const un = listen<{ path?: string | null } | null>(SPEAKERS_CHANGED_EVENT, (e) => link(e.payload?.path));
+    return () => {
+      window.removeEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+      void un.then((f) => f());
+    };
   }, []);
   // Current source's approval verdict for the header chips (Clip sidebar +
   // room stage title). Live session -> the shared doc; solo -> the stored
@@ -4494,6 +4528,21 @@ export default function App() {
     return () => window.removeEventListener(CHAPTERS_CHANGED_EVENT, onChanged);
   }, [reviewSourceKey]);
 
+  const [cutMarkers, setCutMarkers] = useState<CutMarker[]>([]);
+  useEffect(() => {
+    if (!reviewSourceKey) { setCutMarkers([]); return; }
+    const reload = () => setCutMarkers(loadCutMarkers(reviewSourceKey));
+    reload();
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ sourceKey?: string }>).detail;
+      if (!detail || detail.sourceKey === reviewSourceKey) reload();
+    };
+    window.addEventListener(CUT_MARKERS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(CUT_MARKERS_CHANGED_EVENT, onChanged);
+  }, [reviewSourceKey]);
+
+  const aiVideoPath = privateInspectionVisible || ndiProgram || ndiRoomSource || screenProgramActive
+    ? null : sourceKind === "file" ? localFilePath : webPlayback.cachePath;
   const { handlePopOut: handlePopOutPanel } = usePanelBus({
     panelDetached,
     setPanelDetached,
@@ -4513,6 +4562,8 @@ export default function App() {
       canRegenerate: hasSource && !!selectedModel?.downloaded && !ndiProgram && !ndiRoomSource,
       hasSource: hasSource && !ndiProgram && !ndiRoomSource,
       aiModelId: defaults.llmSummarizationModel,
+      aiVideoPath,
+      aiForegroundBusy: isPlaying || transcriptState === "running" || queueRunning,
       aiStyle: { format: defaults.summaryFormat, length: defaults.summaryLength },
       chapterSourceKey: ndiProgram || ndiRoomSource ? null : reviewSourceKey,
       durationSec: ndiProgram || ndiRoomSource ? null : sourceDurationSec,
@@ -4537,11 +4588,13 @@ export default function App() {
       onImportTranscript: () => { void handleImportTranscript(); },
       onTranscriptEdited: () => setTranscriptArrivedTick((n) => n + 1),
       onOpenAiSettings: () => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); },
+      onOpenVideoSettings: () => { setSettingsInitialTab("video-intelligence"); setSettingsOpen(true); },
       // The panel saved chapters to the SHARED localStorage; re-dispatch the
       // same-window change event so the chapter-markers effect re-reads.
       onChaptersChanged: () => {
         try { window.dispatchEvent(new CustomEvent(CHAPTERS_CHANGED_EVENT)); } catch { /* non-DOM */ }
       },
+      onCutMarkersChanged: announceCutMarkers,
     },
   });
 
@@ -4697,6 +4750,8 @@ export default function App() {
           <div ref={libraryViewRef} tabIndex={-1} className="cp-view cp-view-library" hidden={activeView !== "library"}>
             <LibraryBrowser
               sessionsRequestTick={sessionsRequestTick}
+              transcriptLibrary={defaults.transcriptLibrary}
+              onOpenMultitrack={(id) => { setMultitrackOpenRequest((previous) => ({ id, tick: (previous?.tick ?? 0) + 1 })); setActiveView("multitrack"); }}
               onReviewLocalPath={handleReviewLocalPath}
               onOpenWebUrl={(u: string) => { setUrl(u); void handleFetch(u); }}
               roots={lib.roots}
@@ -4719,6 +4774,8 @@ export default function App() {
               selection={null}
               selectionTick={0}
               onOpenLocalPath={handleLibraryOpenLocalPath}
+              onOpenVideoMoment={handleVideoMoment}
+              onVideoSettings={() => { setSettingsInitialTab("video-intelligence"); setSettingsOpen(true); }}
               onOpenTranscriptHistory={handleLibraryOpenTranscript}
               onBatchTranscribe={startBatchTranscribe}
               batchLine={batch.progress.running ? batchSummary(batch.progress) : null}
@@ -4734,6 +4791,7 @@ export default function App() {
               self-hides via hasSource=false since the reader can't regenerate. */}
           <div ref={readerViewRef} tabIndex={-1} className="cp-view cp-view-reader" hidden={activeView !== "reader"}>
             <TranscriptReader
+              onOpenMultitrack={(id, frame, trackId) => { setMultitrackOpenRequest((previous) => ({ id, frame, trackId, tick: (previous?.tick ?? 0) + 1 })); setActiveView("multitrack"); }}
               onImportTranscript={() => { void handleImportTranscript(); }}
               onGoToClip={handleSwitchToClip}
               transcriptLibraryPath={defaults.transcriptLibrary}
@@ -4810,7 +4868,9 @@ export default function App() {
               Keep the workspace mounted so navigation cannot discard work. */}
           <div ref={multitrackViewRef} tabIndex={-1} className="cp-view cp-view-multitrack" hidden={activeView !== "multitrack"}>
             <MultitrackPage
+              openRequest={multitrackOpenRequest}
               active={activeView === "multitrack"}
+              aiModelId={defaults.llmSummarizationModel}
               onOpenSettings={() => { setSettingsInitialTab("transcription"); setSettingsOpen(true); }}
             />
           </div>
@@ -5498,8 +5558,8 @@ export default function App() {
                       currentQueueSource(sourceKind, localFilePath, metadata?.webpage_url),
                     ).map((c) => ({
                       id: c.id,
-                      inFrames: c.inFrames,
-                      outFrames: c.outFrames,
+                      inFrames: c.inFrames / queueFrameRate(c) * frameRate(fps),
+                      outFrames: c.outFrames / queueFrameRate(c) * frameRate(fps),
                       status: c.status,
                       label: c.filename,
                     }))}
@@ -5509,6 +5569,8 @@ export default function App() {
                     }}
                     commentMarkers={reviewMarkers}
                     chapterMarkers={chapterMarkers}
+                    cutMarkers={cutMarkers}
+                    onCutSeek={seconds => { void reviewSession.jumpToComment(seconds); }}
                     reviewRangeDraft={reviewRangeDraft}
                     filmstripPath={sourceKind === "file" ? (playbackPath ?? localFilePath) : null}
                     waveformOn={waveformVisible}
@@ -5518,11 +5580,8 @@ export default function App() {
                     onScrub={onScrub}
                     onScrubEnd={onScrubEnd}
                   />}
-                  {/* Status line under the timeline (9a): the no-marks helper
-                      shows ONLY with no marks and an empty queue; a completed
-                      selection (or a queued no-marks state) renders NOTHING -
-                      the row's space collapses, no reserved empty line.
-                      Partial-mark guidance stays (it completes the gesture). */}
+                  {/* The reserved hint line also hosts brief cut confirmations.
+                      Partial-mark guidance returns when the confirmation fades. */}
                   {roomActive && theater && (
                     <PeoplePanel
                       {...participantPanelProps}
@@ -5558,9 +5617,9 @@ export default function App() {
                     // set. The row holds its line box when it has nothing to
                     // say; aria-hidden keeps an empty one out of the a11y tree.
                     return (
-                      <div className="cp-timeline-hint" aria-hidden={!content}>
+                      <TimelineHint sourceKey={reviewSourceKey}>
                         {content}
-                      </div>
+                      </TimelineHint>
                     );
                   })()}
                 </div>
@@ -5580,6 +5639,7 @@ export default function App() {
                   transcriptEngine={defaults.transcriptionEngine === "parakeet" ? "parakeet" : "whisper"}
                   metadataLoading={metadataLoading}
                   playbackPrepBusy={playbackPrepBusy}
+                  analysisStatus={analysisPipelineStatus}
                   canStop={status === "exporting" || transcriptState === "running" || playbackPrepBusy}
                   onStop={handleStop}
                 />
@@ -5651,8 +5711,7 @@ export default function App() {
                   // onSeek owns the duration clamp (playhead-clock) — no
                   // inline math here, or an unknown duration snaps the cue
                   // click to frame 0.
-                  const r = Math.max(1, Math.round(fps));
-                  onSeek(Math.max(0, Math.floor(seconds * r)));
+                  onSeek(secondsToFrames(seconds, fps));
                 }}
                 transcriptArrivedTick={transcriptArrivedTick}
                 onClearTranscript={handleClearTranscript}
@@ -5674,6 +5733,9 @@ export default function App() {
                 aiModelId={defaults.llmSummarizationModel}
                 aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
                 onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
+                aiVideoPath={aiVideoPath}
+                aiForegroundBusy={isPlaying || transcriptState === "running" || queueRunning}
+                onOpenVideoSettings={() => { setSettingsInitialTab("video-intelligence"); setSettingsOpen(true); }}
                 chapterSourceKey={ndiPictureVisible ? null : reviewSourceKey}
                 sourceDescription={ndiPictureVisible ? null : metadata?.description ?? null}
                 chapterDurationSec={ndiPictureVisible ? null : sourceDurationSec}
@@ -5820,8 +5882,7 @@ export default function App() {
               // Same clamp path a cue click uses: onSeek owns the duration
               // clamp, so no inline math here.
               setTimeout(() => {
-                const r = Math.max(1, Math.round(fps));
-                onSeek(Math.max(0, Math.floor(seconds * r)));
+                onSeek(secondsToFrames(seconds, fps));
               }, 350);
             });
           }}

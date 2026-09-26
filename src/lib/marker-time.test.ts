@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MARKER_SETTINGS,
+  retimeStartTc,
   RATE_TABLE,
   durationFrames,
   frameIndex,
@@ -165,5 +166,22 @@ describe("frameIndex floor convention (r142)", () => {
       expect(frameIndex(f / 25, "25")).toBe(f);
       expect(frameIndex((f * 1001) / 30000, "29.97")).toBe(f);
     }
+  });
+});
+
+describe("retimeStartTc", () => {
+  it("keeps a label the new rate can still express", () => {
+    expect(retimeStartTc("01:00:00:00", "29.97", "25", false)).toBe("01:00:00:00");
+    expect(retimeStartTc("00:59:59:23", "24", "25", false)).toBe("00:59:59:23");
+  });
+  it("moves a frame number the new timebase does not have, instead of leaving it invalid", () => {
+    const moved = retimeStartTc("00:59:59:29", "29.97", "25", false);
+    expect(moved).toBe("00:59:59:24");
+    expect(tcToFrames(moved, "25", false)).not.toBeNull();
+    expect(retimeStartTc("00:59:59:15", "30", "25", false)).toBe("00:59:59:15");
+    expect(retimeStartTc("00:00:10:59", "59.94", "23.976", false)).toBe("00:00:10:23");
+  });
+  it("falls back to 01:00:00:00 for a value that was never a timecode", () => {
+    expect(retimeStartTc("garbage", "25", "24", false)).toBe("01:00:00:00");
   });
 });

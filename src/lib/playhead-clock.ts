@@ -1,3 +1,4 @@
+import { frameRate } from "./timecode";
 /**
  * Seek-target math — THE single place that clamps a user seek against the
  * source duration.
@@ -30,7 +31,7 @@ export function clampSeekFrames(frames: number, durationFrames: number): number 
  *  unknown, so `Math.min(max, target)` never drags a target backward. */
 export function maxSeekSeconds(durationFrames: number, fps: number): number {
   if (durationFrames <= 0) return Infinity;
-  return (durationFrames - 1) / Math.max(1, Math.round(fps));
+  return (durationFrames - 1) / frameRate(fps);
 }
 
 /** Target for "jump to end": the last frame, or null (= no-op) while the

@@ -64,6 +64,7 @@ type Props = {
   /** File this item somewhere. Shelves whose items live in real folders
    *  pass it; everything else shows no such verb. */
   onMove?: () => void;
+  onAddToProject?: () => void;
   /** Finder tags on this file, and the two ways to change them. Absent for
    *  sources with no path on disk (web), which cannot carry an xattr. */
   tags?: readonly FinderTag[];
@@ -97,7 +98,7 @@ type Item = {
 export function LibraryCardMenu({
   anchor, align = "left", canPickThumbnail, hasChosenThumbnail, revealPath,
   onChooseThumbnail, onResetThumbnail, onOpen, onReview, onClose,
-  tags, onToggleTagColor, onClearTagColors, onRename, onDelete, onRemove, deleteLabel, onMove, customEdits, onEditCustom,
+  tags, onToggleTagColor, onClearTagColors, onRename, onDelete, onRemove, deleteLabel, onMove, onAddToProject, customEdits, onEditCustom,
   onTranscribe, transcribeLabel, sessionActions,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -128,6 +129,7 @@ export function LibraryCardMenu({
     }
   }
   if (onMove) items.push({ icon: <IconFolderSolid size={13} />, label: "Move to folder…", onSelect: onMove });
+  if (onAddToProject) items.push({ icon: <IconFolderSolid size={13} />, label: "Add to project folder…", onSelect: onAddToProject });
   if (onOpen) items.push({ icon: <IconPlay size={13} />, label: "Open in Clip", onSelect: onOpen });
   /* Batch transcription's home. It used to live ONLY in the floating
      multi-select pill, so removing that pill would have removed the feature -

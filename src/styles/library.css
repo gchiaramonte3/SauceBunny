@@ -1212,21 +1212,6 @@
   position: relative;
 }
 .cp-lib-browse-empty { padding: var(--s-8) var(--s-5); }
-/* Rootless library — one centered line + the primary button, nothing else. */
-.cp-lib-browse-zero {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--s-4);
-}
-.cp-lib-browse-zero p {
-  margin: 0;
-  font-family: var(--font-ui);
-  font-size: var(--text-lg);
-  color: var(--fg-3);
-}
 /* Grid mode — a dense poster wall: tighter cells and gutters than Home's
    shelves, smaller title type, detail line on hover only (the shared card
    already does that). 30 files should read as a wall of media. */

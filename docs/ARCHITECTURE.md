@@ -1,5 +1,13 @@
 # Sauce Bunny — Architecture
 
+Multitrack output recovery: cached PCM does not imply an active audio device.
+Play/scrub resume a non-running Web Audio context (including WebKit's
+`interrupted` state), recheck readiness after resume/decode, and report a
+non-running device instead of showing false playback. Device interruptions
+park transport and stop scheduled voices; resuming the device alone does not
+restart playback. A new explicit Play gesture is required. This does not
+change the bounded PCM preparation or recognizer concurrency.
+
 A walk-through of how the pieces fit. Read this before your first PR; it'll save you a day of source-spelunking.
 
 ## What Sauce Bunny is
@@ -81,16 +89,184 @@ probes have already overturned.
 
 ## Data flow
 
+### Library organization
+
+`LibraryBrowser` integrates a reference-only Projects/Favorites sidebar alongside
+the existing disk browser. `library-organization.ts` validates the versioned
+folder tree, identities, membership and smart rules; `LibraryOrganizationStore`
+serializes acknowledged writes and owns scoped undo/redo. The native
+`library_organization` commands write `Documents/Sauce Bunny/Library/organization.json`
+atomically, with expected-text compare-and-save and a stable sibling file lock
+across app processes. Failed or unknown-format reads never authorize a reset.
+
+Project items are references to local paths, web URLs, transcript paths or saved
+Multitrack document IDs. Removal/reparenting never deletes originals. Media
+rename/repath updates stable asset IDs; organization undo preserves those newer
+paths. Metadata dialogs merge their changes with current membership instead of
+restoring a stale snapshot. Explicit Relink is available for local references.
+
+`library-project-catalog.ts` combines known scanned files, cached web metadata,
+transcript inventory/history and saved AAF documents using read-only commands.
+Smart results use current facts, with unknown access kept distinct from offline.
+Availability/tag reads are capped at 500 paths per batch; obsolete refreshes stop
+before scheduling further batches. Existing Clip/transcript routes are reused;
+saved Multitrack requests are deferred when that workspace has an active job.
+
+The file browser paginates rather than discarding items above 300. Deeper folders
+are scanned one level at a time into a browser-local overlay, leaving Home's
+shared scan and registered roots unchanged. Disk moves remain explicit native
+operations, with a navigable destination dialog and Browse for external locations.
+See [LIBRARY-ORGANIZATION.md](LIBRARY-ORGANIZATION.md) for acceptance coverage.
+
 ### Multitrack documents
 
 `MultitrackPage` owns its document, track selection, single-clock PCM audition, and
 transcription jobs independently of App's Clip player. Navigation hides the
 workspace without throwing away jobs, and pauses its audition when inactive.
+`useMultitrackKeyboard` opens the numeric `MultitrackTimecodeDialog` only in the
+active workspace outside editable fields and other overlays. It shares Clip's
+digit-fill parsing and HUD styling; AAF rate/drop-frame conversion and source
+start offset resolve only on Enter. The dialog seeks the existing audition
+engine in frames, never the hidden Clip player. TRT is a separate duration
+frame count, not an absolute source timecode.
 `commands/aaf.rs` exposes the typed boundary; `commands/aaf/` separates the
 versioned model/store, cancellable processes, bounded audio preparation, and
 ASR result handling. The bundled `saucebunny-aaf` process resolves source spans
 and reads embedded PCM; existing FFmpeg, Whisper, and Parakeet sidecars provide
 resampling and recognition. No diarization or cloud service is involved.
+
+Multitrack Whisper processes at most four independent two-minute PCM windows
+per CLI invocation, reusing one model initialization. Each input retains its own
+output path, original timestamp mapping and one-second boundary context; audio
+is never concatenated. Scratch space is bounded, one recognizer is enforced
+natively, and Stop kills the JobRegistry-owned process. Parakeet still receives
+one window. Only a fully completed track atomically replaces its saved result.
+`saucebunny.multitrackTranscriptionOptions` stores opt-in Fast decoding and
+Skip non-speech preferences. Accurate/full-audio remains the default. The latter
+uses only a cached Silero model, preserves original timestamps, and falls back
+to full audio if unavailable. It can miss quiet/overlapping speech. Run choices
+and fallback warnings accompany saved results; sanitized Whisper GPU/timing
+counters enter Pipeline without recognized text. Both main and regeneration
+pickers share this contract, and settings are frozen for the selected-track run.
+
+The native schema-4 AAF document (manifest schema 3, embedded PCM index schema 2)
+remains authoritative for labels, recording-date
+provenance/overrides and per-track results, including committed empty results.
+Native writes emit `saucebunny:multitrack-changed` only after atomic saving.
+`useMultitrackLibrary` reconciles typed document entries on disk into the
+Transcripts > Multitrack shelf; no SRT alias or second transcript payload is
+created. Entries use source filenames and disambiguate preserved duplicates.
+Unchanged reimports reopen an existing document; changed versions remain distinct.
+Cast preferences are copied into document labels rather than live-linked.
+
+Linked-media resolution treats `file://server/workspace/...` and UNC addresses
+as metadata. `linked_paths.rs` converts them to known mounted filesystem paths
+or document-scoped, authority-qualified prefix mappings. It never opens a network
+URL or mounts a server. Exact relative paths are tried before any selected-folder
+scan. Scans stay inside the chosen root, omit symlinks and stop at 20,000 entries;
+identity fallback indexes at most 5,000 MXFs. Duplicate valid candidates require
+an explicit file choice. A scan failure does not discard direct-path successes.
+
+AAF import saves/reopens the timeline before linked-media validation. The page
+publishes that document immediately and owns a separate cancellable background
+resolution job; opening a saved document does not wait for the server. Resolution
+prioritizes original sequence lanes and processes 32 sources per checkpoint. MXF
+identity is read natively (`aaf/mxf_header.rs`): the partition pack's
+`HeaderByteCount` bounds the header metadata, so each file costs one or two small
+reads, eight in flight. Anything the native reader does not recognise falls back
+to the sidecar's full pyaaf2 parser, which stays the reference its tests compare
+against (`aaf-sidecar/make_mxf_header_fixtures.py`). On NEXIS the Python parse
+was ~4.7 s per file and serialized by the GIL. A single-track PCM header that
+states the source's exact rate, bits, channels and duration is bound without
+ffprobe; everything else is still confirmed by ffprobe. Each atomic
+graph-only checkpoint merges into the latest document and notifies the library.
+Stop retains prior checkpoints, labels and transcripts; the frontend reconciles
+from disk even when a completion event was missed. A document-scoped guard prevents
+overlapping resolution jobs. Cache/commit keys include only that microphone's
+source mappings, so another lane becoming available cannot reject its transcript.
+Completed waveforms and the audition clock survive unrelated resolution updates.
+The overview loader outlives re-renders and cancels a build only when that
+track's own media changes or it leaves view: checkpoints arrive faster than an
+hour-long linked overview can be read, and restarting on every one meant no
+build ever finished. Overview builds run one at a time on their own cancellable
+gate, never on the two playback permits, and zoomed detail reads a finished
+overview rather than starting a full build per scroll.
+
+`linked_probe.rs` batches bounded `mxf-info` header inspection in the existing
+pyaaf2 sidecar. Fingerprinted header caches provide a local identity index for
+renamed files. Material track IDs are resolved from SourcePackage UMID plus source
+slot, then FFprobe's `i:<track-id>` selector identifies the actual stream index.
+Format, channel count, duration and current file identity are checked before
+binding. MultipleDescriptor children are matched by LinkedSlotID, not array order.
+Nonzero internal MXF origins and unsupported nested MXF edits fail explicitly
+until their additional time transforms are supported. FFmpeg decodes only bounded
+PCM windows; no full-file transcode or new library is required.
+Empty audio-mapping headers are not successful persistent cache entries and are
+reported separately from an actual UMID mismatch. Both standard and legacy Sound
+data definitions are recognized. Per-file header start/end events, elapsed times,
+validation timings and memory/disk cache-hit totals appear in Multitrack Pipeline.
+
+Source files have no arbitrary size ceiling. AAF and MXF fingerprints use
+64-bit seeks and two 64 KiB reads regardless of total size. Graph/header bounds,
+PCM window sizes and corruption checks remain independent resource safeguards.
+`MultitrackPipeline` reuses the Clip `LogsPanel`, including before import succeeds.
+Native `aaf-diagnostic` events record job boundaries, subprocess stages/timings,
+candidate paths/sizes, validation failures and media-resolution totals. The local
+journal retains 1,500 recent rows in memory and two rolling 1 MiB files under
+the app log directory. `aaf_diagnostics` returns that history plus saved graph
+context; it never probes disconnected media during export. `aaf_clear_diagnostics`
+clears only diagnostic history. The frontend subscribes before hydrating the
+snapshot and deduplicates overlap. Save As writes an atomic TXT report; cancellation
+does not write, and success follows the write. Reports omit transcript content,
+recognizer output and URL credentials; source paths/identities remain useful for
+manual support. There is no automatic upload.
+
+Refreshing an older graph reinspects the unchanged AAF with stable lane IDs,
+retaining labels, cast snapshots, path mappings and committed text. Changed
+routing invalidates old bindings/caches and adds a review warning to saved results.
+Native relink saves compare the complete graph revision, preventing concurrent
+mapping changes from overwriting one another. Per-source diagnostics stay in
+the existing Linked media disclosure. Live NEXIS and macOS 14 runtime acceptance
+remain separate from generated-media and static packaging checks.
+
+The transcript pane keeps its overflow selector in a fixed, compact grid column
+outside the scrolling person tabs. Optional **Search with AI** uses the same
+installed model preference, local llama-server and streaming chat client as
+AI Summary. `local-ai-server.ts` shares Summary/search cold starts and stops a
+load only when its last waiter cancels. Each completed request rechecks native
+server identity rather than trusting a stale frontend server handle.
+`ai-transcript-search.ts` scans bounded sections without sampling away passages;
+model-returned IDs are validated against that section and mapped to original
+rows. No generated quotation or timestamp becomes a seek target. The search
+hook cancels stale queries and document/person changes, with no work on playback
+ticks or keystrokes. Search results are transient; saved transcripts and exports
+are unchanged. Search is local even when Summary has an opt-in cloud provider.
+
+Multitrack exports share the full manifest's audio-lane mapping. New AAF imports
+retain optional `PhysicalTrackNumber`; legacy imports keep displayed lane order.
+Filtered transcripts never renumber lanes. Avid serialization stays in the
+shared marker writer. `multitrack-export.ts` owns the SRT overlap sweep and adapts
+all saved passages to the existing escaped print template. Native Save As names
+TXT/PDF destinations. `export_transcript_pdf` loads restricted HTML directly into
+a script-disabled WebKit view with a unique private base URL, blocked navigation
+and no capability grants. Asynchronous AppKit pagination writes a private staging
+PDF; only a completed, validated PDF is atomically copied to the chosen path.
+The separate `print_transcript` command opens the native print dialog and does not
+claim that a file was saved. Neither route uses Tauri's data-URL HTML rewrite.
+
+Group-alternative Avid exports target the original parent **sequence** track,
+resolved through graph IDs with cycle/missing-parent checks. They do not address
+source-group branches and never invent flattened Avid track numbers. A single
+microphone uses Save As; selected/all exports containing alternatives split into
+one TXT per microphone. The grouped bulk action also splits by microphone rather
+than merging equal person names. Ordinary sequence/person exports are unchanged.
+`multitrack-avid-files.ts` plans these files and a separate import guide identifying
+each destination, group, branch and actual collision-safe filename. Import one
+microphone file per parent track at a time (or use sequence copies); marker import
+does not switch the audible branch. Same-destination microphones cannot enter one
+marker file. Scope IDs are captured before the dialog, committed results are read
+after it, and sequential atomic unique writes preserve earlier exports and report
+partial failures. Native Avid import remains a manual acceptance check.
 
 ### Clip and Review media
 
@@ -199,6 +375,74 @@ Generate transcript:
                              rename, search, history popover)
 ```
 
+## Full-frame scene analysis (integration in progress)
+
+`src/lib/scene-analysis/client.ts` owns a cancellable module worker. The worker
+retains MediaBunny Input, decoded samples, canvas and detector features; the
+window only serves compressed native filesystem ranges through the existing
+typed IPC commands. Terminal messages acknowledge cleanup, and run IDs isolate
+late results. The reference detector is distinct from the native video worker's
+sampled semantic-retrieval index: only full-frame boundaries may establish a
+shot count. The internally flagged AI Summary path prepares a 540p H.264 proxy
+in the owned native worker, verifies every presentation timestamp after encoding,
+and compares the browser's full decoded-PTS digest before adopting boundaries.
+Versioned proxy/source mapping and immutable detector evidence are saved before
+model reasoning. `useShotIntelligence` owns source/transcript generations and
+Stop across preparation, detection, persistence and bounded native shot batches.
+The existing text conversation stays mounted across the compact mode switch.
+The remembered, verified picture-model ID (9B default, optional 4B) passes through
+the typed request into each native run and its result provenance. Selection is
+frozen while running; embeddings and audio classification remain separate.
+Picture inference receives frames without dialogue; supplied transcript text has
+its own response field. Pinned software AV1 decoding extends the existing runtime
+without changing the source identity or presentation-time mapping.
+Analysis emits source-labeled, ordered `video-analysis-pipeline` events to the
+main window from either docked or detached panels. `useAnalysisPipeline` feeds
+the existing bounded Pipeline log (and therefore Copy/Export diagnostics) and
+its active badge. Native job-scoped observers report real model loading and
+shot counts; percentage updates are coalesced. The worker publishes each complete
+description while keeping the model loaded for its bounded batch. Native and
+frontend validators bind every update to its job, source, detector ID, model,
+requested range and sampled frames. The final batch must match the live updates.
+Stop retains accepted rows; source changes hide them and reject late updates.
+
+When no transcript is supplied, `scene-analysis/dialogue.ts` owns a separate
+local Clip Whisper job before picture inference. It uses the selected installed
+Whisper model with fast decoding and cached SpeakerKit diarization; it never
+downloads models. `transcript-preview` exposes the completed Whisper SRT while
+speaker detection finishes. Final text and speaker labels replace those dialogue
+cells, with cue overlap mapped to the same source-relative shot ranges. Speech
+stays outside picture prompts and immutable detector evidence. A second source
+identity check precedes adoption and picture inference. Unique library filenames
+avoid overwriting existing transcripts, and committed saves are recorded even
+when Stop or navigation rejects their display. Existing supplied transcripts
+remain untouched; a retry reuses this run's verified dialogue. Missing speech
+models remain an Info diagnostic and do not prevent picture analysis.
+Terminal events identify user Stop, source/panel changes, priority cancellation,
+and failures; stale events cannot revive a finished run. This observability
+path does not change cancellation, add resumability, or persist model answers.
+Analysis metadata and diagnostics live in `ShotAnalysisInfo`, a viewport-contained
+disclosure next to the existing settings gear. Its trigger is portalled into
+the mode row while the source-bound analysis hook retains ownership; opening
+info performs no native work. The tab toolbar holds Add cut markers immediately
+after Audio, outside the tablist. Results retain their terse missing/pending
+states; failure changes the CTA to Retry analysis and marks the info trigger
+without inserting diagnostic prose into the results table.
+Analysis start/end, audio ranges, durations and cut tooltips use source-rate
+HH:MM:SS:FF non-drop-frame timecode, shared with the player. Only timecode
+numbering uses rounded FPS; media-time conversions retain the actual rate
+(e.g. 60000/1001). Half-microsecond tolerance at frame boundaries accounts for
+the proxy's PTS serialization without snapping arbitrary seeks or modifying
+immutable evidence. Shot end is exclusive. VFR retains original PTS for seeking;
+the displayed clock is its source-rate timeline address, not a decoded-frame ordinal.
+The playhead's consumers, panel heartbeat, scrub/step and export paths use the
+same actual-rate clock. New queue rows carry `frameClock: "source"`; legacy rows
+keep their rounded-FPS elapsed ranges. Source marks persist their conversion
+rate; old marks restore to the nearest source frame once, including late FPS
+metadata, without re-saving a stale pre-conversion snapshot.
+This is not yet enabled by default. See `docs/VIDEO-INTELLIGENCE.md` for tested
+browser surfaces and remaining rollout gates.
+
 ## Local AI: one transcript ingestion, shared by every feature
 
 `llama-server` runs as a sidecar and the AI Summary, the auto-chapters and the
@@ -215,9 +459,14 @@ is the entire design:
   sends it byte-for-byte identically. Nothing that varies may enter it — not
   the summary style, not the source description, not the question.
 - **Task instructions ride in the user turn**, after it.
-- **The transcript is windowed one way** (`fitTranscript`, sampled evenly
+- **Summary context is windowed one way** (`fitTranscript`, sampled evenly
   across the runtime). Two different windowings of one transcript are two
   different prompts and share nothing.
+
+Multitrack semantic search is intentionally exhaustive instead: it uses the same
+prefix builder on bounded, unsampled sections and sequentially searches every
+section. Its cue-ID records differ from the summary's timestamped input, so it
+does not claim cross-feature KV-cache reuse for that different representation.
 
 Measured on one server, 28,335 tokens, three consecutive features: **60.92 s**
 for the first, then **0.13 s** and **0.15 s**.
@@ -817,6 +1066,56 @@ repeat open skips yt-dlp entirely when possible:
   pipeline from that pipeline's OWN response header — never from a
   previous pipeline's mode (a failed probe legitimately flips a rebuild
   to `rebased`, which asserts baseTime = seek target instead).
+
+## Local video intelligence (September 2026)
+
+Settings manages explicitly downloaded video models; Library owns selected
+source scope. `use-video-intelligence` dispatches typed, cancellable requests to
+`commands/video_intelligence.rs`. Rust owns one heavy worker and gives existing
+playback, ASR and text AI priority. `video-sidecar/worker.py` runs one request per
+process: bounded PyAV frame decoding, native MLX-VLM embeddings/reranking/video
+descriptions, durable SQLite checkpoints and disposable usearch HNSW indexes.
+Inference has no server or implicit download. Source navigation uses decoded
+timestamps, never model-authored timecodes. See [Video Intelligence](VIDEO-INTELLIGENCE.md)
+for resource bounds, build locks, runtime verification and current limitations.
+
+The optional `analyze-audio` request uses the same Rust job owner but starts
+`saucebunny-audio-analysis`, a system-only Swift resource helper, instead of the
+Python worker. AVFoundation decodes local audio into three-second PCM windows;
+SoundAnalysis returns raw scores with actual source-time coverage. Rust adopts
+the collected evidence only after matching source identity and a clean worker
+completion. It does not capture a device or download a model. The feature-flagged
+Advanced Intelligence controller requests it after visual descriptions and
+keeps those descriptions when optional audio analysis fails. Source/run identity
+is rechecked before freezing the response. A compact disclosure shows actual
+window ranges and unverified classifier suggestions, not inferred music genres.
+Music calibration, durable audio results and packaged validation remain rollout
+gates.
+
+The optional AST candidate (`video-sidecar/audio_ast.py`) performs local
+MLX/NumPy classification against checksum-pinned AudioSet weights. Settings offers
+an explicit download; the feature-flagged controller selects `analyze-music` when
+its receipt is ready, otherwise retaining the native `analyze-audio` path. Both
+use the same owned job and Stop/source-generation checks. Developer-only parity
+scripts live in `scripts/music-analysis/`; numerical parity is verified on smoke
+fixtures, not music accuracy. `audio_pcm.py` supplies bounded ten-second, 16 kHz mono
+windows through PyAV's in-process resampler. Decoded PTS validate each contiguous
+region before an exact sample clock removes container quantization; original
+anchors, gaps and unpadded tails remain source-timed. `music_analysis.py` owns the
+decoder and model, streams evidence, and emits completion only after a second
+source hash and successful model cleanup. Failure or cancellation cannot publish
+an adoptable result. The transport preserves all 527 float32 scores per window,
+with one shared vocabulary; Rust validates identity, coverage and the complete
+stream before returning immutable frontend evidence. The LGPL decoder recipe
+enables the required audio filters. Existing frozen workers need rebuilding.
+`scene-analysis/music-summary.ts` is a versioned presentation policy over that
+completed evidence, not another inference engine. It groups related AudioSet
+genre scores by their maximum and abstains on short, weak or conflicting
+evidence. Suggestions preserve actual window ranges and leave the raw scores
+unchanged. Its provisional thresholds and remaining calibration gates are
+documented in [Video Intelligence](VIDEO-INTELLIGENCE.md). Packaged lifecycle
+validation remains open; this source checkpoint does not update the installed
+app or enable the feature flag.
 
 ## Tone-card design grammar (shell v3)
 

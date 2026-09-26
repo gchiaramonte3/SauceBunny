@@ -1,3 +1,4 @@
+import { frameRate } from "../lib/timecode";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlayerHandle } from "../components/player-handle";
 import type { PlaybackSessionController } from "../lib/playback-session-controller";
@@ -106,7 +107,7 @@ const onPlayToggle = useCallback(() => {
 const onStep = useCallback((delta: number) => {
   exitShuttle();
   const p = playerRef.current;
-  const r = Math.max(1, Math.round(fps));
+  const r = frameRate(fps);
   // Read the live position from the store (action-time read — never a stale
   // closure), compute, THEN write. Also keeps the seek side effect out of a
   // React updater, where StrictMode's double-invoke used to double-seek.
@@ -120,7 +121,7 @@ const onStep = useCallback((delta: number) => {
 
 const seekBySeconds = useCallback((deltaSec: number) => {
   exitShuttle();
-  const r = Math.max(1, Math.round(fps));
+  const r = frameRate(fps);
   const p = playerRef.current;
   const currentSec = p?.isReady() ? (p.getCurrentTime?.() ?? 0) : getPlayheadFrames() / r;
   // maxSeekSeconds is Infinity while the duration is unknown, so a jump can
@@ -218,7 +219,7 @@ const onClearMarks = useCallback(() => {
 const onGotoIn = useCallback(() => {
   if (inFrames == null) return;
   exitShuttle();
-  const r = Math.max(1, Math.round(fps));
+  const r = frameRate(fps);
   markUserSeek(inFrames);
   publishPlayheadFrames(inFrames);
   void playbackController.seekTo(inFrames / r);
@@ -227,7 +228,7 @@ const onGotoIn = useCallback(() => {
 const onGotoOut = useCallback(() => {
   if (outFrames == null) return;
   exitShuttle();
-  const r = Math.max(1, Math.round(fps));
+  const r = frameRate(fps);
   markUserSeek(outFrames);
   publishPlayheadFrames(outFrames);
   void playbackController.seekTo(outFrames / r);
@@ -235,7 +236,7 @@ const onGotoOut = useCallback(() => {
 
 const onSeek = useCallback((f: number) => {
   exitShuttle();
-  const r = Math.max(1, Math.round(fps));
+  const r = frameRate(fps);
   // clampSeekFrames owns the duration clamp: an unknown duration (0) must
   // never clamp — the old inline `min(durationFrames - 1, f)` sent every
   // click to frame 0 whenever metadata hadn't arrived (or lied short).
@@ -251,7 +252,7 @@ const onScrubStart = useCallback(() => {
 }, [exitShuttle, playbackController]);
 
 const onScrub = useCallback((f: number) => {
-  const r = Math.max(1, Math.round(fps));
+  const r = frameRate(fps);
   const clamped = clampSeekFrames(f, durationFrames);
   // Requested time owns the visible timeline/captions during the gesture.
   publishPlayheadFrames(clamped);
@@ -259,7 +260,7 @@ const onScrub = useCallback((f: number) => {
 }, [durationFrames, fps, playbackController]);
 
 const onScrubEnd = useCallback((f: number) => {
-  const r = Math.max(1, Math.round(fps));
+  const r = frameRate(fps);
   const clamped = clampSeekFrames(f, durationFrames);
   markUserSeek(clamped);
   publishPlayheadFrames(clamped);
@@ -270,7 +271,7 @@ const onScrubEnd = useCallback((f: number) => {
 // never arm the latch it yields to (review fix).
 const onChaseSeek = useCallback((f: number) => {
   exitShuttle();
-  const r = Math.max(1, Math.round(fps));
+  const r = frameRate(fps);
   const clamped = clampSeekFrames(f, durationFrames);
   publishPlayheadFrames(clamped);
   void playbackController.seekTo(clamped / r);
@@ -278,7 +279,7 @@ const onChaseSeek = useCallback((f: number) => {
 
 const onChaseSeekConfirmed = useCallback((f: number) => {
   exitShuttle();
-  const r = Math.max(1, Math.round(fps));
+  const r = frameRate(fps);
   const clamped = clampSeekFrames(f, durationFrames);
   publishPlayheadFrames(clamped);
   return playbackController.seekTo(clamped / r, { origin: "remote" });

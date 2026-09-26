@@ -8,6 +8,7 @@ import type {
 import type { ToastKind } from "../components/CanvasToast";
 import { formatError } from "../lib/error-format";
 import { framesToTc, secondsToTc } from "../lib/timecode";
+import { queueFrameRate } from "../lib/queue-ranges";
 import { sanitizeFilename } from "../lib/filename";
 import { newJobId } from "../lib/job-id";
 import { pushRecentClip } from "../lib/recent-clips";
@@ -149,6 +150,7 @@ export function useClipQueue(p: ClipQueueDeps) {
       id: Math.random().toString(36).slice(2),
       source,
       fps,
+      frameClock: "source",
       title: metadata?.title ?? nameFor(nextIndex),
       thumbnail: metadata?.thumbnail ?? null,
       inFrames: inF,
@@ -390,7 +392,7 @@ export function useClipQueue(p: ClipQueueDeps) {
       if (!clipQueueRef.current.some((c) => c.id === item.id)) continue;
       setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "running" } : c));
       setProgress(0);
-      const itemR = Math.max(1, Math.round(item.fps));
+      const itemR = queueFrameRate(item);
       appendLog("info", "queue", `Exporting ${item.filename} (${framesToTc(item.inFrames, item.fps)} → ${framesToTc(item.outFrames, item.fps)})…`);
       const pushQueueRecent = (path: string) => {
         const rc: RecentClip = {
@@ -454,7 +456,7 @@ export function useClipQueue(p: ClipQueueDeps) {
                 url: webUrl,
                 start: framesToTc(item.inFrames, item.fps),
                 end: framesToTc(item.outFrames, item.fps),
-                fps: item.fps,
+                fps: itemR,
                 output_dir: exportOpts.folder,
                 filename: item.filename,
                 job_id: jobId,

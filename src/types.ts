@@ -104,6 +104,8 @@ export type QueuedClip = {
   /** Source fps at add time — ALL frames→seconds/tc math for this item must
    *  use it, never the live player fps (which may belong to another source). */
   fps: number;
+  /** Absent on older queues whose indices used rounded FPS. Preserve those ranges. */
+  frameClock?: "source";
   /** Title + thumbnail at add time — recents attribution for mixed/stale queues. */
   title: string;
   thumbnail: string | null;
@@ -157,6 +159,7 @@ export function isQueuedClip(x: unknown): x is QueuedClip {
   const c = x as Record<string, unknown>;
   return typeof c.id === "string"
     && typeof c.fps === "number" && Number.isFinite(c.fps) && c.fps > 0
+    && (c.frameClock === undefined || c.frameClock === "source")
     && typeof c.inFrames === "number" && typeof c.outFrames === "number"
     && typeof c.filename === "string"
     && typeof c.source === "object" && c.source !== null

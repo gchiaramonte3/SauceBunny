@@ -21,6 +21,7 @@
 @import "./transport.css";
 @import "./logs.css";
 @import "./queue-drawer.css";
+@import "./tab-strip.css";
 @import "./settings.css";
 @import "./palette.css";
 @import "./transcript.css";
@@ -29,6 +30,7 @@
 @import "./review.css";
 @import "./room.css";
 @import "./library.css";
+@import "./library-organization.css";
 @import "./coreview.css";
 @import "./loader.css";
 @import "./welcome.css";

@@ -1,10 +1,59 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { multitrackFixture, multitrackTranscript } from "../test/multitrack-fixture";
+import { multitrackFixture, multitrackGroupFixture, multitrackTranscript } from "../test/multitrack-fixture";
 import { MultitrackTimeline } from "./MultitrackTimeline";
 
 afterEach(cleanup);
+
+it("shows a status only as each track's saved result arrives and restores it on reopening", () => {
+  const document = multitrackFixture();
+  const props = { document, waveforms: {}, waveformErrors: {}, selected: new Set<string>(), solo: new Set<string>(), onSelect: vi.fn(), onRename: vi.fn(), onSeek: vi.fn(), frame: 0 };
+  const view = render(<MultitrackTimeline {...props} />);
+  expect(screen.queryAllByRole("img")).toHaveLength(0);
+  expect(view.container.querySelectorAll(".cp-multitrack-saved-status")).toHaveLength(3);
+  const committed = { ...document, transcripts: [{ ...multitrackTranscript(), duration_frames: document.manifest.duration_frames }] };
+  view.rerender(<MultitrackTimeline {...props} document={committed} />);
+  expect(screen.getByRole("img", { name: "Alex: Transcribed. Transcript saved." })).toBeTruthy();
+  expect(screen.queryAllByRole("img")).toHaveLength(1);
+  // Playback, selection and a new generation attempt have no effect on the
+  // persisted result. Only replacing the document's committed data changes it.
+  view.rerender(<MultitrackTimeline {...props} document={committed} selected={new Set(["track-2"])} frame={120} />);
+  expect(screen.queryAllByRole("img")).toHaveLength(1);
+  view.unmount();
+  render(<MultitrackTimeline {...props} document={JSON.parse(JSON.stringify(committed))} />);
+  expect(screen.getByRole("img", { name: "Alex: Transcribed. Transcript saved." })).toBeTruthy();
+});
+
+it("distinguishes saved empty and timing-review results without implying full-range coverage", () => {
+  const document = multitrackFixture();
+  document.transcripts = [
+    { ...multitrackTranscript(), status: "empty", cues: [], duration_frames: document.manifest.duration_frames },
+    { ...multitrackTranscript("track-2"), status: "review" },
+  ];
+  render(<MultitrackTimeline document={document} waveforms={{}} waveformErrors={{}} selected={new Set()} solo={new Set()} onSelect={vi.fn()} onRename={vi.fn()} onSeek={vi.fn()} frame={0} />);
+  expect(screen.getByRole("img", { name: "Alex: Transcribed. No speech found; result saved." }).classList.contains("is-saved")).toBe(true);
+  const review = screen.getByRole("img", { name: "Sam mic: Selected range transcribed. Transcript saved; timing review needed." });
+  expect(review.classList.contains("needs-review")).toBe(true);
+  expect(review.title).toBe(review.getAttribute("aria-label"));
+});
+
+it("keeps saved status tied to track identity across owner edits, offline media and group expansion", () => {
+  const document = multitrackGroupFixture();
+  document.transcripts = [multitrackTranscript("track-2")];
+  document.manifest.graph!.lanes[1].availability = "offline";
+  const props = { document, waveforms: {}, waveformErrors: {}, selected: new Set<string>(), solo: new Set<string>(), onSelect: vi.fn(), onRename: vi.fn(), onSeek: vi.fn(), frame: 0 };
+  const view = render(<MultitrackTimeline {...props} />);
+  expect(screen.queryAllByRole("img")).toHaveLength(0);
+  view.rerender(<MultitrackTimeline {...props} expanded={new Set(["track-1"])} />);
+  expect(screen.getByRole("img", { name: /Sam mic: Selected range transcribed/ })).toBeTruthy();
+  const renamed = { ...document, labels: [...document.labels, { track_id: "track-2", owner_name: "Renamed mic", cast_member_id: null, color: null }] };
+  view.rerender(<MultitrackTimeline {...props} document={renamed} expanded={new Set(["track-1"])} />);
+  expect(screen.getByRole("img", { name: /Renamed mic: Selected range transcribed/ })).toBeTruthy();
+  view.rerender(<MultitrackTimeline {...props} document={{ ...renamed, transcripts: [] }} expanded={new Set(["track-1"])} />);
+  expect(screen.queryAllByRole("img")).toHaveLength(0);
+});
+
 it("keeps settled clip geometry cached during playhead ticks and refreshes on zoom", () => {
   const document = multitrackFixture();
   let reads = 0;
@@ -40,4 +89,23 @@ it("preserves overlay visibility, clipping, toggles and document replacements", 
   expect(screen.queryByText("This is the first answer.")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Text overlay Alex mic" }));
   expect(screen.queryByText("No transcript in this view")).toBeNull();
+});
+it("a failed waveform offers a retry for that track and shows the error on hover", () => {
+  const document = multitrackFixture(), retry = vi.fn();
+  render(<MultitrackTimeline document={document} waveforms={{}} waveformErrors={{ "track-1": "Decoder failed" }} selected={new Set()} solo={new Set()} onSelect={vi.fn()} onRename={vi.fn()} onSeek={vi.fn()} frame={0} onRetryWaveform={retry} />);
+  const button = screen.getByRole("button", { name: `Retry waveform for ${document.manifest.tracks[0].name}` });
+  expect(button.parentElement?.getAttribute("title")).toBe("Decoder failed");
+  fireEvent.click(button);
+  expect(retry).toHaveBeenCalledWith("track-1");
+});
+
+it("says when separate range runs left part of a track untranscribed, and saves a trimmed owner name", () => {
+  const document = multitrackFixture();
+  document.transcripts = [{ ...multitrackTranscript(), start_frame: 0, duration_frames: 2400, gaps: [[240, 1200]] }];
+  const onRename = vi.fn();
+  render(<MultitrackTimeline document={document} waveforms={{}} waveformErrors={{}} selected={new Set()} solo={new Set()} onSelect={vi.fn()} onRename={onRename} onSeek={vi.fn()} frame={0} />);
+  expect(screen.getByRole("img", { name: /Alex: Selected ranges transcribed, 1 gap not transcribed/ })).toBeTruthy();
+  const owner = screen.getByRole("textbox", { name: "Mic owner for track-2" });
+  fireEvent.change(owner, { target: { value: "  Sam  " } }); fireEvent.blur(owner);
+  expect(onRename).toHaveBeenCalledWith("track-2", "Sam");
 });

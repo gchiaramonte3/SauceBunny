@@ -192,10 +192,10 @@ pub fn cancel_job(registry: State<'_, JobRegistry>, job_id: String) -> Result<bo
 // that lost it. Restricted to the tauri.conf.json externalBin name set
 // so a stray file can never be made executable.
 // ============================================================
-const SIDECAR_NAMES: [&str; 8] = [
-    "yt-dlp", "ffmpeg", "ffprobe", "whisper-cli",
+const SIDECAR_NAMES: [&str; 10] = [
+    "yt-dlp", "deno", "ffmpeg", "ffprobe", "whisper-cli",
     "saucebunny-diarize", "saucebunny-dictate", "saucebunny-capture",
-    "llama-server",
+    "saucebunny-aaf", "llama-server",
 ];
 
 /// Restore the execute bit on any sidecar binary that lost it. Returns the
@@ -1394,6 +1394,19 @@ pub async fn rename_path(from: String, to: String) -> Result<String, crate::AppE
     if !case_only && dst.exists() {
         return Err(format!("A file named \"{name}\" already exists").into());
     }
+    // A case-only rename is only a rename of the SAME file on a case-insensitive
+    // volume. On a case-sensitive one "Clip.mp4" can be a different file sitting
+    // beside "clip.mp4", and rename(2) would silently replace it.
+    if case_only && dst.exists() {
+        use std::os::unix::fs::MetadataExt;
+        let same = match (std::fs::symlink_metadata(&src), std::fs::symlink_metadata(&dst)) {
+            (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+            _ => false,
+        };
+        if !same {
+            return Err(format!("A file named \"{name}\" already exists").into());
+        }
+    }
     std::fs::rename(&src, &dst).map_err(|e| crate::AppError::Io(format!("rename: {e}")))?;
 
     // Only a case-only rename can have "succeeded" without changing anything.
@@ -1563,7 +1576,7 @@ pub fn default_export_path(app: AppHandle) -> Result<String, crate::AppError> {
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-09-15-multitrack-lifecycle-fixes";
+pub const BACKEND_BUILD_ID: &str = "2026-09-26-aaf-range-gaps";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

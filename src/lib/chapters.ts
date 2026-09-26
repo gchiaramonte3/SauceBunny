@@ -11,6 +11,7 @@
  */
 
 import { loadJson, saveJson } from "./storage";
+import { pathKey } from "./repath";
 import { hmsToSeconds, secondsToClock } from "./timecode";
 import type { ChatMessage } from "./ai-chat";
 
@@ -52,15 +53,23 @@ export function hasCreatorChapters(chapters: readonly Chapter[]): boolean {
 // reviewSourceKey: local path — fingerprint-resolved — or webpage URL), so
 // chapters reload with the source across restarts, moves, and renames.
 
+// NFC via `pathKey`: a local source key is a path, and macOS's decomposed
+// on-disk spelling of an accented name must not file chapters under a second
+// key. Entries written before this under the raw spelling are still read (and
+// the raw key is dropped on the next save), so the store migrates itself.
 const KEY_PREFIX = "saucebunny.chapters.";
-const chaptersKey = (sourceKey: string) => KEY_PREFIX + sourceKey;
+const chaptersKey = (sourceKey: string) => KEY_PREFIX + pathKey(sourceKey);
+const legacyChaptersKey = (sourceKey: string) => KEY_PREFIX + sourceKey;
 
 /** Fired after any chapters mutation so other views (the timeline markers)
  *  can re-read. Mirrors REVIEW_CHANGED_EVENT in lib/review.ts. */
 export const CHAPTERS_CHANGED_EVENT = "saucebunny:chapters-changed";
 
 export function loadChapters(sourceKey: string): Chapter[] {
-  const raw = loadJson<unknown>(chaptersKey(sourceKey), []);
+  let raw = loadJson<unknown>(chaptersKey(sourceKey), null);
+  if (raw === null && legacyChaptersKey(sourceKey) !== chaptersKey(sourceKey)) {
+    raw = loadJson<unknown>(legacyChaptersKey(sourceKey), null);
+  }
   if (!Array.isArray(raw)) return [];
   // Defensive re-validate: a corrupt/hand-edited blob can't crash the timeline.
   return raw.filter(
@@ -73,6 +82,9 @@ export function loadChapters(sourceKey: string): Chapter[] {
 
 export function saveChapters(sourceKey: string, chapters: Chapter[]): void {
   saveJson(chaptersKey(sourceKey), chapters);
+  if (legacyChaptersKey(sourceKey) !== chaptersKey(sourceKey)) {
+    try { localStorage.removeItem(legacyChaptersKey(sourceKey)); } catch { /* unavailable */ }
+  }
   try { window.dispatchEvent(new CustomEvent(CHAPTERS_CHANGED_EVENT, { detail: { sourceKey } })); }
   catch { /* non-DOM context (tests) */ }
 }

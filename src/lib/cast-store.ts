@@ -26,7 +26,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { sanitizeCastFile, MAX_CASTS, type Cast } from "./cast";
 import { mergeCasts } from "./cast-merge";
-import { STORE_SCHEMA_VERSION, futureVersionIn, futureVersionMessage, reportFutureVersion } from "./store-schema";
+import { futureVersionIn, futureVersionMessage, reportFutureVersion } from "./store-schema";
+export const CAST_SCHEMA_VERSION = 2;
 
 const FILE = "casts.json";
 const READ_CAP = 8 * 1024 * 1024;
@@ -72,8 +73,8 @@ let futureVersion: number | null = null;
 function lockToFutureVersion(found: number): void {
   if (futureVersion !== null) return;
   futureVersion = found;
-  lastError = futureVersionMessage("casts", found);
-  reportFutureVersion("casts", found);
+  lastError = futureVersionMessage("casts", found, CAST_SCHEMA_VERSION);
+  reportFutureVersion("casts", found, CAST_SCHEMA_VERSION);
   notify();
 }
 
@@ -133,7 +134,7 @@ export async function refreshCastsFromDisk(): Promise<void> {
     const text = await invoke<string>("read_text_file_capped", {
       path: `${dir}/${FILE}`, maxBytes: READ_CAP,
     });
-    const fv = futureVersionIn(text);
+    const fv = futureVersionIn(text, CAST_SCHEMA_VERSION);
     if (fv !== null) { lockToFutureVersion(fv); return; }
     const loaded = sanitizeCastFile(JSON.parse(text));
     const same = loaded.length === casts.length
@@ -237,14 +238,14 @@ async function flush(): Promise<void> {
       ]);
       // Last look at disk before we clobber it: the other window may have
       // been a newer build that upgraded the file since we hydrated.
-      const fv = futureVersionIn(cur);
+      const fv = futureVersionIn(cur, CAST_SCHEMA_VERSION);
       if (fv !== null) { lockToFutureVersion(fv); return; }
       merged = mergeCasts(sanitizeCastFile(JSON.parse(cur)), casts, touched, tombstones).slice(0, MAX_CASTS);
     } catch {
       // No file yet, unreadable, or too slow — preserve rather than merge.
       merged = casts;
     }
-    const text = JSON.stringify({ version: STORE_SCHEMA_VERSION, casts: merged }, null, 2);
+    const text = JSON.stringify({ version: CAST_SCHEMA_VERSION, casts: merged }, null, 2);
     await invoke("write_text_to_path", { path: `${dir}/${FILE}`, text, atomic: true });
     // Only after the write lands: until then those edits are still owed, and
     // clearing them early would drop them from the NEXT merge if this write
@@ -324,7 +325,7 @@ export async function hydrateCastStore(): Promise<void> {
 
     try {
       const text = await invoke<string>("read_text_file_capped", { path: `${dir}/${FILE}`, maxBytes: READ_CAP });
-      const fv = futureVersionIn(text);
+      const fv = futureVersionIn(text, CAST_SCHEMA_VERSION);
       if (fv !== null) lockToFutureVersion(fv);
       // Still loaded, deliberately: the sanitizer is field-tolerant, so the
       // user sees the casts this build understands instead of an empty shelf

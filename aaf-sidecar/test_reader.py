@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,7 @@ import aaf2
 import reader
 
 
-def fixture(path, *, rate='24000/1001', gap=True, origin=0, drop=False, raw=False):
+def fixture(path, *, rate='24000/1001', gap=True, origin=0, drop=False, raw=False, bwf_date=None):
     fps = Fraction(rate)
     sample_count = reader.round_sample(Fraction(12,1)*48000/fps)
     pcm = b''.join(((i % 2000)-1000).to_bytes(3,'little',signed=True) for i in range(sample_count))
@@ -25,6 +26,11 @@ def fixture(path, *, rate='24000/1001', gap=True, origin=0, drop=False, raw=Fals
         wav.setnchannels(1); wav.setsampwidth(3); wav.setframerate(48000)
         wav.writeframes(pcm)
     blob = buf.getvalue()
+    if bwf_date is not None:
+        bext = bytearray(602); bext[320:330] = bwf_date.encode('ascii')
+        chunk = b'bext' + struct.pack('<I', len(bext)) + bytes(bext)
+        blob = blob[:36] + chunk + blob[36:]
+        blob = blob[:4] + struct.pack('<I', len(blob)-8) + blob[8:]
     with aaf2.open(str(path),'w') as file:
         source = file.create.SourceMob('Synthetic essence')
         file.content.mobs.append(source)
@@ -73,6 +79,32 @@ class ReaderTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_sparse_source_over_64_gib_has_bounded_identity_reads(self):
+        path = self.root/'large-source.aaf'
+        size = 65 * 1024**3 + 123
+        head, tail = b'AAF head', b'tail past the old limit'
+        with path.open('wb') as stream:
+            stream.write(head)
+            stream.seek(size-len(tail))
+            stream.write(tail)
+        expected = hashlib.sha256(f'{size}:{path.stat().st_mtime_ns}'.encode())
+        expected.update(head + bytes(65536-len(head)))
+        expected.update(bytes(65536-len(tail)) + tail)
+        self.assertEqual(reader.fingerprint(path), expected.hexdigest())
+        self.assertLess(path.stat().st_blocks * 512, 1024 * 1024)
+        # Still reject empty sources and directories; no total-source cap.
+        empty = self.root/'empty.aaf'; empty.touch()
+        for invalid in (empty, self.root):
+            with self.assertRaises(reader.ReaderError): reader.fingerprint(invalid)
+
+    def test_sparse_padded_aaf_over_64_gib_remains_readable(self):
+        # Generated valid CFB, sparse extension. This proves the source-size
+        # guard and parser, not hours of real large-essence playback.
+        with self.aaf.open('r+b') as stream: stream.truncate(65 * 1024**3)
+        result = self.command('inspect', '--graph', '--input', str(self.aaf))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['tracks'][0]['name'], 'ALPHA')
+
     def command(self, *args):
         return subprocess.run([sys.executable,str(Path(reader.__file__)),'--version'] if not args else [sys.executable,str(Path(reader.__file__)),*args],capture_output=True,text=True,timeout=15)
 
@@ -84,8 +116,46 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(data['start_frame'],1613255)
         self.assertEqual(data['edit_rate'],{'numerator':24000,'denominator':1001})
         self.assertEqual(data['tracks'][0]['name'],'ALPHA')
+        self.assertEqual(data['tracks'][0]['physical_track_number'],1)
+        self.assertNotEqual(data['tracks'][0]['id'],'1')
         self.assertEqual([c['kind'] for c in data['tracks'][0]['clips']],['audio','gap','audio'])
         self.assertEqual(data['tracks'][0]['clips'][0]['source_start_sample'],4004)
+
+    def test_recording_metadata_is_not_the_aaf_creation_or_file_date(self):
+        for supplied, expected in [('2026-08-01', '2026-08-01'), ('2024:02:29', '2024-02-29'), ('2026-02-29', None), ('0000-00-00', None)]:
+            with self.subTest(supplied=supplied):
+                path = self.root / f'{supplied.replace(":", "-")}.aaf'
+                fixture(path, bwf_date=supplied)
+                result = self.command('inspect', '--input', str(path))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                dates = json.loads(result.stdout)['recording_dates']
+                self.assertEqual([item['date'] for item in dates], [expected] if expected else [])
+                if dates: self.assertEqual(dates[0]['provenance'], 'bwf-origination-date')
+        self.assertEqual(json.loads(self.command('inspect', '--input', str(self.aaf)).stdout)['recording_dates'], [])
+
+    def test_explicit_source_recording_comment_has_separate_provenance(self):
+        with aaf2.open(str(self.aaf), 'rw') as file:
+            for mob in file.content.mobs:
+                if isinstance(mob, aaf2.mobs.SourceMob): mob.comments['RecordingDate'] = '2026-08-02'
+        result = self.command('inspect', '--input', str(self.aaf))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = json.loads(result.stdout)['recording_dates']
+        self.assertEqual(metadata[0]['date'], '2026-08-02')
+        self.assertEqual(metadata[0]['provenance'], 'explicit-recording-date')
+
+    def test_physical_track_number_is_not_slot_id_or_audio_order(self):
+        with aaf2.open(str(self.aaf), 'rw') as file:
+            next(file.content.toplevel()).slot_at(int(self.track_id))['PhysicalTrackNumber'].value = 7
+        result = self.command('inspect', '--input', str(self.aaf))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['tracks'][0]['physical_track_number'], 7)
+
+    def test_missing_track_number_is_unknown_not_slot_id(self):
+        with aaf2.open(str(self.aaf), 'rw') as file:
+            del next(file.content.toplevel()).slot_at(int(self.track_id))['PhysicalTrackNumber']
+        result = self.command('inspect', '--input', str(self.aaf))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(json.loads(result.stdout)['tracks'][0]['physical_track_number'])
 
     def test_index_extents_reproduce_pcm_and_keep_exact_positions(self):
         result = self.command('index','--input',str(self.aaf))
@@ -208,6 +278,35 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stderr)
         with wave.open(str(output),'rb') as wav:
             self.assertEqual(wav.readframes(wav.getnframes()),self.pcm[9*2002*3:10*2002*3])
+
+    def timecode_slot(self, file):
+        comp = next(file.content.toplevel())
+        return comp, next(slot for slot in comp.slots if isinstance(slot.segment, aaf2.components.Timecode))
+
+    def test_record_timecode_wrapped_in_a_sequence_is_read(self):
+        with aaf2.open(str(self.aaf),'rw') as file:
+            _, slot = self.timecode_slot(file)
+            timecode = file.create.Timecode(fps=24, length=12); timecode.start = 1613255
+            wrapper = file.create.Sequence(media_kind='timecode'); wrapper.components.append(timecode)
+            slot.segment = wrapper
+        result = self.command('inspect','--input',str(self.aaf))
+        self.assertEqual(result.returncode,0,result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data['start_frame'],1613255)
+        self.assertFalse(any('No matching record timecode' in w for w in data['warnings']))
+
+    def test_auxiliary_timecode_track_uses_track_one_instead_of_failing(self):
+        with aaf2.open(str(self.aaf),'rw') as file:
+            comp, slot = self.timecode_slot(file)
+            slot['PhysicalTrackNumber'].value = 2
+            record = comp.create_timeline_slot('24000/1001')
+            record.segment = file.create.Timecode(fps=24, length=12); record.segment.start = 86400
+            record['PhysicalTrackNumber'].value = 1
+        result = self.command('inspect','--input',str(self.aaf))
+        self.assertEqual(result.returncode,0,result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data['start_frame'],86400)
+        self.assertTrue(any('more than one timecode track' in w for w in data['warnings']))
 
     def test_multiple_compositions_rejected(self):
         with aaf2.open(str(self.aaf),'rw') as file:

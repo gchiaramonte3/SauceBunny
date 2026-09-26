@@ -14,7 +14,7 @@ const {
   futureVersionIn, STORE_SCHEMA_VERSION, onFutureStoreVersion,
   resetFutureVersionListenersForTests,
 } = await import("./store-schema");
-const { __resetCastStore, castsAreReadOnly, getCastError, getCasts, hydrateCastStore, saveCast, flushCasts } =
+const { CAST_SCHEMA_VERSION, __resetCastStore, castsAreReadOnly, getCastError, getCasts, hydrateCastStore, saveCast, flushCasts } =
   await import("./cast-store");
 const { newCast } = await import("./cast");
 const { __resetProjectStore, hydrateProjects, editProject, getProjects } =
@@ -69,7 +69,7 @@ describe("futureVersionIn", () => {
 describe("a store file from a newer build is never overwritten", () => {
   it("cast-store: hydrates, refuses the save, and keeps the file byte-identical", async () => {
     const onDisk = JSON.stringify({
-      version: STORE_SCHEMA_VERSION + 1,
+      version: CAST_SCHEMA_VERSION + 1,
       casts: [{ id: "a", name: "The Bear S3", members: [], newFieldFromTheFuture: "keep me" }],
     });
     const writes: { path: string; text: string }[] = [];
@@ -104,7 +104,7 @@ describe("a store file from a newer build is never overwritten", () => {
     invoke.mockImplementation(async (cmd: string) => {
       if (cmd === "default_transcript_library_path") return LIB;
       if (cmd === "read_text_file_capped") {
-        return JSON.stringify({ version: STORE_SCHEMA_VERSION + 1, casts: [] });
+        return JSON.stringify({ version: CAST_SCHEMA_VERSION + 1, casts: [] });
       }
       throw new Error(`unexpected ${cmd}`);
     });
@@ -137,7 +137,7 @@ describe("a store file from a newer build is never overwritten", () => {
     await hydrateCastStore();
     expect(castsAreReadOnly()).toBe(false);
 
-    onDisk = JSON.stringify({ version: STORE_SCHEMA_VERSION + 1, casts: [] });
+    onDisk = JSON.stringify({ version: CAST_SCHEMA_VERSION + 1, casts: [] });
     saveCast(newCast("Written after the upgrade"));
     await vi.advanceTimersByTimeAsync(2000);
 
@@ -189,7 +189,7 @@ describe("every file store consults the version it writes", () => {
       // STORE_SCHEMA_VERSION the sweep stopped matching anything at all and
       // went green over an empty set - reporting perfect conformance for the
       // very change it should have been checking.
-      const stamps = /version:\s*(\d+|STORE_SCHEMA_VERSION)\s*[,}]/.test(src)
+      const stamps = /version:\s*(\d+|STORE_SCHEMA_VERSION|CAST_SCHEMA_VERSION)\s*[,}]/.test(src)
         || /"version":\s*\d+/.test(src);
       if (!stamps) continue;
       stampers.push(name);
@@ -227,14 +227,14 @@ describe("every file store consults the version it writes", () => {
     expect(bad, "writes a bare version number instead of STORE_SCHEMA_VERSION").toEqual([]);
   });
 
-  it("covers the five stores that exist today, so the sweep is not vacuous", () => {
+  it("covers the stores that exist today, so the sweep is not vacuous", () => {
     const dir = fileURLToPath(new URL(".", import.meta.url));
     const wired = readdirSync(dir).filter(
       (n) => n.endsWith(".ts") && !n.includes(".test.") && n !== "store-schema.ts"
         && readFileSync(join(dir, n), "utf8").includes("futureVersionIn"),
     );
     expect(wired.sort()).toEqual([
-      "cast-store.ts", "review-store.ts", "screening-store.ts",
+      "cast-store.ts", "library-organization.ts", "review-store.ts", "screening-store.ts",
       "transcript-project-store.ts", "web-collection-store.ts",
     ]);
   });
@@ -253,7 +253,7 @@ describe("a report raised before anyone subscribes still reaches the user", () =
     invoke.mockImplementation(async (cmd: string) => {
       if (cmd === "default_transcript_library_path") return LIB;
       if (cmd === "read_text_file_capped") {
-        return JSON.stringify({ version: STORE_SCHEMA_VERSION + 1, casts: [] });
+        return JSON.stringify({ version: CAST_SCHEMA_VERSION + 1, casts: [] });
       }
       throw new Error(`unexpected ${cmd}`);
     });

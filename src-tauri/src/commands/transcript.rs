@@ -37,6 +37,11 @@ pub(crate) struct TranscriptPhaseEvent {
     pub(crate) phase: String,
 }
 
+/// A complete Whisper SRT exists, while speaker detection may still be running.
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct TranscriptPreviewEvent { pub job_id: String, pub path: String }
+
 // ============================================================
 // WHISPER LOCAL TRANSCRIPTION
 // ============================================================
@@ -1117,10 +1122,8 @@ pub(crate) async fn download_with_progress(
 /// instead of breaking. VAD trims silence before decoding, which cuts Whisper's
 /// silence-hallucinations and tightens segment timing — a real accuracy win.
 async fn ensure_vad_model(app: &AppHandle) -> Option<PathBuf> {
+    if let Some(path) = cached_vad_model(app) { return Some(path); }
     let path = whisper_models_dir(app).ok()?.join("ggml-silero-v5.1.2.bin");
-    if path.exists() && path.metadata().map(|m| m.len() > 1000).unwrap_or(false) {
-        return Some(path);
-    }
     let url = "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin";
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
@@ -1141,6 +1144,11 @@ async fn ensure_vad_model(app: &AppHandle) -> Option<PathBuf> {
     tokio::fs::write(&tmp, &bytes).await.ok()?;
     tokio::fs::rename(&tmp, &path).await.ok()?;
     Some(path)
+}
+
+pub(crate) fn cached_vad_model(app: &AppHandle) -> Option<PathBuf> {
+    let path = whisper_models_dir(app).ok()?.join("ggml-silero-v5.1.2.bin");
+    path.metadata().ok().filter(|m| m.is_file() && m.len() > 1000).map(|_| path)
 }
 
 #[derive(Deserialize)]
@@ -1247,6 +1255,7 @@ pub async fn generate_transcript(
     // whisper-cli reads the WAV. Decoupling these steps means a yt-dlp
     // failure won't masquerade as an ffmpeg "Invalid data" error.
     let raw_prefix = format!("{}-raw", args.job_id);
+    super::video_intelligence::yield_video_background(&app);
     let raw_template = cache
         .join(format!("{}.%(ext)s", raw_prefix))
         .to_string_lossy()
@@ -2165,6 +2174,9 @@ pub struct TranscribeLocalArgs {
     /// "fast" → greedy decoding (`-bs 1 -bo 1`); anything else keeps
     /// whisper's own beam-5 default. See `whisper_cli_args`.
     pub speed: Option<String>,
+    /// Analysis reuses installed models only; ordinary Clip behavior is unchanged.
+    #[serde(default)]
+    pub local_only: bool,
 }
 
 /// Where a job's 16 kHz mono WAV lives while whisper reads it.
@@ -2550,6 +2562,8 @@ pub async fn transcribe_local_file(
     let lang = normalize_whisper_lang(args.language.as_deref());
     let duration_seconds = args.duration_seconds;
 
+    let local_only = args.local_only;
+
     tokio::spawn(async move {
         // Phase 1: ffmpeg → 16 kHz mono WAV (works for any video or audio in).
         // Streamed + tracked: registered for Stop, emits an `extract` phase +
@@ -2647,7 +2661,7 @@ pub async fn transcribe_local_file(
                 return;
             }
         };
-        let vad_model = ensure_vad_model(&app_for).await
+        let vad_model = if local_only { cached_vad_model(&app_for) } else { ensure_vad_model(&app_for).await }
             .map(|p| p.to_string_lossy().to_string());
         if vad_model.is_some() {
             emit_transcript_log(&app_for, &job_for, "info",
@@ -2669,9 +2683,6 @@ pub async fn transcribe_local_file(
         // already on disk; the old ordering waited for whisper to terminate
         // first and so paid the diarizer's whole runtime in wall clock for
         // nothing. The merge still waits - it needs whisper's SRT.
-        if detect_speakers && !app_for.state::<JobRegistry>().is_cancelled(&job_for) {
-            start_diarizer_early(&app_for, &job_for, &wav_path_for, expected_speakers);
-        }
         let spawn = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
@@ -2690,9 +2701,14 @@ pub async fn transcribe_local_file(
         };
         app_for.state::<JobRegistry>().insert(job_for.clone(), child);
 
+        if detect_speakers && !app_for.state::<JobRegistry>().is_cancelled(&job_for) {
+            start_diarizer_early_with_policy(&app_for, &job_for, &wav_path_for, expected_speakers, local_only);
+        }
         // We don't know total duration without re-probing; emit progress on
         // every segment but skip the percent (UI will show indeterminate).
         let mut last_log_at = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        let mut terminated = false;
+        let mut channel_error = None;
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
@@ -2712,6 +2728,7 @@ pub async fn transcribe_local_file(
                     }
                 }
                 CommandEvent::Terminated(payload) => {
+                    terminated = true;
                     let _ = app_for.state::<JobRegistry>().take(&job_for);
                     emit_transcript_log(
                         &app_for, &job_for, "info",
@@ -2721,6 +2738,9 @@ pub async fn transcribe_local_file(
                     let srt = format!("{}.srt", output_base_str);
                     let srt_exists = std::path::Path::new(&srt).exists();
                     if success && srt_exists {
+                        let _ = app_for.emit("transcript-preview", TranscriptPreviewEvent {
+                            job_id: job_for.clone(), path: srt.clone(),
+                        });
                         // Optional speaker-diarization step (see the
                         // matching block in transcribe_prepared_wav for
                         // the rationale + failure semantics).
@@ -2737,10 +2757,10 @@ pub async fn transcribe_local_file(
                                     expected_speakers.map(|n| n.to_string()).unwrap_or_else(|| "auto".into()),
                                 ),
                             );
-                            if let Err(e) = run_diarize_and_merge(
+                            if let Err(e) = run_diarize_and_merge_with_policy(
                                 &app_for, &job_for,
                                 &wav_path_for, std::path::Path::new(&srt),
-                                expected_speakers,
+                                expected_speakers, local_only,
                             ).await {
                                 emit_transcript_log(
                                     &app_for, &job_for, "warn",
@@ -2768,8 +2788,15 @@ pub async fn transcribe_local_file(
                     }
                     break;
                 }
+                CommandEvent::Error(message) => { channel_error = Some(message); break; }
                 _ => {}
             }
+        }
+        if !terminated {
+            let _ = std::fs::remove_file(&wav_path_for);
+            app_for.state::<JobRegistry>().finish_job(&job_for);
+            emit_transcript_done(&app_for, &job_for, false, None, None,
+                Some(channel_error.unwrap_or_else(|| "Whisper disconnected before reporting completion".into())));
         }
     });
 
@@ -2892,7 +2919,9 @@ fn shift_srt_file(path: &std::path::Path, offset_s: f64) -> std::io::Result<()> 
         return Ok(());
     }
     let text = std::fs::read_to_string(path)?;
-    std::fs::write(path, shift_srt_text(&text, offset_s))
+    // Rewritten in place: a torn write here would leave the only copy of the
+    // transcript half-shifted, so write beside it and rename over.
+    atomic_write(path, shift_srt_text(&text, offset_s).as_bytes())
 }
 
 #[cfg(test)]
@@ -3158,12 +3187,17 @@ pub(crate) fn start_diarizer_early(
     wav_path: &std::path::Path,
     expected_speakers: Option<u32>,
 ) {
+    start_diarizer_early_with_policy(app, job_id, wav_path, expected_speakers, false);
+}
+
+fn start_diarizer_early_with_policy(app: &AppHandle, job_id: &str, wav_path: &std::path::Path,
+    expected_speakers: Option<u32>, local_only: bool) {
     let app_owned = app.clone();
     let job = job_id.to_string();
     let wav = wav_path.to_path_buf();
     let handle = tauri::async_runtime::spawn(async move {
         // emit_phases:false — whisper owns the phase label while both run.
-        run_diarizer(&app_owned, &job, &wav, expected_speakers, false).await
+        run_diarizer(&app_owned, &job, &wav, expected_speakers, false, local_only).await
     });
     if let Ok(mut g) = diarize_tasks().lock() {
         // Drop any handle stranded by a job that was cancelled before its
@@ -3192,6 +3226,7 @@ async fn run_diarizer(
     wav_path: &std::path::Path,
     expected_speakers: Option<u32>,
     emit_phases: bool,
+    local_only: bool,
 ) -> Result<std::path::PathBuf, crate::AppError> {
     let cache = app
         .path()
@@ -3225,6 +3260,7 @@ async fn run_diarizer(
         }
     }
     let (mut rx, child) = cmd
+        .env("SAUCE_DIARIZER_OFFLINE", if local_only { "1" } else { "0" })
         .args(diar_args)
         .spawn()
         .map_err(|e| format!("failed to spawn saucebunny-diarize: {e}"))?;
@@ -3394,6 +3430,11 @@ async fn run_diarize_and_merge(
     srt_path: &std::path::Path,
     expected_speakers: Option<u32>,
 ) -> Result<(), crate::AppError> {
+    run_diarize_and_merge_with_policy(app, job_id, wav_path, srt_path, expected_speakers, false).await
+}
+
+async fn run_diarize_and_merge_with_policy(app: &AppHandle, job_id: &str, wav_path: &std::path::Path,
+    srt_path: &std::path::Path, expected_speakers: Option<u32>, local_only: bool) -> Result<(), crate::AppError> {
     let started_early = diarize_tasks().lock().ok().and_then(|mut g| g.remove(job_id));
     let diar_json = match started_early {
         Some(task) => {
@@ -3408,7 +3449,7 @@ async fn run_diarize_and_merge(
         }
         // No early start (a caller that diarizes an EXISTING transcript, with
         // no whisper run to overlap with). Behaves exactly as it always did.
-        None => run_diarizer(app, job_id, wav_path, expected_speakers, true).await?,
+        None => run_diarizer(app, job_id, wav_path, expected_speakers, true, local_only).await?,
     };
     merge_diarization(app, job_id, &diar_json, srt_path).await
 }

@@ -41,6 +41,8 @@ describe("npm run verify covers every gate CI runs", () => {
     ["npm run test:obs-packaging", "npm run test:obs-packaging"],
     ["npm run test:ndi-sender", "npm run test:ndi-sender"],
     ["npm run test:aaf", "npm run test:aaf"],
+    ["npm run test:video", "npm run test:video"],
+    ["npm run test:audio-analysis", "npm run test:audio-analysis"],
     ["npm run lint", "npm run lint"],
     ["cargo check", "cargo check"],
     ["cargo test --lib", "cargo test --lib"],
@@ -86,7 +88,7 @@ describe("npm run verify covers every gate CI runs", () => {
   it("has no CI run-step that the mapping forgot", () => {
     // The direction that actually catches drift: a NEW job added to CI and not
     // to the script. Test-only and setup steps are excluded by name.
-    const SETUP = /npm ci|actions\/|playwright install|rustc --version|Stub|mkdir|chmod|printf|echo|cp |bash scripts\/verify-bundle|npm run tauri build/;
+    const SETUP = /npm ci|brew install|actions\/|playwright install|rustc --version|Stub|mkdir|chmod|printf|echo|cp |bash scripts\/verify-bundle|npm run tauri build/;
     const steps = [...ci.matchAll(/^\s*(?:- )?run: (.+)$/gm)]
       .map((m) => m[1].trim())
       // CI-only resource setup replaces the former inline mkdir/touch loops.

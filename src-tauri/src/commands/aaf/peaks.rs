@@ -9,7 +9,8 @@ use tauri::AppHandle;
 const BASE: u64 = 256;
 const POINTS: u64 = 2048;
 const HEADER: u64 = 32;
-static BUILD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// One overview build at a time, shared by native and linked media.
+pub(super) static BUILD: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 fn sample(bytes: &[u8]) -> i16 {
     // Round outwards below when reducing. Retain low-amplitude activity even
@@ -41,9 +42,13 @@ pub fn build(reader: &pcm::Reader, track: &pcm::Track, path: &Path, check: impl 
         Ok(())
     })?;
     if count > 0 { values.push([low,high]); }
+    write_pyramid(values, samples, track.sample_rate, path, check)
+}
+
+pub fn write_pyramid(mut values: Vec<[i16;2]>, samples: u64, hz: u32, path: &Path, check: impl Fn() -> Result<(), AppError>) -> Result<(), AppError> {
     let mut file = File::create(path)?;
     file.write_all(b"SBPEAK01")?; file.write_all(&samples.to_le_bytes())?;
-    file.write_all(&u64::from(track.sample_rate).to_le_bytes())?; file.write_all(&BASE.to_le_bytes())?;
+    file.write_all(&u64::from(hz).to_le_bytes())?; file.write_all(&BASE.to_le_bytes())?;
     loop {
         check()?; write_pairs(&mut file, &values)?;
         if values.len() <= 1 { break; }
@@ -63,7 +68,7 @@ pub fn query(path: &Path, first: u64, end: u64, expected_samples: u64, hz: u32) 
     if hi - lo > POINTS * 2 + 2 || offset + hi * 4 > file.metadata()?.len() { return Err(bad()); }
     file.seek(SeekFrom::Start(offset + lo * 4))?;
     let mut bytes = vec![0; ((hi-lo)*4) as usize]; file.read_exact(&mut bytes)?;
-    let pairs: Vec<[i16;2]> = bytes.chunks_exact(4).map(|p| [i16::from_le_bytes([p[0],p[1]]),i16::from_le_bytes([p[2],p[3]])]).collect();
+    let pairs: Vec<[i16;2]> = bytes.as_chunks::<4>().0.iter().map(|p| [i16::from_le_bytes([p[0],p[1]]),i16::from_le_bytes([p[2],p[3]])]).collect();
     if pairs.iter().any(|p| p[0] > p[1]) { return Err(bad()); }
     let points = POINTS.min(end-first);
     Ok((0..points).map(|x| {
@@ -74,8 +79,11 @@ pub fn query(path: &Path, first: u64, end: u64, expected_samples: u64, hz: u32) 
     }).collect())
 }
 
-pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64, job: &str) -> Result<AafWaveform, AppError> {
+/// `may_build` is false for zoomed detail requests: on linked media they read the
+/// finished overview and never start an hour-long build of their own.
+pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64, may_build: bool, job: &str) -> Result<AafWaveform, AppError> {
     store::track(document, track)?; store::source_ready(document)?;
+    if super::linked_audio::needed(document) { return super::linked_audio::waveform(app, document, track, start, duration, may_build, job).await; }
     let reader = pcm::get(app, document, job).await?;
     let selected = reader.index.track(track)?;
     let first = reader.index.sample(start, selected.sample_rate);
@@ -87,7 +95,7 @@ pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, star
     }
     // Cancellation is checked after waiting and once per bounded read. No detached
     // scans survive tab changes; a new request can rebuild a cancelled partial.
-    let _build = BUILD.lock().await;
+    let _build = super::audio::acquire(app, job, &BUILD).await?;
     process::check_cancelled(app, job)?;
     if path.is_file() {
         if let Ok(peaks) = query(&path, first, end, total, selected.sample_rate) { return Ok(AafWaveform { track_id: track.into(), peaks }); }

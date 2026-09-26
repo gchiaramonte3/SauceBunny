@@ -86,6 +86,17 @@ export function tauriMockInit(expectedBuildId: string): void {
 
   const emptyCacheCategory = { file_count: 0, bytes_total: 0 };
   const table: Record<string, unknown> = {
+    library_organization_load: () => localStorage.getItem("e2e.organization"),
+    library_organization_save: (args: unknown) => {
+      const { expected, text } = args as { expected: string | null; text: string };
+      if (localStorage.getItem("e2e.organizationRefuse") === "1") throw new Error("Disk full");
+      if (localStorage.getItem("e2e.organization") !== expected) throw new Error("Library folders changed in another window. Reload before editing.");
+      localStorage.setItem("e2e.organization", text); return null;
+    },
+    library_reference_status: (args: unknown) => (args as { paths: string[] }).paths.map((path) => ({ path, exists: !path.includes("missing") })),
+    aaf_list: () => JSON.parse(localStorage.getItem("e2e.aafList") ?? "[]"),
+    aaf_diagnostics: () => ({ events: [], active_jobs: [], persistence_error: null, context: "Browser fixture; native filesystem is not accessed." }),
+    aaf_clear_diagnostics: () => null,
     read_text_file_capped: (args: Record<string, unknown>) => {
       const path = String((args as { path?: string }).path ?? "");
       const hit = seededFiles()[path];
@@ -309,6 +320,17 @@ export function tauriMockInit(expectedBuildId: string): void {
     },
     scan_library_folder: (args: unknown) => {
       const path = String((args as { path?: unknown } | undefined)?.path ?? "");
+      if (localStorage.getItem("e2e.deepLibrary") === "1") {
+        const chain = ["/e2e-mock/Footage", "/e2e-mock/Footage/Season", "/e2e-mock/Footage/Season/Episode", "/e2e-mock/Footage/Season/Episode/Selects", "/e2e-mock/Footage/Season/Episode/Selects/Takes"];
+        const scan = (dir: string, remaining: number): object => {
+          const index = chain.indexOf(dir), hasChild = index >= 0 && index < chain.length - 1;
+          return { path: dir, name: dir.split("/").pop(), deeper: remaining === 0 && hasChild,
+            folders: remaining > 0 && hasChild ? [scan(chain[index + 1], remaining - 1)] : [],
+            items: index === 0 || index === chain.length - 1 ? [{ name: index === 0 ? "root.mov" : "deep-take.mov", path: `${dir}/${index === 0 ? "root.mov" : "deep-take.mov"}`, kind: "video", size_bytes: 2048, modified_ms: 0 }] : [],
+          };
+        };
+        return scan(path, Number((args as { maxDepth?: number }).maxDepth ?? 2));
+      }
       if (path.includes("missing")) {
         return Promise.reject({ kind: "NotFound", data: path });
       }

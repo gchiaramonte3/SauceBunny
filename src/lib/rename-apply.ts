@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { libraryOrganization } from "./library-organization-store";
 import { formatError } from "./error-format";
 import { needsRepath, repathTo } from "./repath";
 import { loadChosenPosters, loadSourceTimecodes, saveChosenPosters, saveSourceTimecodes } from "./library";
@@ -83,6 +84,7 @@ export function repathIdentity(
   oldPath: string, newPath: string, id: RenameIdentity,
 ): void {
   if (!needsRepath(oldPath, newPath)) return;
+  void libraryOrganization.repath(oldPath, newPath);
 
   saveChosenPosters(repathKey(loadChosenPosters(), oldPath, newPath));
   saveSourceTimecodes(repathKey(loadSourceTimecodes(), oldPath, newPath));

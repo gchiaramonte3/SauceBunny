@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { MultitrackTimeline } from "../src/components/MultitrackTimeline";
+import { MultitrackTimecodeDialog } from "../src/components/MultitrackTimecodeDialog";
+import { sequenceTimecode, sequenceDurationTimecode } from "../src/lib/multitrack";
 import type { AafDocument } from "../src/bindings/AafDocument";
 import "../src/styles/multitrack.css";
 
@@ -26,11 +28,16 @@ const waveforms = Object.fromEntries(names.map((_, track) => [String(track + 1),
 export function MultitrackExamples() {
   const [document, setDocument] = useState(example);
   const [frame, setFrame] = useState(420);
+  const [timecodeOpen, setTimecodeOpen] = useState(false);
+  const closeTimecode = useCallback(() => setTimecodeOpen(false), []);
   const [solo, setSolo] = useState(new Set(["1"]));
   const [levels, setLevels] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState(new Set(["1", "2", "3", "4"]));
   return <div className="cp-ds-stack">
     <p className="cp-ds-fixture-caption">Multitrack · Generated waveforms, not a recording. Solo and seek update this fixture only.</p>
+    <div className="cp-multitrack-toolbar-options"><button className="cp-tc" aria-label="Go to multitrack timecode" onClick={(event) => { event.currentTarget.focus(); setTimecodeOpen(true); }}>{sequenceTimecode(document.manifest, frame)}</button>
+      <span className="cp-multitrack-trt">TRT {sequenceDurationTimecode(document.manifest)}</span></div>
+    {timecodeOpen && <MultitrackTimecodeDialog manifest={document.manifest} initialDigits="" onClose={closeTimecode} onSeek={setFrame} />}
     <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={{}} selected={selected} solo={solo} frame={frame} levels={levels} onLevel={(id, value) => setLevels((prior) => ({ ...prior, [id]: value }))}
       onSelect={(id) => setSelected((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; })}
       onRename={(trackId, owner) => setDocument((current) => ({ ...current, labels: [...current.labels.filter((label) => label.track_id !== trackId), { track_id: trackId, owner_name: owner, cast_member_id: null, color: null }] }))}

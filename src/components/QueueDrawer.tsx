@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { CutMarkerChange } from "../lib/cut-markers";
 import { usePaneWidth } from "../hooks/use-pane-width";
 import { inertWhen } from "../lib/inert";
 import { dropIndexAt, moveItem } from "../lib/reorder";
@@ -9,6 +10,7 @@ import {
 } from "./Icons";
 import type { QueuedClip , ReviewRangeDraft } from "../types";
 import { secondsToHms } from "../lib/timecode";
+import { queueFrameRate } from "../lib/queue-ranges";
 import { TranscriptViewer } from "./TranscriptViewer";
 import { AiSummary, type SummaryStyle } from "./AiSummary";
 import { ReviewPanel } from "./ReviewPanel";
@@ -134,6 +136,9 @@ type Props = {
   aiStyle?: SummaryStyle;
   /** Open Settings → AI Summary (manage/download/switch the model). */
   onOpenAiSettings?: () => void;
+  aiVideoPath?: string | null;
+  aiForegroundBusy?: boolean;
+  onOpenVideoSettings?: () => void;
   /** Auto-chapters: source identity to persist under (main's reviewSourceKey —
    *  the panel receives it through the bus snapshot). */
   chapterSourceKey?: string | null;
@@ -145,6 +150,7 @@ type Props = {
    *  this over the bus so main's timeline markers re-read. Omit when docked
    *  (the same-window CHAPTERS_CHANGED_EVENT already covers it). */
   onChaptersChanged?: () => void;
+  onCutMarkersChanged?: (change: CutMarkerChange) => void;
   /** Review tab: stable id for the current source (local path / URL), or null. */
   reviewSourceKey?: string | null;
   /** Review tab: human label for the source (title/filename). */
@@ -274,8 +280,8 @@ export function QueueDrawer({
   onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
   transcriptHasSource, onTranscriptEdited,
-  aiModelId, aiStyle, onOpenAiSettings,
-  chapterSourceKey, chapterDurationSec, onChaptersChanged, sourceDescription,
+  aiModelId, aiStyle, onOpenAiSettings, aiVideoPath, aiForegroundBusy, onOpenVideoSettings,
+  chapterSourceKey, chapterDurationSec, onChaptersChanged, onCutMarkersChanged, sourceDescription,
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
   onOpenReviewSource, onReviewLinkAsVersion, onReviewUnlinkVersion, reviewSourcePath, onReviewRangeDraft, onRegisterRangeHotkeys, reviewSession, onUndo, onRedo,
@@ -829,7 +835,7 @@ export function QueueDrawer({
           // Compact display — HH:MM:SS only (drop frames) so the meta line
           // never wraps inside the 340px drawer. Each item carries the fps it
           // was marked at — the live player fps may belong to another source.
-          const r = Math.max(1, Math.round(c.fps));
+          const r = queueFrameRate(c);
           const inS  = c.inFrames  / r;
           const outS = c.outFrames / r;
           const durS = Math.max(0, outS - inS);
@@ -1092,11 +1098,19 @@ export function QueueDrawer({
           selectedModelId={aiModelId}
           style={aiStyle}
           onOpenSettings={onOpenAiSettings}
-          onSeek={onTranscriptSeek}
+          videoPath={aiVideoPath ?? null}
+          videoForegroundBusy={aiForegroundBusy}
+          fps={fps}
+          onOpenVideoSettings={onOpenVideoSettings}
+          /* Shot/evidence times are source PTS, not nominal timecode frames.
+             Preserve fractional-rate cut boundaries (e.g. 1.001s at 23.976).
+             Detached panels already relay exact seconds through their bus. */
+          onSeek={reviewSession ? (seconds) => { void reviewSession.jumpToComment(seconds); } : onTranscriptSeek}
           sourceKey={chapterSourceKey ?? null}
           sourceDescription={sourceDescription ?? null}
           durationSec={chapterDurationSec ?? null}
           onChaptersChanged={onChaptersChanged}
+          onCutMarkersChanged={onCutMarkersChanged}
         />
         </div>
       )}

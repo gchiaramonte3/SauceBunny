@@ -61,6 +61,9 @@
   --fg-4:   #86868F;
   --fg-5:   #71717A;
 
+  --progress-fill: var(--fg-3);
+  --progress-track: var(--bg-4);
+
   --stroke-1: #141419;
   --stroke-green: rgba(108,255,141,0.6);
 
@@ -388,4 +391,3 @@
 @media (prefers-reduced-motion: reduce) {
   :root { --panel-slide: none; }
 }
-

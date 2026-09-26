@@ -98,6 +98,8 @@ const ALLOWED: Record<string, string[]> = {
   // which was byte-identical to RUNNING while both read --accent.
   "logs.css": ["status-pill.success", "tag.ok"],
   "queue-drawer.css": ["cp-queue-item.done", "cp-queue-status.done", "cp-queue-summary .ok"],
+  // A native-committed transcription outcome, never a selected/queued track.
+  "multitrack.css": ["cp-multitrack-saved-status.is-saved"],
   // ── work actually running, and timecodes (2026-08-29) ──────────────
   "ai.css": ["cp-md-ts"],
   "transcript.css": ["cp-tx-jump"],

@@ -47,10 +47,12 @@ run "Swift sidecar" swift build --package-path swift-sidecar
 # cue-breaking bug shipped through that gap twice. SrtCore is dependency-free
 # so this needs no models and runs in milliseconds.
 run "Swift tests" swift test --package-path swift-sidecar
+run "Native audio evidence" npm run test:audio-analysis --silent
 run "OBS capture configuration" npm run test:obs-capture --silent
 run "OBS internal packaging" npm run test:obs-packaging --silent
 run "NDI sender isolation" npm run test:ndi-sender --silent
 run "AAF reader" npm run test:aaf --silent
+run "Video worker" npm run test:video --silent
 # CI runs this too, and this script did not - the same subset bug as clippy
 # below, found the same way. It takes a second and it is the check that stops
 # a strong-copyleft dependency being LINKED into an MIT app, which is the one

@@ -32,11 +32,18 @@
  * cannot prove, a human assigns.
  */
 
+import type { AafGender } from "../bindings/AafGender";
+import type { AafMarkerColor } from "../bindings/AafMarkerColor";
+import { isGender, isMarkerColor } from "./cast-marker";
+
 export type CastMember = {
   id: string;
   name: string;
   /** Hex pip colour. Written into `SpeakerOverrides.colors` on apply. */
   color: string;
+  /** Manually assigned. Never inferred from the media or name. */
+  gender?: AafGender;
+  markerColor?: AafMarkerColor;
   /**
    * Optional face, as a self-contained `data:` URL.
    *
@@ -109,7 +116,7 @@ export function newMember(name: string, color: string, avatar: string | null = n
  */
 export function castFromSpeakers(
   castName: string,
-  speakers: readonly { tag: string; name: string; color: string; skip?: boolean }[],
+  speakers: readonly { tag: string; name: string; color: string; skip?: boolean; gender?: AafGender | null; markerColor?: AafMarkerColor | null }[],
 ): Cast {
   const seen = new Set<string>();
   const members: CastMember[] = [];
@@ -120,7 +127,7 @@ export function castFromSpeakers(
     // one is nearly always a merge the user has not made yet.
     if (!folded || seen.has(folded)) continue;
     seen.add(folded);
-    members.push(newMember(s.name, s.color));
+    members.push({ ...newMember(s.name, s.color), ...(s.gender ? { gender: s.gender } : {}), ...(s.markerColor ? { markerColor: s.markerColor } : {}) });
     if (members.length >= MAX_CAST_MEMBERS) break;
   }
   return newCast(castName, members);
@@ -209,7 +216,8 @@ export function sanitizeCast(raw: unknown): Cast | null {
       && m.avatar.length <= MAX_AVATAR_BYTES
       ? m.avatar
       : null;
-    members.push({ id: typeof m.id === "string" && m.id ? m.id : newId(), name: mName, color, avatar });
+    members.push({ id: typeof m.id === "string" && m.id ? m.id : newId(), name: mName, color, avatar,
+      ...(isGender(m.gender) ? { gender: m.gender } : {}), ...(isMarkerColor(m.markerColor) ? { markerColor: m.markerColor } : {}) });
   }
   return { id, name: name.trim(), updatedAt, members };
 }

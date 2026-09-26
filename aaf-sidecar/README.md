@@ -33,7 +33,9 @@ Exit 2 carries a versioned JSON error on stderr; cancellation exits 130.
 
 ## Limits and fidelity
 
-The reader caps input size at 64 GiB, duration at 24 hours, audio tracks at 64,
+There is no source-file-size cap. Fingerprints read only 64 KiB at each end,
+using 64-bit offsets for AAF and linked MXF sources. The reader caps duration at
+24 hours, sequence audio tracks at 64 (256 expanded microphone lanes),
 graph expansions at 10,000 and traversal depth at 16. Source/track edit rates
 stay rational. A single nearest-sample (ties upward) rule is used at boundaries;
 48 kHz at 24000/1001 maps exactly to 2002 samples per frame. Never concatenate

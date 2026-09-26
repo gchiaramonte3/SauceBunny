@@ -34,11 +34,9 @@ const LAYOUT = ["left", "right", "top", "bottom", "width", "height", "margin", "
 
 /** Progress fills. A bar that grows is the one honest use of animated width. */
 const FILL_ALLOWED = [
-  "src/styles/ai.css .cp-ai-dl-fill",
   "src/styles/buttons.css .cp-gen-fill",
   "src/styles/logs.css .cp-logs-header .progress-bar",
   "src/styles/room.css .cp-transfer-fill",
-  "src/styles/settings.css .cp-model-progress .bar > span",
   "src/styles/transcript.css .cp-tx-insights-bar-fill",
 ];
 

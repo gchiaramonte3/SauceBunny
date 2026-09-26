@@ -4,7 +4,7 @@ import {
   seedSpeakerOverridesFromFingerprint,
   linkSpeakerOverridesToFingerprint,
 } from "./speaker-identity";
-import { speakerOverridesKey } from "../components/transcript/helpers";
+import { loadSpeakerOverrides, renameSpeakerOverridesPath, speakerOverridesKey } from "../components/transcript/helpers";
 
 function installLocalStorage(): Map<string, string> {
   const store = new Map<string, string>();
@@ -81,5 +81,40 @@ describe("seed + link round trip", () => {
   it("no fingerprint (source-less) is a safe no-op", () => {
     expect(seedSpeakerOverridesFromFingerprint("/z.srt", null)).toBe(false);
     linkSpeakerOverridesToFingerprint("/z.srt", null); // must not throw
+  });
+});
+
+describe("speaker overrides key is NFC", () => {
+  const composed = "/Users/me/café.srt";
+  const decomposed = "/Users/me/café.srt";
+
+  it("maps both macOS spellings of one path to one key", () => {
+    expect(composed).not.toBe(decomposed);
+    expect(speakerOverridesKey(decomposed)).toBe(speakerOverridesKey(composed));
+  });
+
+  it("reads a legacy entry under the raw decomposed key and moves it onto the NFC key", () => {
+    fs.set(`saucebunny.speakerNames.${decomposed}`, NAMES);
+    expect(fs.size, "canary: the legacy entry is in the store").toBe(1);
+    // Read with the spelling it was written under (macOS's on-disk one)...
+    expect(loadSpeakerOverrides(decomposed).global).toEqual({ SPEAKER_00: "Alice" });
+    // ...and from then on either spelling finds it.
+    expect(loadSpeakerOverrides(composed).global).toEqual({ SPEAKER_00: "Alice" });
+    expect(fs.get(speakerOverridesKey(composed))).toBe(NAMES);
+    expect(fs.has(`saucebunny.speakerNames.${decomposed}`)).toBe(false);
+  });
+
+  it("carries a legacy entry's names across a rename", () => {
+    fs.set(`saucebunny.speakerNames.${decomposed}`, NAMES);
+    renameSpeakerOverridesPath(decomposed, "/Users/me/renamed.srt");
+    expect(fs.get(speakerOverridesKey("/Users/me/renamed.srt"))).toBe(NAMES);
+    expect([...fs.keys()]).toEqual([speakerOverridesKey("/Users/me/renamed.srt")]);
+  });
+
+  it("lets the fingerprint bridge see a legacy entry", () => {
+    fs.set(`saucebunny.speakerNames.${decomposed}`, NAMES);
+    linkSpeakerOverridesToFingerprint(decomposed, "fp-1");
+    expect(seedSpeakerOverridesFromFingerprint("/Users/me/other.srt", "fp-1")).toBe(true);
+    expect(fs.get(speakerOverridesKey("/Users/me/other.srt"))).toBe(NAMES);
   });
 });

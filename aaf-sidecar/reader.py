@@ -1,8 +1,9 @@
-"""Read-only AAF timeline/embedded-PCM reader. No locator or network access."""
+"""Read-only AAF inspection and embedded PCM extraction. Never opens locators."""
 from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date
 from fractions import Fraction
 import hashlib
 import json
@@ -11,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import signal
+import stat as file_stat
 import struct
 import sys
 import tempfile
@@ -30,7 +32,6 @@ MAX_SEGMENTS = 10000
 MAX_DEPTH = 16
 MAX_DURATION_SECONDS = 24 * 60 * 60
 MAX_EXTRACT_SECONDS = 600
-MAX_INPUT_BYTES = 64 * 1024**3
 BLOCK_BYTES = 192 * 1024
 PEAK_BUCKETS = 2048
 
@@ -79,8 +80,10 @@ def append_warning(warnings_list, message):
 
 def fingerprint(path):
     stat = path.stat()
-    if not path.is_file() or not 0 < stat.st_size <= MAX_INPUT_BYTES:
-        fail('Choose an AAF file smaller than 64 GiB.', 'invalid_input')
+    if not file_stat.S_ISREG(stat.st_mode) or stat.st_size <= 0:
+        fail('Choose a non-empty regular media file.', 'invalid_input')
+    # AAF and MXF can be hundreds of GB. Identity reads only the head/tail,
+    # using 64-bit offsets; source size is not a memory allocation budget.
     digest = hashlib.sha256(f'{stat.st_size}:{stat.st_mtime_ns}'.encode())
     with path.open('rb') as src:
         digest.update(src.read(65536))
@@ -97,6 +100,10 @@ class PCM:
     sample_rate: int
     sample_width: int
     time_reference: int | None
+    recording_date: str | None = None
+    recording_date_provenance: str = 'bwf-origination-date'
+    channels: int = 1
+    channel: int = 0
 
 
 def pcm_layout(essence, descriptor=None):
@@ -107,18 +114,18 @@ def pcm_layout(essence, descriptor=None):
         channels = value(descriptor,'Channels')
         bits = value(descriptor,'QuantizationBits')
         align = value(descriptor,'BlockAlign')
-        if hz.denominator != 1 or hz not in (44100,48000,96000) or channels != 1 or bits not in (16,24,32):
-            fail('Use mono PCM audio at 44.1, 48 or 96 kHz and 16, 24 or 32 bits.')
-        if align != bits//8 or size % align or value(descriptor,'Length') != size//align:
+        if hz.denominator != 1 or hz not in (44100,48000,96000) or not 1 <= channels <= 256 or bits not in (16,24,32):
+            fail('Use PCM audio at 44.1, 48 or 96 kHz and 16, 24 or 32 bits.')
+        if align != channels*bits//8 or size % align or value(descriptor,'Length') != size//align:
             fail('The embedded PCM descriptor does not match its samples.', 'invalid_media')
-        return PCM(str(essence.mob_id),0,size//align,int(hz),align,None)
+        return PCM(str(essence.mob_id),0,size//align,int(hz),bits//8,None,channels=channels)
     head = stream.read(12)
     if head[:4] != b'RIFF' or head[8:] != b'WAVE':
         fail('Only embedded PCM WAVE essence is supported. Export embedded WAV audio.')
     declared = struct.unpack('<I', head[4:8])[0]+8
     if declared != size:
         fail('An embedded WAVE stream has an inconsistent RIFF length.', 'invalid_media')
-    cursor, fmt, data, time_reference = 12, None, None, None
+    cursor, fmt, data, time_reference, recording_date = 12, None, None, None, None
     for _ in range(256):
         if cursor == size:
             break
@@ -133,6 +140,15 @@ def pcm_layout(essence, descriptor=None):
                 fail('The embedded WAVE format is invalid.', 'invalid_media')
             fmt = struct.unpack('<HHIIHH', stream.read(16))
         elif tag == b'bext' and count >= 346:
+            stream.seek(cursor+8+320)
+            raw_date = stream.read(10).decode('ascii', errors='replace')
+            try:
+                # BWF permits alternate separators; reject malformed or zero dates.
+                normalized = raw_date[:4]+'-'+raw_date[5:7]+'-'+raw_date[8:10]
+                if raw_date[4] in '-_: .' and raw_date[7] in '-_: .':
+                    recording_date = date.fromisoformat(normalized).isoformat()
+            except ValueError:
+                pass
             stream.seek(cursor+8+338)
             time_reference = struct.unpack('<Q', stream.read(8))[0]
         elif tag == b'data':
@@ -148,11 +164,21 @@ def pcm_layout(essence, descriptor=None):
     if fmt is None or data is None:
         fail('An embedded WAVE is missing its format or samples.', 'invalid_media')
     tag, channels, hz, byte_rate, align, bits = fmt
-    if tag != 1 or channels != 1 or bits not in (16, 24, 32) or hz not in (44100, 48000, 96000):
-        fail('Use mono PCM WAV audio at 44.1, 48 or 96 kHz and 16, 24 or 32 bits.')
-    if align != bits//8 or byte_rate != hz*align or data[1] % align:
+    if tag != 1 or not 1 <= channels <= 256 or bits not in (16, 24, 32) or hz not in (44100, 48000, 96000):
+        fail('Use PCM WAV audio at 44.1, 48 or 96 kHz and 16, 24 or 32 bits.')
+    if align != channels*bits//8 or byte_rate != hz*align or data[1] % align:
         fail('The embedded PCM sample layout is invalid.', 'invalid_media')
-    return PCM(str(essence.mob_id), data[0], data[1]//align, hz, align, time_reference)
+    return PCM(str(essence.mob_id), data[0], data[1]//align, hz, bits//8, time_reference, recording_date, channels=channels)
+
+
+def timecode_segment(segment):
+    if isinstance(segment, aaf2.components.Timecode):
+        return segment
+    if isinstance(segment, aaf2.components.Sequence):
+        parts = list(segment.components)
+        if len(parts) == 1 and isinstance(parts[0], aaf2.components.Timecode):
+            return parts[0]
+    return None
 
 
 class Timeline:
@@ -188,13 +214,19 @@ class Timeline:
         self.duration = max(s.segment.length for s in audio)
         if not 0 < Fraction(self.duration, 1)/self.rate <= MAX_DURATION_SECONDS:
             fail('The sequence must be longer than zero and no longer than 24 hours.', 'limit_exceeded')
-        timecodes = [s.segment for s in slots if isinstance(s.segment, aaf2.components.Timecode)
-                     and rate_of(s) == self.rate and s.segment.fps == math.ceil(self.rate)]
+        # Record timecode may sit directly in its slot or wrapped in a
+        # one-component Sequence. A sequence can also carry auxiliary TC
+        # tracks; the record track is the one numbered 1, so they no longer
+        # make the whole import fail.
+        timecodes = [(value(s, 'PhysicalTrackNumber'), t) for s in slots
+                     for t in [timecode_segment(s.segment)]
+                     if t is not None and rate_of(s) == self.rate and t.fps == math.ceil(self.rate)]
         self.start, self.fps, self.drop = 0, math.ceil(self.rate), False
         if timecodes:
-            self.start, self.fps, self.drop = timecodes[0].start, timecodes[0].fps, timecodes[0].drop
-            if any((t.start,t.fps,t.drop) != (self.start,self.fps,self.drop) for t in timecodes):
-                fail('Sequence timecode tracks disagree. Export a sequence with one record timecode.')
+            record = next((t for number, t in timecodes if number == 1), timecodes[0][1])
+            self.start, self.fps, self.drop = record.start, record.fps, record.drop
+            if any((t.start,t.fps,t.drop) != (self.start,self.fps,self.drop) for _, t in timecodes):
+                append_warning(self.warnings, 'This sequence has more than one timecode track. The record timecode (track 1) is used.')
         else:
             append_warning(self.warnings, 'No matching record timecode was found. The timeline starts at zero.')
         self.tracks = [self.read_track(s) for s in audio]
@@ -205,6 +237,19 @@ class Timeline:
             if key not in self.essence:
                 fail('Linked or offline media is not read. Re-export the AAF with embedded WAV audio.')
             self.sources[key] = pcm_layout(self.essence[key],value(mob,'EssenceDescription'))
+            if not self.sources[key].recording_date:
+                # Only explicit recording fields. AAF CreationTime describes
+                # the edit/export and Finder timestamps describe the copy.
+                for tag in ('RecordingDate', 'ShootDate', 'DateRecorded'):
+                    tagged_date = mob.comments.get(tag)
+                    raw_date = value(tagged_date, 'Value') if tagged_date is not None else None
+                    if isinstance(raw_date, str):
+                        try:
+                            self.sources[key].recording_date = date.fromisoformat(raw_date.strip()).isoformat()
+                            self.sources[key].recording_date_provenance = 'explicit-recording-date'
+                            break
+                        except ValueError:
+                            pass
         return self.sources[key]
 
     def expand(self, seg, rate, start, duration, trail, warnings_list, depth=0):
@@ -257,6 +302,8 @@ class Timeline:
             fail('Negative source positions are not supported.', 'invalid_media')
         if str(mob.mob_id) in self.essence:
             pcm = self.source(mob)
+            if pcm.channels != 1:
+                fail('Multichannel embedded audio requires the graph importer.')
             if round_sample((offset+duration)*pcm.sample_rate) > pcm.sample_count:
                 fail('A clip exceeds the embedded audio samples.', 'invalid_media')
             return [{'kind':'audio', 'duration':duration, 'source_id':pcm.source_id,
@@ -301,14 +348,18 @@ class Timeline:
             append_warning(warnings_list, 'This track contains different microphone names. Clip names are preserved; no speaker identity is assumed.')
         name = next(iter(owners)) if len(owners)==1 else clean_name(slot.name,f'Track {value(slot,"PhysicalTrackNumber",slot.slot_id)}')
         hz, width = next(iter(formats)) if formats else (48000,3)
-        return {'id':str(slot.slot_id),'name':name,'clips':clips,'warnings':warnings_list,
+        number = value(slot, 'PhysicalTrackNumber')
+        number = number if isinstance(number, int) and number > 0 else None
+        return {'id':str(slot.slot_id),'name':name,'physical_track_number':number,'clips':clips,'warnings':warnings_list,
                 'sample_rate':hz,'sample_width':width,'duration_frames':self.duration}
 
     def manifest(self, source_fingerprint):
         return {'schema_version':SCHEMA_VERSION,'name':clean_name(self.mob.name,'AAF sequence'),
                 'sequence_id':str(self.mob.mob_id),'edit_rate':{'numerator':self.rate.numerator,'denominator':self.rate.denominator},
                 'start_frame':self.start,'duration_frames':self.duration,'timecode_fps':self.fps,'drop_frame':self.drop,
-                'source_fingerprint':source_fingerprint,'tracks':self.tracks,'warnings':self.warnings}
+                'source_fingerprint':source_fingerprint,'tracks':self.tracks,'warnings':self.warnings,
+                'recording_dates':[{'source_id':pcm.source_id,'date':pcm.recording_date,'provenance':pcm.recording_date_provenance}
+                                   for pcm in self.sources.values() if pcm.recording_date]}
 
     def track(self, track_id):
         for track in self.tracks:
@@ -335,10 +386,16 @@ class Timeline:
                 if offset+count > pcm.sample_count:
                     fail('The requested sample range exceeds the embedded audio.', 'invalid_media')
                 stream = self.essence[clip['source_id']].open('r')
-                stream.seek(pcm.data_offset+offset*width)
+                stream.seek(pcm.data_offset+offset*width*pcm.channels)
+            elif clip['kind'] != 'gap':
+                fail('This range contains unavailable audio.', 'missing_media')
             while count:
-                take = min(count,BLOCK_BYTES//width)
-                block = stream.read(take*width) if stream else bytes(take*width)
+                channels = pcm.channels if stream else 1
+                take = min(count,BLOCK_BYTES//(width*channels))
+                block = stream.read(take*width*channels) if stream else bytes(take*width)
+                if channels > 1:
+                    stride = width*channels
+                    block = b''.join(block[i+pcm.channel*width:i+(pcm.channel+1)*width] for i in range(0,len(block),stride))
                 if len(block) != take*width:
                     fail('Embedded audio ended before the requested range.', 'invalid_media')
                 yield block
@@ -433,12 +490,22 @@ def stream_extents(stream):
 
 
 def run(args):
+    if args.command == 'mxf-info':
+        from mxf_info import inspect_many
+        return inspect_many(args.input)
     path = Path(args.input)
     identity = fingerprint(path)
     if args.expected_fingerprint and args.expected_fingerprint != identity:
         fail('The AAF changed. Import it again before continuing.', 'source_changed')
     with aaf2.open(str(path),'r') as file:
-        timeline = Timeline(file)
+        if args.command == 'sequences':
+            from graph import sequence_choices
+            return sequence_choices(file)
+        if getattr(args, 'graph', False):
+            from graph import GraphTimeline
+            timeline = GraphTimeline(file, getattr(args, 'sequence', None))
+        else:
+            timeline = Timeline(file)
         if args.command == 'index':
             # Internal read-only playback index. Keep exact rational source
             # positions; the public manifest intentionally omits these details.
@@ -447,7 +514,9 @@ def run(args):
                 'extents': stream_extents(timeline.essence[key].open('r')),
                 'data_offset': pcm.data_offset, 'sample_count': pcm.sample_count,
                 'sample_rate': pcm.sample_rate, 'sample_width': pcm.sample_width,
-            } for key, pcm in timeline.sources.items()}
+                'channels': pcm.channels, 'channel': pcm.channel,
+            } for key, pcm in timeline.sources.items() if key in timeline.essence}
+            result['schema_version'] = 2 if getattr(args, 'graph', False) else 1
             if sum(len(source['extents']) for source in result['sources'].values()) > 200000:
                 fail('The PCM index exceeds its safety limit.', 'limit_exceeded')
             if fingerprint(path) != identity:
@@ -500,6 +569,9 @@ def run(args):
 
 
 def main():
+    # graph imports the shared reader contracts; use this module instance so
+    # structured ReaderError handling also works in the frozen executable.
+    sys.modules.setdefault('reader', sys.modules[__name__])
     if getattr(sys,'frozen',False):
         # Tauri may SIGKILL the one-file bootloader, which cannot forward that
         # signal. Never let its Python worker keep reading/writing after Stop.
@@ -515,11 +587,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version',action='version',version='saucebunny-aaf 1.0.0 (pyaaf2 '+aaf2.__version__+')')
     commands = parser.add_subparsers(dest='command',required=True)
-    for command in ('inspect','index','extract','peaks'):
+    child = commands.add_parser('mxf-info')
+    child.add_argument('--input', nargs='+', required=True)
+    for command in ('inspect','index','extract','peaks','sequences'):
         child = commands.add_parser(command)
         child.add_argument('--input',required=True)
         child.add_argument('--expected-fingerprint')
-        if command not in ('inspect','index'):
+        child.add_argument('--graph', action='store_true')
+        child.add_argument('--sequence')
+        if command not in ('inspect','index','sequences'):
             child.add_argument('--track',required=True)
             child.add_argument('--output',required=True)
         if command == 'extract':
@@ -536,7 +612,7 @@ def main():
     except ReaderError as error:
         print(json.dumps({'schema_version':1,'error':{'code':error.code,'message':str(error)}}),file=sys.stderr)
         return 130 if error.code == 'cancelled' else 2
-    except (OSError,ValueError,KeyError,AttributeError,IndexError,ZeroDivisionError,AssertionError,struct.error,aaf2.exceptions.AAFError):
+    except (OSError,ValueError,TypeError,KeyError,AttributeError,IndexError,ZeroDivisionError,AssertionError,struct.error,aaf2.exceptions.AAFError):
         # Parser paths and untrusted metadata do not become user-facing tracebacks.
         print(json.dumps({'schema_version':1,'error':{'code':'invalid_aaf','message':'The AAF could not be read safely. Re-export it with embedded mono WAV audio.'}}),file=sys.stderr)
         return 2
