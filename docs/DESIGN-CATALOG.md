@@ -23,6 +23,24 @@ is authorized by this document.
 
 The isolated catalog lives in [design-system](../design-system/). Its source-backed register is [catalog-data.ts](../design-system/catalog-data.ts). It covers Home, Library, Clip, Review, Transcripts, Multitrack, Settings, dialogs, nested components and detached windows. It must not load the production app, invoke native commands, connect NDI, create a room, request camera/microphone permission, or run media jobs.
 
+### Transcript Editor prototype (2026-09-26)
+
+A whole-window prototype rather than a family entry, because a workspace is
+judged at window size, not inside a card: open
+`/design-system.html?prototype=transcript-editor`, or follow the link in the
+catalog sidebar. It is for approval before Phase 1 and changes no production
+code. The spec, the research behind it and what to try are in
+[TRANSCRIPT-EDITOR-UX.md](TRANSCRIPT-EDITOR-UX.md).
+
+- **It holds the catalog's isolation rules.** It uses a generated scene and no
+  storage, invoke, audio or network. The timeline's waveforms are drawn from
+  word times.
+- **Its edit model is real and tested:** `transcript-editor-model.test.ts` and
+  `transcript-editor-layout.test.ts`, plus three browser checks in
+  `catalog.browser.ts`.
+- **It is not a production recipe.** Its classes are `cp-te-*`, in
+  `design-system/transcript-editor.css`, and are not imported by the app.
+
 ### Multitrack lanes (2026-09-14)
 
 The Panels family includes the real controlled `MultitrackTimeline`: four

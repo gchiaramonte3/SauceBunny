@@ -852,3 +852,82 @@ for (const viewport of [{ width: 1100, height: 700 }, { width: 1680, height: 102
     });
   }
 }
+
+test.describe("Transcript Editor prototype", () => {
+  const open = async (page: Page, width = 1440, height = 900) => {
+    await page.setViewportSize({ width, height });
+    await page.goto("/design-system.html?prototype=transcript-editor");
+    await expect(page.getByTestId("transcript-editor")).toBeVisible();
+  };
+  const word = (page: Page, index: number) => page.locator(`.cp-te-doc [data-index="${index}"]`);
+  const clipsOnFirstLane = (page: Page) => page.locator(".cp-te-tl-lane").first().locator(".cp-te-tl-clip");
+
+  test("deleting words closes every track up, and undo puts them back", async ({ page }) => {
+    await open(page);
+    const doc = page.getByRole("region", { name: "Edit transcript" });
+    await expect(doc).toContainText("a kitchen that looks like a crime scene.");
+    await expect(clipsOnFirstLane(page)).toHaveCount(1);
+    const running = await page.locator(".cp-te-readout-of").textContent();
+    await word(page, 9).click();
+    await word(page, 16).click({ modifiers: ["Shift"] });
+    await page.keyboard.press("Backspace");
+    await expect(doc).not.toContainText("kitchen");
+    await expect(clipsOnFirstLane(page)).toHaveCount(2);
+    for (const lane of await page.locator(".cp-te-tl-lane").all()) await expect(lane.locator(".cp-te-tl-clip")).toHaveCount(2);
+    await expect(page.getByRole("button", { name: /^Cut at 01:00:0/ })).toHaveCount(1);
+    expect(await page.locator(".cp-te-readout-of").textContent()).not.toBe(running);
+    await expect(page.getByRole("button", { name: "Undo Delete 8 Words" })).toBeEnabled();
+    await page.keyboard.press("Meta+z");
+    await expect(doc).toContainText("a kitchen that looks like a crime scene.");
+    await expect(clipsOnFirstLane(page)).toHaveCount(1);
+    await expect(page.locator(".cp-te-readout-of")).toHaveText(running!);
+  });
+
+  test("a deletion over crosstalk asks first, and a speaker-only removal moves nothing", async ({ page }) => {
+    await open(page);
+    const index = await page.locator(".cp-te-doc [data-index]").evaluateAll((spans) => {
+      const texts = spans.map((span) => span.textContent);
+      return texts.findIndex((text, at) => text === "grill." && texts[at - 1] === "the" && texts[at - 2] === "take");
+    });
+    expect(index).toBeGreaterThan(0);
+    await word(page, index - 1).click();
+    await word(page, index).click({ modifiers: ["Shift"] });
+    await page.keyboard.press("Backspace");
+    const prompt = page.getByRole("alertdialog", { name: "Tamsin is talking under this." });
+    await expect(prompt).toBeVisible();
+    await expect(prompt.getByRole("button", { name: "Cut for everyone" })).toBeFocused();
+    await prompt.getByRole("button", { name: "Only Wes's words" }).click();
+    await expect(prompt).toBeHidden();
+    await expect(clipsOnFirstLane(page)).toHaveCount(1);
+    await expect(page.locator(".cp-te-word.is-lifted")).toHaveCount(2);
+    await expect(page.getByRole("status")).toContainText("Nothing moved");
+  });
+
+  test("fits the app's minimum window without sideways scrolling, and folds the source when space runs out", async ({ page }) => {
+    await open(page, 1100, 700);
+    await expect(page.getByRole("navigation", { name: "Sequences and edits" })).toBeHidden();
+    const overflow = () => page.evaluate(() => [...document.querySelectorAll(".cp-te, .cp-te *")]
+      .filter((el) => el.scrollWidth > el.clientWidth + 1 && !["hidden", "visible", "clip"].includes(getComputedStyle(el).overflowX))
+      .map((el) => el.className));
+    expect(await page.locator(".cp-te *").count()).toBeGreaterThan(200);
+    expect(await overflow()).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1100);
+    const record = await page.locator(".cp-te-pane-record").boundingBox();
+    expect(record!.width).toBeGreaterThanOrEqual(440);
+    await page.locator(".cp-te-doc").focus();
+    await page.keyboard.press("Control+Meta+s");
+    await expect(page.getByRole("navigation", { name: "Sequences and edits" })).toBeVisible();
+    await page.keyboard.press("Control+Meta+i");
+    await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();
+    const fold = page.getByRole("radiogroup", { name: "Pane" });
+    await expect(fold).toBeVisible();
+    await fold.getByRole("radio", { name: "Source" }).click();
+    await expect(page.getByRole("region", { name: "Source transcript, read only" })).toBeVisible();
+    expect(await overflow()).toEqual([]);
+    const divider = page.getByRole("separator", { name: "Timeline height" });
+    const before = Number(await divider.getAttribute("aria-valuenow"));
+    await divider.focus();
+    await page.keyboard.press("Shift+ArrowUp");
+    expect(Number(await divider.getAttribute("aria-valuenow"))).toBe(before + 32);
+  });
+});
