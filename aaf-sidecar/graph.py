@@ -26,10 +26,16 @@ def choice_id(seg):
     return identity(seg)
 
 
+# A bin exported from Avid can hold hundreds of sequences. The bound only
+# keeps a malformed file from enumerating without end; it was 64, which made a
+# 65-sequence bin impossible to open or even to choose from.
+MAX_SEQUENCES = 1000
+
+
 def sequence_choices(file):
     choices = []
     for mob in file.content.toplevel():
-        if len(choices) >= 64:
+        if len(choices) >= MAX_SEQUENCES:
             fail('Too many top-level sequences.', 'limit_exceeded')
         choices.append({'id': str(mob.mob_id), 'name': clean_name(mob.name, 'AAF sequence')})
     return choices
@@ -76,16 +82,24 @@ class GraphTimeline(Timeline):
         self.selectors = {}
         self.branch_only = None
         self.inside_branch = False
-        sequence_choices(file)  # Bound enumeration before materializing it.
-        tops = list(file.content.toplevel())
-        if sequence_id:
-            chosen = next((m for m in tops if str(m.mob_id) == sequence_id), None)
-            if chosen is None:
+        # A bounded scan, never a full enumeration: finding the chosen
+        # sequence, or learning there is more than one, needs no list of all.
+        chosen, seen = None, 0
+        for mob in file.content.toplevel():
+            seen += 1
+            if seen > MAX_SEQUENCES:
+                fail('Too many top-level sequences.', 'limit_exceeded')
+            if sequence_id and str(mob.mob_id) == sequence_id:
+                chosen = mob
+                break
+            if not sequence_id:
+                if seen > 1:
+                    fail('Choose a sequence from this AAF.', 'choose_sequence')
+                chosen = mob
+        if chosen is None:
+            if sequence_id:
                 fail('The selected sequence is not in this AAF.', 'invalid_input')
-        elif len(tops) == 1:
-            chosen = tops[0]
-        else:
-            fail('Choose a sequence from this AAF.', 'choose_sequence')
+            fail('This AAF does not contain a top-level sequence.')
         # Use the established timecode/rational mapping without mutating the AAF.
         class Content:
             essencedata = file.content.essencedata
@@ -167,8 +181,9 @@ class GraphTimeline(Timeline):
                 raise
             # Preserve an identified, unavailable lane for timing/format graphs
             # that cannot be decoded faithfully. Never manufacture silence.
+            number = value(slot, 'PhysicalTrackNumber')
             track = {'id': str(slot.slot_id), 'name': clean_name(slot.name, f'Track {slot.slot_id}'),
-                'physical_track_number': value(slot, 'PhysicalTrackNumber'), 'sample_rate': 48000, 'sample_width': 3,
+                'physical_track_number': number if isinstance(number, int) and number > 0 else None, 'sample_rate': 48000, 'sample_width': 3,
                 'duration_frames': self.duration, 'clips': [{'kind': 'unavailable', 'start_frame': 0,
                     'duration_frames': self.duration, 'warnings': [str(error)]}], 'warnings': [str(error)]}
         states = {c['kind'] for c in track['clips']}
@@ -245,6 +260,8 @@ class GraphTimeline(Timeline):
                         return [{'kind': 'unavailable', 'duration': duration}]
                     key = str(mob.mob_id) + ':' + str(slot.slot_id)
                     offset = Fraction(seg.start, 1)/rate_of(slot) + start
+                    if offset < 0:
+                        fail('A source has a negative position.', 'invalid_media')
                     if round_sample((offset+duration)*pcm.sample_rate) > pcm.sample_count:
                         fail('A clip exceeds the embedded audio samples.', 'invalid_media')
                     self.sources[key] = replace(pcm, source_id=key, channel=physical-1)

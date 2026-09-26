@@ -43,6 +43,40 @@ All notable changes to Sauce Bunny. Format loosely follows
   copy in Linked media with "Use this copy", instead of leaving the source
   offline and asking you to browse for it.
 
+### Fixed
+- AAF Audio transcription no longer throws away a whole run when the engine
+  returns a cue whose text contains a blank line; the text stays with its cue.
+- A stray file in the AAF Audio folder (an iCloud "copy 2", a Finder duplicate,
+  a half-synced file) no longer empties Saved sequences or blocks every import.
+- Transcribing two separate ranges of a track no longer marks the frames
+  between them as transcribed; the track status and Transcript info say which
+  part is missing.
+- Saving a transcript no longer holds up every other job's Stop while the whole
+  AAF Audio document is re-read and written.
+- AAF bins with more than 64 sequences can be opened; record timecode wrapped
+  in a sequence is read, and an extra timecode track no longer fails the
+  import; very heavily cut multi-mic sequences are no longer refused as too
+  large.
+- Two relinks (the media strip and Settings) can no longer clear each other's
+  busy state, which had let playback and Generate resume mid-relink.
+- Changing the marker export frame rate no longer leaves an invalid Start TC
+  that silently exported every marker an hour early.
+- Copying a large file in the Library no longer freezes the app; deleting a
+  project folder no longer removes hidden files before refusing; a case-only
+  rename can no longer overwrite a different file on a case-sensitive volume.
+- Stop between two steps of an audio clip export or a caption retry now stops
+  it, instead of the job finishing and reporting success.
+- Sidecars that iCloud stripped of their execute bit now include Deno and the
+  AAF reader in the repair sweep.
+- Clicking "Save a copy" in a co-review call now saves even when "Save a copy
+  while watching" is off; that setting only governs automatic copies.
+- Speaker renames made in the popped-out panel now survive a file move or a
+  re-transcription, like renames made in the main window.
+- Chapters and speaker names no longer split between the two ways macOS can
+  spell an accented filename.
+- Stopping or failing a batch transcription no longer leaves a listener
+  behind for every item; a Library folder removed mid-scan stays removed.
+
 ## [0.5.1] - 2026-09-22
 
 ### Added

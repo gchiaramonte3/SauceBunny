@@ -279,6 +279,35 @@ class ReaderTests(unittest.TestCase):
         with wave.open(str(output),'rb') as wav:
             self.assertEqual(wav.readframes(wav.getnframes()),self.pcm[9*2002*3:10*2002*3])
 
+    def timecode_slot(self, file):
+        comp = next(file.content.toplevel())
+        return comp, next(slot for slot in comp.slots if isinstance(slot.segment, aaf2.components.Timecode))
+
+    def test_record_timecode_wrapped_in_a_sequence_is_read(self):
+        with aaf2.open(str(self.aaf),'rw') as file:
+            _, slot = self.timecode_slot(file)
+            timecode = file.create.Timecode(fps=24, length=12); timecode.start = 1613255
+            wrapper = file.create.Sequence(media_kind='timecode'); wrapper.components.append(timecode)
+            slot.segment = wrapper
+        result = self.command('inspect','--input',str(self.aaf))
+        self.assertEqual(result.returncode,0,result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data['start_frame'],1613255)
+        self.assertFalse(any('No matching record timecode' in w for w in data['warnings']))
+
+    def test_auxiliary_timecode_track_uses_track_one_instead_of_failing(self):
+        with aaf2.open(str(self.aaf),'rw') as file:
+            comp, slot = self.timecode_slot(file)
+            slot['PhysicalTrackNumber'].value = 2
+            record = comp.create_timeline_slot('24000/1001')
+            record.segment = file.create.Timecode(fps=24, length=12); record.segment.start = 86400
+            record['PhysicalTrackNumber'].value = 1
+        result = self.command('inspect','--input',str(self.aaf))
+        self.assertEqual(result.returncode,0,result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data['start_frame'],86400)
+        self.assertTrue(any('more than one timecode track' in w for w in data['warnings']))
+
     def test_multiple_compositions_rejected(self):
         with aaf2.open(str(self.aaf),'rw') as file:
             second = file.create.CompositionMob('Another composition')

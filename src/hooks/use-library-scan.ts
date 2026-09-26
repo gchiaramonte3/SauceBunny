@@ -581,6 +581,13 @@ export function useLibraryScan(warmPosters = true): LibraryScan {
   // lazy-thumbnail hook re-requests the (invalidated) poster.
   const [posterVersions, setPosterVersions] = useState<Record<string, number>>({});
   const scanSweepRef = useRef(0);
+  // The roots as of the last add/remove, for an in-flight scan to check on
+  // landing. Removing a root cannot bump scanSweepRef - that would also drop
+  // every OTHER root's in-flight result and strand it at "loading" with no
+  // rescan coming - so a scan instead asks whether its root is still listed.
+  // Written synchronously by add/remove, because a scan can land before the
+  // render that would carry the new list.
+  const rootsRef = useRef(roots);
 
   const bumpPoster = useCallback(
     (path: string) => setPosterVersions((v) => ({ ...v, [path]: (v[path] ?? 0) + 1 })),
@@ -605,9 +612,11 @@ export function useLibraryScan(warmPosters = true): LibraryScan {
         maxDepth: LIBRARY_SCAN_DEPTH,
       });
       if (scanSweepRef.current !== sweep) return; // superseded — drop the write
+      if (!rootsRef.current.includes(root)) return; // removed while scanning
       setScans((s) => ({ ...s, [root]: { status: "ok", tree } }));
     } catch (e) {
       if (scanSweepRef.current !== sweep) return; // superseded — drop the write
+      if (!rootsRef.current.includes(root)) return; // removed while scanning
       // Fail loud: the root renders an inline error row, never a silent skip.
       setScans((s) => ({ ...s, [root]: { status: "error", message: formatError(e) } }));
     }
@@ -672,6 +681,7 @@ export function useLibraryScan(warmPosters = true): LibraryScan {
     if (typeof picked !== "string" || !picked) return;
     if (!roots.includes(picked)) {
       const next = [...roots, picked];
+      rootsRef.current = next;
       setRoots(next);
       saveLibraryRoots(next);
     }
@@ -683,6 +693,7 @@ export function useLibraryScan(warmPosters = true): LibraryScan {
     // Forgets the root only — never touches the disk.
     if (!confirm(`Remove "${name}" from your library? The folder and its files stay on disk.`)) return;
     const next = roots.filter((r) => r !== root);
+    rootsRef.current = next;
     setRoots(next);
     saveLibraryRoots(next);
     setScans((s) => {

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
-import { useMultitrackRelink } from "../hooks/use-multitrack-relink";
+import { linkCounts, useMultitrackRelink } from "../hooks/use-multitrack-relink";
 import { audioTrackLabel, trackOwner } from "../lib/multitrack";
 
 /** Every source with its links and actions. Resolution is document-local and
@@ -8,9 +8,9 @@ import { audioTrackLabel, trackOwner } from "../lib/multitrack";
 export function MultitrackMedia({ document, disabled, onBusy }: { document: AafDocument; disabled?: boolean; onBusy?: (busy: boolean) => void }) {
   const { busy, error, result, clearResult, stop, resolve } = useMultitrackRelink(document.id, onBusy);
   useEffect(() => { clearResult(); }, [document, clearResult]);
-  const graph = (result ?? document).manifest.graph;
+  const current = result ?? document, graph = current.manifest.graph, counts = linkCounts(current);
   if (!graph?.sources.length) return null;
-  return <details className="cp-multitrack-media" open><summary>Linked media · {graph.sources.filter(source => source.status === "ready" && source.resolved).length}/{graph.sources.length} available</summary>
+  return <details className="cp-multitrack-media" open><summary>Linked media · {counts.linked}/{counts.total} available</summary>
     <div className="cp-multitrack-media-actions"><button className="btn btn-ghost" disabled={busy || disabled} onClick={() => void resolve("folder")}>Locate media folder…</button><button className="btn btn-ghost" disabled={busy || disabled} onClick={() => void resolve("refresh")}>Refresh availability</button>{busy && <button className="btn btn-ghost" onClick={stop}>Stop</button>}</div>
     {busy && <p role="status">Checking media…</p>}{error && <p className="cp-multitrack-error" role="alert">{error}</p>}
     <div className="cp-multitrack-media-list">{graph.sources.map(source => {

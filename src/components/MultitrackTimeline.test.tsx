@@ -98,3 +98,14 @@ it("a failed waveform offers a retry for that track and shows the error on hover
   fireEvent.click(button);
   expect(retry).toHaveBeenCalledWith("track-1");
 });
+
+it("says when separate range runs left part of a track untranscribed, and saves a trimmed owner name", () => {
+  const document = multitrackFixture();
+  document.transcripts = [{ ...multitrackTranscript(), start_frame: 0, duration_frames: 2400, gaps: [[240, 1200]] }];
+  const onRename = vi.fn();
+  render(<MultitrackTimeline document={document} waveforms={{}} waveformErrors={{}} selected={new Set()} solo={new Set()} onSelect={vi.fn()} onRename={onRename} onSeek={vi.fn()} frame={0} />);
+  expect(screen.getByRole("img", { name: /Alex: Selected ranges transcribed, 1 gap not transcribed/ })).toBeTruthy();
+  const owner = screen.getByRole("textbox", { name: "Mic owner for track-2" });
+  fireEvent.change(owner, { target: { value: "  Sam  " } }); fireEvent.blur(owner);
+  expect(onRename).toHaveBeenCalledWith("track-2", "Sam");
+});

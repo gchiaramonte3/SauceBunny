@@ -146,6 +146,12 @@ pub struct AafTrackTranscript {
     #[serde(default)]
     pub timing_issues: Vec<AafTimingIssue>,
     pub warnings: Vec<String>,
+    // Frame spans inside the envelope that no run transcribed: what lies
+    // between two separate range runs. Absent for a contiguous result, so
+    // every earlier file reads unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "Array<[number, number]>")]
+    pub gaps: Option<Vec<[i64; 2]>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

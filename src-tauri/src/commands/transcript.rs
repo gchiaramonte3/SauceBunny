@@ -2919,7 +2919,9 @@ fn shift_srt_file(path: &std::path::Path, offset_s: f64) -> std::io::Result<()> 
         return Ok(());
     }
     let text = std::fs::read_to_string(path)?;
-    std::fs::write(path, shift_srt_text(&text, offset_s))
+    // Rewritten in place: a torn write here would leave the only copy of the
+    // transcript half-shifted, so write beside it and rename over.
+    atomic_write(path, shift_srt_text(&text, offset_s).as_bytes())
 }
 
 #[cfg(test)]

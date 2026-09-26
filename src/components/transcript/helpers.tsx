@@ -14,6 +14,7 @@
 import type React from "react";
 import { applySplits, type CueSplits } from "../../lib/cue-splits";
 import type { Cue, Turn } from "../../lib/srt";
+import { pathKey } from "../../lib/repath";
 
 /**
  * Wrap every case-insensitive occurrence of `query` inside `text` in a
@@ -412,17 +413,45 @@ export function cloneOverrides(prev: SpeakerOverrides): SpeakerOverrides {
   };
 }
 
-/** localStorage key the panel persists a transcript's speaker overrides under. */
+/** localStorage key the panel persists a transcript's speaker overrides under.
+ *  NFC via `pathKey`, so macOS's decomposed on-disk spelling and a composed
+ *  one typed or pasted elsewhere name ONE entry. Entries written before this
+ *  under a decomposed key are migrated by `readSpeakerOverridesRaw`. */
 export function speakerOverridesKey(path: string): string {
-  return `saucebunny.speakerNames.${path}`;
+  return `saucebunny.speakerNames.${pathKey(path)}`;
+}
+
+/** The persisted overrides blob for a path, or null. Reads the NFC key and
+ *  falls back to the key spelled exactly as `path` was (how every entry was
+ *  written before keys were normalised), moving a legacy hit onto the NFC key
+ *  so the store migrates itself and a later removeItem cannot resurrect it. */
+export function readSpeakerOverridesRaw(path: string): string | null {
+  const key = speakerOverridesKey(path);
+  try {
+    const val = localStorage.getItem(key);
+    if (val != null) return val;
+    const legacy = `saucebunny.speakerNames.${path}`;
+    if (legacy === key) return null;
+    const old = localStorage.getItem(legacy);
+    if (old == null) return null;
+    try {
+      localStorage.setItem(key, old);
+      localStorage.removeItem(legacy);
+    } catch { /* still readable from the legacy key */ }
+    return old;
+  } catch {
+    return null;
+  }
 }
 
 /** Carry a transcript's path-keyed speaker names to a new path (rename/move).
  *  The fingerprint mirror (keyed on the SOURCE, unchanged) is untouched. */
 export function renameSpeakerOverridesPath(oldPath: string, newPath: string): void {
   try {
-    const val = localStorage.getItem(speakerOverridesKey(oldPath));
+    const val = readSpeakerOverridesRaw(oldPath);
     if (val == null) return;
+    // A rename that only changes the Unicode spelling is the same key.
+    if (speakerOverridesKey(oldPath) === speakerOverridesKey(newPath)) return;
     localStorage.setItem(speakerOverridesKey(newPath), val);
     localStorage.removeItem(speakerOverridesKey(oldPath));
   } catch { /* ignore */ }
@@ -499,7 +528,7 @@ export function prepareCues(cues: Cue[], overrides: Pick<SpeakerOverrides, "cueT
 export function loadSpeakerOverrides(path: string | null): SpeakerOverrides {
   if (!path) return EMPTY_OVERRIDES;
   try {
-    const raw = localStorage.getItem(speakerOverridesKey(path));
+    const raw = readSpeakerOverridesRaw(path);
     if (!raw) return EMPTY_OVERRIDES;
     const p = JSON.parse(raw) as Partial<SpeakerOverrides>;
     return {

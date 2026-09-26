@@ -4,4 +4,4 @@ import type { AafEngine } from "./AafEngine";
 import type { AafTimingIssue } from "./AafTimingIssue";
 import type { AafTranscriptStatus } from "./AafTranscriptStatus";
 
-export type AafTrackTranscript = { track_id: string, start_frame: number, duration_frames: number, engine: AafEngine, model_id: string, status: AafTranscriptStatus, sample_rate: number, cues: Array<AafCue>, timing_issues: Array<AafTimingIssue>, warnings: Array<string>, };
+export type AafTrackTranscript = { track_id: string, start_frame: number, duration_frames: number, engine: AafEngine, model_id: string, status: AafTranscriptStatus, sample_rate: number, cues: Array<AafCue>, timing_issues: Array<AafTimingIssue>, warnings: Array<string>, gaps?: Array<[number, number]>, };

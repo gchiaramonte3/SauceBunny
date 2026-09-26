@@ -28,3 +28,22 @@ it("counts what is missing and relinks from the workspace", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Details" }));
   expect(details).toHaveBeenCalled();
 });
+
+it("an idle strip that unmounts does not report that another relink finished", () => {
+  const doc = multitrackLinkedFixture(); const busy = vi.fn();
+  const view = render(<MultitrackMediaStatus document={doc} onBusy={busy} />);
+  view.unmount();
+  expect(busy).not.toHaveBeenCalled();
+  expect(mocks.invoke).not.toHaveBeenCalled();
+});
+
+it("a strip that unmounts mid-relink cancels its job and clears only its own flag", async () => {
+  const doc = multitrackLinkedFixture(); const busy = vi.fn();
+  mocks.invoke.mockReturnValue(new Promise(() => {}));
+  const view = render(<MultitrackMediaStatus document={doc} onBusy={busy} />);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await vi.waitFor(() => expect(busy).toHaveBeenLastCalledWith(true));
+  view.unmount();
+  expect(busy).toHaveBeenLastCalledWith(false);
+  expect(mocks.invoke).toHaveBeenCalledWith("cancel_job", expect.objectContaining({ jobId: expect.any(String) }));
+});

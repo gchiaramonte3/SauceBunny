@@ -572,6 +572,10 @@ pub fn rename_transcript_folder(
     new_name: String,
 ) -> Result<String, crate::AppError> {
     let stem = valid_stem(&new_name)?;
+    // `folder` is joined onto the library root, and `Path::join` with an
+    // absolute or `..` segment escapes it. It names an EXISTING project, so
+    // the cleaned value is discarded; only the refusal matters.
+    valid_stem(&folder)?;
     let root = PathBuf::from(&library_path);
     let src = root.join(&folder);
     if !src.is_dir() {
@@ -615,6 +619,9 @@ pub fn rename_transcript_folder(
 /// and reversible up to that point.
 #[tauri::command]
 pub fn delete_transcript_folder(library_path: String, folder: String) -> Result<(), crate::AppError> {
+    // Same traversal guard as the rename: validated before anything on disk
+    // is looked at, let alone removed.
+    valid_stem(&folder)?;
     let root = PathBuf::from(&library_path);
     let dir = root.join(&folder);
     if !dir.is_dir() {
@@ -633,13 +640,24 @@ pub fn delete_transcript_folder(library_path: String, folder: String) -> Result<
         )));
     }
     // Only the folder itself, and only when nothing but incidental files (a
-    // .DS_Store) remain — remove_dir refuses a non-empty directory, which is
-    // the backstop if the count above ever disagrees with reality.
-    for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-        let name = entry.file_name();
-        if name.to_string_lossy().starts_with('.') {
-            let _ = std::fs::remove_file(entry.path());
-        }
+    // .DS_Store) remain. Decide that for EVERY entry before removing any of
+    // them, so a refusal deletes nothing; remove_dir refusing a non-empty
+    // directory is still the backstop if the listing disagrees with reality.
+    let entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&dir)
+        .map_err(|e| crate::AppError::internal(format!("Couldn't read the folder: {e}")))?
+        .collect::<Result<_, _>>()
+        .map_err(|e| crate::AppError::internal(format!("Couldn't read the folder: {e}")))?;
+    let incidental = |e: &std::fs::DirEntry| {
+        e.file_name().to_string_lossy().starts_with('.')
+            && e.file_type().map(|t| t.is_file()).unwrap_or(false)
+    };
+    if !entries.iter().all(incidental) {
+        return Err(crate::AppError::invalid(
+            "That project still holds other files. Move them out first.",
+        ));
+    }
+    for entry in &entries {
+        let _ = std::fs::remove_file(entry.path());
     }
     std::fs::remove_dir(&dir)
         .map_err(|e| crate::AppError::internal(format!("Couldn't delete the folder: {e}")))?;
@@ -728,7 +746,15 @@ pub fn move_library_file(src_path: String, dest_dir: String) -> Result<String, c
 /// file it would clobber may be the only copy of something, and inventing
 /// "clip 2.mov" quietly makes a decision the user did not ask for.
 #[tauri::command]
-pub fn copy_library_file(src_path: String, dest_dir: String) -> Result<String, crate::AppError> {
+pub async fn copy_library_file(src_path: String, dest_dir: String) -> Result<String, crate::AppError> {
+    // A multi-gigabyte copy must not pin the thread the command runs on (a
+    // sync command runs on the main thread and freezes the UI for its length).
+    tokio::task::spawn_blocking(move || copy_library_file_sync(src_path, dest_dir))
+        .await
+        .map_err(|e| crate::AppError::internal(format!("Copy task failed: {e}")))?
+}
+
+fn copy_library_file_sync(src_path: String, dest_dir: String) -> Result<String, crate::AppError> {
     let src = PathBuf::from(&src_path);
     if !src.is_file() {
         return Err(crate::AppError::not_found(src_path.as_str()));

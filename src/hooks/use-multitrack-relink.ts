@@ -12,7 +12,7 @@ export function useMultitrackRelink(documentId: string, onBusy?: (busy: boolean)
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [result, setResult] = useState<AafDocument | null>(null);
   const job = useRef<string | null>(null), mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; if (job.current) void invoke("cancel_job", { jobId: job.current }).catch(() => {}); onBusy?.(false); }; }, [onBusy]);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; if (job.current) { void invoke("cancel_job", { jobId: job.current }).catch(() => {}); onBusy?.(false); } }; }, [onBusy]);
   const stop = () => { const id = job.current; job.current = null; setBusy(false); onBusy?.(false); if (id) void invoke("cancel_job", { jobId: id }).catch(cause => setError(formatError(cause))); };
   const resolve = async (kind: "refresh" | "folder" | "file", sourceId?: string, chosen?: string) => {
     if (job.current) return;

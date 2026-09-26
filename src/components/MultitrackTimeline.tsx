@@ -32,13 +32,15 @@ function TrackLabel({ document, trackId, onRename, onOwnerMenu }: Pick<Props, "d
   return <input className="cp-multitrack-owner" aria-label={`Mic owner for ${trackId}`} value={draft} title={owner}
     onContextMenu={onOwnerMenu ? (event) => { event.preventDefault(); event.stopPropagation(); event.currentTarget.blur(); onOwnerMenu(trackId); } : undefined}
     onChange={(event) => setDraft(event.target.value)} maxLength={120}
-    onBlur={() => { if (!cancelled.current && draft.trim() !== owner) onRename(trackId, draft); cancelled.current = false; }}
+    onBlur={() => { if (!cancelled.current && draft.trim() !== owner) onRename(trackId, draft.trim()); cancelled.current = false; }}
     onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { cancelled.current = true; setDraft(owner); event.currentTarget.blur(); } }} />;
 }
 function TranscriptStatus({ transcript, owner, duration }: { transcript?: AafTrackTranscript; owner: string; duration: number }) {
   if (!transcript) return <span className="cp-multitrack-saved-status" aria-hidden="true" />;
   const review = transcript.status === "review";
-  const range = transcript.start_frame > 0 || transcript.duration_frames < duration ? "Selected range transcribed" : "Transcribed";
+  const gaps = transcript.gaps?.length ?? 0;
+  const range = gaps ? `Selected ranges transcribed, ${gaps} ${gaps === 1 ? "gap" : "gaps"} not transcribed`
+    : transcript.start_frame > 0 || transcript.duration_frames < duration ? "Selected range transcribed" : "Transcribed";
   const detail = review ? "Transcript saved; timing review needed" : transcript.status === "empty" ? "No speech found; result saved" : "Transcript saved";
   const label = `${owner}: ${range}. ${detail}.`;
   return <span className={`cp-multitrack-saved-status${review ? " needs-review" : " is-saved"}`} role="img" aria-label={label} title={label}>

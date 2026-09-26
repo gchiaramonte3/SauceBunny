@@ -16,6 +16,10 @@ const h = vi.hoisted(() => ({
    *  INSIDE the await that sits between the cancelled-check and the spawn.
    *  The only way to land Stop in that window from a test. */
   onListen: null as null | (() => void),
+  /** `transcript-done` listeners attached and not yet released. */
+  live: 0,
+  /** When true, the spawn itself rejects. */
+  spawnFails: false,
 }));
 
 /**
@@ -39,6 +43,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     h.calls.push(cmd);
     h.args.push(a);
     if (cmd === "transcribe_local_file") {
+      if (h.spawnFails) throw new Error("bad input");
       const job = (a as { args?: { job_id?: string } } | undefined)?.args?.job_id;
       if (job) {
         h.waiting.push(job);
@@ -54,8 +59,13 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: async (name: string, cb: (e: { payload: unknown }) => void) => {
     if (name !== "transcript-done") return () => {};
     h.sub = cb;
+    h.live++;
     h.onListen?.();
-    return () => { if (h.sub === cb) h.sub = null; };
+    let released = false;
+    return () => {
+      if (!released) { released = true; h.live--; }
+      if (h.sub === cb) h.sub = null;
+    };
   },
 }));
 
@@ -105,7 +115,10 @@ async function startParked() {
 }
 
 describe("useBatchTranscribe cancel", () => {
-  beforeEach(() => { h.calls = []; h.args = []; h.waiting = []; h.sub = null; h.auto = true; h.onListen = null; });
+  beforeEach(() => {
+    h.calls = []; h.args = []; h.waiting = []; h.sub = null; h.auto = true; h.onListen = null;
+    h.live = 0; h.spawnFails = false;
+  });
 
   it("never asks the backend for a job id", () => {
     // The id is local now. If this ever fails, the round trip is back and the
@@ -223,5 +236,26 @@ describe("useBatchTranscribe cancel", () => {
     expect(h.calls.filter((c) => c === "transcribe_local_file")).toHaveLength(2);
     expect(result.current.state.items.map((i) => i.status)).toEqual(["done", "done"]);
     expect(result.current.progress.finished).toBe(true);
+  });
+
+  it("releases the transcript-done listener when Stop lands during the wait", async () => {
+    // The break after the post-await re-check used to skip done.stop(), so
+    // every file cancelled there left a listener attached for good.
+    h.auto = false;
+    const { result } = renderHook(() => useBatchTranscribe());
+    h.onListen = () => { h.onListen = null; result.current.cancel(); };
+    await act(async () => {
+      await result.current.start(FILES, SETTINGS);
+    });
+    expect(h.calls).not.toContain("transcribe_local_file");
+    expect(h.live, "a listener survived a cancelled file").toBe(0);
+  });
+
+  it("releases the transcript-done listener when the spawn itself fails", async () => {
+    h.spawnFails = true;
+    const { result } = renderHook(() => useBatchTranscribe());
+    await act(async () => { await result.current.start(FILES, SETTINGS); });
+    expect(result.current.state.items.map((i) => i.status)).toEqual(["error", "error"]);
+    expect(h.live, "one listener leaked per failed file").toBe(0);
   });
 });

@@ -2095,7 +2095,7 @@ export function useCoReview({
   const keepOfferedCopy = useCallback(() => {
     const c = keepCandidateRef.current;
     if (!c) return;
-    setKeepTarget(c);
+    setKeepTarget({ ...c, explicit: true });
     slog("info", `Saving a copy of "${c.name}" while you watch.`);
   }, [slog]);
 
@@ -2145,7 +2145,7 @@ export function useCoReview({
    * which is the whole thing Tier A exists to prevent.
    */
   const [keepTarget, setKeepTarget] = useState<
-    { blake3: string; name: string; total: number; fingerprint: string | null } | null
+    { blake3: string; name: string; total: number; fingerprint: string | null; explicit?: boolean } | null
   >(null);
   keepTargetRef.current = keepTarget;
 

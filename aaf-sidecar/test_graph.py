@@ -111,6 +111,17 @@ class GraphTests(unittest.TestCase):
         self.assertNotEqual(result.returncode,0); self.assertIn('choose_sequence',result.stderr); self.assertNotIn('Traceback',result.stderr)
         result=subprocess.run(base+['inspect','--graph','--input',str(path),'--sequence',choices[1]['id']],capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stderr)
+    def test_a_bin_with_more_than_64_sequences_can_be_chosen_from_and_opened(self):
+        path=self.root/'bin.aaf'; grouped_fixture(path)
+        with aaf2.open(str(path),'rw') as file:
+            wanted=str(next(file.content.toplevel()).mob_id)
+            for index in range(70):
+                extra=file.create.CompositionMob(f'Extra {index}'); extra['UsageCode'].value='Usage_TopLevel'; file.content.mobs.append(extra)
+        base=[sys.executable,str(Path(reader.__file__))]
+        result=subprocess.run(base+['sequences','--input',str(path)],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr); self.assertEqual(len(json.loads(result.stdout)),71)
+        with aaf2.open(str(path),'r') as file:
+            self.assertEqual(GraphTimeline(file,wanted).manifest(reader.fingerprint(path))['graph']['sequence_id'],wanted)
     def test_unsupported_operation_is_not_silence_or_a_whole_file_rejection(self):
         path=self.root/'effect.aaf'; grouped_fixture(path)
         with aaf2.open(str(path),'rw') as file:

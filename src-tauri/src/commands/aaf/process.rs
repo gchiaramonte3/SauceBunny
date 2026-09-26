@@ -136,7 +136,10 @@ async fn run_inner(app: &AppHandle, job: &str, stage: &str, name: &str, args: Ve
         };
         match event {
             Some(CommandEvent::Stdout(bytes)) => {
-                if result.stdout.len() + bytes.len() > 16 * 1024 * 1024 {
+                // The same ceiling a saved document has. At 16 MiB a heavily cut
+                // multi-mic sequence (about 35,000 audio clips) could never be
+                // imported, far below what validate_manifest itself accepts.
+                if (result.stdout.len() + bytes.len()) as u64 > super::store::MAX_DOCUMENT_BYTES {
                     if let Some(child) = registry.take(&key) { let _ = child.kill(); }
                     return Err(AppError::invalid("AAF worker output exceeded its safety limit"));
                 }

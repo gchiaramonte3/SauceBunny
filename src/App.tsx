@@ -3750,16 +3750,23 @@ export default function App() {
   // the NEXT path change. Registered once; reads current path/fp through a ref.
   const speakerBridgeRef = useRef<{ path: string | null; fp: string | null }>({ path: null, fp: null });
   speakerBridgeRef.current = { path: transcriptPath, fp: speakerFp };
+  // Both channels: the window CustomEvent covers renames made in this window,
+  // and the Tauri event covers the popped-out panel, whose renames otherwise
+  // never reached the index (the CustomEvent does not cross windows).
   useEffect(() => {
-    const onChange = (e: Event) => {
+    const link = (evPath: string | null | undefined) => {
       const { path, fp } = speakerBridgeRef.current;
       if (!path || !fp) return;
-      const evPath = (e as CustomEvent<{ path?: string }>).detail?.path;
       if (evPath && evPath !== path) return;
       linkSpeakerOverridesToFingerprint(path, fp);
     };
+    const onChange = (e: Event) => link((e as CustomEvent<{ path?: string }>).detail?.path);
     window.addEventListener(SPEAKERS_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+    const un = listen<{ path?: string | null } | null>(SPEAKERS_CHANGED_EVENT, (e) => link(e.payload?.path));
+    return () => {
+      window.removeEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+      void un.then((f) => f());
+    };
   }, []);
   // Current source's approval verdict for the header chips (Clip sidebar +
   // room stage title). Live session -> the shared doc; solo -> the stored

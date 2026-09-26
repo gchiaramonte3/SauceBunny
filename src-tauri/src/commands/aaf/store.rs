@@ -12,7 +12,7 @@ static DOCUMENT_WRITER: Mutex<()> = Mutex::new(());
 /// could not save its later tracks: every run after the cap failed only at
 /// commit, once all the recognition work was done. The cap stays as a guard
 /// against a corrupt or hostile file, sized well above real sequences.
-const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
+pub(super) const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
 
 pub fn root(app: &AppHandle) -> Result<PathBuf, AppError> {
     let path = app.path().document_dir().map_err(|e| AppError::internal(e.to_string()))?
@@ -53,21 +53,38 @@ pub fn load(root: &Path, id: &str) -> Result<AafDocument, AppError> {
     Ok(document)
 }
 
-fn write(root: &Path, document: &AafDocument) -> Result<(), AppError> {
+/// Runs the one step that must not happen after Stop: putting the bytes on
+/// disk. Production passes JobRegistry::while_active, which holds the global
+/// cancellation lock while it runs. Loading, merging and serialising happen
+/// before the gate, so every other job's Stop and progress checks are no
+/// longer queued behind a whole-document parse. The order is always this
+/// store's DOCUMENT_WRITER first, then the cancellation lock.
+pub type Gate<'a> = &'a dyn Fn(&mut dyn FnMut() -> Result<(), AppError>) -> Result<(), AppError>;
+const UNGATED: Gate<'static> = &|commit| commit();
+
+fn write(root: &Path, document: &AafDocument) -> Result<(), AppError> { write_gated(root, document, UNGATED) }
+
+fn write_gated(root: &Path, document: &AafDocument, gate: Gate) -> Result<(), AppError> {
     if !(1..=DOCUMENT_SCHEMA_VERSION).contains(&document.schema_version) { return Err(AppError::invalid("Unsupported multitrack schema version")); }
     let mut document = document.clone();
     document.schema_version = DOCUMENT_SCHEMA_VERSION;
     validate_manifest(&document.manifest)?;
     let path = document_path(root, &document.id)?;
     if path.exists() {
-        // Refuse newer files before overwrite, even if the in-memory copy is older.
-        let _: AafDocument = load(root, &document.id)?;
+        // Refuse newer files before overwrite, even if the in-memory copy is
+        // older. Only the version is needed: building the whole document
+        // again, cues and all, cost a full parse of up to 256 MB per save.
+        #[derive(serde::Deserialize)]
+        struct Version { schema_version: u32 }
+        let saved: Version = read_json(&path)?;
+        if !(1..=DOCUMENT_SCHEMA_VERSION).contains(&saved.schema_version) {
+            return Err(AppError::invalid("This multitrack document was saved by an unsupported version. Update Sauce Bunny."));
+        }
     }
     // Compact: indentation cost about a third of the file for nothing a reader needs.
     let json = serde_json::to_vec(&document)?;
     if json.len() as u64 > MAX_DOCUMENT_BYTES { return Err(AppError::invalid("This sequence's saved transcripts have reached the 256 MB an AAF Audio document can hold, so this run was not saved. Export the finished tracks before generating more.")); }
-    crate::commands::system::write_bytes_impl(&path.to_string_lossy(), &json, false, false, true)?;
-    Ok(())
+    gate(&mut || crate::commands::system::write_bytes_impl(&path.to_string_lossy(), &json, false, false, true).map(|_| ()))
 }
 
 #[cfg(test)]
@@ -77,7 +94,10 @@ pub fn create(root: &Path, document: &AafDocument) -> Result<(), AppError> {
     write(root, document)
 }
 
-pub fn import(root: &Path, document: AafDocument) -> Result<AafDocument, AppError> {
+#[cfg(test)]
+pub fn import(root: &Path, document: AafDocument) -> Result<AafDocument, AppError> { import_gated(root, document, UNGATED) }
+
+pub fn import_gated(root: &Path, document: AafDocument, gate: Gate) -> Result<AafDocument, AppError> {
     let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
     if let Some(mut existing) = reopen(root, &document)? {
         if document.manifest.recording_dates.is_some() { existing.manifest.recording_dates = document.manifest.recording_dates.clone(); }
@@ -91,11 +111,11 @@ pub fn import(root: &Path, document: AafDocument) -> Result<AafDocument, AppErro
         } else if existing.manifest.schema_version < SCHEMA_VERSION {
             upgrade_graph(&mut existing, document.manifest)?;
         }
-        write(root, &existing)?;
+        write_gated(root, &existing, gate)?;
         return Ok(existing);
     }
     if document_path(root, &document.id)?.exists() { return Err(AppError::invalid("AAF Audio document already exists")); }
-    write(root, &document)?;
+    write_gated(root, &document, gate)?;
     Ok(document)
 }
 
@@ -105,7 +125,9 @@ pub fn reopen(root: &Path, incoming: &AafDocument) -> Result<Option<AafDocument>
     let mut candidates = Vec::new();
     for item in list(root)? {
         if item.source_path != incoming.source_path { continue; }
-        let doc = load(root, &item.id)?;
+        // A listed document that no longer loads is not this sequence's
+        // history; importing afresh beats refusing every import.
+        let Ok(doc) = load(root, &item.id) else { continue; };
         let same_sequence = match (&doc.manifest.graph, &incoming.manifest.graph) {
             (Some(old), Some(new)) => old.sequence_id == new.sequence_id,
             (None, _) => doc.manifest.name == incoming.manifest.name
@@ -126,6 +148,10 @@ pub fn reopen(root: &Path, incoming: &AafDocument) -> Result<Option<AafDocument>
 }
 
 pub fn metadata(root: &Path, id: &str, override_date: Option<String>, dates: Option<Vec<AafRecordingDate>>) -> Result<AafDocument, AppError> {
+    metadata_gated(root, id, override_date, dates, UNGATED)
+}
+
+pub fn metadata_gated(root: &Path, id: &str, override_date: Option<String>, dates: Option<Vec<AafRecordingDate>>, gate: Gate) -> Result<AafDocument, AppError> {
     let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
     let mut document = load(root, id)?;
     if let Some(dates) = dates { document.manifest.recording_dates = Some(dates); }
@@ -133,7 +159,7 @@ pub fn metadata(root: &Path, id: &str, override_date: Option<String>, dates: Opt
     if document.shoot_date_override.as_ref().is_some_and(|value| !value.is_empty() && !valid_date(value)) {
         return Err(AppError::invalid("Enter a valid shoot date as YYYY-MM-DD"));
     }
-    write(root, &document)?;
+    write_gated(root, &document, gate)?;
     Ok(document)
 }
 
@@ -170,7 +196,12 @@ pub fn labels(root: &Path, id: &str, labels: Vec<AafTrackLabel>) -> Result<AafDo
 
 /// Commit a run and return what the track now holds. A run over part of the
 /// sequence is spliced into the saved transcript rather than replacing it.
+#[cfg(test)]
 pub fn save_transcript(root: &Path, expected: &AafDocument, transcript: AafTrackTranscript) -> Result<AafTrackTranscript, AppError> {
+    save_transcript_gated(root, expected, transcript, UNGATED)
+}
+
+pub fn save_transcript_gated(root: &Path, expected: &AafDocument, transcript: AafTrackTranscript, gate: Gate) -> Result<AafTrackTranscript, AppError> {
     let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
     let mut document = load(root, &expected.id)?;
     if cache_key(&document, &transcript.track_id, "commit") != cache_key(expected, &transcript.track_id, "commit") {
@@ -182,7 +213,7 @@ pub fn save_transcript(root: &Path, expected: &AafDocument, transcript: AafTrack
     let previous = document.transcripts.iter().position(|item| item.track_id == transcript.track_id).map(|index| document.transcripts.remove(index));
     let merged = merge_transcript(previous, transcript, &document.manifest.edit_rate)?;
     document.transcripts.push(merged.clone());
-    write(root, &document)?;
+    write_gated(root, &document, gate)?;
     Ok(merged)
 }
 
@@ -209,8 +240,20 @@ pub fn merge_transcript(previous: Option<AafTrackTranscript>, run: AafTrackTrans
     let status = if !timing_issues.is_empty() { AafTranscriptStatus::Review } else if cues.is_empty() { AafTranscriptStatus::Empty } else { AafTranscriptStatus::Completed };
     let mut warnings = run.warnings;
     warnings.push(format!("Saved results outside this run were kept from an earlier {} {} run.", engine_name(&previous.engine), previous.model_id));
+    // The envelope spans both runs, so what lies between two runs that do not
+    // touch has to be recorded, or the whole span reads as transcribed.
+    let mut gaps: Vec<[i64; 2]> = Vec::new();
+    for [a, b] in previous.gaps.unwrap_or_default() {
+        if a < run.start_frame { gaps.push([a, b.min(run.start_frame)]); }
+        if b > run_end { gaps.push([a.max(run_end), b]); }
+    }
+    if run_end < previous.start_frame { gaps.push([run_end, previous.start_frame]); }
+    if run.start_frame > previous_end { gaps.push([previous_end, run.start_frame]); }
+    gaps.retain(|[a, b]| b > a);
+    gaps.sort_unstable();
     Ok(AafTrackTranscript { track_id: run.track_id, start_frame, duration_frames: run_end.max(previous_end) - start_frame,
-        engine: run.engine, model_id: run.model_id, status, sample_rate: run.sample_rate, cues, timing_issues, warnings })
+        engine: run.engine, model_id: run.model_id, status, sample_rate: run.sample_rate, cues, timing_issues, warnings,
+        gaps: (!gaps.is_empty()).then_some(gaps) })
 }
 
 fn engine_name(engine: &AafEngine) -> &'static str {
@@ -223,25 +266,34 @@ pub fn list(root: &Path) -> Result<Vec<AafDocumentSummary>, AppError> {
         let path = entry?.path();
         if path.extension().is_none_or(|ext| ext != "json") { continue; }
         let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue; };
-        // A listing needs names and counts, not every cue of every sequence:
-        // counting the arrays without building them keeps a shelf of large
-        // multi-mic documents from costing gigabytes each time it refreshes.
-        #[derive(serde::Deserialize)]
-        struct Manifest { name: String, tracks: Vec<serde::de::IgnoredAny> }
-        #[derive(serde::Deserialize)]
-        struct Summary { schema_version: u32, id: String, source_path: String, manifest: Manifest, transcripts: Vec<serde::de::IgnoredAny> }
-        let document: Summary = read_json(&document_path(root, id)?)?;
-        if !(1..=DOCUMENT_SCHEMA_VERSION).contains(&document.schema_version) {
-            return Err(AppError::invalid("This multitrack document was saved by an unsupported version. Update Sauce Bunny."));
-        }
-        if document.id != id { return Err(AppError::invalid("AAF Audio document identity does not match its filename")); }
-        results.push(AafDocumentSummary { id: document.id, name: document.manifest.name,
-            track_count: document.manifest.tracks.len() as u32,
-            transcribed_tracks: document.transcripts.len() as u32, source_path: document.source_path,
-            modified_ms: Some(modified_ms(&std::fs::metadata(&path)?)) });
+        // One file that is not a document must not empty the shelf. This
+        // folder lives in Documents, which iCloud syncs, so "<id> 2.json"
+        // conflict copies, Finder duplicates and half-downloaded files turn up
+        // here; any one of them used to fail the listing and, through reopen,
+        // every AAF import. They are skipped, never deleted.
+        if let Ok(summary) = summarize(root, id, &path) { results.push(summary); }
     }
     results.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(results)
+}
+
+fn summarize(root: &Path, id: &str, path: &Path) -> Result<AafDocumentSummary, AppError> {
+    // A listing needs names and counts, not every cue of every sequence:
+    // counting the arrays without building them keeps a shelf of large
+    // multi-mic documents from costing gigabytes each time it refreshes.
+    #[derive(serde::Deserialize)]
+    struct Manifest { name: String, tracks: Vec<serde::de::IgnoredAny> }
+    #[derive(serde::Deserialize)]
+    struct Summary { schema_version: u32, id: String, source_path: String, manifest: Manifest, transcripts: Vec<serde::de::IgnoredAny> }
+    let document: Summary = read_json(&document_path(root, id)?)?;
+    if !(1..=DOCUMENT_SCHEMA_VERSION).contains(&document.schema_version) {
+        return Err(AppError::invalid("This multitrack document was saved by an unsupported version. Update Sauce Bunny."));
+    }
+    if document.id != id { return Err(AppError::invalid("AAF Audio document identity does not match its filename")); }
+    Ok(AafDocumentSummary { id: document.id, name: document.manifest.name,
+        track_count: document.manifest.tracks.len() as u32,
+        transcribed_tracks: document.transcripts.len() as u32, source_path: document.source_path,
+        modified_ms: Some(modified_ms(&std::fs::metadata(path)?)) })
 }
 
 pub fn source_ready(document: &AafDocument) -> Result<(), AppError> {
@@ -341,7 +393,12 @@ fn warn_changed_routing(document: &mut AafDocument, fresh: &AafManifest) {
     }
 }
 
+#[cfg(test)]
 pub fn save_graph(root: &Path, update: &AafDocument, expected_revision: &str) -> Result<AafDocument, AppError> {
+    save_graph_gated(root, update, expected_revision, UNGATED)
+}
+
+pub fn save_graph_gated(root: &Path, update: &AafDocument, expected_revision: &str, gate: Gate) -> Result<AafDocument, AppError> {
     let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
     let mut current = load(root, &update.id)?;
     if cache_key(&current, "all", "relink") != expected_revision { return Err(AppError::invalid("Media resolution changed in another operation. Refresh availability and try again.")); }
@@ -350,7 +407,7 @@ pub fn save_graph(root: &Path, update: &AafDocument, expected_revision: &str) ->
     current.manifest.schema_version = update.manifest.schema_version;
     current.manifest.tracks = update.manifest.tracks.clone();
     current.manifest.graph = update.manifest.graph.clone();
-    write(root, &current)?;
+    write_gated(root, &current, gate)?;
     Ok(current)
 }
 
@@ -359,7 +416,7 @@ mod tests {
     use super::*;
     fn run(start: i64, duration: i64, cues: &[(&str, i64, i64)], issues: &[(&str, i64)]) -> AafTrackTranscript {
         AafTrackTranscript { track_id: "10".into(), start_frame: start, duration_frames: duration, engine: AafEngine::Parakeet, model_id: "m".into(),
-            status: AafTranscriptStatus::Completed, sample_rate: ASR_RATE as u32, warnings: vec![],
+            status: AafTranscriptStatus::Completed, sample_rate: ASR_RATE as u32, warnings: vec![], gaps: None,
             cues: cues.iter().map(|(id, a, b)| AafCue { id: (*id).into(), start_sample: *a, end_sample: *b, text: (*id).into(), boundary_review: false }).collect(),
             timing_issues: issues.iter().map(|(id, frame)| AafTimingIssue { id: (*id).into(), text: "t".into(), reported_timing: "x".into(), chunk_start_frame: *frame, reason: "r".into() }).collect() }
     }
@@ -395,6 +452,18 @@ mod tests {
         let merged = merge_transcript(Some(early), late, &rate).unwrap();
         assert_eq!(merged.cues.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), vec!["e", "l"]);
         assert_eq!((merged.start_frame, merged.duration_frames), (0, 60));
+        assert_eq!(merged.gaps, Some(vec![[10, 50]]));
+        // A third run inside the gap leaves only what it did not cover.
+        let middle = run(20, 10, &[("m", 21 * 640, 22 * 640)], &[]);
+        let filled = merge_transcript(Some(merged.clone()), middle, &rate).unwrap();
+        assert_eq!(filled.gaps, Some(vec![[10, 20], [30, 50]]));
+        // One run covering the gap closes it; one covering everything clears it.
+        let bridge = run(5, 50, &[], &[]);
+        assert_eq!(merge_transcript(Some(filled), bridge, &rate).unwrap().gaps, None);
+        let earlier = run(70, 10, &[], &[]);
+        let before = merge_transcript(Some(earlier), run(0, 10, &[], &[]), &rate).unwrap();
+        assert_eq!(before.gaps, Some(vec![[10, 70]]));
+        assert_eq!(merge_transcript(Some(before), run(0, 100, &[], &[]), &rate).unwrap().gaps, None);
     }
     fn fixture() -> AafDocument {
         AafDocument { schema_version: 1, shoot_date_override: None, id: "a".repeat(64), source_path: "/tmp/source.aaf".into(),
@@ -417,7 +486,7 @@ mod tests {
         create(&root, &doc).unwrap();
         let transcript = AafTrackTranscript { track_id: "10".into(), start_frame: 24, duration_frames: 48,
             engine: AafEngine::Parakeet, model_id: "test".into(), status: AafTranscriptStatus::Review,
-            sample_rate: 16000, cues: vec![AafCue { id: "cue".into(), start_sample: 16016, end_sample: 24024, text: "Hello, Café".into(), boundary_review: false }], timing_issues: vec![AafTimingIssue { id: "untimed".into(), text: "Kept without invented timing".into(), reported_timing: "00:00:10,000 --> 00:00:10,000".into(), chunk_start_frame: 24, reason: "Empty time range".into() }], warnings: vec![] };
+            sample_rate: 16000, cues: vec![AafCue { id: "cue".into(), start_sample: 16016, end_sample: 24024, text: "Hello, Café".into(), boundary_review: false }], timing_issues: vec![AafTimingIssue { id: "untimed".into(), text: "Kept without invented timing".into(), reported_timing: "00:00:10,000 --> 00:00:10,000".into(), chunk_start_frame: 24, reason: "Empty time range".into() }], warnings: vec![], gaps: None };
         save_transcript(&root, &doc, transcript).unwrap();
         let updated = labels(&root, &doc.id, vec![AafTrackLabel { track_id: "10".into(), owner_name: "かが Élodie".into(), cast_member_id: None, color: None, gender: None, marker_color: None }]).unwrap();
         assert_eq!(updated.transcripts.len(), 1);
@@ -487,7 +556,7 @@ mod tests {
         let mut original = fixture();
         original.transcripts.push(AafTrackTranscript { track_id: "10".into(), engine: AafEngine::Parakeet,
             model_id: "test".into(), start_frame: 0, duration_frames: 240, status: AafTranscriptStatus::Empty,
-            sample_rate: 16000, cues: vec![], timing_issues: vec![], warnings: vec![] });
+            sample_rate: 16000, cues: vec![], timing_issues: vec![], warnings: vec![], gaps: None });
         create(&root, &original).unwrap();
         let mut duplicate = fixture(); duplicate.id = "c".repeat(64); create(&root, &duplicate).unwrap();
         let mut fresh = fixture(); fresh.id = "d".repeat(64);
@@ -497,6 +566,20 @@ mod tests {
         fresh.manifest.source_fingerprint = "e".repeat(64);
         assert_eq!(import(&root, fresh).unwrap().id, "d".repeat(64));
         assert_eq!(list(&root).unwrap().len(), 3);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stray_files_in_the_folder_do_not_empty_the_shelf_or_block_import() {
+        let root = std::env::temp_dir().join(format!("aaf-stray-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let original = fixture(); create(&root, &original).unwrap();
+        std::fs::write(root.join(format!("{} 2.json", original.id)), b"{}").unwrap();
+        std::fs::write(root.join(format!("{}.json", "f".repeat(64))), b"{\"schema_version\":1,").unwrap();
+        std::fs::write(root.join("notes.txt"), b"not json").unwrap();
+        assert_eq!(list(&root).unwrap().iter().map(|d| d.id.clone()).collect::<Vec<_>>(), vec![original.id.clone()]);
+        let mut fresh = fixture(); fresh.id = "d".repeat(64);
+        assert_eq!(import(&root, fresh).unwrap().id, original.id);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -533,7 +616,7 @@ mod tests {
     fn graph_migration_keeps_cast_snapshots_text_and_old_ids_and_distinguishes_sequences() {
         let root=std::env::temp_dir().join(format!("aaf-migrate-{}",uuid::Uuid::new_v4())); std::fs::create_dir(&root).unwrap();
         let mut old=fixture(); old.labels[0].owner_name="User label".into(); old.labels[0].marker_color=Some(AafMarkerColor::Pink);
-        old.transcripts.push(AafTrackTranscript { track_id:"10".into(),engine:AafEngine::Parakeet,model_id:"test".into(),start_frame:0,duration_frames:240,status:AafTranscriptStatus::Empty,sample_rate:16000,cues:vec![],timing_issues:vec![],warnings:vec![] });
+        old.transcripts.push(AafTrackTranscript { track_id:"10".into(),engine:AafEngine::Parakeet,model_id:"test".into(),start_frame:0,duration_frames:240,status:AafTranscriptStatus::Empty,sample_rate:16000,cues:vec![],timing_issues:vec![],warnings:vec![],gaps:None });
         create(&root,&old).unwrap();
         let mut incoming=with_graph(fixture()); incoming.id="c".repeat(64);
         let saved=import(&root,incoming.clone()).unwrap();
@@ -552,7 +635,7 @@ mod tests {
             "resolved":{"path":"/tmp/audio.wav","fingerprint":"a".repeat(64),"stream_index":0,"size":960960,"modified_ms":1}})).unwrap());
         let clip=&mut doc.manifest.tracks[0].clips[0]; clip.kind="audio".into(); clip.source_id=Some("s".into()); clip.source_start_sample=Some(0); clip.sample_rate=Some(48000);
         doc.manifest.graph.as_mut().unwrap().positions.push(AafSourcePosition { track_id:"10".into(),clip_index:0,numerator:0,denominator:1 });
-        let transcript=AafTrackTranscript { track_id:"10".into(),engine:AafEngine::Parakeet,model_id:"committed".into(),start_frame:0,duration_frames:240,status:AafTranscriptStatus::Empty,sample_rate:16000,cues:vec![],timing_issues:vec![],warnings:vec![] };
+        let transcript=AafTrackTranscript { track_id:"10".into(),engine:AafEngine::Parakeet,model_id:"committed".into(),start_frame:0,duration_frames:240,status:AafTranscriptStatus::Empty,sample_rate:16000,cues:vec![],timing_issues:vec![],warnings:vec![],gaps:None };
         doc.transcripts.push(transcript.clone()); create(&root,&doc).unwrap();
         let revision=cache_key(&doc,"all","relink");
         let mut replacement=doc.clone(); replacement.manifest.graph.as_mut().unwrap().sources[0].resolved.as_mut().unwrap().fingerprint="b".repeat(64);
@@ -583,7 +666,7 @@ mod tests {
         assert_eq!(key,cache_key(&pending,"10","commit"));
         let saved=save_graph(&root,&pending,&cache_key(&doc,"all","relink")).unwrap();
         assert_eq!(saved.labels[0].owner_name,"Edited while checking");
-        let transcript=AafTrackTranscript {track_id:"10".into(),engine:AafEngine::Whisper,model_id:"committed during resolution".into(),start_frame:0,duration_frames:240,status:AafTranscriptStatus::Empty,sample_rate:16000,cues:vec![],timing_issues:vec![],warnings:vec![]};
+        let transcript=AafTrackTranscript {track_id:"10".into(),engine:AafEngine::Whisper,model_id:"committed during resolution".into(),start_frame:0,duration_frames:240,status:AafTranscriptStatus::Empty,sample_rate:16000,cues:vec![],timing_issues:vec![],warnings:vec![],gaps:None};
         save_transcript(&root,&doc,transcript).unwrap();
         pending.manifest.graph.as_mut().unwrap().sources[1].status="offline".into();
         let last=save_graph(&root,&pending,&cache_key(&saved,"all","relink")).unwrap();
@@ -605,7 +688,7 @@ mod tests {
         doc.manifest.graph.as_mut().unwrap().path_mappings.push(AafPathMapping {from:"/Show/MXF".into(),to:"/Volumes/Renamed/MXF".into(),authority:Some("nexis".into())});
         doc.labels[0].owner_name="Edited owner".into();
         let clip=&mut doc.manifest.tracks[0].clips[0]; clip.kind="audio".into(); clip.source_id=Some("s".into());
-        doc.transcripts.push(AafTrackTranscript {track_id:"10".into(),start_frame:0,duration_frames:240,engine:AafEngine::Whisper,model_id:"saved".into(),status:AafTranscriptStatus::Empty,sample_rate:16000,cues:vec![],timing_issues:vec![],warnings:vec![]});
+        doc.transcripts.push(AafTrackTranscript {track_id:"10".into(),start_frame:0,duration_frames:240,engine:AafEngine::Whisper,model_id:"saved".into(),status:AafTranscriptStatus::Empty,sample_rate:16000,cues:vec![],timing_issues:vec![],warnings:vec![],gaps:None});
         let mut fresh=doc.manifest.clone(); fresh.schema_version=SCHEMA_VERSION; fresh.graph.as_mut().unwrap().path_mappings.clear();
         fresh.graph.as_mut().unwrap().sources[0].resolved=None;
         upgrade_graph(&mut doc,fresh.clone()).unwrap();

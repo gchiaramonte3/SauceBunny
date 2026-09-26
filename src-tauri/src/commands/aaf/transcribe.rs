@@ -102,13 +102,34 @@ pub fn parse_cues(text: &str, chunk: &Chunk, rate: &AafRate, track: &str) -> Res
     let owner_end = frame_samples(chunk.end, rate)?;
     let mut cues = Vec::new();
     let mut timing_issues = Vec::new();
-    for (index, block) in text.split("\n\n").filter(|block| !block.trim().is_empty()).enumerate() {
-        let mut lines = block.trim().lines();
-        let first = lines.next().ok_or_else(|| AppError::invalid("Invalid speech cue"))?;
-        let timing = if first.contains("-->") { first } else { lines.next().ok_or_else(|| AppError::invalid("Speech cue has no timestamp"))? };
-        let (start, end) = timing.split_once("-->").ok_or_else(|| AppError::invalid("Speech cue has no timestamp"))?;
-        let text = lines.collect::<Vec<_>>().join(" ").trim().to_owned();
+    // A blank line inside a cue's text ("♪\n\n♪") splits one SRT block into
+    // two, and the second has no timing line. That used to fail the whole run
+    // with "Speech cue has no timestamp", discarding every finished chunk. It
+    // is the previous cue's text, so it is folded back into it; with no cue
+    // before it, it is kept as untimed text rather than dropped.
+    let mut blocks: Vec<(Option<String>, String)> = Vec::new();
+    for block in text.split("\n\n").filter(|block| !block.trim().is_empty()) {
+        let lines: Vec<&str> = block.trim().lines().collect();
+        let at = lines.iter().take(2).position(|line| line.contains("-->"));
+        match at {
+            Some(at) => blocks.push((Some(lines[at].trim().to_owned()), lines[at + 1..].join(" ").trim().to_owned())),
+            None => match blocks.last_mut() {
+                Some((_, text)) => { text.push(' '); text.push_str(lines.join(" ").trim()); }
+                None => blocks.push((None, lines.join(" ").trim().to_owned())),
+            },
+        }
+    }
+    // Output with no time range anywhere is not a transcript at all.
+    if blocks.iter().all(|(timing, _)| timing.is_none()) { return Err(AppError::invalid("Speech cue has no timestamp")); }
+    for (index, (timing, text)) in blocks.into_iter().enumerate() {
+        let text = text.trim().to_owned();
         if text.is_empty() { continue; }
+        let Some((timing, (start, end))) = timing.as_deref().and_then(|timing| Some((timing, timing.split_once("-->")?))) else {
+            timing_issues.push(AafTimingIssue { id: format!("{track}-{}-{index}", chunk.start), text,
+                reported_timing: String::new(), chunk_start_frame: chunk.extract_start,
+                reason: "The engine returned text without a time range.".into() });
+            continue;
+        };
         let (start, end) = match cue_range(start, end, available) {
             Ok(range) => range,
             Err(reason) => {
@@ -254,9 +275,10 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
             "Cue times are machine estimates, not verified word boundaries. No diarization or cross-track deletion was performed.".into(),
             "Cues marked for boundary review can repeat across processing chunks. Both are kept so differing segmentation cannot silently remove words.".into(),
             "Recognition uses bounded audio chunks with one second of context.".into(),
-            speech_note.into(), format!("Decoding: {}. Model reuse: up to {batch_size} windows per load.", if fast && whisper { "Fast" } else { "Accurate" })] };
+            speech_note.into(), format!("Decoding: {}. Model reuse: up to {batch_size} windows per load.", if fast && whisper { "Fast" } else { "Accurate" })], gaps: None };
     let root = store::root(app)?;
-    let saved = app.state::<JobRegistry>().while_active(job, || store::save_transcript(&root, document, transcript))?;
+    let registry = app.state::<JobRegistry>();
+    let saved = store::save_transcript_gated(&root, document, transcript, &|commit| registry.while_active(job, commit))?;
     let _ = tauri::Emitter::emit(app, "saucebunny:multitrack-changed", &document.id);
     Ok(saved)
 }
@@ -356,6 +378,17 @@ mod tests {
         assert_eq!(cues[0].start_sample, 16_096_000);
         assert_eq!(cues[1].start_sample - cues[0].start_sample, 25 * ASR_RATE);
         assert!(parse_cues("not a transcript", &chunk, &rate, "12").is_err());
+    }
+    #[test]
+    fn a_blank_line_inside_a_cue_keeps_the_run_and_the_text() {
+        let rate = AafRate { numerator: 24_000, denominator: 1001 };
+        let chunk = Chunk { start: 0, end: 240, extract_start: 0, extract_end: 240 };
+        let parsed = parse_cues("1\n00:00:01,000 --> 00:00:02,000\n♪\n\n♪\n\n2\n00:00:03,000 --> 00:00:04,000\nNext\n", &chunk, &rate, "10").unwrap();
+        assert_eq!(parsed.cues.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), ["♪ ♪", "Next"]);
+        assert!(parsed.timing_issues.is_empty());
+        let leading = parse_cues("Stray words\n\n1\n00:00:01,000 --> 00:00:02,000\nTimed\n", &chunk, &rate, "10").unwrap();
+        assert_eq!(leading.cues[0].text, "Timed");
+        assert_eq!(leading.timing_issues[0].text, "Stray words");
     }
     #[test]
     fn bounded_chunks_cover_fractional_rate_without_drifting() {

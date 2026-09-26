@@ -161,6 +161,27 @@ export function tcToFrames(tc: string, rate: FrameRateKey, dropFrame: boolean): 
   return (hh * 3600 + mm * 60 + ss) * T + ff;
 }
 
+/** The sequence Start TC after a change of rate or drop-frame. It is a LABEL
+ *  (a sequence starting at 01:00:00:00 still starts there at another rate), so
+ *  a label that is still valid is kept exactly. Only one the new rate cannot
+ *  express (00:59:59:29 at 25 fps, or a frame number drop-frame skips) is
+ *  moved: its frame field scales to the new timebase and steps past a skipped
+ *  label. Without this the stored value stayed invalid and every export fell
+ *  back to 00:00:00:00, putting each marker an hour early. */
+export function retimeStartTc(tc: string, from: FrameRateKey, to: FrameRateKey, dropFrame: boolean): string {
+  if (tcToFrames(tc, to, dropFrame) !== null) return tc;
+  const nums = tc.trim().split(/[:;]/).map((part) => parseInt(part, 10));
+  if (nums.length !== 4 || nums.some((n) => !Number.isFinite(n))) return DEFAULT_MARKER_SETTINGS.sequenceStartTc;
+  const [hh, mm, ss, ff] = nums, T = RATE_TABLE[to].timebase;
+  const scaled = Math.min(T - 1, Math.floor((ff * T) / RATE_TABLE[from].timebase));
+  const separator = dropFrame && RATE_TABLE[to].dropAllowed ? ";" : ":";
+  for (let frame = scaled; frame < T; frame++) {
+    const candidate = `${pad(hh)}:${pad(mm)}:${pad(ss)}${separator}${pad(frame)}`;
+    if (tcToFrames(candidate, to, dropFrame) !== null) return candidate;
+  }
+  return DEFAULT_MARKER_SETTINGS.sequenceStartTc;
+}
+
 /** Absolute frames -> HH:MM:SS:FF. Non-drop uses ':' throughout; drop-frame
  *  (29.97 / 59.94 only) uses ';' before the frames field. */
 export function framesToTc(totalFrames: number, rate: FrameRateKey, dropFrame: boolean): string {

@@ -49,7 +49,8 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String, sequence_i
     store::source_ready(&document)?;
     // Reopen an unchanged document (including all committed transcripts) or
     // commit the offline timeline before any linked-media I/O begins.
-    let document = app.state::<JobRegistry>().while_active(&job_id, || store::import(&root, document))?;
+    let registry = app.state::<JobRegistry>();
+    let document = store::import_gated(&root, document, &|commit| registry.while_active(&job_id, commit))?;
     let _ = app.emit("saucebunny:multitrack-changed", &document.id);
     diagnostics::log(&app, &job_id, "ok", "saved", &format!("Timeline saved: {} · {} lanes · {} committed transcripts", document.manifest.name, document.manifest.tracks.len(), document.transcripts.len()));
     Ok(document)
@@ -90,7 +91,8 @@ pub async fn aaf_resolve_media(app: AppHandle, document_id: String, source_id: O
         store::source_ready(&checkpoint)?;
         // Merge graph-only changes into the latest document. Concurrent label
         // edits/transcription commits survive; a competing relink is rejected.
-        let saved = app.state::<JobRegistry>().while_active(&job_id, || store::save_graph(&root, &checkpoint, &revision))?;
+        let registry = app.state::<JobRegistry>();
+        let saved = store::save_graph_gated(&root, &checkpoint, &revision, &|commit| registry.while_active(&job_id, commit))?;
         revision = store::cache_key(&saved, "all", "relink");
         let _ = app.emit("saucebunny:multitrack-changed", &document_id);
         Ok(())
@@ -140,7 +142,8 @@ pub async fn aaf_read_recording_dates(app: AppHandle, document_id: String, job_i
     validate_manifest(&manifest)?;
     store::source_ready(&document)?;
     if manifest.source_fingerprint != document.manifest.source_fingerprint { return Err(AppError::invalid("The AAF changed. Import it again.")); }
-    let document = app.state::<JobRegistry>().while_active(&job_id, || store::metadata(&root, &document_id, None, Some(manifest.recording_dates.unwrap_or_default())) )?;
+    let registry = app.state::<JobRegistry>();
+    let document = store::metadata_gated(&root, &document_id, None, Some(manifest.recording_dates.unwrap_or_default()), &|commit| registry.while_active(&job_id, commit))?;
     let _ = app.emit("saucebunny:multitrack-changed", &document_id);
     Ok(document)
     }).await

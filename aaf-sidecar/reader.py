@@ -171,6 +171,16 @@ def pcm_layout(essence, descriptor=None):
     return PCM(str(essence.mob_id), data[0], data[1]//align, hz, bits//8, time_reference, recording_date, channels=channels)
 
 
+def timecode_segment(segment):
+    if isinstance(segment, aaf2.components.Timecode):
+        return segment
+    if isinstance(segment, aaf2.components.Sequence):
+        parts = list(segment.components)
+        if len(parts) == 1 and isinstance(parts[0], aaf2.components.Timecode):
+            return parts[0]
+    return None
+
+
 class Timeline:
     def __init__(self, file):
         self.file = file
@@ -204,13 +214,19 @@ class Timeline:
         self.duration = max(s.segment.length for s in audio)
         if not 0 < Fraction(self.duration, 1)/self.rate <= MAX_DURATION_SECONDS:
             fail('The sequence must be longer than zero and no longer than 24 hours.', 'limit_exceeded')
-        timecodes = [s.segment for s in slots if isinstance(s.segment, aaf2.components.Timecode)
-                     and rate_of(s) == self.rate and s.segment.fps == math.ceil(self.rate)]
+        # Record timecode may sit directly in its slot or wrapped in a
+        # one-component Sequence. A sequence can also carry auxiliary TC
+        # tracks; the record track is the one numbered 1, so they no longer
+        # make the whole import fail.
+        timecodes = [(value(s, 'PhysicalTrackNumber'), t) for s in slots
+                     for t in [timecode_segment(s.segment)]
+                     if t is not None and rate_of(s) == self.rate and t.fps == math.ceil(self.rate)]
         self.start, self.fps, self.drop = 0, math.ceil(self.rate), False
         if timecodes:
-            self.start, self.fps, self.drop = timecodes[0].start, timecodes[0].fps, timecodes[0].drop
-            if any((t.start,t.fps,t.drop) != (self.start,self.fps,self.drop) for t in timecodes):
-                fail('Sequence timecode tracks disagree. Export a sequence with one record timecode.')
+            record = next((t for number, t in timecodes if number == 1), timecodes[0][1])
+            self.start, self.fps, self.drop = record.start, record.fps, record.drop
+            if any((t.start,t.fps,t.drop) != (self.start,self.fps,self.drop) for _, t in timecodes):
+                append_warning(self.warnings, 'This sequence has more than one timecode track. The record timecode (track 1) is used.')
         else:
             append_warning(self.warnings, 'No matching record timecode was found. The timeline starts at zero.')
         self.tracks = [self.read_track(s) for s in audio]
@@ -596,7 +612,7 @@ def main():
     except ReaderError as error:
         print(json.dumps({'schema_version':1,'error':{'code':error.code,'message':str(error)}}),file=sys.stderr)
         return 130 if error.code == 'cancelled' else 2
-    except (OSError,ValueError,KeyError,AttributeError,IndexError,ZeroDivisionError,AssertionError,struct.error,aaf2.exceptions.AAFError):
+    except (OSError,ValueError,TypeError,KeyError,AttributeError,IndexError,ZeroDivisionError,AssertionError,struct.error,aaf2.exceptions.AAFError):
         # Parser paths and untrusted metadata do not become user-facing tracebacks.
         print(json.dumps({'schema_version':1,'error':{'code':'invalid_aaf','message':'The AAF could not be read safely. Re-export it with embedded mono WAV audio.'}}),file=sys.stderr)
         return 2

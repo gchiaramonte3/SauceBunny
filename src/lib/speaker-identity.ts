@@ -22,7 +22,7 @@
  */
 
 import { reviewFingerprint } from "./review";
-import { speakerOverridesKey } from "../components/transcript/helpers";
+import { readSpeakerOverridesRaw, speakerOverridesKey } from "../components/transcript/helpers";
 import { reportStorageProblem } from "./storage";
 
 const FP_INDEX_KEY = "saucebunny.speakerNames.fpindex";
@@ -70,7 +70,7 @@ export function speakerFingerprint(
 /** The path key's overrides blob when it holds real names, else null. */
 function pathBlob(path: string): string | null {
   try {
-    const raw = localStorage.getItem(speakerOverridesKey(path));
+    const raw = readSpeakerOverridesRaw(path);
     return raw && raw !== "{}" ? raw : null;
   } catch {
     return null;

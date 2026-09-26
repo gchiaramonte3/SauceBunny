@@ -26,7 +26,8 @@ export function MultitrackRunDetails({ document, report, error, onClose }: {
       {document.transcripts.length > 0 && <section><h3>Saved tracks</h3><ul className="cp-multitrack-run-tracks">
         {document.transcripts.map((result) => <li key={result.track_id}><strong>{trackOwner(document, result.track_id)}</strong>
           <span>{result.status === "empty" ? "No speech found" : result.status === "review" ? "Saved; timing review needed" : "Saved"} · {result.engine} · {result.model_id}</span>
-          <span>{sequenceTimecode(document.manifest, result.start_frame)} to {sequenceTimecode(document.manifest, result.start_frame + result.duration_frames)}</span></li>)}
+          <span>{sequenceTimecode(document.manifest, result.start_frame)} to {sequenceTimecode(document.manifest, result.start_frame + result.duration_frames)}</span>
+          {result.gaps?.map(([from, to]) => <span key={from}>Not transcribed: {sequenceTimecode(document.manifest, from)} to {sequenceTimecode(document.manifest, to)}</span>)}</li>)}
       </ul></section>}
       {reviewCount > 0 && <p>The engine supplied an empty, reversed, or out-of-range timestamp. That does not mean the source audio is damaged. Those passages are kept separately so they cannot jump the playhead to an invalid time.</p>}
       {notes.length > 0 && <section><h3>Notes</h3>{notes.map((note) => <p key={note}>{note}</p>)}</section>}
