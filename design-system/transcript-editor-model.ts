@@ -12,14 +12,18 @@
  * there is nothing else it could be. Speaker-only removals are MUTES on one
  * track and do not ripple, which keeps crosstalk in sync.
  *
+ * An edit can draw on several SOURCES (sequences or clips). Every word,
+ * segment and mute names the source its times are in, so "4.2 s" always
+ * means 4.2 s of a particular recording.
+ *
  * Times are seconds of source time here. Production works in frames and
  * samples; the arithmetic is the same.
  */
 
 export type TeSpeaker = { id: string; name: string; track: number };
-export type TeWord = { id: string; speaker: string; text: string; start: number; end: number };
-export type TeSegment = { id: string; srcIn: number; srcOut: number };
-export type TeMute = { speaker: string; srcIn: number; srcOut: number };
+export type TeWord = { id: string; source: string; speaker: string; text: string; start: number; end: number };
+export type TeSegment = { id: string; source: string; srcIn: number; srcOut: number };
+export type TeMute = { source: string; speaker: string; srcIn: number; srcOut: number };
 export type TeEdit = { segments: TeSegment[]; mutes: TeMute[] };
 
 /** A word as it appears in the edit, with its place in program time. */
@@ -79,7 +83,7 @@ export function programToSource(edit: TeEdit, program: number): { segment: numbe
 }
 
 const isMuted = (edit: TeEdit, word: TeWord) => edit.mutes.some((mute) =>
-  mute.speaker === word.speaker && word.start >= mute.srcIn - 1e-6 && word.end <= mute.srcOut + 1e-6);
+  mute.source === word.source && mute.speaker === word.speaker && word.start >= mute.srcIn - 1e-6 && word.end <= mute.srcOut + 1e-6);
 
 /** Words that play in the edit, in program order. A word belongs to a segment
  *  when its midpoint does; a later edit can never leave half a word showing. */
@@ -89,7 +93,7 @@ export function placeWords(words: TeWord[], edit: TeEdit): TePlacedWord[] {
   edit.segments.forEach((segment, index) => {
     for (const word of words) {
       const middle = (word.start + word.end) / 2;
-      if (middle < segment.srcIn || middle >= segment.srcOut) continue;
+      if (word.source !== segment.source || middle < segment.srcIn || middle >= segment.srcOut) continue;
       const offset = starts[index] - segment.srcIn;
       placed.push({ word, segment: index, programStart: Math.max(starts[index], word.start + offset),
         programEnd: Math.min(starts[index] + segmentLength(segment), word.end + offset), muted: isMuted(edit, word) });
@@ -113,14 +117,14 @@ export function paragraphs(placed: TePlacedWord[]): TeParagraph[] {
   return out;
 }
 
-/** Remove [srcIn, srcOut) from every segment. What is left closes up. */
-export function removeRange(edit: TeEdit, srcIn: number, srcOut: number): TeEdit {
+/** Remove [srcIn, srcOut) of one source from every segment. What is left closes up. */
+export function removeRange(edit: TeEdit, source: string, srcIn: number, srcOut: number): TeEdit {
   if (srcOut <= srcIn) return edit;
   const segments: TeSegment[] = [];
   for (const segment of edit.segments) {
-    if (srcOut <= segment.srcIn || srcIn >= segment.srcOut) { segments.push(segment); continue; }
-    if (srcIn > segment.srcIn) segments.push({ id: nextId("seg"), srcIn: segment.srcIn, srcOut: srcIn });
-    if (srcOut < segment.srcOut) segments.push({ id: nextId("seg"), srcIn: srcOut, srcOut: segment.srcOut });
+    if (segment.source !== source || srcOut <= segment.srcIn || srcIn >= segment.srcOut) { segments.push(segment); continue; }
+    if (srcIn > segment.srcIn) segments.push({ id: nextId("seg"), source, srcIn: segment.srcIn, srcOut: srcIn });
+    if (srcOut < segment.srcOut) segments.push({ id: nextId("seg"), source, srcIn: srcOut, srcOut: segment.srcOut });
   }
   return { ...edit, segments };
 }
@@ -133,7 +137,7 @@ export function removeRange(edit: TeEdit, srcIn: number, srcOut: number): TeEdit
 export function cutRange(words: TeWord[], selected: TeWord[], segment: TeSegment): [number, number] {
   const first = Math.min(...selected.map((word) => word.start));
   const last = Math.max(...selected.map((word) => word.end));
-  const inside = words.filter((word) => word.end > segment.srcIn && word.start < segment.srcOut && !selected.includes(word));
+  const inside = words.filter((word) => word.source === segment.source && word.end > segment.srcIn && word.start < segment.srcOut && !selected.includes(word));
   const before = Math.max(segment.srcIn, ...inside.filter((word) => word.end <= first).map((word) => word.end));
   const after = Math.min(segment.srcOut, ...inside.filter((word) => word.start >= last).map((word) => word.start));
   const into = (gap: number) => Math.min(HANDLE, gap / 2);
@@ -181,14 +185,14 @@ export function deleteWords(words: TeWord[], edit: TeEdit, keys: Set<string>): T
     }
   }
   const segments = edit.segments.flatMap((segment, index) =>
-    (cuts.get(index) ?? []).reduce((pieces, [srcIn, srcOut]) => removeRange({ segments: pieces, mutes: [] }, srcIn, srcOut).segments, [segment]));
+    (cuts.get(index) ?? []).reduce((pieces, [srcIn, srcOut]) => removeRange({ segments: pieces, mutes: [] }, segment.source, srcIn, srcOut).segments, [segment]));
   return { edit: { ...edit, segments }, removed, crosstalk, seconds };
 }
 
 /** Silence only these words, on their speaker's track. No ripple. */
 export function muteWords(words: TeWord[], edit: TeEdit, ids: Set<string>): TeEdit {
   const mutes = [...edit.mutes];
-  for (const word of words) if (ids.has(word.id)) mutes.push({ speaker: word.speaker, srcIn: word.start, srcOut: word.end });
+  for (const word of words) if (ids.has(word.id)) mutes.push({ source: word.source, speaker: word.speaker, srcIn: word.start, srcOut: word.end });
   return { ...edit, mutes };
 }
 
@@ -196,7 +200,7 @@ export function muteWords(words: TeWord[], edit: TeEdit, ids: Set<string>): TeEd
 export function unmuteWords(words: TeWord[], edit: TeEdit, ids: Set<string>): TeEdit {
   const targets = words.filter((word) => ids.has(word.id));
   return { ...edit, mutes: edit.mutes.filter((mute) => !targets.some((word) =>
-    word.speaker === mute.speaker && word.start >= mute.srcIn - 1e-6 && word.end <= mute.srcOut + 1e-6)) };
+    word.source === mute.source && word.speaker === mute.speaker && word.start >= mute.srcIn - 1e-6 && word.end <= mute.srcOut + 1e-6)) };
 }
 
 /** Split the edit at a program position; returns the index to insert at. */
@@ -209,9 +213,9 @@ function splitAt(edit: TeEdit, program: number): { edit: TeEdit; index: number }
     if (index === edit.segments.length && program <= at + 1e-6) index = segments.length;
     if (index === edit.segments.length && program > at + 1e-6 && program < at + length - 1e-6) {
       const cut = segment.srcIn + (program - at);
-      segments.push({ id: nextId("seg"), srcIn: segment.srcIn, srcOut: cut });
+      segments.push({ id: nextId("seg"), source: segment.source, srcIn: segment.srcIn, srcOut: cut });
       index = segments.length;
-      segments.push({ id: nextId("seg"), srcIn: cut, srcOut: segment.srcOut });
+      segments.push({ id: nextId("seg"), source: segment.source, srcIn: cut, srcOut: segment.srcOut });
     } else segments.push(segment);
     at += length;
     if (position === edit.segments.length - 1 && index === edit.segments.length && program >= at - 1e-6) index = segments.length;
@@ -220,11 +224,11 @@ function splitAt(edit: TeEdit, program: number): { edit: TeEdit; index: number }
 }
 
 /** Splice a source range into the edit at a program position (Avid's splice-in). */
-export function spliceIn(edit: TeEdit, srcIn: number, srcOut: number, program: number): TeEdit {
+export function spliceIn(edit: TeEdit, source: string, srcIn: number, srcOut: number, program: number): TeEdit {
   if (srcOut <= srcIn) return edit;
   const split = splitAt(edit, program);
   const segments = [...split.edit.segments];
-  segments.splice(split.index, 0, { id: nextId("seg"), srcIn, srcOut });
+  segments.splice(split.index, 0, { id: nextId("seg"), source, srcIn, srcOut });
   return { ...split.edit, segments };
 }
 
@@ -276,9 +280,9 @@ export function moveParagraph(words: TeWord[], edit: TeEdit, paragraph: TeParagr
  */
 export function healSeam(edit: TeEdit, index: number): TeEdit {
   const prev = edit.segments[index - 1], next = edit.segments[index];
-  if (!prev || !next || next.srcIn < prev.srcOut) return edit;
+  if (!prev || !next || prev.source !== next.source || next.srcIn < prev.srcOut) return edit;
   const segments = [...edit.segments];
-  segments.splice(index - 1, 2, { id: nextId("seg"), srcIn: prev.srcIn, srcOut: next.srcOut });
+  segments.splice(index - 1, 2, { id: nextId("seg"), source: prev.source, srcIn: prev.srcIn, srcOut: next.srcOut });
   return { ...edit, segments };
 }
 
@@ -290,6 +294,7 @@ export function healSeam(edit: TeEdit, index: number): TeEdit {
  * those words twice.
  */
 export type TeSeamKind = "cut" | "through" | "jump";
+/** `gap` is the source time the seam skips; NaN when the two sides are different sources. */
 export type TeSeam = { index: number; at: number; gap: number; kind: TeSeamKind; removed: TeWord[]; clipped: Set<string> };
 
 /** Every edit point, keyed by the index of the segment that starts there. */
@@ -298,14 +303,81 @@ export function seamList(edit: TeEdit, words: TeWord[]): TeSeam[] {
   const used = new Set(placeWords(words, edit).map((item) => item.word.id));
   return edit.segments.slice(1).map((next, offset) => {
     const prev = edit.segments[offset];
-    const gap = next.srcIn - prev.srcOut;
-    const skipped = gap <= 0 ? [] : words.filter((word) => {
-      const middle = (word.start + word.end) / 2;
-      return middle >= prev.srcOut && middle < next.srcIn;
-    }).sort((a, b) => a.start - b.start);
-    const kind: TeSeamKind = Math.abs(gap) < 1e-6 ? "through" : gap > 0 && !skipped.some((word) => used.has(word.id)) ? "cut" : "jump";
-    const clipped = new Set(words.filter((word) => (word.start < prev.srcOut && word.end > prev.srcOut)
-      || (word.start < next.srcIn && word.end > next.srcIn)).map((word) => word.speaker));
+    const same = prev.source === next.source;
+    const gap = same ? next.srcIn - prev.srcOut : NaN;
+    const skipped = !(gap > 0) ? [] : sourceWords(words, prev.source, prev.srcOut, next.srcIn);
+    const kind: TeSeamKind = same && Math.abs(gap) < 1e-6 ? "through" : gap > 0 && !skipped.some((word) => used.has(word.id)) ? "cut" : "jump";
+    const clipped = new Set(words.filter((word) => (word.source === prev.source && word.start < prev.srcOut && word.end > prev.srcOut)
+      || (word.source === next.source && word.start < next.srcIn && word.end > next.srcIn)).map((word) => word.speaker));
     return { index: offset + 1, at: starts[offset + 1], gap, kind, removed: kind === "cut" ? skipped : [], clipped };
   });
+}
+
+/** One source's words whose midpoints fall in [from, to), in time order. */
+function sourceWords(words: TeWord[], source: string, from: number, to: number) {
+  return words.filter((word) => {
+    const middle = (word.start + word.end) / 2;
+    return word.source === source && middle >= from && middle < to;
+  }).sort((a, b) => a.start - b.start);
+}
+
+/**
+ * A removed line, as the text shows it: struck through, in place, restorable.
+ * `at` is where it would go back (the index of the segment it goes before;
+ * `segments.length` means the end). `from`/`to` is exactly the source it
+ * restores, so restoring one line of a longer cut brings back that line and
+ * nothing either side of it.
+ */
+export type TeGhost = { id: string; at: number; source: string; speaker: string; words: TeWord[]; from: number; to: number };
+
+/**
+ * Every removed line next to the edit: the cuts between segments, plus
+ * anything trimmed off the head or the tail of a source. Split into lines by
+ * speaker and by long pauses, the same way the edit's paragraphs are.
+ */
+export function ghostLines(edit: TeEdit, words: TeWord[], durations: Record<string, number>): TeGhost[] {
+  if (!edit.segments.length) return [];
+  const used = new Set(placeWords(words, edit).map((item) => item.word.id));
+  const first = edit.segments[0], last = edit.segments[edit.segments.length - 1];
+  const gaps: { at: number; source: string; from: number; to: number }[] = [
+    { at: 0, source: first.source, from: 0, to: first.srcIn },
+    ...seamList(edit, words).filter((seam) => seam.kind === "cut").map((seam) =>
+      ({ at: seam.index, source: edit.segments[seam.index].source, from: edit.segments[seam.index - 1].srcOut, to: edit.segments[seam.index].srcIn })),
+    { at: edit.segments.length, source: last.source, from: last.srcOut, to: durations[last.source] ?? last.srcOut },
+  ];
+  const ghosts: TeGhost[] = [];
+  for (const gap of gaps) {
+    const skipped = sourceWords(words, gap.source, gap.from, gap.to);
+    if (!skipped.length || skipped.some((word) => used.has(word.id))) continue;
+    const lines: TeWord[][] = [];
+    for (const word of skipped) {
+      const line = lines[lines.length - 1], previous = line?.[line.length - 1];
+      if (!line || previous.speaker !== word.speaker || word.start - previous.end > PAUSE_BREAK) lines.push([word]);
+      else line.push(word);
+    }
+    lines.forEach((line, index) => {
+      const before = lines[index - 1]?.[lines[index - 1].length - 1], after = lines[index + 1]?.[0];
+      ghosts.push({ id: `g-${line[0].id}`, at: gap.at, source: gap.source, speaker: line[0].speaker, words: line,
+        from: before ? (before.end + line[0].start) / 2 : gap.from, to: after ? (line[line.length - 1].end + after.start) / 2 : gap.to });
+    });
+  }
+  return ghosts;
+}
+
+/**
+ * Put a removed range of source back where it came from. It joins the
+ * segment on either side when they are the same source and meet it, and
+ * otherwise goes in as its own segment, so restoring the middle line of a
+ * three-line cut leaves the other two cut.
+ */
+export function restoreRange(edit: TeEdit, at: number, source: string, from: number, to: number): TeEdit {
+  const segments = [...edit.segments];
+  const prev = segments[at - 1], next = segments[at];
+  const joinsPrev = prev?.source === source && prev.srcOut >= from - 1e-6;
+  const joinsNext = next?.source === source && next.srcIn <= to + 1e-6;
+  if (joinsPrev && joinsNext) segments.splice(at - 1, 2, { id: nextId("seg"), source, srcIn: prev.srcIn, srcOut: next.srcOut });
+  else if (joinsPrev) segments.splice(at - 1, 1, { ...prev, id: nextId("seg"), srcOut: Math.max(prev.srcOut, to) });
+  else if (joinsNext) segments.splice(at, 1, { ...next, id: nextId("seg"), srcIn: Math.min(next.srcIn, from) });
+  else segments.splice(at, 0, { id: nextId("seg"), source, srcIn: from, srcOut: to });
+  return { ...edit, segments };
 }

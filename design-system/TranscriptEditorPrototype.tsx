@@ -1,82 +1,88 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { secondsToTc } from "../src/lib/timecode";
-import { teScene, teSourceDuration, teSpeakers, teTc, teWholeScene, teWords } from "./transcript-editor-fixture";
-import {
-  cutRange, deleteWords, healSeam, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration,
-  programToSource, seamList, segmentStarts, spliceIn, unmuteWords, type TeDeleteResult, type TeEdit,
-} from "./transcript-editor-model";
+import { answer, type TeAgentContext, type TeLine } from "./transcript-editor-agent";
+import { activate, closeTab, columnOf, defaultDock, isClosable, isSourceTab, moveTab, openTab, sourceTab, teColumnNames, teColumns, TE_PINNED, type TeColumn } from "./transcript-editor-dock";
+import { teDurations, teScene, teSources, teSpeakers, teTc, teWholeScene, teWords } from "./transcript-editor-fixture";
 import { clampTimeline, layoutPanes, tePaneLimits, teTimelineLimits, type TePane } from "./transcript-editor-layout";
+import {
+  cutRange, deleteWords, ghostLines, healSeam, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration,
+  programToSource, restoreRange, seamList, segmentStarts, spliceIn, unmuteWords, type TeDeleteResult, type TeEdit, type TeGhost,
+} from "./transcript-editor-model";
+import { TeAsk, type TeAskMessage } from "./TeAsk";
 import { TeDocument, type TeSelection } from "./TeDocument";
-import type { TeSeamInfo } from "./TeParagraph";
 import { TeInspector } from "./TeInspector";
+import type { TeSeamInfo } from "./TeParagraph";
 import { TePrompt } from "./TePrompt";
+import { TeRecord } from "./TeRecord";
 import { TeSidebar, type TeLibraryGroup } from "./TeSidebar";
 import { TeSource } from "./TeSource";
 import { TeSplitter } from "./TeSplitter";
+import { TeTabBar, type TeTab } from "./TeTabBar";
+import type { TeTextStyle } from "./TeTextSettings";
 import { TeTimeline } from "./TeTimeline";
 import { TeToolbar } from "./TeToolbar";
 import { TeTransport } from "./TeTransport";
+import { useTePlayback } from "./use-te-playback";
 
-/** Five well-separated hues from the production SPEAKER_SOLIDS palette
+/** Well-separated hues from the production SPEAKER_SOLIDS palette
  *  (src/components/transcript/helpers.tsx), which the catalog may not import. */
 const colors: Record<string, string> = Object.fromEntries(teSpeakers.map((speaker, index) =>
-  [speaker.id, ["#FD8A8C", "#EB9A04", "#0AF2CD", "#75B0FF", "#E887FE"][index]]));
-const scene = teWholeScene();
-const sourcePlaced = placeWords(teWords, scene);
+  [speaker.id, ["#FD8A8C", "#EB9A04", "#0AF2CD", "#75B0FF", "#E887FE", "#ABF201", "#F886BB"][index]]));
 const fps = teScene.fps;
-const library: TeLibraryGroup[] = [
-  { title: "AAF Audio", items: [
-    { id: "mg3", name: teScene.sequence, detail: "5 mics · 2:02 · transcribed", ready: true },
-    { id: "mg1", name: "EP104 Judges Table · MG 1", detail: "4 mics · 6:40 · transcribed", ready: false },
-    { id: "itm", name: "EP104 ITM Rosa", detail: "1 mic · 11:12 · not transcribed", ready: false },
-  ] },
-  { title: "Library", items: [
-    { id: "lib", name: "EP104 Kitchen walkthrough.mov", detail: "Transcript · 2 speakers · 8:15", ready: false },
-  ] },
-  { title: "Edits", items: [{ id: "edit", name: "Kitchen Challenge, first pass", detail: "From MG 3 · open", ready: true }] },
-];
-
-type Snapshot = { edit: TeEdit; corrections: Record<string, string> };
-type History = { past: { snapshot: Snapshot; label: string }[]; present: Snapshot; future: { snapshot: Snapshot; label: string }[] };
+const sourceOf = (id: string) => teSources.find((source) => source.id === id)!;
+const sourceSpeakers = Object.fromEntries(teSources.map((source) => [source.id, source.speakers]));
+const sourcePlaced = Object.fromEntries(teSources.map((source) => [source.id, placeWords(teWords, teWholeScene(source.id))]));
 const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
 const tc = (seconds: number) => teTc(seconds, fps);
 const nameOf = (id: string) => teSpeakers.find((speaker) => speaker.id === id)?.name ?? id;
 const names = (ids: string[]) => { const list = [...new Set(ids)].map(nameOf); return list.length < 3 ? list.join(" and ") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`; };
+const tabLabel = (tab: string) => isSourceTab(tab) ? sourceOf(tab.slice(7)).short : ({ library: "Library", edit: "Edit", inspector: "Inspector", ask: "Ask" } as Record<string, string>)[tab] ?? tab;
+const pane = (column: TeColumn) => column as TePane;
+
+type Snapshot = { edit: TeEdit; corrections: Record<string, string> };
+type History = { past: { snapshot: Snapshot; label: string }[]; present: Snapshot; future: { snapshot: Snapshot; label: string }[] };
+type Drag = { tab: string; x: number; y: number; target: { column: TeColumn; index: number } | null };
 
 /**
  * Transcript Editor, as a clickable prototype. Nothing here reads a file or
- * plays sound: the scene is generated, and the playhead runs on a clock. What
- * IS real is the edit model, so every deletion, move, splice and undo does to
- * the timeline exactly what it says.
+ * plays sound: the sources are generated, and the playheads run on a clock.
+ * What IS real is the edit model, so every deletion, move, splice, restore and
+ * undo does to the timeline exactly what it says.
  */
 export function TranscriptEditorPrototype() {
   const root = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 1680, height: 1020 });
-  const [history, setHistory] = useState<History>(() => ({ past: [], present: { edit: scene, corrections: {} }, future: [] }));
+  const [history, setHistory] = useState<History>(() => ({ past: [], present: { edit: teWholeScene(), corrections: {} }, future: [] }));
   const { edit, corrections } = history.present;
   const [selection, setSelection] = useState<TeSelection>({ anchor: 0, focus: 0, collapsed: true });
-  const [playhead, setPlayhead] = useState(0);
-  const [play, setPlay] = useState<{ from: number; at: number } | null>(null);
   const [solo, setSolo] = useState<Set<string>>(new Set());
   const [mute, setMute] = useState<Set<string>>(new Set());
-  const [open, setOpen] = useState({ sidebar: true, source: true, inspector: true });
-  const [sizes, setSizes] = useState({ sidebar: 220, source: 320, inspector: 270 });
-  const [priority, setPriority] = useState<TePane[]>(["source", "inspector", "sidebar"]);
+  const [dock, setDock] = useState(defaultDock);
+  const [open, setOpen] = useState<Record<TePane, boolean>>({ left: true, source: true, right: true });
+  const [sizes, setSizes] = useState<Record<TePane, number>>({ left: 220, source: 340, right: 290 });
+  const [priority, setPriority] = useState<TePane[]>(["source", "right", "left"]);
+  const [recordView, setRecordView] = useState<string | null>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
   const [timelineWanted, setTimeline] = useState<number | null>(null);
-  const [view, setView] = useState<"source" | "edit">("edit");
-  const [showRemoved, setShowRemoved] = useState(false);
+  const [showRemoved, setShowRemoved] = useState(true);
   const [seam, setSeam] = useState<number | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
-  const [sourceRange, setSourceRange] = useState<[number, number] | null>(null);
+  const [ranges, setRanges] = useState<Record<string, [number, number] | null>>({});
+  const [focusSource, setFocusSource] = useState("mg3");
   const [match, setMatch] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<{ result: TeDeleteResult; lift: Set<string>; who: string[] } | null>(null);
+  const [text, setText] = useState<Record<"source" | "edit", TeTextStyle>>({ source: { family: "serif", size: 13, leading: "normal" }, edit: { family: "serif", size: 15, leading: "normal" } });
+  const [messages, setMessages] = useState<TeAskMessage[]>([]);
   const [message, setMessage] = useState("");
 
   const placed = useMemo(() => placeWords(teWords, edit), [edit]);
   const paras = useMemo(() => paragraphs(placed), [placed]);
   const seams = useMemo(() => seamList(edit, teWords), [edit]);
+  const ghosts = useMemo(() => ghostLines(edit, teWords, teDurations), [edit]);
   const used = useMemo(() => new Set(placed.map((item) => item.word.id)), [placed]);
   const total = programDuration(edit);
+  const playback = useTePlayback({ record: total, ...teDurations });
+  const playhead = playback.head("record");
   const count = placed.length;
   const starts = segmentStarts(edit);
   const range: [number, number] | null = selection.collapsed || !count ? null
@@ -86,12 +92,15 @@ export function TranscriptEditorPrototype() {
   const keys = new Set(selected.map(placementKey));
   const dryRun = selected.length ? deleteWords(teWords, edit, keys) : null;
   const current = placed.find((item) => item.programStart <= playhead && playhead < item.programEnd) ?? null;
+  const currentKey = current ? placementKey(current) : null;
   const speaking = [...new Set(placed.filter((item) => !item.muted && item.programStart <= playhead && playhead < item.programEnd).map((item) => item.word.speaker))];
-  const layout = layoutPanes(box.width, open, sizes, priority);
+  const has = (column: TeColumn) => dock[column].tabs.length > 0;
+  const layout = layoutPanes(box.width, { left: open.left && has("left"), source: open.source && has("source"), right: open.right && has("right") }, sizes, priority);
   const timelineHeight = clampTimeline(timelineWanted ?? Math.min(teTimelineLimits.ideal, Math.round(box.height * 0.3)), box.height);
-  const seamInfo: Record<number, TeSeamInfo> = Object.fromEntries(seams.map((item) => [item.index, { seconds: item.kind === "jump" ? null : item.gap, removed: item.removed }]));
+  const seamInfo: Record<number, TeSeamInfo> = Object.fromEntries(seams.map((item) => [item.index, { kind: item.kind, seconds: item.kind === "cut" ? item.gap : null }]));
   const talk: Record<string, number> = {};
   for (const item of placed) if (!item.muted) talk[item.word.speaker] = (talk[item.word.speaker] ?? 0) + item.programEnd - item.programStart;
+  const context: TeAgentContext = { words: teWords, placed, speakers: teSpeakers, sources: teSources };
 
   useEffect(() => {
     const element = root.current;
@@ -100,29 +109,13 @@ export function TranscriptEditorPrototype() {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+  const follow = playback.playing === "record" || playback.scrubbing;
   useEffect(() => {
-    if (!play) return;
-    let frame = 0;
-    const tick = (now: number) => {
-      const position = play.from + Math.max(0, now - play.at) / 1000;
-      if (position >= total) { setPlayhead(total); setPlay(null); return; }
-      setPlayhead(position);
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [play, total]);
-  const currentKey = current ? placementKey(current) : null;
-  useEffect(() => {
-    if (play && currentKey) root.current?.querySelector(".cp-te-doc .cp-te-word.is-current")?.scrollIntoView({ block: "nearest" });
-  }, [currentKey, play]);
+    if (follow && currentKey) root.current?.querySelector(".cp-te-doc .cp-te-word.is-current")?.scrollIntoView({ block: "nearest" });
+  }, [currentKey, follow]);
 
   const focusDoc = () => requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".cp-te-doc")?.focus());
-  const seek = (position: number) => {
-    const at = Math.max(0, Math.min(total, position));
-    setPlayhead(at);
-    if (play) setPlay({ from: at, at: performance.now() });
-  };
+  const seek = (position: number) => playback.seek("record", position);
   const commit = (label: string, change: (present: Snapshot) => Partial<Snapshot> | null) => setHistory((h) => {
     const next = change(h.present);
     return next ? { past: [...h.past, { snapshot: h.present, label }].slice(-200), present: { ...h.present, ...next }, future: [] } : h;
@@ -139,10 +132,12 @@ export function TranscriptEditorPrototype() {
   const applyDelete = (result: TeDeleteResult, words: number) => {
     const at = range ? range[0] : caret;
     commit(`Delete ${plural(words, "Word")}`, () => ({ edit: result.edit }));
-    setSelection({ anchor: at, focus: at, collapsed: true });
+    // The caret stays at the end of the line you were on, and so does the
+    // playhead: nothing jumps into the next line until you go there.
+    setSelection({ anchor: at, focus: at, collapsed: true, after: at > 0 });
     setPrompt(null); setSeam(null);
-    seek(placeWords(teWords, result.edit)[at]?.programStart ?? programDuration(result.edit));
-    setMessage(`Deleted ${plural(words, "word")}, ${result.seconds.toFixed(2)} s. Every track closed up.`);
+    seek(at > 0 ? placeWords(teWords, result.edit)[at - 1]?.programEnd ?? 0 : 0);
+    setMessage(`Deleted ${plural(words, "word")}, ${result.seconds.toFixed(2)} s. Every track closed up.${showRemoved ? " The line stays struck through until you restore it." : ""}`);
     focusDoc();
   };
   const lift = (ids: Set<string>, who: string[]) => {
@@ -161,167 +156,291 @@ export function TranscriptEditorPrototype() {
     if (dryRun.crosstalk.length) return setPrompt({ result: dryRun, lift: ids, who });
     applyDelete(dryRun, selected.length);
   };
+  const restore = (ghost: TeGhost) => {
+    commit("Restore Line", (present) => ({ edit: restoreRange(present.edit, ghost.at, ghost.source, ghost.from, ghost.to) }));
+    setMessage(`Restored ${nameOf(ghost.speaker)}'s line. Every track opened up again.`);
+  };
   const insertionPoint = (index: number) => {
     if (index >= count) return total;
     if (index <= 0) return 0;
     const [before, after] = [placed[index - 1], placed[index]];
     return before.segment !== after.segment ? starts[after.segment] : (before.programEnd + after.programStart) / 2;
   };
+  const splice = (lines: { source: string; words: typeof teWords }[], at: number | null, label: string) => {
+    let next = edit, position = at ?? total;
+    for (const line of lines) {
+      const whole = teWholeScene(line.source).segments[0];
+      const [srcIn, srcOut] = cutRange(teWords, line.words, whole);
+      next = spliceIn(next, line.source, srcIn, srcOut, position);
+      position += srcOut - srcIn;
+    }
+    commit(label, () => ({ edit: next }));
+    return next;
+  };
   const insert = (atEnd: boolean) => {
-    if (!sourceRange) return;
-    const chosen = sourcePlaced.slice(sourceRange[0], sourceRange[1] + 1).map((item) => item.word);
-    const [srcIn, srcOut] = cutRange(teWords, chosen, scene.segments[0]);
+    const chosenRange = ranges[focusSource];
+    if (!chosenRange) return;
+    const words = sourcePlaced[focusSource].slice(chosenRange[0], chosenRange[1] + 1).map((item) => item.word);
     const position = atEnd ? total : insertionPoint(range ? range[0] : caret);
-    const next = spliceIn(edit, srcIn, srcOut, position);
-    const fresh = next.segments.findIndex((segment) => !edit.segments.some((old) => old.id === segment.id) && segment.srcIn === srcIn);
-    const indexes = placeWords(teWords, next).flatMap((item, index) => item.segment === fresh ? [index] : []);
-    commit(`Insert ${plural(chosen.length, "Word")}`, () => ({ edit: next }));
+    const next = splice([{ source: focusSource, words }], position, `Insert ${plural(words.length, "Word")}`);
+    const fresh = new Set(next.segments.filter((segment) => !edit.segments.some((old) => old.id === segment.id)).map((segment) => next.segments.indexOf(segment)));
+    const indexes = placeWords(teWords, next).flatMap((item, index) => fresh.has(item.segment) && words.includes(item.word) ? [index] : []);
     if (indexes.length) setSelection({ anchor: indexes[0], focus: indexes[indexes.length - 1], collapsed: false });
-    setMessage(`Inserted ${plural(chosen.length, "word")} at ${tc(position)}. Everything after it moved down on every track.`);
+    setMessage(`Inserted ${plural(words.length, "word")} from ${sourceOf(focusSource).short} at ${tc(position)}. Everything after it moved down on every track.`);
     focusDoc();
+  };
+  const showPanel = (tab: string, fallback: TeColumn) => {
+    const next = openTab(dock, tab, fallback);
+    setDock(next);
+    const column = columnOf(next, tab)!;
+    if (column !== "record") { setOpen((state) => ({ ...state, [column]: true })); setPriority((order) => [pane(column), ...order.filter((item) => item !== column)]); }
+    if (layout.folded.includes(pane(column))) setRecordView(tab);
+  };
+  const showInSource = (source: string, words: typeof teWords) => {
+    const indexes = words.map((word) => sourcePlaced[source].findIndex((item) => item.word.id === word.id)).filter((index) => index >= 0);
+    if (!indexes.length) return;
+    showPanel(sourceTab(source), "source");
+    setFocusSource(source);
+    setRanges((state) => ({ ...state, [source]: [Math.min(...indexes), Math.max(...indexes)] }));
+    setMatch(words[0].id);
+    playback.seek(source, words[0].start);
   };
   const findInSource = () => {
     const targets = selected.length ? selected : placed[caret] ? [placed[caret]] : [];
     if (!targets.length) return;
-    const indexes = targets.map((item) => sourcePlaced.findIndex((other) => other.word.id === item.word.id));
-    setSourceRange([Math.min(...indexes), Math.max(...indexes)]);
-    setMatch(targets[0].word.id);
-    if (layout.folded) setView("source");
-    else if (!layout.shown.source) toggle("source");
-    setMessage(`Found in the source at ${teTc(targets[0].word.start, fps, teScene.startTc)}.`);
+    const source = targets[0].word.source;
+    showInSource(source, targets.filter((item) => item.word.source === source).map((item) => item.word));
+    setMessage(`Found in ${sourceOf(source).short} at ${teTc(targets[0].word.start, fps, sourceOf(source).startTc)}.`);
   };
   const findInEdit = () => {
-    if (!sourceRange) return;
-    const word = sourcePlaced[sourceRange[0]].word;
+    const chosenRange = ranges[focusSource];
+    if (!chosenRange) return;
+    const word = sourcePlaced[focusSource][chosenRange[0]].word;
     const index = placed.findIndex((item) => item.word.id === word.id);
     if (index < 0) return setMessage(`“${word.text}” is not in the edit. Press V to insert it at the caret.`);
     setSelection({ anchor: index, focus: index, collapsed: true });
     seek(placed[index].programStart);
-    if (layout.folded) setView("edit");
     setMessage(`Found in the edit at ${tc(placed[index].programStart)}.`);
     focusDoc();
   };
-  const toggle = (pane: TePane) => {
-    if (layout.shown[pane]) return setOpen((state) => ({ ...state, [pane]: false }));
-    setOpen((state) => ({ ...state, [pane]: true }));
-    setPriority((order) => [pane, ...order.filter((item) => item !== pane)]);
-  };
-  const togglePlay = () => {
-    if (play) return setPlay(null);
-    const from = playhead >= total - 0.01 ? 0 : playhead;
-    setPlayhead(from);
-    setPlay({ from, at: performance.now() });
+  const toggle = (column: TePane) => {
+    if (layout.shown[column]) return setOpen((state) => ({ ...state, [column]: false }));
+    if (!has(column as TeColumn)) return setMessage(`The ${column} panel is empty. Drag a tab there, or use a tab's ⋯ menu.`);
+    setOpen((state) => ({ ...state, [column]: true }));
+    setPriority((order) => [column, ...order.filter((item) => item !== column)]);
   };
   const chooseSeam = (index: number) => {
     setSeam(index);
     seek(starts[index] ?? 0);
     const info = seams.find((item) => item.index === index);
-    if (info && !layout.shown.inspector) setMessage(info.kind === "cut" ? `Cut at ${tc(info.at)}, ${info.gap.toFixed(2)} s removed. Open the inspector to restore it.` : `Edit point at ${tc(info.at)}.`);
+    if (info) setMessage(info.kind === "cut" ? `Cut at ${tc(info.at)}, ${info.gap.toFixed(2)} s removed.` : `Edit point at ${tc(info.at)}.`);
+  };
+  const openAsk = () => {
+    showPanel("ask", "right");
+    requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".cp-te-ask-input")?.focus());
+  };
+  const moveTo = (tab: string, to: TeColumn, index?: number) => {
+    setDock((state) => moveTab(state, tab, to, index));
+    if (to !== "record") { setOpen((state) => ({ ...state, [to]: true })); setPriority((order) => [pane(to), ...order.filter((item) => item !== to)]); }
+    setRecordView(null);
+    setMessage(`Moved ${tabLabel(tab)} to the ${to === "record" ? "edit" : to} panel.`);
+  };
+  const dropTarget = (x: number, y: number, tab: string): Drag["target"] => {
+    const hit = document.elementsFromPoint(x, y).find((element) => (element as HTMLElement).dataset?.dockColumn) as HTMLElement | undefined;
+    if (!hit) return null;
+    const column = hit.dataset.dockColumn as TeColumn;
+    if (tab === TE_PINNED && column !== "record") return null;
+    const own = Array.from(hit.querySelectorAll<HTMLElement>("[data-dock-tab]")).filter((element) => dock[column].tabs.includes(element.dataset.dockTab!));
+    const onStrip = !!(document.elementsFromPoint(x, y).find((element) => (element as HTMLElement).dataset?.dockStrip));
+    const index = onStrip ? own.filter((element) => { const rect = element.getBoundingClientRect(); return rect.left + rect.width / 2 < x; }).length : dock[column].tabs.length;
+    return { column, index };
   };
 
-  const onKeyDown = (event: React.KeyboardEvent) => {
+  const onKeyDown = (event: KeyboardEvent) => {
     const target = event.target as HTMLElement;
-    if (target.closest("input, textarea, select, [role=alertdialog]")) return;
+    if (target !== document.body && !root.current?.contains(target)) return;
+    if (target.closest("input, textarea, select, [role=alertdialog], [role=dialog]")) return;
     const key = event.key.toLowerCase();
-    if (event.key === " " && !target.closest("button, [role=separator]")) { event.preventDefault(); return togglePlay(); }
+    const inSource = target.closest<HTMLElement>("[data-source-id]")?.dataset.sourceId;
+    if (event.key === " " && !target.closest("button, [role=separator], [role=tab]")) { event.preventDefault(); return playback.toggle(inSource ?? "record"); }
     if (event.metaKey && !event.ctrlKey && key === "z") { event.preventDefault(); return step(!event.shiftKey); }
-    if (event.metaKey && event.ctrlKey && (key === "s" || key === "i")) { event.preventDefault(); return toggle(key === "s" ? "sidebar" : "inspector"); }
+    if (event.metaKey && !event.ctrlKey && key === "k") { event.preventDefault(); return openAsk(); }
+    if (event.metaKey && event.ctrlKey && (key === "s" || key === "i")) { event.preventDefault(); return toggle(key === "s" ? "left" : "right"); }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (key === "v") { event.preventDefault(); return insert(false); }
     if (key === "f") { event.preventDefault(); return event.shiftKey ? findInEdit() : findInSource(); }
-    if (event.key === "Home" && !target.closest(".cp-te-doc, [role=separator]")) { event.preventDefault(); seek(0); }
+    if (key === "escape" && drag) { setDrag(null); }
   };
 
-  const source = <TeSource speakers={teSpeakers} colors={colors} fps={fps} sourceBase={teScene.startTc} words={teWords} scene={scene} used={used}
-    corrections={corrections} range={sourceRange} onRange={(next) => { setSourceRange(next); setMatch(null); }} match={match}
-    onInsert={() => insert(false)} onAppend={() => insert(true)} sequence={teScene.sequence} />;
+  // On the window, not the root: after a button that disabled itself (Apply,
+  // say) focus falls to <body>, and ⌘Z still has to reach the edit.
+  const keyHandler = useRef(onKeyDown);
+  useEffect(() => { keyHandler.current = onKeyDown; });
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => keyHandler.current(event);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+
+  const panel = (tab: string) => {
+    if (tab === "library") return <TeSidebar groups={library(dock)} current="edit" onNew={() => { commit("New Edit", () => ({ edit: teWholeScene() })); setSelection({ anchor: 0, focus: 0, collapsed: true }); seek(0); setMessage("Started again from the whole Kitchen scene. Undo brings the last edit back."); }}
+      onOpen={(item) => item.id === "edit" ? setMessage("This edit is open.") : item.ready ? (showPanel(sourceTab(item.id), "source"), setFocusSource(item.id)) : setMessage(`${item.name} is a placeholder in this prototype.`)} />;
+    if (tab === "inspector") return <TeInspector speakers={teSpeakers.filter((speaker) => talk[speaker.id] || placed.some((item) => item.word.speaker === speaker.id))} colors={colors} fps={fps}
+      selected={selected} caretWord={placed[caret] ?? null} crosstalk={dryRun?.crosstalk ?? []} cutSeconds={dryRun?.seconds ?? 0} onDelete={remove} onMatch={findInSource}
+      seam={seam == null ? null : (() => { const info = seams.find((item) => item.index === seam); return info ? { index: info.index, at: info.at, gap: info.gap, kind: info.kind, removed: info.removed.length, clipped: [...info.clipped].map(nameOf) } : null; })()}
+      onRestoreSeam={() => {
+        const info = seams.find((item) => item.index === seam);
+        if (seam == null || !info || info.kind !== "cut") return;
+        commit("Restore Cut", (present) => ({ edit: healSeam(present.edit, seam) }));
+        setSeam(null);
+        setMessage(`Restored ${info.gap.toFixed(2)} s and ${plural(info.removed.length, "word")}. Every track opened up again.`);
+      }}
+      onCloseSeam={() => setSeam(null)}
+      summary={{ running: total, sources: [...new Set(edit.segments.map((segment) => sourceOf(segment.source).short))], removedLines: ghosts.length,
+        clips: edit.segments.length, cuts: seams.length, lifted: placed.filter((item) => item.muted).length, corrections: Object.keys(corrections).length }}
+      talk={talk} />;
+    if (tab === "ask") return <TeAsk context={context} messages={messages} colors={colors} sourceName={(id) => sourceOf(id).short}
+      lineTc={(line) => teTc(line.words[0].start, fps, sourceOf(line.source).startTc)}
+      onSend={(prompt) => {
+        const reply = answer(prompt, context);
+        setMessages((list) => [...list, { id: list.length, role: "you", text: prompt }, { id: list.length + 1, role: "ask", text: reply.text, reply }]);
+      }}
+      onJump={(line: TeLine) => showInSource(line.source, line.words)}
+      onApply={(item) => {
+        const proposal = item.reply?.proposal;
+        if (!proposal) return;
+        if (proposal.kind === "insert") splice(proposal.lines, null, `Ask: ${proposal.label}`);
+        else {
+          const ids = new Set(proposal.ids);
+          const result = deleteWords(teWords, edit, new Set(placed.filter((word) => ids.has(word.word.id)).map(placementKey)));
+          commit(`Ask: ${proposal.label}`, () => ({ edit: result.edit }));
+        }
+        setMessages((list) => list.map((entry) => entry.id === item.id ? { ...entry, applied: true } : entry));
+        requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".cp-te-ask-input")?.focus());
+        setMessage(`${proposal.label}: done. ⌘Z undoes it.`);
+      }} />;
+    if (isSourceTab(tab)) {
+      const source = sourceOf(tab.slice(7));
+      return <div data-source-id={source.id} className="cp-te-source-host" onFocusCapture={() => setFocusSource(source.id)} onPointerDownCapture={() => setFocusSource(source.id)}>
+        <TeSource source={source} speakers={teSpeakers} colors={colors} fps={fps} words={teWords} used={used} corrections={corrections}
+          range={ranges[source.id] ?? null} onRange={(next) => { setRanges((state) => ({ ...state, [source.id]: next })); setMatch(null); }} match={match}
+          playhead={playback.head(source.id)} playing={playback.playing === source.id} onPlay={() => playback.toggle(source.id)}
+          onScrub={(value) => playback.seek(source.id, value)} onScrubStart={playback.scrubStart} onScrubEnd={playback.scrubEnd}
+          text={text.source} onText={(style) => setText((state) => ({ ...state, source: style }))}
+          onInsert={() => insert(false)} onAppend={() => insert(true)} />
+      </div>;
+    }
+    return <TeRecord fps={fps} playhead={playhead} total={total} marks={seams.map((item) => item.at)}
+      note={`${plural(count, "word")} · ${plural(seams.length, "edit point")}`}
+      onScrub={seek} onScrubStart={playback.scrubStart} onScrubEnd={playback.scrubEnd}
+      text={text.edit} onText={(style) => setText((state) => ({ ...state, edit: style }))}>
+      <TeDocument speakers={teSpeakers} colors={colors} fps={fps} paragraphs={paras} placed={placed} selection={selection} current={currentKey}
+        sourceLabel={(id) => sourceOf(id).short} seams={seamInfo} seam={seam} onSeam={chooseSeam}
+        ghosts={showRemoved ? ghosts : null} onRestore={restore} corrections={corrections} editing={editing}
+        onCorrect={(id, value) => {
+          setEditing(null);
+          const original = teWords.find((word) => word.id === id)?.text;
+          commit("Correct Text", (present) => {
+            if ((present.corrections[id] ?? null) === (value === original ? null : value)) return null;
+            const next = { ...present.corrections };
+            if (!value || value === original) delete next[id]; else next[id] = value;
+            return { corrections: next };
+          });
+          focusDoc();
+        }}
+        onSelect={(next, seekTo) => { setSelection(next); if (seekTo) seek(next.anchor < count ? placed[next.anchor].programStart : total); }}
+        onScrub={seek} onDelete={remove} onEdit={setEditing}
+        onMove={(index, direction) => {
+          const paragraph = paras[index];
+          if (!paragraph || !paras[index + direction]) return;
+          const next = moveParagraph(teWords, edit, paragraph, direction < 0 ? paras[index - 1] : paras[index + 2] ?? null);
+          if (next === edit) return;
+          commit("Move Paragraph", () => ({ edit: next }));
+          const first = placeWords(teWords, next).findIndex((item) => item.word.id === paragraph.words[0].word.id);
+          setSelection({ anchor: first, focus: first + paragraph.words.length - 1, collapsed: false });
+          setMessage(`Moved ${nameOf(paragraph.speaker)}'s paragraph ${direction < 0 ? "up" : "down"}. Its clips moved with it on every track.`);
+        }} />
+      {prompt && <TePrompt who={names(prompt.who)} under={names(prompt.result.crosstalk.map((word) => word.speaker))} count={prompt.result.crosstalk.length}
+        onEveryone={() => applyDelete(prompt.result, prompt.lift.size)} onOnly={() => lift(prompt.lift, prompt.who)} onCancel={() => { setPrompt(null); focusDoc(); }} />}
+    </TeRecord>;
+  };
+
+  const tabsOf = (column: TeColumn): TeTab[] => {
+    const own = dock[column].tabs.map((tab) => ({ id: tab, label: tabLabel(tab), closable: isClosable(tab), movable: tab !== TE_PINNED, home: column }));
+    if (column !== "record") return own;
+    return [...own, ...layout.folded.flatMap((folded) => dock[folded as TeColumn].tabs.map((tab) => ({ id: tab, label: tabLabel(tab), closable: isClosable(tab), movable: true, home: folded as TeColumn })))];
+  };
+  const activeIn = (column: TeColumn) => column === "record" && recordView && tabsOf("record").some((tab) => tab.id === recordView) ? recordView : dock[column].active;
+  const columnView = (column: TeColumn) => {
+    const tabs = tabsOf(column), active = activeIn(column);
+    return <div className="cp-te-column" data-dock-column={column} data-drop={drag?.target?.column === column ? "" : undefined}>
+      <TeTabBar column={column} tabs={tabs} active={active} panelId={`cp-te-panel-${column}`} dropIndex={drag?.target?.column === column ? drag.target.index : null}
+        onActivate={(tab) => {
+          const home = columnOf(dock, tab)!;
+          setDock((state) => activate(state, tab));
+          if (column === "record") setRecordView(home === "record" ? null : tab);
+          if (isSourceTab(tab)) setFocusSource(tab.slice(7));
+        }}
+        onClose={(tab) => { setDock((state) => closeTab(state, tab)); setMessage(`Closed ${tabLabel(tab)}. Open it again from the library${tab === "ask" ? " or the Ask button" : ""}.`); }}
+        onMove={moveTo}
+        onDrag={(tab, x, y) => setDrag({ tab, x, y, target: dropTarget(x, y, tab) })}
+        onDrop={(x, y) => { const target = drag ? dropTarget(x, y, drag.tab) : null; if (drag && target) moveTo(drag.tab, target.column, target.index); setDrag(null); }}
+        onCancel={() => setDrag(null)} />
+      <div className="cp-te-column-body" id={`cp-te-panel-${column}`} role="tabpanel" aria-label={active ? tabLabel(active) : teColumnNames[column]}>{active && panel(active)}</div>
+    </div>;
+  };
+
   const sourceIndex = placed.length ? programToSource(edit, playhead) : null;
-  return <div ref={root} className="cp-te" data-testid="transcript-editor" onKeyDown={onKeyDown}>
-    <TeToolbar title="Kitchen Challenge, first pass" subtitle={`From ${teScene.sequence} · ${teScene.aaf}`}
-      sidebar={layout.shown.sidebar} inspector={layout.shown.inspector} source={layout.shown.source} folded={layout.folded} view={view}
-      onSidebar={() => toggle("sidebar")} onInspector={() => toggle("inspector")} onSource={() => toggle("source")} onView={setView}
+  const sourceAtHead = sourceIndex ? edit.segments[sourceIndex.segment].source : null;
+  return <div ref={root} className={`cp-te${drag ? " is-dragging" : ""}`} data-testid="transcript-editor">
+    <TeToolbar title="Kitchen Challenge, first pass" subtitle={`${sourceOf("mg3").name} · ${teScene.aaf}`}
+      left={layout.shown.left} source={layout.shown.source} right={layout.shown.right}
+      onLeft={() => toggle("left")} onSource={() => toggle("source")} onRight={() => toggle("right")} onAsk={openAsk}
       undo={history.past[history.past.length - 1]?.label ?? null} redo={history.future[0]?.label ?? null} onUndo={() => step(true)} onRedo={() => step(false)}
       showRemoved={showRemoved} onShowRemoved={() => setShowRemoved((value) => !value)} />
     <div className="cp-te-panes">
-      {layout.shown.sidebar && <>
-        <div className="cp-te-pane" style={{ width: layout.widths.sidebar }}>
-          <TeSidebar groups={library} current="edit" onNew={() => { commit("New Edit", () => ({ edit: teWholeScene() })); setSelection({ anchor: 0, focus: 0, collapsed: true }); seek(0); setMessage("Started again from the whole scene. Undo brings the last edit back."); }}
-            onOpen={(item) => setMessage(item.id === "edit" ? "This edit is open." : item.ready ? `This edit is cut from ${item.name}. The whole scene is in the Source pane.` : `${item.name} is a placeholder in this prototype.`)} />
-        </div>
-        <TeSplitter between="column" label="Sidebar width" value={layout.widths.sidebar} {...tePaneLimits.sidebar}
-          onChange={(width) => setSizes((state) => ({ ...state, sidebar: width }))} onReset={() => setSizes((state) => ({ ...state, sidebar: tePaneLimits.sidebar.ideal }))} />
-      </>}
-      {layout.shown.source && <>
-        <div className="cp-te-pane" style={{ width: layout.widths.source }}>{source}</div>
-        <TeSplitter between="column" label="Source width" value={layout.widths.source} {...tePaneLimits.source}
-          onChange={(width) => setSizes((state) => ({ ...state, source: width }))} onReset={() => setSizes((state) => ({ ...state, source: tePaneLimits.source.ideal }))} />
-      </>}
-      <div className="cp-te-pane cp-te-pane-record">
-        {layout.folded && view === "source" ? source : <section className="cp-te-record" aria-labelledby="cp-te-record-title">
-          <header className="cp-te-pane-head">
-            <h2 id="cp-te-record-title" className="cp-te-pane-title">Edit</h2>
-            <span className="cp-te-pane-note">{plural(count, "word")} · {secondsToTc(total, fps)} · {plural(seams.length, "edit point")}</span>
-          </header>
-          <TeDocument speakers={teSpeakers} colors={colors} fps={fps} paragraphs={paras} placed={placed} selection={selection} current={currentKey}
-            seams={seamInfo} showRemoved={showRemoved} seam={seam} onSeam={chooseSeam} corrections={corrections} editing={editing}
-            onCorrect={(id, text) => {
-              setEditing(null);
-              const original = teWords.find((word) => word.id === id)?.text;
-              commit("Correct Text", (present) => {
-                const same = (present.corrections[id] ?? null) === (text === original ? null : text);
-                if (same) return null;
-                const next = { ...present.corrections };
-                if (!text || text === original) delete next[id]; else next[id] = text;
-                return { corrections: next };
-              });
-              focusDoc();
-            }}
-            onSelect={(next, seekTo) => { setSelection(next); if (seekTo) seek(next.anchor < count ? placed[next.anchor].programStart : total); }}
-            onDelete={remove} onEdit={setEditing}
-            onMove={(index, direction) => {
-              const paragraph = paras[index];
-              if (!paragraph || !paras[index + direction]) return;
-              const next = moveParagraph(teWords, edit, paragraph, direction < 0 ? paras[index - 1] : paras[index + 2] ?? null);
-              if (next === edit) return;
-              commit("Move Paragraph", () => ({ edit: next }));
-              const first = placeWords(teWords, next).findIndex((item) => item.word.id === paragraph.words[0].word.id);
-              setSelection({ anchor: first, focus: first + paragraph.words.length - 1, collapsed: false });
-              setMessage(`Moved ${nameOf(paragraph.speaker)}'s paragraph ${direction < 0 ? "up" : "down"}. Its clips moved with it on every track.`);
-            }} />
-          {prompt && <TePrompt who={names(prompt.who)} under={names(prompt.result.crosstalk.map((word) => word.speaker))} count={prompt.result.crosstalk.length}
-            onEveryone={() => applyDelete(prompt.result, prompt.lift.size)} onOnly={() => lift(prompt.lift, prompt.who)} onCancel={() => { setPrompt(null); focusDoc(); }} />}
-        </section>}
-      </div>
-      {layout.shown.inspector && <>
-        <TeSplitter between="column" label="Inspector width" value={layout.widths.inspector} invert {...tePaneLimits.inspector}
-          onChange={(width) => setSizes((state) => ({ ...state, inspector: width }))} onReset={() => setSizes((state) => ({ ...state, inspector: tePaneLimits.inspector.ideal }))} />
-        <div className="cp-te-pane" style={{ width: layout.widths.inspector }}>
-          <TeInspector speakers={teSpeakers} colors={colors} fps={fps} selected={selected} caretWord={placed[caret] ?? null}
-            crosstalk={dryRun?.crosstalk ?? []} cutSeconds={dryRun?.seconds ?? 0} onDelete={remove} onMatch={findInSource}
-            seam={seam == null ? null : (() => { const info = seams.find((item) => item.index === seam); return info ? { index: info.index, at: info.at, gap: info.gap, kind: info.kind, removed: info.removed.length, clipped: [...info.clipped].map(nameOf) } : null; })()}
-            onRestoreSeam={() => {
-              const info = seams.find((item) => item.index === seam);
-              if (seam == null || !info || info.kind !== "cut") return;
-              commit("Restore Cut", (present) => ({ edit: healSeam(present.edit, seam) }));
-              setSeam(null);
-              setMessage(`Restored ${info.gap.toFixed(2)} s and ${plural(info.removed.length, "word")}. Every track opened up again.`);
-            }}
-            onCloseSeam={() => setSeam(null)}
-            summary={{ running: total, scene: teSourceDuration, clips: edit.segments.length, cuts: seams.length, lifted: placed.filter((item) => item.muted).length, corrections: Object.keys(corrections).length }}
-            talk={talk} />
-        </div>
-      </>}
+      {(["left", "source"] as const).map((column) => layout.shown[column] && <div key={column} className="cp-te-pane-pair">
+        <div className="cp-te-pane" style={{ width: layout.widths[column] }}>{columnView(column)}</div>
+        <TeSplitter between="column" label={`${teColumnNames[column]} width`} value={layout.widths[column]} {...tePaneLimits[column]}
+          onChange={(width) => setSizes((state) => ({ ...state, [column]: width }))} onReset={() => setSizes((state) => ({ ...state, [column]: tePaneLimits[column].ideal }))} />
+      </div>)}
+      <div className="cp-te-pane cp-te-pane-record">{columnView("record")}</div>
+      {layout.shown.right && <div className="cp-te-pane-pair">
+        <TeSplitter between="column" label="Right panel width" value={layout.widths.right} invert {...tePaneLimits.right}
+          onChange={(width) => setSizes((state) => ({ ...state, right: width }))} onReset={() => setSizes((state) => ({ ...state, right: tePaneLimits.right.ideal }))} />
+        <div className="cp-te-pane" style={{ width: layout.widths.right }}>{columnView("right")}</div>
+      </div>}
     </div>
+    {drag && <>
+      {teColumns.filter((column) => column !== "record" && !layout.shown[pane(column)]).map((column) =>
+        <div key={column} className={`cp-te-dropzone is-${column}`} data-dock-column={column} data-drop={drag.target?.column === column ? "" : undefined}>{teColumnNames[column]}</div>)}
+      <div className="cp-te-drag-ghost" style={{ left: drag.x + 12, top: drag.y + 10 }} aria-hidden="true">{tabLabel(drag.tab)}</div>
+    </>}
     <TeSplitter between="row" label="Timeline height" value={timelineHeight} invert min={teTimelineLimits.min} max={Math.max(teTimelineLimits.min, Math.floor(box.height / 2))}
       onChange={setTimeline} onReset={() => setTimeline(null)} />
     <div className="cp-te-lower" style={{ height: timelineHeight }}>
-      <TeTransport playing={play != null} onToggle={togglePlay} onStart={() => seek(0)} playhead={playhead} total={total} fps={fps}
-        source={sourceIndex ? sourceIndex.source : null} sourceBase={teScene.startTc}
+      <TeTransport playing={playback.playing === "record"} onToggle={() => playback.toggle("record")} onStart={() => seek(0)} playhead={playhead} total={total} fps={fps}
+        source={sourceIndex ? sourceIndex.source : null} sourceBase={sourceAtHead ? sourceOf(sourceAtHead).startTc : "00:00:00:00"}
+        sourceName={sourceAtHead ? sourceOf(sourceAtHead).short : ""}
         speaking={speaking.map((id) => ({ id, name: nameOf(id), color: colors[id] }))} message={message} />
       <TeTimeline speakers={teSpeakers} edit={edit} seams={seams} placed={placed} selection={keys} playhead={playhead} fps={fps} colors={colors}
-        solo={solo} mute={mute} onSeek={seek} seam={seam} onSeam={chooseSeam}
+        solo={solo} mute={mute} onSeek={seek} seam={seam} onSeam={chooseSeam} sourceSpeakers={sourceSpeakers} sourceName={(id) => sourceOf(id).short}
+        onScrubStart={playback.scrubStart} onScrubEnd={playback.scrubEnd}
         onSolo={(id) => setSolo((state) => { const next = new Set(state); if (!next.delete(id)) next.add(id); return next; })}
         onMute={(id) => setMute((state) => { const next = new Set(state); if (!next.delete(id)) next.add(id); return next; })} />
     </div>
   </div>;
+}
+
+function library(dock: ReturnType<typeof defaultDock>): TeLibraryGroup[] {
+  const isOpen = (id: string) => !!columnOf(dock, sourceTab(id));
+  const detail = (id: string) => { const source = sourceOf(id); return `${plural(source.speakers.length, "mic")} · ${secondsToTc(source.duration, fps).slice(3, 8)}${isOpen(id) ? " · open" : ""}`; };
+  return [
+    { title: "AAF Audio", items: ["mg3", "mg1"].map((id) => ({ id, name: sourceOf(id).name, detail: detail(id), ready: true, open: isOpen(id) })) },
+    { title: "Library", items: [
+      { id: "itm", name: sourceOf("itm").name, detail: detail("itm"), ready: true, open: isOpen("itm") },
+      { id: "lib", name: "EP104 Kitchen walkthrough.mov", detail: "Transcript · 2 speakers · 8:15", ready: false },
+    ] },
+    { title: "Edits", items: [{ id: "edit", name: "Kitchen Challenge, first pass", detail: "Open", ready: true }] },
+  ];
 }

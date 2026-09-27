@@ -25,39 +25,62 @@ splice, restore, undo and redo changes the timeline exactly as it would in
 Phase 1, and the text and the tracks are drawn from the same data.
 
 **What is not:**
-- The scene is generated, not recorded: an invented five-person kitchen scene
-  with computed word timings, drawn waveforms and some crosstalk.
-- Play moves the playhead on a clock and makes no sound.
+- The sources are generated, not recorded. There are three: an invented
+  five-person kitchen scene (MG 3), a judges' table (MG 1) and a one-mic
+  interview (ITM Rosa). All have computed word timings, drawn waveforms and
+  some crosstalk.
+- Play moves the playheads on a clock and makes no sound.
+- Ask is scripted: a few intents answered in code, not a model.
 - Nothing is saved, and Export is disabled.
-- The sidebar's other sequences are placeholders.
 
 ### Things to try
 
-1. Click a word, Shift-click another, press **Delete** (⌫). The words go, and
-   every lane gains a clip boundary at the same place. A **¦** mark stays in
-   the text where the cut is.
-2. Turn on **Show removed**. The cut's words come back struck through, in
-   place. Click the **¦** and choose **Restore what was cut**.
-3. Select Wes's "the grill." and press Delete. Tamsin talks over it, so
-   you are asked: cut the time for everyone, or silence only Wes's words.
+1. **Double-click** a word in Dev's first line to select that line, then
+   press **Delete** (⌫).
+   - The time goes from every track and the timeline closes up.
+   - The line stays in the text, struck through, marked **Removed**, with a
+     **Restore** button.
+   - The caret waits at the end of the line above; it does not jump into the
+     next one.
+2. Turn **Removed lines** off in the toolbar and the struck lines collapse to
+   a **¦** mark. Turn it back on to restore any of them.
+3. Select Wes's "the grill." and press Delete. Tamsin talks over it, so you
+   are asked: cut the time for everyone, or silence only Wes's words.
 4. **Shift-Delete** silences words on their speaker's track only. Nothing
    moves; the words dim and their waveform goes quiet.
 5. **Option-↑ / Option-↓** (or the arrows on a paragraph's header) move a
    paragraph. Its clips move with it on every track.
-6. In **Source**, select a line and press **V** to put it in the edit at the
-   caret. **F** finds the edit's selection in the source. **Shift-F** goes the
+6. Open **EP104 Judges Table** from the Library. It opens as a second source
+   tab. Select a line there and press **V** to splice it into the edit at the
+   caret. **F** finds the edit's selection in its source; **Shift-F** goes the
    other way.
-7. Press **Return** on a single selected word to correct its text. The media
-   does not move.
-8. Resize the window down to 1100×700, and use ⌃⌘S and ⌃⌘I.
+7. **Drag a tab** (Ask, Inspector, a source) onto another panel's tabs, or
+   use its **⋯** menu to move it or close it.
+8. **Scrub:**
+   - drag across the timeline ruler or lanes;
+   - drag the rail at the top of the Edit or a Source;
+   - hold **Option** and drag across the words themselves.
+9. Press **Ask** (⌘K) and type `pull every line from @Ro`. Pick **@Rosa**,
+   add `in @ITM`, and send. Six lines come back; **Add 6 Lines to the End**
+   puts them in the edit, and ⌘Z takes them out.
+10. Use the **gear** on the Edit or a Source to change its typeface, size and
+    line spacing.
+11. Resize the window down to 1100×700. The left panel folds into the Edit's
+    tabs rather than vanishing.
 
 ### What to approve
 
-- The layout: sidebar, source, edit, inspector over a full-width timeline.
+- The layout:
+  - four panels of tabs over a full-width timeline;
+  - any tab can be moved except the edit;
+  - several sources can be open at once.
 - Delete means "cut the time on every track"; Shift-Delete means "silence this
   speaker only".
-- Cuts are never invisible: a ¦ in the text, a marker on the ruler, a line
-  through every lane.
+- A deleted line stays visible, struck through, until it is restored or
+  removed lines are hidden. The ruler marks the cut, and a line runs through
+  every lane.
+- Double-click selects a line; the caret stays put after a delete.
+- Ask: @ mentions, cited lines, and changes that wait for Apply.
 - The crosstalk question, and its wording.
 - Source/record: read-only source beside the edit, V to splice, F to match.
 - How the timeline looks: one lane per speaker, in the speaker's colour,
@@ -116,8 +139,11 @@ cut lands on a frame boundary, because Avid cannot represent anything finer
 |---|---|---|
 | Place the caret | Click | The caret goes before the word, and the playhead moves to it |
 | Select words | Drag, Shift-click, Shift-← → | Selection snaps to whole words |
+| Select a line | Double-click | From the last full stop to the next, within the paragraph |
+| Select a paragraph | Triple-click | |
+| Scrub | ⌥-drag across words | The playhead follows the pointer; nothing is selected |
 | Select all | ⌘A | |
-| Delete for everyone | ⌫ or fn⌫ | Cuts the time on every track; the timeline closes up |
+| Delete for everyone | ⌫ or fn⌫ | Cuts the time on every track; the timeline closes up; the line stays struck through with Restore |
 | Delete for one speaker | ⇧⌫ | Silences only those words on their track; nothing moves. Again restores |
 | Correct text | Return, on one word | Edits the words only; the media never moves |
 | Move a paragraph | ⌥↑ ⌥↓, or its header arrows | The paragraph's clips move on every track |
@@ -128,11 +154,21 @@ cut lands on a frame boundary, because Avid cannot represent anything finer
   spans only draw them. Typing cannot change the media by accident, and
   VoiceOver reads a document with speaker headings rather than an editable
   field. An `aria-live` status line reports every edit.
-- **A cut is never invisible.** Descript and Riverside hide deletions by
-  default, and research on both says that is how an editor loses track of
-  what they did. Here a cut leaves a **¦** in the text (it names the seconds
-  removed and opens the cut), a marker on the ruler, and a line through every
-  lane. **Show removed** puts the words back in place, struck through.
+- **A deleted line does not disappear.**
+  - Descript and Riverside hide deletions by default, and research on both
+    says that is how an editor loses track of what they did.
+  - Here a deleted line stays where it was, struck through, labelled
+    **Removed**, with a **Restore** button.
+  - A cut inside a line shows its words inline with a small ↺.
+  - **Restore** brings back exactly that line and nothing either side of it,
+    so restoring one of three deleted lines leaves the other two cut.
+  - Turning **Removed lines** off collapses them to a **¦** mark, which still
+    names the seconds removed. The ruler marks every cut, and a line runs
+    through every lane.
+- **Deleting does not move you.** After a delete the caret sits at the end
+  of the line you were on and the playhead stays at the cut. Nothing scrolls,
+  and the next line is not selected; going there is a click (or a
+  double-click, for the whole line).
 - **Crosstalk asks before it cuts.** When the time you delete also holds
   someone else's words, the editor chooses between cutting the time for
   everyone or silencing only the selected speaker. Return picks the first;
@@ -144,10 +180,17 @@ cut lands on a frame boundary, because Avid cannot represent anything finer
 
 ## Source and record
 
-The source pane is the whole scene, read-only. The edit is the record.
+Each source is a tab: open as many as you need from the Library, and they
+collect side by side in whichever panel holds sources. A source is
+read-only. The edit is the record, and it can draw on several sources at
+once. A paragraph from a different source than the one before it carries a
+small badge naming it.
 
+- **Every source has its own playhead**, with a play button, a scrub rail and
+  its timecode. Clicking a word parks the source there. Space plays the panel
+  that has focus, and only one thing plays at a time.
 - Words already in the edit read at full strength; the rest are dimmed, so
-  what the cut left out is visible at a glance. The pane header counts them.
+  what the cut left out is visible at a glance. The footer counts them.
 - **V** splices the source selection into the edit at the caret. **Add to
   end** appends it. Both are Avid's verbs, on Avid's key.
 - **F** is Match Frame: it finds the edit's selection in the source.
@@ -156,10 +199,44 @@ The source pane is the whole scene, read-only. The edit is the record.
 - Overwrite (B), Lift (Z) and Extract (X) on marked ranges are Phase 1 work,
   not in the prototype.
 
+## Ask
+
+A chat panel for talking to the footage. Its answers cite the lines they
+come from, and anything that would change the edit waits for you to apply
+it.
+
+- **@ mentions choose what it reads.** Type @ for a menu of every source, every
+  person and the edit itself (@Kitchen, @Judges, @ITM, @Rosa, @edit). Arrow
+  keys and Return pick one; in a sent message the mentions show as chips.
+- **Answers cite lines.** Every line in an answer shows its source and
+  timecode. Clicking one opens that source's tab with the line selected.
+- **Changes are proposals.** "Add 6 lines to the end" or "Remove 3 filler
+  words" is a button. Applying it is one undo step, named after the request
+  ("Undo Ask: Add 6 Lines to the End").
+- **In this prototype** it answers four scripted intents: find a phrase, pull
+  every line from a person, remove filler words, and summarize a source.
+- **In the app** it sends the mentioned transcripts to local Qwen by default,
+  or to Claude with the user's own key through the r135 opt-in path. The key
+  stays in the Keychain and the call is made in Rust. Only what is mentioned
+  is sent.
+
+## Text settings
+
+A gear on the Edit and on each Source sets that pane's typeface (serif or
+sans), size (11 to 24 pt) and line spacing (tight, normal or loose). It
+shows a sample line as you change it. The panes are set separately, so the
+source can stay compact while the edit reads large.
+
 ## The timeline
 
 - One lane per speaker, keeping the imported AAF's **track numbers** (A1, A2,
-  …). A lane is a track, not a view: that is what Avid will get back.
+  …). A lane is a track, not a view: that is what Avid will get back. Where a
+  source has no mic for someone, their lane is empty (filler) for that clip.
+- **Scrubbing follows the pointer.** Press anywhere on the ruler or a lane and
+  drag. The playhead, the timecode, the lit word in the text and the "speaking
+  now" names all move on every pointer move, not on release. Playback pauses
+  while you hold and resumes where you let go. The Edit's scrub rail and
+  ⌥-drag in the text do the same.
 - Each clip is a segment. Its waveform is that speaker's mic, in their
   colour; muted ranges draw faint.
 - Every edit point has a marker on the ruler (a button that names it: "Cut at
@@ -191,39 +268,59 @@ The source pane is the whole scene, read-only. The edit is the record.
 
 ## Panels
 
-Four panes over a full-width timeline:
+Four columns of tabs over a full-width timeline:
 
 ```
 ┌ toolbar ────────────────────────────────────────────────────────────┐
-│ sidebar │ source │          edit (record)          │   inspector    │
-│         │        │                                 │                │
-├─────────┴────────┴─────── transport ───────────────┴────────────────┤
-│ timeline: ruler + one lane per speaker                              │
-└─────────────────────────────────────────────────────────────────────┘
+│ Library │ MG 3 · MG 1 │        Edit (record)        │ Inspector · Ask │
+│         │             │                             │                 │
+├─────────┴─────────────┴──── transport ──────────────┴─────────────────┤
+│ timeline: ruler + one lane per speaker                                │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
-| Pane | Min | Ideal | Max | Role |
+| Column | Min | Ideal | Max | Starts with |
 |---|---|---|---|---|
-| Sidebar | 180 | 220 | 320 | Where an edit comes from: AAF Audio sequences, Library transcripts, saved edits |
-| Source | 280 | 320 | 480 | The whole scene, read-only |
-| Edit | 440 | fills | | The document. Never collapses |
-| Inspector | 240 | 270 | 360 | The selection, the edit point, the edit's totals, talk time, export |
+| Left | 180 | 220 | 320 | Library |
+| Source | 280 | 320 | 480 | MG 3 Kitchen (more sources open beside it) |
+| Edit | 440 | fills | | Edit. Never collapses |
+| Right | 240 | 270 | 360 | Inspector, Ask |
 | Timeline | 160 | 264, or 30% of the window | 50% | Transport plus a ruler and one lane per speaker |
 
-- **When space runs out, panes leave; they do not shrink into uselessness.**
-  The sidebar goes first, then the inspector, then the source, which folds into
-  a **Source | Edit** switch in the toolbar. The edit's reading width never
-  drops below about sixty characters.
-- **The pane you opened last wins.** Asking for a pane always shows it, and
-  something else steps aside. The rules are a pure function
-  (`design-system/transcript-editor-layout.ts`) with tests.
+- **Panels are tabs, and tabs move.**
+  - Drag a tab onto another column's tabs, or onto its body, and it moves
+    there. A white bar shows where it will land.
+  - Columns that are hidden show a drop target at the window edge while you
+    drag.
+  - Every tab also has a **⋯** menu: *Move to Left panel / Source panel /
+    Edit panel / Right panel*, and *Close* for sources and Ask. With the
+    keyboard, ⌥⌘← and ⌥⌘→ move the active tab and ⌘W closes it.
+  - The one fixed tab is **Edit**, because its column is the one that fills
+    the window.
+  - The drag is pointer-based on purpose: an HTML5 drag starts a macOS drag
+    session, which the app window would treat as a file being dropped
+    (`native-drag-contract`).
+- **Tab strips never scroll sideways.** What does not fit goes behind "N
+  more". This reuses the production `TabOverflowMenu` and the fitting rule in
+  `lib/tab-overflow`.
+- **When space runs out, columns leave; they do not shrink into
+  uselessness.**
+  - The left column goes first, then the right, then the source.
+  - A column that leaves **folds**: its tabs join the Edit's strip, in italics,
+    so nothing it held becomes unreachable.
+  - The edit's reading width never drops below about sixty characters.
+- **The column you opened last wins.** Asking for one always shows it, and
+  something else steps aside. The rules are pure functions with tests: the
+  layout is `design-system/transcript-editor-layout.ts`, and the tabs are
+  `design-system/transcript-editor-dock.ts`.
 - **Dividers** are 1 px hairlines with a 10 px grab area. Drag them, or focus
   one and use the arrow keys (Shift for bigger steps, Home and End for the
   limits); double-click resets. They say so in their tooltip.
-- **Toolbar:** the sidebar toggle and title lead, the inspector toggle
-  trails, and undo and redo name what they will do. ⌃⌘S toggles the sidebar
-  and ⌃⌘I the inspector, matching SwiftUI's `SidebarCommands` and
-  `InspectorCommands`.
+- **Toolbar:**
+  - The left-panel toggle and the title lead; the right-panel toggle trails.
+  - Undo and redo name what they will do.
+  - ⌃⌘S toggles the left panel and ⌃⌘I the right, matching SwiftUI's
+    `SidebarCommands` and `InspectorCommands`. ⌘K opens Ask.
 - Nothing critical lives only in the timeline or at the bottom of the window,
   because people drag windows past the bottom of the screen. Every timeline
   action also has a key or an inspector button.
@@ -238,6 +335,8 @@ so a native version later is a port, not a redesign.
 |---|---|---|
 | Window | `WindowGroup.defaultSize`, `.windowResizability(.contentMinSize)` | `NSWindow.minSize` |
 | Sidebar | `NavigationSplitView` sidebar with `List(selection:)` | Sidebar split item |
+| A column's tabs | A custom tab strip over the active panel; which panel lives in which column is app state (the dock model ports as is) | A tabless `NSTabView` under a custom strip |
+| Ask | `ScrollView` of messages over a `TextField(axis: .vertical)`, with the @ menu as a popover | `NSTableView` plus an `NSTextView` with completion |
 | Top row over timeline | `VSplitView` | Vertical `NSSplitViewController` |
 | Source and edit | `HSplitView` children, each an `NSTextView` representable | `NSTextView`, the edit one with a delegate that vetoes typing |
 | Inspector | `.inspector` with `inspectorColumnWidth(min:ideal:max:)` | Inspector split item (270) |
@@ -355,8 +454,11 @@ useful on its own.
 
 ## Known gaps in the prototype
 
-- No audio, no waveform from real media, no persistence.
-- The sidebar is navigation-only; other sequences do not open.
+- No audio, no waveform from real media, no persistence (the panel layout
+  resets on reload).
+- Ask is scripted, not a model, and cannot yet revise its own proposal.
+- A tab cannot be dragged out into a floating window, and columns cannot be
+  split top and bottom.
 - Overwrite, Lift and Extract on marked ranges, trims at an edit point
   (ripple, roll, slip), pause tightening, filler words and J/L cuts are not
   drawn yet.

@@ -35,9 +35,12 @@ code. The spec, the research behind it and what to try are in
 - **It holds the catalog's isolation rules.** It uses a generated scene and no
   storage, invoke, audio or network. The timeline's waveforms are drawn from
   word times.
-- **Its edit model is real and tested:** `transcript-editor-model.test.ts` and
-  `transcript-editor-layout.test.ts`, plus three browser checks in
-  `catalog.browser.ts`.
+- **Its models are real and tested:** the edit (`transcript-editor-model`),
+  the pane layout, the tab dock and Ask's scripted agent each have unit tests,
+  and `catalog.browser.ts` has seven browser checks. Every one of those
+  checks was confirmed to fail when the behaviour it covers is broken.
+- **It reuses two production pieces:** `TabOverflowMenu` and
+  `lib/tab-overflow`, on the isolation allowlist, for its "N more" tabs.
 - **It is not a production recipe.** Its classes are `cp-te-*`, in
   `design-system/transcript-editor.css`, and are not imported by the app.
 

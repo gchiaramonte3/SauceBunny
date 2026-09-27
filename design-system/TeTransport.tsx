@@ -6,7 +6,7 @@ type Props = {
   playing: boolean; onToggle: () => void; onStart: () => void;
   playhead: number; total: number; fps: number;
   /** Source time under the playhead, in seconds from the scene's start timecode. */
-  source: number | null; sourceBase: string;
+  source: number | null; sourceBase: string; sourceName: string;
   speaking: { id: string; name: string; color: string }[]; message: string;
 };
 
@@ -28,6 +28,7 @@ export function TeTransport(props: Props) {
     </div>
     <div className="cp-te-readout">
       <span className="cp-te-readout-label">Source</span>
+      {props.sourceName && <span className="cp-te-readout-of">{props.sourceName}</span>}
       <span className="cp-te-readout-tc is-quiet">{props.source == null ? "--:--:--:--" : teTc(props.source, fps, props.sourceBase)}</span>
     </div>
     <div className="cp-te-speaking" aria-label="Speaking now">

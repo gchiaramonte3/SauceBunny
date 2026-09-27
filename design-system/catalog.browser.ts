@@ -860,38 +860,61 @@ test.describe("Transcript Editor prototype", () => {
     await expect(page.getByTestId("transcript-editor")).toBeVisible();
   };
   const word = (page: Page, index: number) => page.locator(`.cp-te-doc [data-index="${index}"]`);
+  const live = (page: Page) => page.locator(".cp-te-doc [data-index]").allTextContents();
   const clipsOnFirstLane = (page: Page) => page.locator(".cp-te-tl-lane").first().locator(".cp-te-tl-clip");
+  const indexOf = (page: Page, words: string[]) => page.locator(".cp-te-doc [data-index]").evaluateAll((spans, wanted) => {
+    const texts = spans.map((span) => span.textContent);
+    return texts.findIndex((_, at) => wanted.every((text, offset) => texts[at + offset] === text));
+  }, words);
 
-  test("deleting words closes every track up, and undo puts them back", async ({ page }) => {
+  test("deleting words closes every track up, keeps them struck through, and undo puts them back", async ({ page }) => {
     await open(page);
-    const doc = page.getByRole("region", { name: "Edit transcript" });
-    await expect(doc).toContainText("a kitchen that looks like a crime scene.");
+    expect((await live(page)).join(" ")).toContain("a kitchen that looks like a crime scene.");
     await expect(clipsOnFirstLane(page)).toHaveCount(1);
-    const running = await page.locator(".cp-te-readout-of").textContent();
+    const running = await page.locator(".cp-te-readout-of").first().textContent();
     await word(page, 9).click();
     await word(page, 16).click({ modifiers: ["Shift"] });
     await page.keyboard.press("Backspace");
-    await expect(doc).not.toContainText("kitchen");
-    await expect(clipsOnFirstLane(page)).toHaveCount(2);
-    for (const lane of await page.locator(".cp-te-tl-lane").all()) await expect(lane.locator(".cp-te-tl-clip")).toHaveCount(2);
-    await expect(page.getByRole("button", { name: /^Cut at 01:00:0/ })).toHaveCount(1);
-    expect(await page.locator(".cp-te-readout-of").textContent()).not.toBe(running);
+    expect((await live(page)).join(" ")).not.toContain("kitchen");
+    const ghost = page.locator(".cp-te-ghost-line, .cp-te-ghost").filter({ hasText: "a kitchen that looks like a crime scene." });
+    await expect(ghost).toHaveCount(1);
+    for (const lane of await page.locator(".cp-te-tl-lane").all()) {
+      if (await lane.locator(".cp-te-tl-clip").count()) await expect(lane.locator(".cp-te-tl-clip")).toHaveCount(2);
+    }
+    expect(await page.locator(".cp-te-readout-of").first().textContent()).not.toBe(running);
     await expect(page.getByRole("button", { name: "Undo Delete 8 Words" })).toBeEnabled();
     await page.keyboard.press("Meta+z");
-    await expect(doc).toContainText("a kitchen that looks like a crime scene.");
+    expect((await live(page)).join(" ")).toContain("a kitchen that looks like a crime scene.");
+    await expect(page.locator(".cp-te-ghost-line, .cp-te-ghost")).toHaveCount(0);
     await expect(clipsOnFirstLane(page)).toHaveCount(1);
-    await expect(page.locator(".cp-te-readout-of")).toHaveText(running!);
+  });
+
+  test("a double-click selects one line, and deleting it leaves the caret on the line above until it is restored", async ({ page }) => {
+    await open(page);
+    const at = await indexOf(page, ["I", "mean,"]);
+    await word(page, at).dblclick();
+    await expect(page.locator(".cp-te-doc .cp-te-word.is-selected")).toHaveText(["Um,", "I", "mean,", "that's", "not", "on", "us."]);
+    const before = (await live(page)).length;
+    await page.keyboard.press("Backspace");
+    const ghost = page.locator(".cp-te-ghost-line");
+    await expect(ghost).toHaveCount(1);
+    await expect(ghost).toContainText("Um, I mean, that's not on us.");
+    await expect(ghost).toContainText("Removed");
+    expect((await live(page)).length).toBe(before - 7);
+    // The caret sits after the last word of the line above, not at the start of the next one.
+    expect(await page.locator(".cp-te-doc .cp-te-caret").evaluate((caret) => caret.previousElementSibling?.textContent)).toBe("scene.");
+    await ghost.getByRole("button", { name: /^Restore Dev's line/ }).click();
+    await expect(ghost).toHaveCount(0);
+    expect((await live(page)).length).toBe(before);
+    await expect(page.getByRole("button", { name: "Undo Restore Line" })).toBeEnabled();
   });
 
   test("a deletion over crosstalk asks first, and a speaker-only removal moves nothing", async ({ page }) => {
     await open(page);
-    const index = await page.locator(".cp-te-doc [data-index]").evaluateAll((spans) => {
-      const texts = spans.map((span) => span.textContent);
-      return texts.findIndex((text, at) => text === "grill." && texts[at - 1] === "the" && texts[at - 2] === "take");
-    });
-    expect(index).toBeGreaterThan(0);
-    await word(page, index - 1).click();
-    await word(page, index).click({ modifiers: ["Shift"] });
+    const at = await indexOf(page, ["take", "the", "grill."]);
+    expect(at).toBeGreaterThan(0);
+    await word(page, at + 1).click();
+    await word(page, at + 2).click({ modifiers: ["Shift"] });
     await page.keyboard.press("Backspace");
     const prompt = page.getByRole("alertdialog", { name: "Tamsin is talking under this." });
     await expect(prompt).toBeVisible();
@@ -903,26 +926,94 @@ test.describe("Transcript Editor prototype", () => {
     await expect(page.getByRole("status")).toContainText("Nothing moved");
   });
 
-  test("fits the app's minimum window without sideways scrolling, and folds the source when space runs out", async ({ page }) => {
+  test("sources open as tabs, and a tab moves to another panel by its menu or by dragging", async ({ page }) => {
+    await open(page);
+    await page.getByRole("navigation", { name: "Library" }).getByRole("button", { name: /Judges Table/ }).click();
+    const sources = page.getByRole("tablist", { name: "Source panel" });
+    await expect(sources.getByRole("tab")).toHaveText(["MG 3 Kitchen", "MG 1 Judges"]);
+    await expect(sources.getByRole("tab", { name: "MG 1 Judges" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("region", { name: "MG 1 Judges transcript, read only" })).toContainText("Blue team. Tell me about this plate.");
+    // By menu: Ask moves from the right panel to the left.
+    await page.getByRole("tablist", { name: "Right panel" }).getByRole("tab", { name: "Ask" }).click();
+    await page.getByRole("button", { name: "Ask panel options" }).click();
+    await page.getByRole("menuitem", { name: "Move to Left panel" }).click();
+    await expect(page.getByRole("tablist", { name: "Left panel" }).getByRole("tab")).toHaveText(["Library", "Ask"]);
+    await expect(page.getByRole("tablist", { name: "Right panel" }).getByRole("tab")).toHaveText(["Inspector"]);
+    // By dragging: MG 1 onto the right panel's tabs.
+    const tab = await sources.getByRole("tab", { name: "MG 1 Judges" }).boundingBox();
+    const strip = await page.locator('[data-dock-strip="right"]').boundingBox();
+    await page.mouse.move(tab!.x + tab!.width / 2, tab!.y + tab!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(tab!.x + 40, tab!.y + 30, { steps: 4 });
+    await page.mouse.move(strip!.x + strip!.width - 50, strip!.y + strip!.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.getByRole("tablist", { name: "Right panel" }).getByRole("tab")).toHaveText(["Inspector", "MG 1 Judges"]);
+    await expect(sources.getByRole("tab")).toHaveText(["MG 3 Kitchen"]);
+  });
+
+  test("Ask reads what you @mention and hands back a change to apply, which undo takes away", async ({ page }) => {
+    await open(page);
+    await page.getByRole("button", { name: "Ask", exact: true }).first().click();
+    const input = page.getByRole("combobox", { name: /Ask about the transcripts/ });
+    await expect(input).toBeFocused();
+    await input.pressSequentially("pull every line from @Ro");
+    await expect(page.getByRole("listbox", { name: "Mention" }).getByRole("option")).toHaveCount(1);
+    await page.keyboard.press("Enter");
+    await input.pressSequentially("in @IT");
+    await page.keyboard.press("Enter");
+    await expect(input).toHaveValue("pull every line from @Rosa in @ITM ");
+    await page.keyboard.press("Enter");
+    const reply = page.locator(".cp-te-msg.is-ask").last();
+    await expect(reply).toContainText("6 lines from Rosa in ITM Rosa");
+    await reply.getByRole("button", { name: "Add 6 Lines to the End" }).click();
+    await expect(page.locator(".cp-te-tl-clip[title*='ITM Rosa']").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Undo Ask: Add 6 Lines to the End" })).toBeEnabled();
+    await expect(input).toBeFocused();
+    await page.locator(".cp-te-doc").focus();
+    await page.keyboard.press("Meta+z");
+    await expect(page.locator(".cp-te-tl-clip[title*='ITM Rosa']")).toHaveCount(0);
+  });
+
+  test("the timeline scrubs as you drag, and the text settings resize the edit", async ({ page }) => {
+    await open(page);
+    const ruler = (await page.locator(".cp-te-tl-ruler").boundingBox())!;
+    const tc = page.locator(".cp-te-readout-tc").first();
+    await page.mouse.move(ruler.x + 10, ruler.y + ruler.height / 2);
+    await page.mouse.down();
+    const seen = new Set<string>();
+    for (let step = 1; step <= 4; step++) {
+      await page.mouse.move(ruler.x + 10 + step * 120, ruler.y + ruler.height / 2 + 40, { steps: 2 });
+      seen.add((await tc.textContent())!);
+    }
+    await page.mouse.up();
+    expect(seen.size).toBe(4);
+    const text = page.locator(".cp-te-doc .cp-te-para-text").first();
+    const size = await text.evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+    await page.getByRole("button", { name: "Edit text settings" }).click();
+    await page.getByRole("button", { name: "Larger text" }).click();
+    await page.getByRole("dialog", { name: "Edit text settings" }).getByRole("radio", { name: "Sans" }).click();
+    expect(await text.evaluate((element) => parseFloat(getComputedStyle(element).fontSize))).toBe(size + 1);
+    expect(await text.evaluate((element) => getComputedStyle(element).fontFamily)).toContain("Nunito Sans");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Edit text settings" })).toBeHidden();
+  });
+
+  test("fits the app's minimum window without sideways scrolling, and a column with no room folds into the edit's tabs", async ({ page }) => {
     await open(page, 1100, 700);
-    await expect(page.getByRole("navigation", { name: "Sequences and edits" })).toBeHidden();
+    await expect(page.getByRole("navigation", { name: "Library" })).toBeHidden();
+    const edit = page.getByRole("tablist", { name: "Edit panel" });
+    await expect(edit.getByRole("tab")).toHaveText(["Edit", "Library"]);
     const overflow = () => page.evaluate(() => [...document.querySelectorAll(".cp-te, .cp-te *")]
       .filter((el) => el.scrollWidth > el.clientWidth + 1 && !["hidden", "visible", "clip"].includes(getComputedStyle(el).overflowX))
       .map((el) => el.className));
     expect(await page.locator(".cp-te *").count()).toBeGreaterThan(200);
     expect(await overflow()).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1100);
-    const record = await page.locator(".cp-te-pane-record").boundingBox();
-    expect(record!.width).toBeGreaterThanOrEqual(440);
-    await page.locator(".cp-te-doc").focus();
-    await page.keyboard.press("Control+Meta+s");
-    await expect(page.getByRole("navigation", { name: "Sequences and edits" })).toBeVisible();
-    await page.keyboard.press("Control+Meta+i");
-    await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();
-    const fold = page.getByRole("radiogroup", { name: "Pane" });
-    await expect(fold).toBeVisible();
-    await fold.getByRole("radio", { name: "Source" }).click();
-    await expect(page.getByRole("region", { name: "Source transcript, read only" })).toBeVisible();
+    expect((await page.locator(".cp-te-pane-record").boundingBox())!.width).toBeGreaterThanOrEqual(440);
+    await edit.getByRole("tab", { name: "Library" }).click();
+    await expect(page.getByRole("navigation", { name: "Library" })).toBeVisible();
+    await page.locator(".cp-te-toolbar").getByRole("button", { name: "Left panel" }).click();
+    await expect(page.getByRole("tablist", { name: "Left panel" })).toBeVisible();
     expect(await overflow()).toEqual([]);
     const divider = page.getByRole("separator", { name: "Timeline height" });
     const before = Number(await divider.getAttribute("aria-valuenow"));

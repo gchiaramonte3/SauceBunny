@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { teTc } from "./transcript-editor-fixture";
 import type { TeEdit, TePlacedWord, TeSeam, TeSpeaker } from "./transcript-editor-model";
 import { placementKey, programDuration, segmentLength, segmentStarts } from "./transcript-editor-model";
@@ -9,10 +9,13 @@ type Props = {
   playhead: number; fps: number; colors: Record<string, string>; solo: Set<string>; mute: Set<string>;
   onSeek: (program: number) => void; onSolo: (speaker: string) => void; onMute: (speaker: string) => void;
   seam: number | null; onSeam: (segment: number) => void;
+  /** Which speakers each source has a mic for: a lane with no mic in a source shows filler there. */
+  sourceSpeakers: Record<string, string[]>; sourceName: (id: string) => string;
+  onScrubStart: () => void; onScrubEnd: () => void;
 };
 
 const describe = (seam: TeSeam, fps: number) => `${seam.kind === "cut" ? "Cut" : seam.kind === "through" ? "Through edit" : "Jump"} at ${teTc(seam.at, fps)}`
-  + (seam.kind === "cut" ? `, ${seam.gap.toFixed(2)} s removed` : seam.kind === "jump" ? `, ${seam.gap < 0 ? "back" : "ahead"} ${Math.abs(seam.gap).toFixed(1)} s in the scene` : "")
+  + (seam.kind === "cut" ? `, ${seam.gap.toFixed(2)} s removed` : seam.kind === "jump" ? (Number.isNaN(seam.gap) ? ", to another source" : `, ${seam.gap < 0 ? "back" : "ahead"} ${Math.abs(seam.gap).toFixed(1)} s in the scene`) : "")
   + (seam.clipped.size ? ", cuts into a word" : "");
 
 /**
@@ -32,8 +35,9 @@ export function TeTimeline(props: Props) {
   const x = (t: number) => `${((t - start) / span) * 100}%`;
   const w = (d: number) => `${(d / span) * 100}%`;
   const starts = segmentStarts(edit);
-  const mutes = useMemo(() => Object.fromEntries(speakers.map((s) => [s.id,
-    edit.mutes.filter((m) => m.speaker === s.id).map((m): [number, number] => [m.srcIn, m.srcOut])])), [edit.mutes, speakers]);
+  const mutes = useMemo(() => Object.fromEntries(speakers.flatMap((s) => Object.keys(props.sourceSpeakers).map((source) => [`${source}:${s.id}`,
+    edit.mutes.filter((m) => m.speaker === s.id && m.source === source).map((m): [number, number] => [m.srcIn, m.srcOut])]))), [edit.mutes, speakers, props.sourceSpeakers]);
+  const held = useRef(false);
   const chosen = placed.filter((item) => selection.has(placementKey(item)));
   const band = chosen.length ? [Math.min(...chosen.map((i) => i.programStart)), Math.max(...chosen.map((i) => i.programEnd))] : null;
   // Ticks on whole timecode seconds, which at 23.976 are not whole seconds of media.
@@ -41,10 +45,23 @@ export function TeTimeline(props: Props) {
   const step = ([1, 2, 5, 10, 15, 30, 60].find((s) => span / (s * second) <= 8) ?? 120) * second;
   const ticks = Array.from({ length: Math.floor(span / step) + 2 }, (_, i) => (Math.floor(start / step) + i) * step)
     .filter((t) => t >= start && t <= start + span * 0.94);
-  const seek = (event: React.PointerEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest("button")) return;
-    const box = event.currentTarget.getBoundingClientRect();
-    props.onSeek(Math.max(0, Math.min(total, start + ((event.clientX - box.left) / box.width) * span)));
+  // Scrub: press anywhere on the ruler or a lane and drag. The playhead
+  // follows every pointer move, and playback waits until you let go.
+  const position = (event: React.PointerEvent<HTMLElement>) => {
+    const box = (event.currentTarget.closest(".cp-te-tl-grid") as HTMLElement).querySelector(".cp-te-tl-ruler")!.getBoundingClientRect();
+    return Math.max(0, Math.min(total, start + ((event.clientX - box.left) / box.width) * span));
+  };
+  const scrub = {
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+      if (event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      held.current = true;
+      props.onScrubStart();
+      props.onSeek(position(event));
+    },
+    onPointerMove: (event: React.PointerEvent<HTMLElement>) => { if (held.current) props.onSeek(position(event)); },
+    onPointerUp: () => { if (held.current) { held.current = false; props.onScrubEnd(); } },
+    onPointerCancel: () => { if (held.current) { held.current = false; props.onScrubEnd(); } },
   };
   return <section className="cp-te-timeline" aria-label="Edit timeline">
     <div className="cp-te-tl-bar">
@@ -59,7 +76,7 @@ export function TeTimeline(props: Props) {
     </div>
     <div className="cp-te-tl-grid" style={{ "--te-lanes": speakers.length } as React.CSSProperties}>
       <div className="cp-te-tl-corner" aria-hidden="true" />
-      <div className="cp-te-tl-ruler" onPointerDown={seek}>
+      <div className="cp-te-tl-ruler" {...scrub}>
         {ticks.map((t) => <span key={t} className="cp-te-tl-tick" style={{ left: x(t) }}>{teTc(t, fps)}</span>)}
         {seams.filter((cut) => cut.at >= start && cut.at <= start + span).map((cut) => <button key={cut.index} type="button"
           className={`cp-te-tl-seam-mark${props.seam === cut.index ? " is-selected" : ""}${cut.clipped.size ? " is-clipped" : ""}`} style={{ left: x(cut.at) }}
@@ -72,10 +89,12 @@ export function TeTimeline(props: Props) {
           <button type="button" className={`cp-te-tl-toggle${solo.has(speaker.id) ? " on" : ""}`} aria-pressed={solo.has(speaker.id)} aria-label={`Solo ${speaker.name}`} title={`Solo ${speaker.name}`} onClick={() => props.onSolo(speaker.id)}>S</button>
           <button type="button" className={`cp-te-tl-toggle${mute.has(speaker.id) ? " on" : ""}`} aria-pressed={mute.has(speaker.id)} aria-label={`Mute ${speaker.name}`} title={`Mute ${speaker.name}`} onClick={() => props.onMute(speaker.id)}>M</button>
         </div>
-        <div className={`cp-te-tl-lane${mute.has(speaker.id) || (solo.size > 0 && !solo.has(speaker.id)) ? " is-quiet" : ""}`} onPointerDown={seek}>
-          {edit.segments.map((segment, index) => starts[index] + segmentLength(segment) < start || starts[index] > start + span ? null
-            : <div key={segment.id} className="cp-te-tl-clip" style={{ left: x(starts[index]), width: w(segmentLength(segment)) }}>
-              <TeWave speaker={speaker.id} srcIn={segment.srcIn} srcOut={segment.srcOut} muted={mutes[speaker.id]} />
+        <div className={`cp-te-tl-lane${mute.has(speaker.id) || (solo.size > 0 && !solo.has(speaker.id)) ? " is-quiet" : ""}`} {...scrub}>
+          {edit.segments.map((segment, index) => starts[index] + segmentLength(segment) < start || starts[index] > start + span
+            || !props.sourceSpeakers[segment.source]?.includes(speaker.id) ? null
+            : <div key={segment.id} className="cp-te-tl-clip" style={{ left: x(starts[index]), width: w(segmentLength(segment)) }}
+              title={`${speaker.name} · ${props.sourceName(segment.source)}`}>
+              <TeWave source={segment.source} speaker={speaker.id} srcIn={segment.srcIn} srcOut={segment.srcOut} muted={mutes[`${segment.source}:${speaker.id}`]} />
             </div>)}
           {seams.filter((cut) => cut.clipped.has(speaker.id)).map((cut) => <span key={cut.index} className="cp-te-tl-clipped" style={{ left: x(cut.at) }} title={`A word of ${speaker.name}'s is cut at this edit`} />)}
         </div>

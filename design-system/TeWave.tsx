@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { tePeaks } from "./transcript-editor-fixture";
 
 /** One clip's generated waveform, drawn in the lane's speaker colour. */
-export function TeWave({ speaker, srcIn, srcOut, muted }: { speaker: string; srcIn: number; srcOut: number; muted: [number, number][] }) {
+export function TeWave({ source, speaker, srcIn, srcOut, muted }: { source: string; speaker: string; srcIn: number; srcOut: number; muted: [number, number][] }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -14,7 +14,7 @@ export function TeWave({ speaker, srcIn, srcOut, muted }: { speaker: string; src
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      const peaks = tePeaks(speaker, srcIn, srcOut, Math.min(w, 1200));
+      const peaks = tePeaks(source, speaker, srcIn, srcOut, Math.min(w, 1200));
       const ink = getComputedStyle(canvas).color;
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = ink;
@@ -32,6 +32,6 @@ export function TeWave({ speaker, srcIn, srcOut, muted }: { speaker: string; src
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [speaker, srcIn, srcOut, muted]);
+  }, [source, speaker, srcIn, srcOut, muted]);
   return <canvas ref={ref} className="cp-te-wave" aria-hidden="true" />;
 }

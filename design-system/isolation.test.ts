@@ -73,6 +73,9 @@ const allowedProduction = new Set([
   "src/lib/multitrack-gain",
   // Pure min/max canvas renderers; waveform acquisition stays in the workspace hook.
   "src/components/MultitrackWaveform", "src/components/TimelineWaveform",
+  // The "N more" menu and its pure fitting rule, reused by the Transcript
+  // Editor prototype's tab strips; dismiss/menu-key hooks are already allowed.
+  "src/components/TabOverflowMenu", "src/lib/tab-overflow",
 ]);
 const pureHelpers = [...allowedProduction].flatMap(path => [".tsx", ".ts"].map(extension => resolve(root, path + extension)).filter(existsSync));
 

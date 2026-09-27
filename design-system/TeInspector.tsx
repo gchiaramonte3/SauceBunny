@@ -2,7 +2,7 @@ import { teTc } from "./transcript-editor-fixture";
 import type { TePlacedWord, TeSpeaker, TeWord } from "./transcript-editor-model";
 
 export type TeSeamDetail = { index: number; at: number; gap: number; kind: "cut" | "through" | "jump"; removed: number; clipped: string[] };
-export type TeSummary = { running: number; scene: number; clips: number; cuts: number; lifted: number; corrections: number };
+export type TeSummary = { running: number; sources: string[]; removedLines: number; clips: number; cuts: number; lifted: number; corrections: number };
 
 type Props = {
   speakers: TeSpeaker[]; colors: Record<string, string>; fps: number;
@@ -57,6 +57,7 @@ export function TeInspector(props: Props) {
       <p className="cp-te-insp-lead">{props.seam.kind === "cut" ? "Cut" : props.seam.kind === "through" ? "Through edit" : "Jump"} at {tc(props.seam.at, fps)}</p>
       <p className="cp-te-insp-meta">{props.seam.kind === "cut" ? `${props.seam.gap.toFixed(2)} s removed · ${plural(props.seam.removed, "word")}`
         : props.seam.kind === "through" ? "Nothing removed. The two clips play straight through."
+        : Number.isNaN(props.seam.gap) ? "Joins two different sources. There is nothing between them to restore."
         : `Goes ${props.seam.gap < 0 ? "back" : "ahead"} ${Math.abs(props.seam.gap).toFixed(1)} s in the scene. What it skips still plays elsewhere in the edit, so there is nothing to restore.`}</p>
       {props.seam.clipped.length > 0 && <p className="cp-te-insp-warn" role="note">This edit cuts into a word on {names(props.seam.clipped)}'s track.</p>}
       <div className="cp-te-insp-actions">
@@ -67,8 +68,9 @@ export function TeInspector(props: Props) {
     <section className="cp-te-insp-section" aria-labelledby="cp-te-insp-edit">
       <h3 id="cp-te-insp-edit" className="cp-te-insp-title">This edit</h3>
       <dl className="cp-te-insp-facts">
-        <div><dt>Running time</dt><dd>{clock(summary.running)} of {clock(summary.scene)}</dd></div>
-        <div><dt>Removed</dt><dd>{(summary.scene - summary.running).toFixed(1)} s</dd></div>
+        <div><dt>Running time</dt><dd>{clock(summary.running)}</dd></div>
+        <div><dt>Sources</dt><dd>{summary.sources.join(", ")}</dd></div>
+        <div><dt>Removed lines</dt><dd>{summary.removedLines}</dd></div>
         <div><dt>Clips per track</dt><dd>{summary.clips}</dd></div>
         <div><dt>Edit points</dt><dd>{summary.cuts}</dd></div>
         <div><dt>Silenced on one track</dt><dd>{plural(summary.lifted, "word")}</dd></div>
