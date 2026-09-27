@@ -171,6 +171,25 @@ def pcm_layout(essence, descriptor=None):
     return PCM(str(essence.mob_id), data[0], data[1]//align, hz, bits//8, time_reference, recording_date, channels=channels)
 
 
+def media_kind(component):
+    """The kind of a component's data definition, spelled one way.
+
+    pyaaf2 reports the definition's short name, so a slot reads 'Sound' or
+    'Picture'; but Media Composer also writes the OMF-era definitions, which
+    read 'LegacySound', 'LegacyPicture' and 'LegacyTimecode'. Compare kinds
+    only through this: a bare `.lower() == 'sound'` drops every Legacy slot
+    without a word, which is the bug that hid OP-Atom LegacySound media from
+    relink. Spaces are dropped too, because a dictionary may name
+    DescriptiveMetadata 'Descriptive Metadata'.
+    """
+    kind = ''.join(str(getattr(component, 'media_kind', None) or '').lower().split())
+    if kind.startswith('datadef_'):
+        kind = kind[len('datadef_'):]
+    if kind.startswith('legacy'):
+        kind = kind[len('legacy'):]
+    return 'picture' if kind == 'picturewithmatte' else kind
+
+
 def timecode_segment(segment):
     if isinstance(segment, aaf2.components.Timecode):
         return segment
@@ -205,7 +224,7 @@ class Timeline:
             if index >= MAX_TRACKS*4:
                 fail('The AAF contains too many timeline slots.', 'limit_exceeded')
             slots.append(slot)
-        audio = [s for s in slots if s.segment.media_kind.lower() == 'sound']
+        audio = [s for s in slots if media_kind(s.segment) == 'sound']
         if not 0 < len(audio) <= MAX_TRACKS:
             fail('Choose an AAF with between 1 and 64 audio tracks.', 'limit_exceeded')
         self.rate = rate_of(audio[0])

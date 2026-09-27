@@ -108,6 +108,29 @@ class ReaderTests(unittest.TestCase):
     def command(self, *args):
         return subprocess.run([sys.executable,str(Path(reader.__file__)),'--version'] if not args else [sys.executable,str(Path(reader.__file__)),*args],capture_output=True,text=True,timeout=15)
 
+    def test_legacy_sound_slot_is_an_audio_track(self):
+        # Media Composer writes OMF-era data definitions; pyaaf2 reports them
+        # as 'LegacySound', which a bare `.lower() == 'sound'` dropped.
+        with aaf2.open(str(self.aaf), 'rw') as file:
+            comp = next(file.content.toplevel())
+            track = next(s for s in comp.slots if s.segment.media_kind == 'Sound')
+            for component in [track.segment, *track.segment.components]:
+                component.media_kind = 'LegacySound'
+        with aaf2.open(str(self.aaf), 'r') as file:
+            self.assertEqual(next(file.content.toplevel()).slots[1].segment.media_kind, 'LegacySound')
+            timeline = reader.Timeline(file)
+        self.assertEqual([t['name'] for t in timeline.tracks], ['ALPHA'])
+        self.assertEqual([c['kind'] for c in timeline.tracks[0]['clips']], ['audio', 'gap', 'audio'])
+
+    def test_media_kind_folds_legacy_and_spelling(self):
+        class Kind:
+            def __init__(self, kind): self.media_kind = kind
+        for raw, expected in [('Sound', 'sound'), ('LegacySound', 'sound'), ('LegacyPicture', 'picture'),
+                              ('LegacyTimecode', 'timecode'), ('Picture', 'picture'), ('PictureWithMatte', 'picture'),
+                              ('DataDef_LegacySound', 'sound'), ('Descriptive Metadata', 'descriptivemetadata'),
+                              ('DescriptiveMetadata', 'descriptivemetadata'), (None, '')]:
+            self.assertEqual(reader.media_kind(Kind(raw)), expected, raw)
+
     def test_inspect_names_rational_timing_and_gaps(self):
         result = self.command('inspect','--input',str(self.aaf))
         self.assertEqual(result.returncode,0,result.stderr)
