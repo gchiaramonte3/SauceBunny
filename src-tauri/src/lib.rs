@@ -14,6 +14,8 @@ mod premiere_bridge;
 // Transcript Editor: the edit document and its on-disk undo log.
 mod edit_doc;
 mod edit_log;
+// Per-mic speech analysis from the waveform overview (Transcript Editor).
+mod speech;
 pub use error::AppError;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -281,6 +283,7 @@ pub fn run() {
             commands::take_pending_review_link,
             commands::review_code,
             commands::session_kick,
+            commands::aaf_speech,
             commands::edit_list,
             commands::edit_create,
             commands::edit_head,

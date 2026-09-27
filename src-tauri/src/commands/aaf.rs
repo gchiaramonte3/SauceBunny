@@ -193,6 +193,26 @@ pub async fn aaf_transcribe_track(app: AppHandle, document_id: String, track_id:
     }).await
 }
 
+/// Speech analysis for one track: where its mic is open, loud moments no word
+/// covers, and word boundaries inside its saved transcript's cues. Reads the
+/// waveform overview (building it first if needed); never decodes again.
+#[tauri::command]
+pub async fn aaf_speech(app: AppHandle, document_id: String, track_id: String, job_id: String) -> Result<crate::speech::AafSpeech, AppError> {
+    diagnostics::operation(&app, &job_id, "speech", &format!("Speech analysis · document {document_id} · track {track_id}"), async {
+    let _job = process::JobGuard::begin(&app, &job_id)?;
+    let document = store::load(&store::root(&app)?, &document_id)?;
+    peaks::waveform(&app, &document, &track_id, 0, document.manifest.duration_frames, true, &job_id).await?;
+    let path = peaks::overview_path(&app, &document, &track_id)?;
+    let (pairs, hz, bucket) = tauri::async_runtime::spawn_blocking(move || peaks::read_base(&path)).await
+        .map_err(|e| AppError::internal(e.to_string()))??;
+    let cues: Vec<crate::speech::CueInput> = document.transcripts.iter().filter(|transcript| transcript.track_id == track_id)
+        .flat_map(|transcript| transcript.cues.iter())
+        .map(|cue| crate::speech::CueInput { id: &cue.id, start_sample: cue.start_sample, end_sample: cue.end_sample, text: &cue.text })
+        .collect();
+    Ok(crate::speech::analyse(&track_id, &pairs, hz, bucket, &cues))
+    }).await
+}
+
 #[cfg(test)]
 mod native_reader_tests {
     use super::*;

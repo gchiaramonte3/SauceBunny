@@ -79,6 +79,33 @@ pub fn query(path: &Path, first: u64, end: u64, expected_samples: u64, hz: u32) 
     }).collect())
 }
 
+/// Where a track's overview pyramid lives: the native reader's, or the one
+/// built from linked (NEXIS) media, whichever this document uses.
+pub fn overview_path(app: &AppHandle, document: &AafDocument, track: &str) -> Result<std::path::PathBuf, AppError> {
+    let cache = store::cache(app)?;
+    Ok(if super::linked_audio::needed(document) {
+        cache.join(format!("{}.peaks-v2.bin", store::cache_key(document, track, "linked-pyramid")))
+    } else {
+        cache.join(format!("{}.peaks-v1.bin", store::cache_key(document, track, "pyramid")))
+    })
+}
+
+/// The pyramid's finest level whole, for speech analysis: (pairs, hz, bucket).
+/// Validated like `query`; a damaged cache is an error, never a guess.
+pub fn read_base(path: &Path) -> Result<(Vec<[i16; 2]>, u32, u64), AppError> {
+    let bad = || AppError::invalid("Invalid cached waveform; re-open the AAF to rebuild it");
+    let mut file = File::open(path)?; let mut header = [0_u8; HEADER as usize]; file.read_exact(&mut header)?;
+    let number = |at| { let mut value = [0_u8; 8]; value.copy_from_slice(&header[at..at+8]); u64::from_le_bytes(value) };
+    let (samples, hz, bucket) = (number(8), number(16), number(24));
+    if &header[..4] != b"SBPE" || hz == 0 || hz > 384_000 || bucket == 0 { return Err(bad()); }
+    let count = samples.div_ceil(bucket);
+    if HEADER + count * 4 > file.metadata()?.len() || count > 1 << 28 { return Err(bad()); }
+    let mut bytes = vec![0; (count * 4) as usize]; file.read_exact(&mut bytes)?;
+    let pairs: Vec<[i16;2]> = bytes.as_chunks::<4>().0.iter().map(|p| [i16::from_le_bytes([p[0],p[1]]),i16::from_le_bytes([p[2],p[3]])]).collect();
+    if pairs.iter().any(|p| p[0] > p[1]) { return Err(bad()); }
+    Ok((pairs, u32::try_from(hz).map_err(|_| bad())?, bucket))
+}
+
 /// `may_build` is false for zoomed detail requests: on linked media they read the
 /// finished overview and never start an hour-long build of their own.
 pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64, may_build: bool, job: &str) -> Result<AafWaveform, AppError> {
