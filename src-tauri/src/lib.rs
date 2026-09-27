@@ -11,6 +11,9 @@ mod stream_proxy;
 mod stream_failure;
 mod acquisition_gate;
 mod premiere_bridge;
+// Transcript Editor: the edit document and its on-disk undo log.
+mod edit_doc;
+mod edit_log;
 pub use error::AppError;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -194,6 +197,7 @@ pub fn run() {
         .manage(commands::VideoIntelligenceState::default())
         .manage(commands::SessionManager::default())
         .manage(commands::PendingReviewLink::default())
+        .manage(commands::EditStore::default())
         .invoke_handler(tauri::generate_handler![
             #[cfg(feature = "obs-audio-acceptance")]
             commands::obs::audio_acceptance::obs_audio_acceptance_start,
@@ -277,6 +281,15 @@ pub fn run() {
             commands::take_pending_review_link,
             commands::review_code,
             commands::session_kick,
+            commands::edit_list,
+            commands::edit_create,
+            commands::edit_head,
+            commands::edit_commit,
+            commands::edit_undo,
+            commands::edit_redo,
+            commands::edit_jump,
+            commands::edit_pin,
+            commands::edit_history,
             commands::create_review_grant,
             commands::list_review_grants,
             commands::revoke_review_grant,

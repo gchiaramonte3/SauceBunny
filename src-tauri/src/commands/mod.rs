@@ -58,6 +58,8 @@ pub mod review_link;
 pub use review_link::*;
 pub mod review_grant;
 pub use review_grant::*;
+pub mod edits;
+pub use edits::*;
 // Tier B bridge (no invoke commands of its own; used by stream_proxy + session).
 pub mod peer_stream;
 pub mod ndi;

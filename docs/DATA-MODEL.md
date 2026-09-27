@@ -47,6 +47,10 @@ Collections/
   collections.json         web-source collections (virtual, keyed by URL)
 Frames/
   <source>_<timecode>.jpg  grabbed stills; the FILENAME is the only index
+Edits/
+  <slug>-<id8>.json        Transcript Editor edits: the CURRENT state of each,
+                           rewritten atomically on every step. A readable copy;
+                           the history lives in app_data_dir() (below)
 ```
 
 `~/Movies/Sauce Bunny/` is the default export folder. The app writes finished
@@ -59,6 +63,16 @@ clips there and never reads them back; it is output, not a store.
 `clear-media-cache-on-quit` — a zero-byte marker file that is the *pref* for
 clear-on-quit, deliberately a file because it is read at shutdown after the
 webview and its `localStorage` are already gone.
+
+`timelines.sqlite` (+ `-wal`, `-shm`) is the Transcript Editor's undo log:
+every state of every edit, as a tree, so undone branches survive and history
+survives a quit (`src-tauri/src/edit_log.rs`). Each state is an RFC 6902 patch
+from its parent, with the whole document every 100 steps. It is here and not
+in Documents because a live SQLite file's side files are exactly what iCloud
+eviction breaks; the readable copy in `Documents/Sauce Bunny/Edits/` is the
+part a person backs up. Schema-versioned: a newer log is refused, not
+rewritten. This IS the user's work, unlike the rest of this folder, so the
+Edits copy exists to keep that true when app data is wiped.
 
 ### `app_cache_dir()` — three named directories
 
