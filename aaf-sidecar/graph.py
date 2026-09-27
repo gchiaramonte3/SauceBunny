@@ -11,7 +11,7 @@ import json
 import struct
 import aaf2
 from reader import (Timeline, PCM, ReaderError, value, rate_of, clean_name,
-                    append_warning, fail, round_sample, MAX_DEPTH)
+                    append_warning, fail, round_sample, media_kind, MAX_DEPTH)
 
 MAX_AUDIO_LANES = 256
 
@@ -76,7 +76,7 @@ def audio_descriptor(descriptor, slot_id):
 
 
 class GraphTimeline(Timeline):
-    def __init__(self, file, sequence_id=None):
+    def __init__(self, file, sequence_id=None, expand_alternates=True):
         self.external = {}
         self.overrides = {}
         self.selectors = {}
@@ -112,7 +112,11 @@ class GraphTimeline(Timeline):
         self.file = file
         main_tracks = list(self.tracks)
         extra = []
-        for slot, parent in zip([s for s in chosen.slots if s.segment.media_kind.lower() == 'sound'], main_tracks):
+        # The writer's self-check compares only what plays, and a string-out
+        # holds one Selector per bite: expanding every alternate there would
+        # multiply lanes per bite rather than per branch.
+        sound_slots = [s for s in chosen.slots if media_kind(s.segment) == 'sound'] if expand_alternates else []
+        for slot, parent in zip(sound_slots, main_tracks):
             self.selectors = {}
             self.read_track(slot)
             pending = [(key, selector, {}) for key, selector in self.selectors.items()]
@@ -152,7 +156,7 @@ class GraphTimeline(Timeline):
         self.tracks = main_tracks + extra
         self.picture_tracks = [{'slot_id': s.slot_id, 'physical_track_number': value(s, 'PhysicalTrackNumber'),
                                 'name': clean_name(s.name, 'Picture'), 'component': type(s.segment).__name__}
-                               for s in chosen.slots if s.segment.media_kind.lower() == 'picture']
+                               for s in chosen.slots if media_kind(s.segment) == 'picture']
         self.markers = []
         for slot in chosen.slots:
             if slot.segment.media_kind.lower() != 'descriptive metadata':
@@ -197,7 +201,7 @@ class GraphTimeline(Timeline):
 
     def expand(self, seg, rate, start, duration, trail, warnings_list, depth=0):
         self.expanded += 1
-        if self.expanded > 10000:
+        if self.expanded > self.MAX_EXPANSIONS:
             fail('The AAF source graph is too complex.', 'limit_exceeded')
         if depth > MAX_DEPTH:
             fail('The AAF source graph is too deep.', 'limit_exceeded')
@@ -205,7 +209,7 @@ class GraphTimeline(Timeline):
             fail('A source reference extends outside its segment.', 'invalid_media')
         if isinstance(seg, aaf2.components.Sequence) and any(isinstance(c, aaf2.components.Transition) for c in seg.components):
             children = list(seg.components)
-            if len(children) > 10000:
+            if len(children) > self.MAX_COMPONENTS:
                 fail('Too many sequence components.', 'limit_exceeded')
             result, cursor = [], Fraction(0)
             for index, child in enumerate(children):
