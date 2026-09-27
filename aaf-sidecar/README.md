@@ -1,6 +1,8 @@
-# Local AAF reader
+# Local AAF reader and edit writer
 
-`saucebunny-aaf` is a read-only, bounded subprocess. It does not open media
+`saucebunny-aaf` is a bounded subprocess. Every command opens its AAF inputs
+read-only; `write-edit` (below) is the one command that creates an AAF, and it
+only ever creates a new file. It does not open media
 locators, start an editor, download packages, or contact a service at runtime.
 It imports a single top-level audio composition from embedded mono PCM WAVE
 or PCMDescriptor essence. The application's multitrack page owns playback,
@@ -24,7 +26,70 @@ transcription jobs and caching; this subprocess only reads AAF and audio.
   It never writes a full-length audio copy. The JSON includes `sample_rate`,
   `sample_count`, `samples_per_peak` and the relative start/duration.
 
-All commands accept `--expected-fingerprint` and reject stale input. Identity
+### `write-edit --request REQUEST.json`
+
+Writes an edit as a new, metadata-only AAF for Media Composer (`writer.py`;
+design notes in `docs/AAF-MULTITRACK.md`, "Writer"). The request, at most
+64 MB of UTF-8 JSON:
+
+```json
+{ "schema_version": 1,
+  "name": "SO_E104_Rosa_v01",
+  "edit_rate": "24000/1001",
+  "start_timecode_frames": 86400,
+  "approach": "C",
+  "sources": [{ "id": "s1", "aaf_path": "/abs/source.aaf", "sequence_id": "urn:smpte:umid:..." }],
+  "tracks": [{ "kind": "sound", "physical_track_number": 1, "source_slots": { "s1": 3 } },
+             { "kind": "picture", "physical_track_number": 1, "source_slots": { "s1": 2 } }],
+  "segments": [{ "kind": "source", "source": "s1", "in_frame": 100, "out_frame": 250 },
+               { "kind": "gap", "frames": 24 }],
+  "mutes": [{ "segment_index": 0, "track_index": 0, "from_frame": 10, "to_frame": 40 }],
+  "markers": [{ "frame": 0, "track_index": 0, "name": "Rosa", "comment": "reason", "color": "Red" }],
+  "output_path": "/abs/out.aaf" }
+```
+
+- Frames are whole edit units at `edit_rate` (a rational string or
+  `{numerator, denominator}`), which every mapped source slot must share.
+  `in_frame`/`out_frame` are 0-based positions in the source sequence,
+  out exclusive; segments are laid end to end from frame 0 of the new
+  sequence. `source_slots` maps a source id to a slot id of that source's
+  sequence (the reader's track `id`); a track with no slot for a segment's
+  source is Filler there.
+- `mutes` are relative to their segment and silence one track only.
+  `markers` are frames of the new sequence on a track index; `color` is one
+  of Red, Green, Blue, Cyan, Magenta, Yellow, White, Black.
+- `approach` `"C"` copies group Selectors (every alternate, the chosen angle
+  kept); `"B"` references the clip that plays (the master clip channel).
+- Bounds: 1 to 256 tracks with 1 to 64 sound tracks, 1 to 100,000
+  segments, 256 sources, 100,000 markers, 24 hours. All paths absolute;
+  `output_path` ends in `.aaf` and must not exist.
+
+The AAF is written to a temporary file, re-read with the app's own reader and
+compared frame by frame, then published by atomic link. With markers, a
+`<output stem> - Avid markers.txt` (Name, TC, Track, colour, Comment,
+Duration; tab separated, no header) is published next to it. The result on
+stdout:
+
+```json
+{ "schema_version": 1, "output": "/abs/out.aaf", "markers_output": "/abs/out - Avid markers.txt",
+  "sequence_id": "urn:smpte:umid:...", "name": "SO_E104_Rosa_v01", "approach": "C",
+  "edit_rate": { "numerator": 24000, "denominator": 1001 }, "start_timecode_frames": 86400,
+  "timecode_fps": 24, "drop_frame": false, "duration_frames": 174,
+  "tracks": [{ "index": 0, "kind": "sound", "physical_track_number": 1, "label": "A1",
+               "slot_id": 2, "data_def": "Sound" }],
+  "segments": 2, "markers": 1, "copied_mobs": 12, "warnings": [],
+  "verify": { "ok": true, "frames_checked": 348, "tracks_checked": 2, "markers_checked": 1 } }
+```
+
+Error codes beyond the reader's: `invalid_input` (the request), `invalid_output`
+(the output or marker file exists, or its folder does not), `transition_split`
+(a cut or mute boundary inside a dissolve), `missing_media` (a clip points at a
+mob the source AAF does not contain), `unsupported_aaf` (speed changes,
+keyframed picture effects, unknown components), `verify_failed` (the re-read
+disagreed; nothing was published), `source_changed` and `write_failed`.
+
+The reading commands accept `--expected-fingerprint` and reject stale input
+(`write-edit` fingerprints its sources before and after instead). Identity
 uses SHA-256 of size, nanosecond mtime and the first/last 64 KiB: this is a
 bounded cache identity, **not** a cryptographic full-file integrity claim.
 The selected input is opened read-only. New output files are published with

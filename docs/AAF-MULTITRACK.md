@@ -90,6 +90,56 @@ parent/child source mappings are deduplicated. TXT/CSV/PDF/SRT exports identify 
 provenance; Avid markers for alternative lanes are deliberately unavailable.
 Root sequence markers keep their original A1/A2/etc. destinations.
 
+## Writer
+
+`saucebunny-aaf write-edit --request REQUEST.json` is the sidecar's one
+writing command (Phase 0 and Phase 6 of
+[TRANSCRIPT-EDITOR-PLAN.md](TRANSCRIPT-EDITOR-PLAN.md)). It turns an edit (a
+list of source ranges and gaps, with mutes and markers) into a new AAF that
+Media Composer can import, and it never changes an input. The request and
+result shapes are in [`aaf-sidecar/README.md`](../aaf-sidecar/README.md).
+
+- **Copied, not rebuilt.** Each source range is copied out of the original
+  sequence's own components and trimmed on its frame boundaries, including
+  SourceClip start offsets in the referenced slot's rate (a non-integer trim
+  is refused, never rounded), Fillers, nested Sequences and effects. Every
+  MasterMob, SourceMob and group mob the new sequence reaches is copied from
+  its source AAF with its original MobID, deduplicated across sources, because
+  Media Composer relinks by MobID. No essence is written.
+- **Groups.** Approach `C` copies the group Selector for the range with every
+  alternate and keeps the angle the editor chose. Approach `B` follows what
+  plays to the master clip channel. Only Media Composer can decide between
+  them (the Phase 0 Mac test plan in
+  [AAF-ASSEMBLY-RESEARCH.md](AAF-ASSEMBLY-RESEARCH.md)).
+- **What is refused.** A cut that splits a transition (a bite holding a whole
+  dissolve keeps it), speed changes, keyframed picture effects, and anything
+  not a clip, filler, selector, sequence or effect. Automated Audio Pan or
+  Gain is dropped with a raw-microphone warning, the reader's own policy;
+  constant pan and gain travel with the clip. A fade survives only on an
+  untrimmed edge.
+- **Layout.** One timecode track running continuously from the requested
+  start, then one Sequence per requested track with the requested track
+  number. Gaps, mutes and unmapped sources are Filler of the track's data
+  definition, which stays `LegacySound`/`LegacyPicture` when every source
+  used one. Markers are `DescriptiveMarker`s on an event slot per described
+  track, as Media Composer writes them, plus a `<name> - Avid markers.txt`
+  for the Markers window's Import Markers.
+- **Self-check.** Before the file is published it is re-read with
+  `graph.GraphTimeline` and every frame of every sound track is compared with
+  the frame the edit asked for: same source mob, same channel, same sample.
+  Picture tracks are walked the same way to their source mob, slot and
+  position; markers, timecode and length are compared too. A mismatch fails
+  with `verify_failed` and nothing is written. The re-read checks only what
+  plays: it does not expand group alternates, which a C string-out holds one
+  Selector per bite of.
+
+The reader changes this needed are small: `LegacySound`/`LegacyPicture`
+tracks are read as sound/picture (they were silently dropped), and the reader's
+expansion budget can be sized by the writer for the edit it just bounded.
+Still open for the app's own reader: re-reading a many-bite C string-out with
+alternates expanded counts lanes per Selector instance and can exceed the
+256-lane cap (AAF-ASSEMBLY-RESEARCH.md, "Found in the current reader").
+
 ## Track-first controls
 
 The transcript arrow occupies a fixed 28 px column beside the person tabs,

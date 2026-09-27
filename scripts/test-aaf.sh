@@ -16,3 +16,4 @@ fi
 PYTHONDONTWRITEBYTECODE=1 "${AAF_PYTHON}" "${ROOT_DIR}/aaf-sidecar/test_reader.py"
 PYTHONDONTWRITEBYTECODE=1 "${AAF_PYTHON}" "${ROOT_DIR}/aaf-sidecar/test_graph.py"
 PYTHONDONTWRITEBYTECODE=1 "${AAF_PYTHON}" "${ROOT_DIR}/aaf-sidecar/test_mxf.py"
+PYTHONDONTWRITEBYTECODE=1 "${AAF_PYTHON}" "${ROOT_DIR}/aaf-sidecar/test_writer.py"
