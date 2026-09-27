@@ -71,6 +71,14 @@ export function EditEditor({ editId, head, open, history, data, active, commit, 
     insert: () => root.current?.querySelector<HTMLButtonElement>(".cp-te-src-actions button")?.click(),
   });
 
+  const pictureOf = useMemo(() => {
+    const bySource = new Map(document.sources.map((source) => {
+      const tracks = data.documents.get(source.id)?.manifest.graph?.picture_tracks ?? [];
+      const v1 = tracks.find((track) => track.physical_track_number === 1 && track.clips.length) ?? tracks.find((track) => track.clips.length);
+      return [source.id, (v1?.clips ?? []).map((clip) => ({ from: clip.start_frame / fps, to: (clip.start_frame + clip.duration_frames) / fps, clip }))];
+    }));
+    return (source: string) => bySource.get(source) ?? [];
+  }, [document.sources, data.documents, fps]);
   const seamInfo = Object.fromEntries(ws.seams.map((item) => [item.index, { kind: item.kind, seconds: item.kind === "cut" ? item.gap : null }]));
   const sources = document.sources.map((source) => source.name).join(" · ");
   return <div ref={root} className="cp-te" data-testid="transcript-editor">
@@ -105,7 +113,7 @@ export function EditEditor({ editId, head, open, history, data, active, commit, 
     <EditLower ws={ws} solo={solo} mute={mute} onSolo={(id) => setSolo((state) => toggled(state, id))} onMute={(id) => setMute((state) => toggled(state, id))} lanes={lanes} colors={colors} fps={fps} recordStart={recordStart} playhead={playhead} playing={playback.playing} busy={playback.busy}
       onToggle={() => void playback.toggle()} onSeek={seek} onScrubStart={playback.pause} onScrubEnd={() => undefined}
       tc={tc} sourceTc={(source, seconds) => editTc(seconds, fps, infos.find((info) => info.id === source)?.startFrames ?? 0)} sourceName={sourceName} nameOf={nameOf}
-      sourceLanes={sourceLanes} peaksOf={(source, lane) => data.peaks.get(`${source}:${lane}`)} durationOf={(source) => data.durations[source] ?? 0}
+      sourceLanes={sourceLanes} peaksOf={(source, lane) => data.peaks.get(`${source}:${lane}`)} durationOf={(source) => data.durations[source] ?? 0} pictureOf={pictureOf}
       zoom={zoom} onZoom={setZoom} snap={snap} onSnap={() => setSnap((value) => !value)} follow={follow} onFollow={() => setFollow((value) => !value)} loop={loop} onLoop={() => setLoop((value) => !value)} />
   </div>;
 }

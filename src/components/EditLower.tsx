@@ -9,6 +9,7 @@ type Props = {
   playhead: number; playing: boolean; busy: boolean; onToggle: () => void; onSeek: (seconds: number) => void; onScrubStart: () => void; onScrubEnd: () => void;
   tc: (seconds: number) => string; sourceTc: (source: string, seconds: number) => string; sourceName: (id: string) => string; nameOf: (lane: string) => string;
   sourceLanes: Record<string, string[]>; peaksOf: (source: string, lane: string) => [number, number][] | undefined; durationOf: (source: string) => number;
+  pictureOf?: React.ComponentProps<typeof EditTimeline>["pictureOf"];
   zoom: number; onZoom: (zoom: number) => void; snap: boolean; onSnap: () => void; follow: boolean; onFollow: () => void; loop: boolean; onLoop: () => void;
 };
 
@@ -27,7 +28,7 @@ export function EditLower(props: Props) {
       speaking={speaking.map((id) => ({ id, name: props.nameOf(id), color: props.colors[id] }))} message={ws.message} />
     <EditTimeline speakers={props.lanes} edit={ws.edit} seams={ws.seams} placed={ws.placed} selection={ws.keys} playhead={playhead} fps={fps} recordStart={props.recordStart}
       colors={props.colors} solo={props.solo} mute={props.mute} onSeek={props.onSeek} seam={ws.seam} onSeam={ws.chooseSeam}
-      sourceSpeakers={props.sourceLanes} sourceName={props.sourceName} peaksOf={props.peaksOf} durationOf={props.durationOf}
+      sourceSpeakers={props.sourceLanes} sourceName={props.sourceName} peaksOf={props.peaksOf} durationOf={props.durationOf} pictureOf={props.pictureOf}
       tracks={ws.onTracks} onTrack={ws.toggleTrack} dead={ws.dead} onDeadSkip={ws.skipDead} onDeadPreset={ws.findDead} onDeadApply={ws.applyDead} onDeadCancel={() => ws.setDead(null)}
       onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} zoom={props.zoom} onZoom={props.onZoom} markers={ws.markers.map((marker) => marker.at)}
       tools={{ marks: ws.marks, canMark: ws.edit.segments.length > 0, snap: props.snap, follow: props.follow, loop: props.loop, hasPrevious: !!previous, hasNext: !!next,

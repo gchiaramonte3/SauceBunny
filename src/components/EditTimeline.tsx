@@ -6,6 +6,7 @@ import { multitrackTextLayout } from "../lib/multitrack-text-layout";
 import { EditDeadLayer } from "./EditDeadLayer";
 import { EditDeadSpaceBar, type EditDeadPreset, type EditDeadReview } from "./EditDeadSpaceBar";
 import { EditTimelineTools, type EditTimelineAudio, type EditTimelineView } from "./EditTimelineTools";
+import { EditPictureRow } from "./EditPictureRow";
 import { EditTimelineRow } from "./EditTimelineRow";
 import { EditTimelineRuler } from "./EditTimelineRuler";
 
@@ -20,6 +21,7 @@ type Props = {
   sourceSpeakers: Record<string, string[]>; sourceName: (id: string) => string;
   /** A source track's overview peaks and the source's length in seconds, for the clip waveforms. */
   peaksOf: (source: string, speaker: string) => [number, number][] | undefined; durationOf: (source: string) => number;
+  pictureOf?: React.ComponentProps<typeof EditPictureRow>["pictureOf"];
   onScrubStart: () => void; onScrubEnd: () => void;
   zoom: number; onZoom: (zoom: number) => void; markers: number[]; tools: ToolProps;
   /** Avid's track selectors: on tracks take Lift and show the marked region. */
@@ -121,10 +123,11 @@ export function EditTimeline(props: Props) {
       view={view} onView={setView} audio={audio} onAudio={setAudio}
       allText={speakers.every((s) => text.has(s.id))} onAllText={() => setText(speakers.every((s) => text.has(s.id)) ? new Set() : new Set(speakers.map((s) => s.id)))} />
     {props.dead && <EditDeadSpaceBar review={props.dead} onPreset={props.onDeadPreset} onApply={props.onDeadApply} onCancel={props.onDeadCancel} />}
-    <div className="cp-te-tl-grid" style={{ "--te-rows": speakers.length + 1 } as React.CSSProperties}>
+    <div className="cp-te-tl-grid" style={{ "--te-rows": speakers.length + 1 + (props.pictureOf && edit.segments.some((segment) => !isGap(segment) && props.pictureOf?.(segment.source).length) ? 1 : 0) } as React.CSSProperties}>
       <div className="cp-te-tl-corner" aria-hidden="true" />
       <EditTimelineRuler rulerRef={ruler} fps={fps} recordStart={props.recordStart} start={start} span={span} x={x} w={w} marked={marked} markers={props.markers}
         seams={seams} seam={props.seam} describe={(cut) => describe(cut, fps, props.recordStart)} onSeam={(cut) => { props.onSeek(cut.at); props.onSeam(cut.index); }} scrub={scrub} />
+      {props.pictureOf && <EditPictureRow edit={edit} starts={starts} start={start} span={span} x={x} w={w} pictureOf={props.pictureOf} />}
       {speakers.map((speaker) => <EditTimelineRow key={speaker.id} speaker={speaker} color={colors[speaker.id]} soloed={solo.has(speaker.id)} quiet={solo.size > 0 && !solo.has(speaker.id)}
         muted={mute.has(speaker.id)} shown={text.has(speaker.id)} cues={words[speaker.id] ?? []} selected={props.tracks.has(speaker.id)}
         onTrack={props.onTrack} onSolo={props.onSolo} onMute={props.onMute} onText={toggleText}
