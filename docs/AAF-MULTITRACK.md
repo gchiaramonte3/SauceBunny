@@ -90,6 +90,38 @@ parent/child source mappings are deduplicated. TXT/CSV/PDF/SRT exports identify 
 provenance; Avid markers for alternative lanes are deliberately unavailable.
 Root sequence markers keep their original A1/A2/etc. destinations.
 
+### Data kinds, muted clips and picture as metadata
+
+pyaaf2 reports a slot's kind as its data definition's short name. Media
+Composer also writes the OMF-era definitions, which read `LegacySound`,
+`LegacyPicture` and `LegacyTimecode`, so every kind comparison in the reader
+goes through one helper, `media_kind()` in `aaf-sidecar/reader.py`, which folds
+the `Legacy` prefix and spacing (`Descriptive Metadata` and
+`DescriptiveMetadata` are one kind). A bare `.lower() == 'sound'` drops a
+Legacy slot without a word.
+
+Avid writes a **muted clip** as a `Selector` whose selected item is a `Filler`
+or a `ScopeReference`, with the real clip in `Alternates`. It is not a group:
+it plays as silence (a gap), registers no group selector and produces no
+alternative lane, and its track carries the warning "Muted clip in Avid: it
+plays as silence here too."
+
+**Picture is read, never decoded.** `aaf-sidecar/picture.py` walks each picture
+slot of the chosen sequence and adds `clips` to its `picture_tracks` entry: the
+record range in sequence frames, the clip (MasterMob) name and MobID, the file
+SourceMob's MobID and a descriptor summary (descriptor class, sample rate,
+stored width and height, frame layout, compression UL), the tape or import
+SourceMob's name, and the source timecode at the in point, read from that
+mob's own timecode slot (frames, fps and drop frame). Filler is omitted. A
+group Selector records its selected angle with `group: true`; a muted picture
+Selector reads as `kind: "muted"`, named after the clip it hides. No essence
+is opened and no locator followed. A picture track stops at 100,000 clips and
+the walk at one million steps; either limit costs picture clips and a
+sequence warning, never the audio import. AAF Audio draws V1 (or the first
+picture track with clips) as one row of named blocks above the microphones,
+with no thumbnails and no video. Documents saved before this read as having no
+picture clips.
+
 ## Track-first controls
 
 The transcript arrow occupies a fixed 28 px column beside the person tabs,

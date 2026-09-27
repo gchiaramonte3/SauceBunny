@@ -109,18 +109,28 @@ The one thing no amount of fixture testing can answer.
 - **Fix `Legacy*` data definitions.** `graph.py` and `reader.py` compare
   `media_kind` to `sound`/`picture` only, so `LegacySound`/`LegacyPicture`
   slots would be dropped (the same class of bug that broke NEXIS relink).
+  - [x] Done: one `media_kind()` helper in `reader.py` folds `Legacy*` and
+    spacing; every kind comparison uses it; fixture tests break-tested.
 - **Classify muted clips.** Avid writes a muted clip as a `Selector` whose
   selected item is `Filler` or a `ScopeReference`; today that surfaces as a
   phantom group branch. Treat it as "muted", not "group".
+  - [x] Done: a muted Selector plays as a gap with a track warning and no
+    lane (Filler and ScopeReference fixtures, break-tested).
 - **Picture as metadata.** For each V track, emit `picture_clips[]`: record
   range, clip name, master and file MobID, tape name, source timecode, and
   a descriptor summary (frame rate, stored size, compression). Timecode
   tracks become the record and source TC of the sequence.
+  - [x] Done as `picture_tracks[].clips` (`aaf-sidecar/picture.py`,
+    `AafPictureClip`), with tape source TC and group/muted flags; bounded.
 - **UI:** one thumbnail-free V1 lane of named blocks in AAF Audio and the
   editor, so the editor can see where the picture cuts are.
+  - [x] AAF Audio done (`MultitrackPictureLane`); the editor lane follows
+    in Phase 5, when the editor exists.
 - **Gate:** the 117 genuine AAFs from the OTIO and LibAAF sets parse with
   picture metadata, the muted-clip sample reads as muted, and no reader
   regression in the existing AAF tests.
+  - [ ] Open: no reader regression and synthetic fixtures pass; the 117
+    genuine AAFs and a real Avid muted-clip sample are not yet run.
 
 ### Phase 2: media index (relink at NEXIS scale)
 
