@@ -84,7 +84,7 @@ export function answer(prompt: string, context: TeAgentContext): TeReply {
       && (speakerIds.length ? speakerIds.includes(item.word.speaker) : true));
     if (!hits.length) return { text: "I found no filler words in the edit.", lines: [], proposal: null };
     return {
-      text: `${plural(hits.length, "filler word")} in the edit. Removing them cuts that time from every track; each one is shown below so you can check it first.`,
+      text: `${plural(hits.length, "filler word")} in the edit.`,
       lines: hits.map((item) => ({ source: item.word.source, speaker: item.word.speaker, words: [item.word] })),
       proposal: { kind: "delete", label: `Remove ${plural(hits.length, "Filler Word")}`, ids: hits.map((item) => item.word.id) },
     };
@@ -116,7 +116,7 @@ export function answer(prompt: string, context: TeAgentContext): TeReply {
   }
 
   return {
-    text: "In this prototype I can find a phrase, pull every line from a person, remove filler words, or summarize a source. Try: find “onions” in @Kitchen, pull every line from @Rosa, remove fillers from @edit, or summarize @Judges.",
+    text: "Try: find “onions” in @Kitchen, pull every line from @Rosa, remove fillers from @edit, or summarize @Judges.",
     lines: [], proposal: null,
   };
 }

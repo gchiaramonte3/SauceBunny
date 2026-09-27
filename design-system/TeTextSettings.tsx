@@ -37,10 +37,10 @@ export function TeTextSettings({ pane, style, onChange }: Props) {
   const size = (next: number) => onChange({ ...style, size: Math.max(teTextSizes.min, Math.min(teTextSizes.max, next)) });
   return <div ref={box} className="cp-te-set">
     <button type="button" className={`cp-icon-btn cp-te-set-btn${open ? " active" : ""}`} aria-expanded={open} aria-controls={id}
-      aria-label={`${pane} text settings`} title={`${pane} text settings: typeface, size and spacing`} onClick={() => setOpen((value) => !value)}>
+      aria-label={`${pane} text settings`} title={`${pane} text settings`} onClick={() => setOpen((value) => !value)}>
       <IconSettings size={14} /></button>
     {open && <div id={id} className="cp-te-set-pop" role="dialog" aria-label={`${pane} text settings`}>
-      <Choice label="Typeface" value={style.family} options={[["serif", "Serif"], ["sans", "Sans"]]} onChange={(family) => onChange({ ...style, family })} />
+      <Choice label="Typeface" value={style.family} options={[["sans", "Sans"], ["serif", "Serif"]]} onChange={(family) => onChange({ ...style, family })} />
       <div className="cp-te-set-row"><label className="cp-te-set-label" htmlFor={`${id}-size`}>Size</label>
         <div className="cp-te-set-size">
           <button type="button" className="cp-icon-btn" aria-label="Smaller text" title="Smaller text" disabled={style.size <= teTextSizes.min} onClick={() => size(style.size - 1)}>A−</button>

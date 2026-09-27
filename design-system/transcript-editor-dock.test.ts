@@ -5,7 +5,7 @@ describe("transcript editor dock", () => {
   it("moves a tab to another column and shows it there, leaving a neighbour showing where it was", () => {
     const dock = moveTab(defaultDock(), "inspector", "left");
     expect(dock.left).toEqual({ tabs: ["library", "inspector"], active: "inspector" });
-    expect(dock.right).toEqual({ tabs: ["ask"], active: "ask" });
+    expect(dock.right).toEqual({ tabs: ["history", "ask"], active: "history" });
   });
 
   it("drops a tab at a position, and reordering within a column counts the gap it leaves", () => {

@@ -32,7 +32,7 @@ export function TeParagraph(props: Props) {
   const mark = (index: number) => {
     const info = props.seams[index];
     if (!info || info.kind === "through") return null;
-    const label = info.kind === "jump" ? "Edit point, a jump to another part of the scene or another source" : `Cut, ${(info.seconds ?? 0).toFixed(2)} s removed`;
+    const label = info.kind === "jump" ? "Jump" : `Cut, ${(info.seconds ?? 0).toFixed(2)} s removed`;
     return <button type="button" className={`cp-te-cutmark${props.seam === index ? " is-selected" : ""}`} aria-label={label} title={label}
       onClick={() => props.onSeam(index)}>¦</button>;
   };
@@ -43,7 +43,7 @@ export function TeParagraph(props: Props) {
       const ghosts = props.ghosts(previous.segment, item.segment);
       if (ghosts.length) return ghosts.map((ghost) => <span key={ghost.id} className="cp-te-ghost" style={{ "--te-speaker": color } as React.CSSProperties}>
         {ghost.speaker !== paragraph.speaker && <span className="cp-te-ghost-who">{props.nameOf(ghost.speaker)}:</span>}
-        <span className="cp-te-ghost-text" title="Removed. Restore puts it back on every track.">{quote(ghost)}</span>
+        <span className="cp-te-ghost-text" title="Restore">{quote(ghost)}</span>
         <button type="button" className="cp-te-restore" aria-label={`Restore “${quote(ghost)}”`} title="Restore this line" onClick={() => props.onRestore(ghost)}>↺</button>{" "}
       </span>);
       return mark(item.segment);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  deleteWords as deleteKeys, ghostLines, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration, programToSource,
+  addEdit, extractProgram, liftProgram, deleteWords as deleteKeys, ghostLines, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration, programToSource,
   healSeam, removeRange, restoreRange, seamList, spliceIn, unmuteWords, type TeEdit, type TeWord,
 } from "./transcript-editor-model";
 import { teDurations, teWholeScene, teWords } from "./transcript-editor-fixture";
@@ -154,5 +154,32 @@ describe("transcript editor model", () => {
     expect(seams.every((seam) => Number.isNaN(seam.gap))).toBe(true);
     expect(healSeam(edit, 1)).toBe(edit);
     expect(placeWords(teWords, edit).some((item) => item.word.source === "itm")).toBe(true);
+  });
+
+  it("add edit cuts every track at the playhead and changes nothing else", () => {
+    const edit = addEdit(whole(), 2.5);
+    expect(edit.segments.map((segment) => [segment.srcIn, segment.srcOut])).toEqual([[0, 2.5], [2.5, 5]]);
+    expect(programDuration(edit)).toBe(5);
+    expect(seamList(edit, words).map((seam) => seam.kind)).toEqual(["through"]);
+    // On an existing edit point there is nothing to cut.
+    expect(addEdit(edit, 2.5)).toBe(edit);
+    expect(addEdit(whole(), 0)).toEqual(whole());
+  });
+
+  it("lift silences In to Out on every mic and keeps the time; extract closes it up", () => {
+    const lifted = liftProgram(whole(), 1.45, 2.7, () => ["a", "b"]);
+    expect(programDuration(lifted)).toBe(5);
+    const muted = placeWords(words, lifted).filter((item) => item.muted).map((item) => item.word.id);
+    expect(muted).toEqual(["a2", "a3", "b2"]);
+    const extracted = extractProgram(whole(), 1.45, 2.45).edit;
+    expect(programDuration(extracted)).toBeCloseTo(4);
+    expect(placeWords(words, extracted).map((item) => item.word.id)).toEqual(["a1", "b1"]);
+  });
+
+  it("lift maps a range that spans two segments back to each source", () => {
+    const edit: TeEdit = { segments: [{ id: "x", source: "s", srcIn: 3, srcOut: 5 }, { id: "y", source: "s", srcIn: 0, srcOut: 2 }], mutes: [] };
+    const lifted = liftProgram(edit, 1, 3, () => ["a"]);
+    expect(lifted.mutes).toEqual([{ source: "s", speaker: "a", srcIn: 4, srcOut: 5 }, { source: "s", speaker: "a", srcIn: 0, srcOut: 1 }]);
+    expect(liftProgram(edit, 2, 2, () => ["a"])).toBe(edit);
   });
 });

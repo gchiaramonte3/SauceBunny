@@ -95,7 +95,7 @@ export function TeTabBar(props: Props) {
     <TabOverflowMenu tabs={hidden.map((tab) => ({ id: tab.id, label: tab.label }))} selected={active ?? ""} noun="panels" buttonRef={more} onSelect={props.onActivate} />
     {current && (current.movable || current.closable) && <div ref={menu} className="cp-te-tabmenu-wrap">
       <button type="button" className="cp-icon-btn cp-te-tabmenu-btn" aria-haspopup="menu" aria-expanded={menuOpen}
-        aria-label={`${current.label} panel options`} title={`${current.label}: move to another panel or close`} onClick={() => setMenuOpen((value) => !value)}><IconMore size={14} /></button>
+        aria-label={`${current.label} panel options`} title={`${current.label} options`} onClick={() => setMenuOpen((value) => !value)}><IconMore size={14} /></button>
       {menuOpen && <div className="cp-tabstrip-menu cp-te-tabmenu" role="menu" aria-label={`${current.label} panel options`}>
         {current.movable && teColumns.filter((to) => to !== column).map((to) => <button key={to} type="button" role="menuitem"
           onClick={() => { setMenuOpen(false); props.onMove(current.id, to); }}>Move to {teColumnNames[to]}</button>)}

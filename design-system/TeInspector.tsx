@@ -40,14 +40,14 @@ export function TeInspector(props: Props) {
           <p className="cp-te-insp-lead">{plural(selected.length, "word")} · {names(who)}</p>
           <p className="cp-te-insp-meta">{tc(selected[0].programStart, fps)} to {tc(selected[selected.length - 1].programEnd, fps)} · {props.cutSeconds.toFixed(2)} s</p>
           <blockquote className="cp-te-insp-quote">{selected.slice(0, 14).map((item) => item.word.text).join(" ")}{selected.length > 14 ? " …" : ""}</blockquote>
-          {under.length > 0 && <p className="cp-te-insp-warn" role="note">{names(under)} {under.length === 1 ? "is" : "are"} talking under this. Deleting takes {plural(props.crosstalk.length, "word")} of theirs too.</p>}
+          {under.length > 0 && <p className="cp-te-insp-warn" role="note">Crosstalk: {names(under)}, {plural(props.crosstalk.length, "word")}.</p>}
           <div className="cp-te-insp-actions">
-            <button type="button" className="btn btn-ghost cp-te-btn" onClick={() => props.onDelete(false)} title="Cut this time from every track and close the gap (Delete)">
-              Delete from all tracks<kbd className="cp-te-kbd">⌫</kbd></button>
+            <button type="button" className="btn btn-ghost cp-te-btn" onClick={() => props.onDelete(false)} title="Cut from all tracks and close the gap (⌫)">
+              Delete<kbd className="cp-te-kbd">⌫</kbd></button>
             <button type="button" className="btn btn-ghost cp-te-btn" onClick={() => props.onDelete(true)}
-              title={allLifted ? "Bring these words back on their speaker's track (Shift-Delete)" : "Silence only these words, on their speaker's track. Nothing moves (Shift-Delete)"}>
-              {allLifted ? `Restore on ${names(who)}'s track` : `Remove from ${names(who)}'s track only`}<kbd className="cp-te-kbd">⇧⌫</kbd></button>
-            <button type="button" className="btn btn-ghost cp-te-btn" onClick={props.onMatch} title="Show these words in the source transcript (F)">
+              title={allLifted ? "Unsilence on their track (⇧⌫)" : "Silence on their track only; nothing moves (⇧⌫)"}>
+              {allLifted ? "Unsilence" : `Silence ${names(who)}`}<kbd className="cp-te-kbd">⇧⌫</kbd></button>
+            <button type="button" className="btn btn-ghost cp-te-btn" onClick={props.onMatch} title="Show in the source (F)">
               Find in source<kbd className="cp-te-kbd">F</kbd></button>
           </div>
         </>}
@@ -56,12 +56,12 @@ export function TeInspector(props: Props) {
       <h3 id="cp-te-insp-seam" className="cp-te-insp-title">Edit point</h3>
       <p className="cp-te-insp-lead">{props.seam.kind === "cut" ? "Cut" : props.seam.kind === "through" ? "Through edit" : "Jump"} at {tc(props.seam.at, fps)}</p>
       <p className="cp-te-insp-meta">{props.seam.kind === "cut" ? `${props.seam.gap.toFixed(2)} s removed · ${plural(props.seam.removed, "word")}`
-        : props.seam.kind === "through" ? "Nothing removed. The two clips play straight through."
-        : Number.isNaN(props.seam.gap) ? "Joins two different sources. There is nothing between them to restore."
-        : `Goes ${props.seam.gap < 0 ? "back" : "ahead"} ${Math.abs(props.seam.gap).toFixed(1)} s in the scene. What it skips still plays elsewhere in the edit, so there is nothing to restore.`}</p>
-      {props.seam.clipped.length > 0 && <p className="cp-te-insp-warn" role="note">This edit cuts into a word on {names(props.seam.clipped)}'s track.</p>}
+        : props.seam.kind === "through" ? "Nothing removed."
+        : Number.isNaN(props.seam.gap) ? "Joins two sources."
+        : `Jumps ${props.seam.gap < 0 ? "back" : "ahead"} ${Math.abs(props.seam.gap).toFixed(1)} s.`}</p>
+      {props.seam.clipped.length > 0 && <p className="cp-te-insp-warn" role="note">Cuts into a word: {names(props.seam.clipped)}.</p>}
       <div className="cp-te-insp-actions">
-        <button type="button" className="btn btn-ghost cp-te-btn" disabled={props.seam.kind !== "cut"} onClick={props.onRestoreSeam}>Restore what was cut</button>
+        <button type="button" className="btn btn-ghost cp-te-btn" disabled={props.seam.kind !== "cut"} onClick={props.onRestoreSeam}>Restore</button>
         <button type="button" className="btn btn-ghost cp-te-btn" onClick={props.onCloseSeam}>Done</button>
       </div>
     </section>}
@@ -73,12 +73,12 @@ export function TeInspector(props: Props) {
         <div><dt>Removed lines</dt><dd>{summary.removedLines}</dd></div>
         <div><dt>Clips per track</dt><dd>{summary.clips}</dd></div>
         <div><dt>Edit points</dt><dd>{summary.cuts}</dd></div>
-        <div><dt>Silenced on one track</dt><dd>{plural(summary.lifted, "word")}</dd></div>
-        <div><dt>Text corrections</dt><dd>{summary.corrections}</dd></div>
+        <div><dt>Silenced</dt><dd>{plural(summary.lifted, "word")}</dd></div>
+        <div><dt>Corrections</dt><dd>{summary.corrections}</dd></div>
       </dl>
     </section>
     <section className="cp-te-insp-section" aria-labelledby="cp-te-insp-talk">
-      <h3 id="cp-te-insp-talk" className="cp-te-insp-title">Talk time in the edit</h3>
+      <h3 id="cp-te-insp-talk" className="cp-te-insp-title">Talk time</h3>
       <ul className="cp-te-insp-talk">{speakers.map((speaker) => <li key={speaker.id} style={{ "--te-speaker": props.colors[speaker.id], "--te-share": `${(props.talk[speaker.id] ?? 0) / longest * 100}%` } as React.CSSProperties}>
         <span className="cp-te-swatch" aria-hidden="true" /><span className="cp-te-insp-talk-name">{speaker.name}</span>
         <span className="cp-te-insp-talk-bar" aria-hidden="true" /><span className="cp-te-insp-talk-time">{(props.talk[speaker.id] ?? 0).toFixed(1)} s</span>
@@ -87,7 +87,7 @@ export function TeInspector(props: Props) {
     <section className="cp-te-insp-section" aria-labelledby="cp-te-insp-export">
       <h3 id="cp-te-insp-export" className="cp-te-insp-title">Send to Avid</h3>
       <button type="button" className="btn cp-te-btn" disabled aria-describedby="cp-te-insp-export-note">Export sequence as AAF…</button>
-      <p id="cp-te-insp-export-note" className="cp-te-insp-note">Phase 1. Writes a new sequence that relinks to the same mic media, one track per speaker, cuts on frame boundaries.</p>
+      <p id="cp-te-insp-export-note" className="cp-te-insp-note">Coming in phase 1.</p>
     </section>
   </aside>;
 }

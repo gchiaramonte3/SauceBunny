@@ -5,12 +5,14 @@ import { activate, closeTab, columnOf, defaultDock, isClosable, isSourceTab, mov
 import { teDurations, teScene, teSources, teSpeakers, teTc, teWholeScene, teWords } from "./transcript-editor-fixture";
 import { clampTimeline, layoutPanes, tePaneLimits, teTimelineLimits, type TePane } from "./transcript-editor-layout";
 import {
-  cutRange, deleteWords, ghostLines, healSeam, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration,
+  addEdit, cutRange, deleteWords, extractProgram, liftProgram, ghostLines, healSeam, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration,
   programToSource, restoreRange, seamList, segmentStarts, spliceIn, unmuteWords, type TeDeleteResult, type TeEdit, type TeGhost,
 } from "./transcript-editor-model";
 import { TeAsk, type TeAskMessage } from "./TeAsk";
 import { TeDocument, type TeSelection } from "./TeDocument";
+import { TeHistory } from "./TeHistory";
 import { TeInspector } from "./TeInspector";
+import { createLog, current as headOf, jump, pin, record, redo, redoTarget, undo, type TeLog } from "./transcript-editor-history";
 import type { TeSeamInfo } from "./TeParagraph";
 import { TePrompt } from "./TePrompt";
 import { TeRecord } from "./TeRecord";
@@ -36,11 +38,10 @@ const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "
 const tc = (seconds: number) => teTc(seconds, fps);
 const nameOf = (id: string) => teSpeakers.find((speaker) => speaker.id === id)?.name ?? id;
 const names = (ids: string[]) => { const list = [...new Set(ids)].map(nameOf); return list.length < 3 ? list.join(" and ") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`; };
-const tabLabel = (tab: string) => isSourceTab(tab) ? sourceOf(tab.slice(7)).short : ({ library: "Library", edit: "Edit", inspector: "Inspector", ask: "Ask" } as Record<string, string>)[tab] ?? tab;
+const tabLabel = (tab: string) => isSourceTab(tab) ? sourceOf(tab.slice(7)).short : ({ library: "Library", edit: "Edit", inspector: "Inspector", ask: "Ask", history: "History" } as Record<string, string>)[tab] ?? tab;
 const pane = (column: TeColumn) => column as TePane;
 
-type Snapshot = { edit: TeEdit; corrections: Record<string, string> };
-type History = { past: { snapshot: Snapshot; label: string }[]; present: Snapshot; future: { snapshot: Snapshot; label: string }[] };
+type Snapshot = { edit: TeEdit; corrections: Record<string, string>; markers: number[] };
 type Drag = { tab: string; x: number; y: number; target: { column: TeColumn; index: number } | null };
 
 /**
@@ -52,8 +53,8 @@ type Drag = { tab: string; x: number; y: number; target: { column: TeColumn; ind
 export function TranscriptEditorPrototype() {
   const root = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 1680, height: 1020 });
-  const [history, setHistory] = useState<History>(() => ({ past: [], present: { edit: teWholeScene(), corrections: {} }, future: [] }));
-  const { edit, corrections } = history.present;
+  const [log, setLog] = useState<TeLog<Snapshot>>(() => createLog<Snapshot>({ edit: teWholeScene(), corrections: {}, markers: [] }, Date.now()));
+  const { edit, corrections, markers } = headOf(log);
   const [selection, setSelection] = useState<TeSelection>({ anchor: 0, focus: 0, collapsed: true });
   const [solo, setSolo] = useState<Set<string>>(new Set());
   const [mute, setMute] = useState<Set<string>>(new Set());
@@ -71,9 +72,14 @@ export function TranscriptEditorPrototype() {
   const [focusSource, setFocusSource] = useState("mg3");
   const [match, setMatch] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<{ result: TeDeleteResult; lift: Set<string>; who: string[] } | null>(null);
-  const [text, setText] = useState<Record<"source" | "edit", TeTextStyle>>({ source: { family: "serif", size: 13, leading: "normal" }, edit: { family: "serif", size: 15, leading: "normal" } });
+  const [text, setText] = useState<Record<"source" | "edit", TeTextStyle>>({ source: { family: "sans", size: 13, leading: "normal" }, edit: { family: "sans", size: 15, leading: "normal" } });
   const [messages, setMessages] = useState<TeAskMessage[]>([]);
   const [message, setMessage] = useState("");
+  const [marks, setMarks] = useState<{ in: number | null; out: number | null }>({ in: null, out: null });
+  const [snap, setSnap] = useState(true);
+  const [followHead, setFollowHead] = useState(true);
+  const [looping, setLooping] = useState(false);
+  const [zoom, setZoom] = useState(1);
 
   const placed = useMemo(() => placeWords(teWords, edit), [edit]);
   const paras = useMemo(() => paragraphs(placed), [placed]);
@@ -81,7 +87,10 @@ export function TranscriptEditorPrototype() {
   const ghosts = useMemo(() => ghostLines(edit, teWords, teDurations), [edit]);
   const used = useMemo(() => new Set(placed.map((item) => item.word.id)), [placed]);
   const total = programDuration(edit);
-  const playback = useTePlayback({ record: total, ...teDurations });
+  const marked = marks.in != null && marks.out != null && marks.out > marks.in ? [marks.in, marks.out] as const : null;
+  const [loopFrom, loopTo] = marked ?? [0, total];
+  const loop = useMemo(() => looping ? { target: "record", from: loopFrom, to: loopTo } : null, [looping, loopFrom, loopTo]);
+  const playback = useTePlayback({ record: total, ...teDurations }, loop);
   const playhead = playback.head("record");
   const count = placed.length;
   const starts = segmentStarts(edit);
@@ -116,19 +125,24 @@ export function TranscriptEditorPrototype() {
 
   const focusDoc = () => requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".cp-te-doc")?.focus());
   const seek = (position: number) => playback.seek("record", position);
-  const commit = (label: string, change: (present: Snapshot) => Partial<Snapshot> | null) => setHistory((h) => {
-    const next = change(h.present);
-    return next ? { past: [...h.past, { snapshot: h.present, label }].slice(-200), present: { ...h.present, ...next }, future: [] } : h;
-  });
-  const step = (back: boolean) => {
-    const entry = back ? history.past[history.past.length - 1] : history.future[0];
-    if (!entry) return;
-    setHistory(back
-      ? { past: history.past.slice(0, -1), present: entry.snapshot, future: [{ snapshot: history.present, label: entry.label }, ...history.future] }
-      : { past: [...history.past, { snapshot: history.present, label: entry.label }], present: entry.snapshot, future: history.future.slice(1) });
-    setSeam(null); setPrompt(null);
-    setMessage(`${back ? "Undo" : "Redo"}: ${entry.label}.`);
+  // Every change is a step in the log; `group` lets rapid repeats of one
+  // action (a paragraph nudged five times) land as one step.
+  const commit = (label: string, change: (present: Snapshot) => Partial<Snapshot> | null, group: string | null = null) => {
+    const at = Date.now();
+    setLog((state) => {
+      const present = headOf(state), next = change(present);
+      return next ? record(state, label, { ...present, ...next }, at, group) : state;
+    });
   };
+  const undoLabel = log.states[log.head].parent == null ? null : log.states[log.head].label;
+  const redoId = redoTarget(log), redoLabel = redoId == null ? null : log.states[redoId].label;
+  const moveHead = (next: TeLog<Snapshot>, text: string) => {
+    if (next === log) return;
+    setLog(next);
+    setSeam(null); setPrompt(null);
+    setMessage(text);
+  };
+  const step = (back: boolean) => back ? moveHead(undo(log), `Undo ${undoLabel}`) : moveHead(redo(log), `Redo ${redoLabel}`);
   const applyDelete = (result: TeDeleteResult, words: number) => {
     const at = range ? range[0] : caret;
     commit(`Delete ${plural(words, "Word")}`, () => ({ edit: result.edit }));
@@ -137,7 +151,7 @@ export function TranscriptEditorPrototype() {
     setSelection({ anchor: at, focus: at, collapsed: true, after: at > 0 });
     setPrompt(null); setSeam(null);
     seek(at > 0 ? placeWords(teWords, result.edit)[at - 1]?.programEnd ?? 0 : 0);
-    setMessage(`Deleted ${plural(words, "word")}, ${result.seconds.toFixed(2)} s. Every track closed up.${showRemoved ? " The line stays struck through until you restore it." : ""}`);
+    setMessage(`Deleted ${plural(words, "word")}, ${result.seconds.toFixed(2)} s.`);
     focusDoc();
   };
   const lift = (ids: Set<string>, who: string[]) => {
@@ -145,7 +159,7 @@ export function TranscriptEditorPrototype() {
     commit(restoring ? "Restore on Track" : `Remove from ${names(who)}'s Track`, (present) =>
       ({ edit: restoring ? unmuteWords(teWords, present.edit, ids) : muteWords(teWords, present.edit, ids) }));
     setPrompt(null);
-    setMessage(restoring ? `Restored ${plural(ids.size, "word")} on ${names(who)}'s track.` : `Silenced ${plural(ids.size, "word")} on ${names(who)}'s track. Nothing moved.`);
+    setMessage(`${restoring ? "Unsilenced" : "Silenced"} ${plural(ids.size, "word")}.`);
     focusDoc();
   };
   const remove = (speakerOnly: boolean) => {
@@ -158,7 +172,7 @@ export function TranscriptEditorPrototype() {
   };
   const restore = (ghost: TeGhost) => {
     commit("Restore Line", (present) => ({ edit: restoreRange(present.edit, ghost.at, ghost.source, ghost.from, ghost.to) }));
-    setMessage(`Restored ${nameOf(ghost.speaker)}'s line. Every track opened up again.`);
+    setMessage(`Restored ${nameOf(ghost.speaker)}'s line.`);
   };
   const insertionPoint = (index: number) => {
     if (index >= count) return total;
@@ -186,7 +200,7 @@ export function TranscriptEditorPrototype() {
     const fresh = new Set(next.segments.filter((segment) => !edit.segments.some((old) => old.id === segment.id)).map((segment) => next.segments.indexOf(segment)));
     const indexes = placeWords(teWords, next).flatMap((item, index) => fresh.has(item.segment) && words.includes(item.word) ? [index] : []);
     if (indexes.length) setSelection({ anchor: indexes[0], focus: indexes[indexes.length - 1], collapsed: false });
-    setMessage(`Inserted ${plural(words.length, "word")} from ${sourceOf(focusSource).short} at ${tc(position)}. Everything after it moved down on every track.`);
+    setMessage(`Inserted ${plural(words.length, "word")} at ${tc(position)}.`);
     focusDoc();
   };
   const showPanel = (tab: string, fallback: TeColumn) => {
@@ -217,7 +231,7 @@ export function TranscriptEditorPrototype() {
     if (!chosenRange) return;
     const word = sourcePlaced[focusSource][chosenRange[0]].word;
     const index = placed.findIndex((item) => item.word.id === word.id);
-    if (index < 0) return setMessage(`“${word.text}” is not in the edit. Press V to insert it at the caret.`);
+    if (index < 0) return setMessage(`Not in the edit. V inserts it.`);
     setSelection({ anchor: index, focus: index, collapsed: true });
     seek(placed[index].programStart);
     setMessage(`Found in the edit at ${tc(placed[index].programStart)}.`);
@@ -225,7 +239,7 @@ export function TranscriptEditorPrototype() {
   };
   const toggle = (column: TePane) => {
     if (layout.shown[column]) return setOpen((state) => ({ ...state, [column]: false }));
-    if (!has(column as TeColumn)) return setMessage(`The ${column} panel is empty. Drag a tab there, or use a tab's ⋯ menu.`);
+    if (!has(column as TeColumn)) return setMessage(`The ${column} panel is empty.`);
     setOpen((state) => ({ ...state, [column]: true }));
     setPriority((order) => [column, ...order.filter((item) => item !== column)]);
   };
@@ -235,6 +249,30 @@ export function TranscriptEditorPrototype() {
     const info = seams.find((item) => item.index === index);
     if (info) setMessage(info.kind === "cut" ? `Cut at ${tc(info.at)}, ${info.gap.toFixed(2)} s removed.` : `Edit point at ${tc(info.at)}.`);
   };
+  // Timeline tools. Marks and toggles are view state; cuts and markers are
+  // edits, so they go through history and ⌘Z.
+  const cutHere = () => {
+    const next = addEdit(edit, playhead);
+    if (next === edit) return;
+    commit("Add Edit", () => ({ edit: next }));
+  };
+  const markIn = () => setMarks((m) => ({ in: playhead, out: m.out != null && m.out > playhead ? m.out : null }));
+  const markOut = () => setMarks((m) => ({ in: m.in != null && m.in < playhead ? m.in : null, out: playhead }));
+  const takeMarked = (close: boolean) => {
+    if (!marked) return;
+    const [from, to] = marked;
+    commit(close ? "Extract" : "Lift", (present) => close
+      ? { edit: extractProgram(present.edit, from, to).edit, markers: present.markers.filter((t) => t <= from || t >= to).map((t) => t >= to ? t - (to - from) : t) }
+      : { edit: liftProgram(present.edit, from, to, (source) => sourceSpeakers[source] ?? []) });
+    setMarks({ in: null, out: null });
+    seek(from);
+    setMessage(`${close ? "Extracted" : "Lifted"} ${(to - from).toFixed(2)} s.`);
+  };
+  const addMarker = () => commit("Add Marker", (present) => present.markers.some((t) => Math.abs(t - playhead) < 1 / fps) ? null
+    : { markers: [...present.markers, playhead].sort((a, b) => a - b) });
+  const previousEdit = [...seams].reverse().find((item) => item.at < playhead - 1e-3) ?? null;
+  const nextEdit = seams.find((item) => item.at > playhead + 1e-3) ?? null;
+  const zoomBy = (direction: -1 | 0 | 1) => setZoom((z) => direction === 0 ? 1 : Math.max(1, Math.min(32, direction > 0 ? z * 2 : z / 2)));
   const openAsk = () => {
     showPanel("ask", "right");
     requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".cp-te-ask-input")?.focus());
@@ -265,8 +303,19 @@ export function TranscriptEditorPrototype() {
     if (event.key === " " && !target.closest("button, [role=separator], [role=tab]")) { event.preventDefault(); return playback.toggle(inSource ?? "record"); }
     if (event.metaKey && !event.ctrlKey && key === "z") { event.preventDefault(); return step(!event.shiftKey); }
     if (event.metaKey && !event.ctrlKey && key === "k") { event.preventDefault(); return openAsk(); }
+    if (event.metaKey && !event.ctrlKey && key === "y") { event.preventDefault(); return showPanel("history", "right"); }
     if (event.metaKey && event.ctrlKey && (key === "s" || key === "i")) { event.preventDefault(); return toggle(key === "s" ? "left" : "right"); }
+    const onEdit = !inSource;
+    if (onEdit && event.metaKey && !event.ctrlKey && !event.altKey) {
+      const action = ({ b: cutHere, l: () => setLooping((value) => !value), "=": () => zoomBy(1), "-": () => zoomBy(-1) } as Record<string, () => void>)[key];
+      if (action) { event.preventDefault(); return action(); }
+    }
+    if (onEdit && event.altKey && !event.metaKey && event.code === "KeyX") { event.preventDefault(); return setMarks({ in: null, out: null }); }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (onEdit && event.shiftKey && key === "z") { event.preventDefault(); return zoomBy(0); }
+    const tool = onEdit && !event.shiftKey ? ({ i: markIn, o: markOut, z: () => takeMarked(false), x: () => takeMarked(true), m: addMarker, n: () => setSnap((value) => !value),
+      a: () => previousEdit && chooseSeam(previousEdit.index), s: () => nextEdit && chooseSeam(nextEdit.index) } as Record<string, () => void>)[key] : undefined;
+    if (tool) { event.preventDefault(); return tool(); }
     if (key === "v") { event.preventDefault(); return insert(false); }
     if (key === "f") { event.preventDefault(); return event.shiftKey ? findInEdit() : findInSource(); }
     if (key === "escape" && drag) { setDrag(null); }
@@ -283,8 +332,8 @@ export function TranscriptEditorPrototype() {
   }, []);
 
   const panel = (tab: string) => {
-    if (tab === "library") return <TeSidebar groups={library(dock)} current="edit" onNew={() => { commit("New Edit", () => ({ edit: teWholeScene() })); setSelection({ anchor: 0, focus: 0, collapsed: true }); seek(0); setMessage("Started again from the whole Kitchen scene. Undo brings the last edit back."); }}
-      onOpen={(item) => item.id === "edit" ? setMessage("This edit is open.") : item.ready ? (showPanel(sourceTab(item.id), "source"), setFocusSource(item.id)) : setMessage(`${item.name} is a placeholder in this prototype.`)} />;
+    if (tab === "library") return <TeSidebar groups={library(dock)} current="edit" onNew={() => { commit("New Edit", () => ({ edit: teWholeScene() })); setSelection({ anchor: 0, focus: 0, collapsed: true }); seek(0); setMessage("New edit."); }}
+      onOpen={(item) => item.id === "edit" ? setMessage("") : item.ready ? (showPanel(sourceTab(item.id), "source"), setFocusSource(item.id)) : setMessage("Placeholder.")} />;
     if (tab === "inspector") return <TeInspector speakers={teSpeakers.filter((speaker) => talk[speaker.id] || placed.some((item) => item.word.speaker === speaker.id))} colors={colors} fps={fps}
       selected={selected} caretWord={placed[caret] ?? null} crosstalk={dryRun?.crosstalk ?? []} cutSeconds={dryRun?.seconds ?? 0} onDelete={remove} onMatch={findInSource}
       seam={seam == null ? null : (() => { const info = seams.find((item) => item.index === seam); return info ? { index: info.index, at: info.at, gap: info.gap, kind: info.kind, removed: info.removed.length, clipped: [...info.clipped].map(nameOf) } : null; })()}
@@ -293,12 +342,14 @@ export function TranscriptEditorPrototype() {
         if (seam == null || !info || info.kind !== "cut") return;
         commit("Restore Cut", (present) => ({ edit: healSeam(present.edit, seam) }));
         setSeam(null);
-        setMessage(`Restored ${info.gap.toFixed(2)} s and ${plural(info.removed.length, "word")}. Every track opened up again.`);
+        setMessage(`Restored ${info.gap.toFixed(2)} s.`);
       }}
       onCloseSeam={() => setSeam(null)}
       summary={{ running: total, sources: [...new Set(edit.segments.map((segment) => sourceOf(segment.source).short))], removedLines: ghosts.length,
         clips: edit.segments.length, cuts: seams.length, lifted: placed.filter((item) => item.muted).length, corrections: Object.keys(corrections).length }}
       talk={talk} />;
+    if (tab === "history") return <TeHistory log={log} onJump={(id) => moveHead(jump(log, id), log.states[id].pinned ?? log.states[id].label)}
+      onPin={(id, name) => setLog((state) => pin(state, id, name))} />;
     if (tab === "ask") return <TeAsk context={context} messages={messages} colors={colors} sourceName={(id) => sourceOf(id).short}
       lineTc={(line) => teTc(line.words[0].start, fps, sourceOf(line.source).startTc)}
       onSend={(prompt) => {
@@ -317,7 +368,7 @@ export function TranscriptEditorPrototype() {
         }
         setMessages((list) => list.map((entry) => entry.id === item.id ? { ...entry, applied: true } : entry));
         requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".cp-te-ask-input")?.focus());
-        setMessage(`${proposal.label}: done. ⌘Z undoes it.`);
+        setMessage(`${proposal.label}.`);
       }} />;
     if (isSourceTab(tab)) {
       const source = sourceOf(tab.slice(7));
@@ -331,7 +382,7 @@ export function TranscriptEditorPrototype() {
       </div>;
     }
     return <TeRecord fps={fps} playhead={playhead} total={total} marks={seams.map((item) => item.at)}
-      note={`${plural(count, "word")} · ${plural(seams.length, "edit point")}`}
+      note=""
       onScrub={seek} onScrubStart={playback.scrubStart} onScrubEnd={playback.scrubEnd}
       text={text.edit} onText={(style) => setText((state) => ({ ...state, edit: style }))}>
       <TeDocument speakers={teSpeakers} colors={colors} fps={fps} paragraphs={paras} placed={placed} selection={selection} current={currentKey}
@@ -355,10 +406,10 @@ export function TranscriptEditorPrototype() {
           if (!paragraph || !paras[index + direction]) return;
           const next = moveParagraph(teWords, edit, paragraph, direction < 0 ? paras[index - 1] : paras[index + 2] ?? null);
           if (next === edit) return;
-          commit("Move Paragraph", () => ({ edit: next }));
+          commit("Move Paragraph", () => ({ edit: next }), `move:${paragraph.words[0].word.id}`);
           const first = placeWords(teWords, next).findIndex((item) => item.word.id === paragraph.words[0].word.id);
           setSelection({ anchor: first, focus: first + paragraph.words.length - 1, collapsed: false });
-          setMessage(`Moved ${nameOf(paragraph.speaker)}'s paragraph ${direction < 0 ? "up" : "down"}. Its clips moved with it on every track.`);
+          setMessage(`Moved ${direction < 0 ? "up" : "down"}.`);
         }} />
       {prompt && <TePrompt who={names(prompt.who)} under={names(prompt.result.crosstalk.map((word) => word.speaker))} count={prompt.result.crosstalk.length}
         onEveryone={() => applyDelete(prompt.result, prompt.lift.size)} onOnly={() => lift(prompt.lift, prompt.who)} onCancel={() => { setPrompt(null); focusDoc(); }} />}
@@ -381,7 +432,7 @@ export function TranscriptEditorPrototype() {
           if (column === "record") setRecordView(home === "record" ? null : tab);
           if (isSourceTab(tab)) setFocusSource(tab.slice(7));
         }}
-        onClose={(tab) => { setDock((state) => closeTab(state, tab)); setMessage(`Closed ${tabLabel(tab)}. Open it again from the library${tab === "ask" ? " or the Ask button" : ""}.`); }}
+        onClose={(tab) => { setDock((state) => closeTab(state, tab)); setMessage(`Closed ${tabLabel(tab)}.`); }}
         onMove={moveTo}
         onDrag={(tab, x, y) => setDrag({ tab, x, y, target: dropTarget(x, y, tab) })}
         onDrop={(x, y) => { const target = drag ? dropTarget(x, y, drag.tab) : null; if (drag && target) moveTo(drag.tab, target.column, target.index); setDrag(null); }}
@@ -395,8 +446,8 @@ export function TranscriptEditorPrototype() {
   return <div ref={root} className={`cp-te${drag ? " is-dragging" : ""}`} data-testid="transcript-editor">
     <TeToolbar title="Kitchen Challenge, first pass" subtitle={`${sourceOf("mg3").name} · ${teScene.aaf}`}
       left={layout.shown.left} source={layout.shown.source} right={layout.shown.right}
-      onLeft={() => toggle("left")} onSource={() => toggle("source")} onRight={() => toggle("right")} onAsk={openAsk}
-      undo={history.past[history.past.length - 1]?.label ?? null} redo={history.future[0]?.label ?? null} onUndo={() => step(true)} onRedo={() => step(false)}
+      onLeft={() => toggle("left")} onSource={() => toggle("source")} onRight={() => toggle("right")} onAsk={openAsk} onHistory={() => showPanel("history", "right")}
+      undo={undoLabel} redo={redoLabel} onUndo={() => step(true)} onRedo={() => step(false)}
       showRemoved={showRemoved} onShowRemoved={() => setShowRemoved((value) => !value)} />
     <div className="cp-te-panes">
       {(["left", "source"] as const).map((column) => layout.shown[column] && <div key={column} className="cp-te-pane-pair">
@@ -425,7 +476,11 @@ export function TranscriptEditorPrototype() {
         speaking={speaking.map((id) => ({ id, name: nameOf(id), color: colors[id] }))} message={message} />
       <TeTimeline speakers={teSpeakers} edit={edit} seams={seams} placed={placed} selection={keys} playhead={playhead} fps={fps} colors={colors}
         solo={solo} mute={mute} onSeek={seek} seam={seam} onSeam={chooseSeam} sourceSpeakers={sourceSpeakers} sourceName={(id) => sourceOf(id).short}
-        onScrubStart={playback.scrubStart} onScrubEnd={playback.scrubEnd}
+        onScrubStart={playback.scrubStart} onScrubEnd={playback.scrubEnd} zoom={zoom} onZoom={setZoom} markers={markers}
+        tools={{ marks, canMark: count > 0, snap, follow: followHead, loop: looping, hasPrevious: !!previousEdit, hasNext: !!nextEdit,
+          onAddEdit: cutHere, onMarkIn: markIn, onMarkOut: markOut, onLift: () => takeMarked(false), onExtract: () => takeMarked(true), onMarker: addMarker,
+          onSnap: () => setSnap((value) => !value), onFollow: () => setFollowHead((value) => !value), onLoop: () => setLooping((value) => !value),
+          onPrevious: () => previousEdit && chooseSeam(previousEdit.index), onNext: () => nextEdit && chooseSeam(nextEdit.index) }}
         onSolo={(id) => setSolo((state) => { const next = new Set(state); if (!next.delete(id)) next.add(id); return next; })}
         onMute={(id) => setMute((state) => { const next = new Set(state); if (!next.delete(id)) next.add(id); return next; })} />
     </div>

@@ -10,7 +10,7 @@ export function TePrompt({ who, under, count, onEveryone, onOnly, onCancel }: Pr
   return <div className="cp-te-prompt" role="alertdialog" aria-labelledby="cp-te-prompt-title" aria-describedby="cp-te-prompt-body"
     onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onCancel(); } }}>
     <p id="cp-te-prompt-title" className="cp-te-prompt-title">{under} is talking under this.</p>
-    <p id="cp-te-prompt-body" className="cp-te-prompt-body">Cutting the time for everyone also removes {count === 1 ? "one word" : `${count} words`} of {under}'s. Removing only {who}'s words leaves the timing alone and silences them on {who}'s track.</p>
+    <p id="cp-te-prompt-body" className="cp-te-prompt-body">Cutting for everyone removes {count === 1 ? "one word" : `${count} words`} of {under}'s.</p>
     <div className="cp-te-prompt-actions">
       <button type="button" className="btn cp-te-btn" autoFocus onClick={onEveryone}>Cut for everyone</button>
       <button type="button" className="btn btn-ghost cp-te-btn" onClick={onOnly}>Only {who}'s words</button>

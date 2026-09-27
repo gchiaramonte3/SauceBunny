@@ -21,14 +21,14 @@ export const TE_PINNED = "edit";
 export const sourceTab = (source: string) => `source:${source}`;
 export const isSourceTab = (tab: string) => tab.startsWith("source:");
 /** Panels that can be closed and opened again. The edit, the library and the inspector are always there. */
-export const isClosable = (tab: string) => isSourceTab(tab) || tab === "ask";
+export const isClosable = (tab: string) => isSourceTab(tab) || tab === "ask" || tab === "history";
 
 export function defaultDock(): TeDock {
   return {
     left: { tabs: ["library"], active: "library" },
     source: { tabs: [sourceTab("mg3")], active: sourceTab("mg3") },
     record: { tabs: [TE_PINNED], active: TE_PINNED },
-    right: { tabs: ["inspector", "ask"], active: "inspector" },
+    right: { tabs: ["inspector", "history", "ask"], active: "inspector" },
   };
 }
 

@@ -123,7 +123,7 @@ export function TeDocument(props: Props) {
         props.onSelect({ anchor: first, focus: first + props.paragraphs[paragraph].words.length - 1, collapsed: false }, false);
       }
     }}>
-    <p id="cp-te-doc-help" className="cp-visually-hidden">Arrow keys move by word, Shift extends, double-click selects a line and triple-click a paragraph. Delete removes from every track and leaves the line struck through so it can be restored; Shift-Delete removes from one speaker's track. Option-drag scrubs. Option-Up and Option-Down move a paragraph, Return corrects a word's text.</p>
+    <p id="cp-te-doc-help" className="cp-visually-hidden">Arrows move by word. Double-click a line, triple-click a paragraph. Delete cuts all tracks; Shift-Delete one speaker. Option-drag scrubs. Option-Up/Down moves a paragraph. Return corrects a word.</p>
     {props.paragraphs.map((paragraph, index) => {
       const first = offset;
       offset += paragraph.words.length;

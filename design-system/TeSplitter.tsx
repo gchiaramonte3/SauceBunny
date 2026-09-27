@@ -23,7 +23,7 @@ export function TeSplitter({ between, label, value, min, max, invert, onChange, 
   return <div className={`cp-te-split is-${between}`} role="separator" tabIndex={0}
     aria-orientation={between === "column" ? "vertical" : "horizontal"} aria-label={label}
     aria-valuenow={Math.round(value)} aria-valuemin={min} aria-valuemax={max}
-    title={`${label}. Drag, or use the arrow keys. Double-click to reset.`}
+    title={`${label}. Double-click to reset.`}
     onPointerDown={(event) => {
       if (event.button !== 0) return;
       event.currentTarget.setPointerCapture(event.pointerId);

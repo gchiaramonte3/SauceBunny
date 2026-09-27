@@ -9,7 +9,9 @@ export type TeTarget = string;
  * Scrubbing pauses playback and picks it up again from where you let go, so
  * a drag never fights the clock.
  */
-export function useTePlayback(limits: Record<TeTarget, number>) {
+export type TeLoop = { target: TeTarget; from: number; to: number } | null;
+
+export function useTePlayback(limits: Record<TeTarget, number>, loop: TeLoop = null) {
   const [heads, setHeads] = useState<Record<TeTarget, number>>({ record: 0 });
   const [play, setPlay] = useState<{ target: TeTarget; from: number; at: number } | null>(null);
   const [scrubbing, setScrubbing] = useState(false);
@@ -19,16 +21,18 @@ export function useTePlayback(limits: Record<TeTarget, number>) {
 
   useEffect(() => {
     if (!play) return;
+    const looping = loop && loop.target === play.target && loop.to > loop.from ? loop : null;
     let frame = 0;
     const tick = (now: number) => {
       const position = play.from + Math.max(0, now - play.at) / 1000;
+      if (looping && position >= looping.to) { setPlay({ target: play.target, from: looping.from, at: now }); return; }
       if (position >= limit) { setHeads((current) => ({ ...current, [play.target]: limit })); setPlay(null); return; }
       setHeads((current) => ({ ...current, [play.target]: position }));
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [play, limit]);
+  }, [play, limit, loop]);
 
   const head = (target: TeTarget) => heads[target] ?? 0;
   const seek = (target: TeTarget, value: number) => {
@@ -39,7 +43,9 @@ export function useTePlayback(limits: Record<TeTarget, number>) {
   };
   const toggle = (target: TeTarget) => {
     if (play?.target === target) return setPlay(null);
-    const from = head(target) >= (limits[target] ?? 0) - 0.01 ? 0 : head(target);
+    const inLoop = loop && loop.target === target && loop.to > loop.from ? loop : null;
+    const from = inLoop && (head(target) < inLoop.from || head(target) >= inLoop.to - 0.01) ? inLoop.from
+      : head(target) >= (limits[target] ?? 0) - 0.01 ? 0 : head(target);
     setHeads((current) => ({ ...current, [target]: from }));
     setPlay({ target, from, at: performance.now() });
   };

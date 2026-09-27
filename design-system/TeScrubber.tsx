@@ -25,7 +25,7 @@ export function TeScrubber({ label, value, max, text, marks = [], onScrub, onScr
   const end = () => { if (held.current) { held.current = false; onScrubEnd?.(); } };
   return <div ref={rail} className="cp-te-scrub" role="slider" tabIndex={0} aria-label={label}
     aria-valuemin={0} aria-valuemax={Math.round(max)} aria-valuenow={Math.round(value)} aria-valuetext={text}
-    title={`${label}. Drag to scrub, or use the arrow keys.`}
+    title={label}
     style={{ "--te-at": `${(Math.min(value, max) / span) * 100}%` } as React.CSSProperties}
     onPointerDown={(event) => {
       if (event.button !== 0) return;

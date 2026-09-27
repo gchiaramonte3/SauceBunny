@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
 import { tePeaks } from "./transcript-editor-fixture";
 
-/** One clip's generated waveform, drawn in the lane's speaker colour. */
-export function TeWave({ source, speaker, srcIn, srcOut, muted }: { source: string; speaker: string; srcIn: number; srcOut: number; muted: [number, number][] }) {
+/** One clip's generated waveform, in the lane's ink. A lifted stretch draws
+ *  flat, or as a low bed of room tone when that is switched on. */
+export function TeWave({ source, speaker, srcIn, srcOut, muted, roomTone }: { source: string; speaker: string; srcIn: number; srcOut: number; muted: [number, number][]; roomTone: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -21,9 +22,12 @@ export function TeWave({ source, speaker, srcIn, srcOut, muted }: { source: stri
       const cy = h / 2, amp = cy - 2 * dpr;
       peaks.forEach(([min, max], index) => {
         const t = srcIn + ((index + 0.5) / peaks.length) * (srcOut - srcIn);
-        ctx.globalAlpha = muted.some(([a, b]) => t >= a && t <= b) ? 0.18 : 0.85;
+        const lifted = muted.some(([a, b]) => t >= a && t <= b);
+        const scale = lifted ? (roomTone ? 0.08 + 0.04 * Math.abs(Math.sin(index * 1.7)) : 0) : 1;
+        ctx.globalAlpha = lifted ? (roomTone ? 0.55 : 0.18) : 0.85;
         const x = (index / peaks.length) * w;
-        ctx.fillRect(x, cy - max * amp, Math.max(1, w / peaks.length - 0.25), Math.max(dpr * 0.75, (max - min) * amp));
+        const top = lifted ? scale : max, bottom = lifted ? -scale : min;
+        ctx.fillRect(x, cy - top * amp, Math.max(1, w / peaks.length - 0.25), Math.max(dpr * 0.75, (top - bottom) * amp));
       });
       ctx.globalAlpha = 0.2;
       ctx.fillRect(0, cy - 0.5, w, 1);
@@ -32,6 +36,6 @@ export function TeWave({ source, speaker, srcIn, srcOut, muted }: { source: stri
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [source, speaker, srcIn, srcOut, muted]);
+  }, [source, speaker, srcIn, srcOut, muted, roomTone]);
   return <canvas ref={ref} className="cp-te-wave" aria-hidden="true" />;
 }

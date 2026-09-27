@@ -18,7 +18,7 @@ export function TeSidebar({ groups, current, onOpen, onNew }: Props) {
       <ul className="cp-te-side-list">
         {group.items.map((item) => <li key={item.id}>
           <button type="button" className={`cp-te-side-item${item.id === current ? " is-current" : ""}${item.open ? " is-open" : ""}`} aria-current={item.id === current || item.open ? "true" : undefined}
-            onClick={() => onOpen(item)} title={item.ready ? `Open ${item.name} as a source tab` : `${item.name}. A placeholder in this prototype.`}>
+            onClick={() => onOpen(item)} title={item.ready ? undefined : "Placeholder"}>
             {group.title === "Edits" ? <IconTranscript size={13} /> : <IconFolder size={13} />}
             <span className="cp-te-side-text"><span className="cp-te-side-name">{item.name}</span><span className="cp-te-side-detail">{item.detail}</span></span>
           </button>

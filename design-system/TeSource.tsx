@@ -96,12 +96,12 @@ export function TeSource(props: Props) {
       })}
     </div>
     <footer className="cp-te-src-foot">
-      <span className="cp-te-pane-note" aria-live="polite">{range ? `${range[1] - range[0] + 1} words selected` : `${inEdit} of ${count} words in the edit`}</span>
+      <span className="cp-te-pane-note" aria-live="polite">{range ? `${range[1] - range[0] + 1} selected` : `${inEdit}/${count} used`}</span>
       <div className="cp-te-src-actions">
         <button type="button" className="btn btn-ghost cp-te-btn" disabled={!range} onClick={props.onInsert}
-          title="Insert the selected words at the edit's caret (V)">Insert at caret<kbd className="cp-te-kbd">V</kbd></button>
+          title="Insert at the edit's caret (V)">Insert<kbd className="cp-te-kbd">V</kbd></button>
         <button type="button" className="btn btn-ghost cp-te-btn" disabled={!range} onClick={props.onAppend}
-          title="Add the selected words to the end of the edit">Add to end</button>
+          title="Append to the edit">Append</button>
       </div>
     </footer>
   </section>;

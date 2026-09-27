@@ -1,5 +1,4 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { IconSparkles } from "../src/components/Icons";
 import { mentionOptions, mentionQuery, type TeAgentContext, type TeLine, type TeMention, type TeReply } from "./transcript-editor-agent";
 
 export type TeAskMessage = { id: number; role: "you" | "ask"; text: string; reply?: TeReply; applied?: boolean };
@@ -55,7 +54,6 @@ export function TeAsk(props: Props) {
   };
   const send = (text: string) => { if (text.trim()) { props.onSend(text.trim()); setDraft(""); setMenu(null); } };
   return <section className="cp-te-ask" aria-label="Ask">
-    <p className="cp-te-ask-note"><IconSparkles size={13} /> Scripted in this prototype. In the app, Ask reads the transcripts you mention with local Qwen, or Claude with your own key, and every change it suggests waits for you to apply it.</p>
     <div ref={log} className="cp-te-ask-log" role="log" aria-live="polite" aria-label="Conversation">
       {props.messages.length === 0 && <div className="cp-te-ask-starters">{starters.map((starter) =>
         <button key={starter} type="button" className="btn btn-ghost cp-te-btn" onClick={() => send(starter)}>{starter}</button>)}</div>}
@@ -82,8 +80,8 @@ export function TeAsk(props: Props) {
           <span className="cp-te-chip">{option.token}</span><span className="cp-te-mention-kind">{option.kind === "edit" ? "This edit" : option.kind === "source" ? `Source · ${option.label}` : "Person"}</span>
         </li>)}
       </ul>}
-      <label className="cp-visually-hidden" htmlFor={`${id}-input`}>Ask about the transcripts. Type @ to mention a source, a person or the edit.</label>
-      <textarea id={`${id}-input`} ref={input} className="cp-te-ask-input" rows={2} value={draft} placeholder="Ask about your footage. Type @ to mention a source or person."
+      <label className="cp-visually-hidden" htmlFor={`${id}-input`}>Ask. Type @ to mention a source, person or the edit.</label>
+      <textarea id={`${id}-input`} ref={input} className="cp-te-ask-input" rows={2} value={draft} placeholder="Ask… @ to mention"
         role="combobox" aria-expanded={!!menu && matches.length > 0} aria-controls={`${id}-mentions`} aria-autocomplete="list"
         aria-activedescendant={menu && matches.length ? `${id}-m-${menu.index}` : undefined}
         onChange={(event) => { setDraft(event.target.value); track(event.target.value, event.target.selectionStart); }}

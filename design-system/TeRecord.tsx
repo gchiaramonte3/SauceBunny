@@ -17,7 +17,7 @@ type Props = {
 export function TeRecord(props: Props) {
   return <section className="cp-te-record" aria-label="Edit" style={teTextVars(props.text)}>
     <div className="cp-te-tools">
-      <span className="cp-te-tools-note">{props.note}</span>
+      {props.note && <span className="cp-te-tools-note">{props.note}</span>}
       <TeScrubber label="Edit position" value={props.playhead} max={props.total} text={teTc(props.playhead, props.fps)} marks={props.marks}
         onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} />
       <span className="cp-te-tools-tc">{teTc(props.playhead, props.fps)}<span className="cp-te-tools-of"> / {secondsToTc(props.total, props.fps)}</span></span>

@@ -67,6 +67,19 @@ Phase 1, and the text and the tracks are drawn from the same data.
     line spacing.
 11. Resize the window down to 1100×700. The left panel folds into the Edit's
     tabs rather than vanishing.
+12. Press **T** on a timeline track (beside S and M) to see its words over
+    the waveform, where they are said. **View ▸ Text on every track** turns
+    it on for all of them.
+13. Timeline tools, from the keyboard or the icon row over the tracks:
+    - **⌘B** cuts every track at the playhead;
+    - **I** and **O** mark a range, then **Z** lifts it (the time stays,
+      silent) or **X** extracts it (everything closes up);
+    - **M** drops a marker, **A** and **S** jump between edit points;
+    - **N** snap, **⌘L** loop, **⌘=** / **⌘−** / **⇧Z** zoom.
+14. Make three deletions, undo two, then make a different one. Open
+    **History** (⌘Y): the two undone steps are still there under
+    **2 undone**. Click one to go back to it, and ★ to pin a state with a
+    name.
 
 ### What to approve
 
@@ -222,8 +235,9 @@ it.
 
 ## Text settings
 
-A gear on the Edit and on each Source sets that pane's typeface (serif or
-sans), size (11 to 24 pt) and line spacing (tight, normal or loose). It
+A gear on the Edit and on each Source sets that pane's typeface (Nunito
+Sans, the app's face, by default; or Serif, which is macOS's own New York,
+not a web font), size (11 to 24 pt) and line spacing (tight, normal or loose). It
 shows a sample line as you change it. The panes are set separately, so the
 source can stay compact while the edit reads large.
 
@@ -237,13 +251,23 @@ source can stay compact while the edit reads large.
   now" names all move on every pointer move, not on release. Playback pauses
   while you hold and resumes where you let go. The Edit's scrub rail and
   ⌥-drag in the text do the same.
-- Each clip is a segment. Its waveform is that speaker's mic, in their
-  colour; muted ranges draw faint.
+- Each clip is a segment, drawn exactly as AAF Audio draws a lane: one
+  violet for every clip and waveform, deep violet on a soloed track, grey on
+  the others while anything is soloed. Speaker colours stay in the text; on
+  the timeline they are a 6 px swatch by the name, so a lane does not turn
+  into a rainbow. A lifted range draws flat, or as a low bed when
+  **Audio ▸ Room tone in lifts** is on.
+- **S, M and T** sit together on each track head at 18×16, one size down from
+  AAF Audio's. **T** puts that track's words over its waveform where they are
+  said, using AAF Audio's own layout (`src/lib/multitrack-text-layout.ts`):
+  timed lines when they fit, passage counts when they do not. One change for
+  the edit: a column holding a single line shows the line, not "1 passage".
 - Every edit point has a marker on the ruler (a button that names it: "Cut at
   01:00:06:05, 4.79 s removed") and a line through every lane. A dashed line
   is a through edit. An amber tick on a lane means the cut clips one of that
   speaker's words, usually crosstalk.
-- The selection shows as a band across every lane.
+- The selection shows as a band across every lane; a marked In to Out shows
+  on the ruler and as a faint band across the lanes.
 - Solo and Mute per lane are for listening only. They do not edit.
 - **It never scrolls sideways on its own.** Zoom in, then pan with the slider.
   A Mac with a mouse attached always shows classic scroll bars, and a sideways
@@ -252,6 +276,33 @@ source can stay compact while the edit reads large.
   of media is not a second of timecode: adding 3,600 seconds and formatting
   lands 3.6 seconds short of 01:00:00:00, which is the bug the prototype's
   first draft had.
+
+### Tools
+
+One row of icons over the ruler. No heading and no sentence: it is obviously
+a timeline, and an instruction in a toolbar is the thing no pro editor puts
+there (research below). Each icon's tooltip names it and its key.
+
+| Group | Tool | Key | Precedent |
+|---|---|---|---|
+| Actions | Add edit at playhead | ⌘B | FCP ⌘B, Premiere ⌘K (⌘K is the app's command palette) |
+| | Mark in / Mark out | I / O | Every NLE |
+| | Lift in to out, leave the gap | Z | Avid Z |
+| | Extract in to out, close the gap | X | Avid X |
+| | Add marker | M | Premiere, FCP, Resolve |
+| Modes | Snap (edit points, markers, marks, word edges, within 8 px) | N | FCP, Resolve |
+| | Follow playhead (turns the page when it runs off) | none | Premiere's page scroll |
+| | Loop (in to out, else the whole edit) | ⌘L | Premiere, FCP |
+| Navigate | Previous / next edit | A / S | Avid |
+| View ▾ | Waveforms, Text on every track, Track height S/M/L | | Resolve's View Options, FCP's Clip Appearance |
+| Audio ▾ | Crossfade at cuts (off, 1, 2, 4 frames), Room tone in lifts | | Descript's room tone |
+| | Zoom out / Fit / in | ⌘− / ⇧Z / ⌘= | FCP |
+
+Cuts, lifts, extracts and markers are edits and go through the undo log;
+marks, snap, follow, loop and zoom are view state. Left out on purpose: a
+tool palette (one select-and-scrub mode is enough when the text does the
+editing), linked selection (every clip already spans every lane) and
+position lock.
 
 ### Edit on frames, fade in preview
 
@@ -265,6 +316,85 @@ source can stay compact while the edit reads large.
   reads as abrupt; above 50 ms it blurs speech.
 - The AAF gets hard cuts by default. An option writes 2-frame audio dissolves,
   but only where every track has a pause at least that long.
+
+## Undo log
+
+Every state the edit has been in is kept. That is the "massive undo log",
+and it is deliberately more than any NLE does:
+
+| | Levels | Survives quit | History list | Branches |
+|---|---|---|---|---|
+| Premiere | 32 by default | no | yes | no |
+| Final Cut Pro | unlimited in a session | no (15-minute library backups) | no | no |
+| Resolve | about 20 shown | no (live save + timed backups) | yes | no |
+| Pro Tools, Logic | 32 / session | no | yes | no |
+| Descript | version history | yes, in the cloud | yes | no |
+| vim | 1000, `undofile` | yes | `:undolist` | yes (a tree) |
+| **Sauce Bunny** | **every step** | **yes, on disk** | **yes** | **yes** |
+
+(From search summaries of each vendor's docs; the vendors' own pages could
+not be fetched from this session.)
+
+**How it behaves.** It is a tree, like vim's, not a stack:
+
+- Undo moves to the parent state, redo to the child you came from.
+- A change after an undo starts a new branch. The undone steps are **not**
+  thrown away: History shows them as "N undone" under the step they left
+  from, and clicking one goes there.
+- Jumping to any state records nothing and loses nothing; redo then retraces
+  the path you jumped along.
+- Rapid repeats of one action coalesce into one step (a paragraph nudged
+  five times within 500 ms is one undo), as Yjs's UndoManager does.
+- Any state can be pinned with a name ("Client cut v2"); a pinned state is
+  never coalesced into.
+
+The prototype holds this in memory (`design-system/transcript-editor-history.ts`,
+pure and tested), because the catalog may not write to disk. The panel is
+**History**, a dockable tab (⌘Y, or the clock beside undo and redo).
+
+**In the app: a database.** SQLite through `rusqlite` (MIT, `bundled`, so no
+system library), written only from Rust:
+
+```sql
+CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);          -- schema_version
+CREATE TABLE timelines(
+  id TEXT PRIMARY KEY, title TEXT, source_key TEXT,            -- NFC path / fingerprint
+  created_at INTEGER, head_state_id INTEGER);
+CREATE TABLE states(                                           -- one row per step
+  id INTEGER PRIMARY KEY, timeline_id TEXT NOT NULL REFERENCES timelines(id),
+  parent_id INTEGER REFERENCES states(id),                     -- the tree
+  created_at INTEGER NOT NULL, label TEXT NOT NULL,            -- "Delete 3 Words"
+  op_json TEXT NOT NULL, inverse_json TEXT NOT NULL,
+  origin TEXT NOT NULL DEFAULT 'local',                        -- local | peer:<id>
+  session_id TEXT, pinned_name TEXT);
+CREATE INDEX states_tl ON states(timeline_id, id);
+CREATE INDEX states_parent ON states(parent_id);
+CREATE TABLE checkpoints(                                      -- every 100 steps
+  state_id INTEGER PRIMARY KEY REFERENCES states(id),
+  doc_json TEXT NOT NULL, doc_hash TEXT NOT NULL);
+```
+
+- **Ops plus checkpoints, not a snapshot per step.** An op is about 200 bytes
+  and an edit about 5 KB, so 100,000 steps come to roughly 25 MB, and
+  reaching any state is "load the nearest checkpoint, replay at most 99 ops",
+  well under a millisecond. A snapshot per step would be 500 MB.
+- **Where: `app_data_dir()`, not `~/Documents`.** Documents is iCloud-synced
+  for many users, a live SQLite file has `-wal` and `-shm` side files that
+  iCloud can evict separately, and this project has already lost a git
+  packfile, a DMG and the transcript scan to that eviction. The readable
+  deliverable stays in Documents: a debounced atomic JSON of the current
+  state, which is what a user copies or backs up.
+- **Crash safety:** one writer connection, WAL, `synchronous=FULL` (edit
+  rates make its cost invisible), `integrity_check` on open, a store-version
+  guard like every other store (`store-version-contract`), and a flush on
+  `pagehide` (`quit-flush-contract`).
+- **Retention:** keep everything. Past about 200 MB, offer Compact History,
+  which keeps every checkpoint and pinned state and thins old ops; it never
+  runs on its own.
+- **Co-review:** each step records its origin, so undo can mean "my last
+  step" in a shared session, and redo follows Figma's rule (undo, copy, redo
+  back leaves the document unchanged). This is the same problem
+  `undo-redo-fidelity-contract` already pins for review notes.
 
 ## Panels
 
@@ -348,7 +478,27 @@ edits a plain string only: selection binding needs 15, and styled text needs
 26.
 
 **Older Macs.** The app's floor is macOS 14, which means WKWebView could be
-anything from Safari 17.0 to 26.x. The prototype is built for 17.0:
+anything from Safari 17.0 to 26.x. The prototype is built for 17.0, and was
+audited against MDN's browser-compat-data rather than from memory:
+
+| Used by | Feature | Safari since |
+|---|---|---|
+| Tab drag | Pointer capture | 13 |
+| Tab drop target | `document.elementsFromPoint` | 11.1 |
+| Tab strip overflow, timeline width | `ResizeObserver` | 13.1 |
+| Tab strip | `Array.prototype.at` | 15.4 |
+| Tab lookup | `CSS.escape` | 10.1 |
+| Clip and selection tints | `color-mix()` | 16.2 |
+| Focus rings | `:focus-visible` | 15.4 |
+| Track rows | `display: contents` in grid | 11.1 |
+
+The audit found one real break, and it was not in the tabs:
+`text-decoration: line-through dotted var(--fg-4)` (a shorthand carrying a
+style and a colour) is only supported from **Safari 26.2**. Before that
+WebKit drops the whole declaration, so a removed word lost its strike-through
+on every Mac short of the newest. Production had the same bug on one rule in
+`ai.css`. Both now use the longhands, and `text-decoration-contract` fails
+the build if a shorthand carries anything but the line again.
 
 - No anchor positioning, `scrollbar-gutter`, View Transitions, `field-sizing`
   or `content-visibility`.
@@ -373,10 +523,20 @@ It follows [DESIGN.md](DESIGN.md) and the production stylesheet rules:
   - Green appears nowhere, because nothing here is a positive outcome or a
     live feed.
   - Warnings (a clipped word, crosstalk) use `--warning`.
-  - Speaker colours are five well-separated hues from `SPEAKER_SOLIDS`.
-- **Type:** chrome is Nunito Sans at the `--text-*` scale. The edit's prose is
-  the transcript reader's serif at 15 px, so reading and editing a transcript
-  look like the same thing.
+  - Speaker colours are seven hues from `SPEAKER_SOLIDS`, in the text and the
+    track swatch only. The timeline uses AAF Audio's violet lanes.
+  - Menus reuse production's `cp-view-popover` / `cp-popover-item` (the
+    monitor's View menu), opening upward over the timeline.
+- **Type:** Nunito Sans everywhere, at the `--text-*` scale, including the
+  edit's prose by default. An earlier draft set the prose in a serif web font
+  the app never loads, so it fell back to Georgia; Serif is now a choice in
+  the gear and uses the system's New York.
+- **Copy:** labels are verbs or nouns, tooltips name the control and its key
+  and nothing else (Apple HIG: "Be brief", 60 to 75 characters at most,
+  "avoid repeating a control's name"), status messages report the result in
+  one clause ("Deleted 3 words, 1.20 s."), and no row exists to explain
+  another row. The timeline's "No edits yet. Delete words in the transcript
+  and every track closes up." was the example that started this pass.
 - **Controls:** buttons are the catalog's 26 px compact recipe, icon buttons
   are the transport's `cp-icon-btn`, and the Source | Edit switch is
   `cp-segmented`. Every class carries the `cp-` prefix. There are no inline
@@ -447,21 +607,26 @@ useful on its own.
 6. **Deletion granularity:** any word, or snap to phrase boundaries?
 7. **Export layout:** keep the AAF's track numbers (as the prototype does), or
    re-lay tracks in speaker order? Write 2-frame dissolves by default?
-8. **Neo Main:** its timeline rules and track assignment were asked to be the
+8. **Undo database:** is `app_data_dir()` right for the log (safe from iCloud,
+   but not in your backups of Documents unless Time Machine covers the whole
+   disk), and is "keep everything, offer compaction past 200 MB" the right
+   retention?
+9. **Neo Main:** its timeline rules and track assignment were asked to be the
    baseline, but the repository is not reachable from this session. Push it
    (a private repo is fine) or have a session on the Mac summarise its
    timeline model, and this section gets revised against it.
 
 ## Known gaps in the prototype
 
-- No audio, no waveform from real media, no persistence (the panel layout
-  resets on reload).
+- No audio, no waveform from real media, no persistence: the undo log and
+  the panel layout are in memory and reset on reload.
 - Ask is scripted, not a model, and cannot yet revise its own proposal.
 - A tab cannot be dragged out into a floating window, and columns cannot be
   split top and bottom.
-- Overwrite, Lift and Extract on marked ranges, trims at an edit point
-  (ripple, roll, slip), pause tightening, filler words and J/L cuts are not
-  drawn yet.
+- Overwrite, trims at an edit point (ripple, roll, slip), pause tightening
+  and J/L cuts are not drawn yet. Crossfade and room tone are drawn, not
+  heard. Markers are program times and do not ride a later ripple edit
+  except Extract.
 - The waveform does not follow Solo and Mute; they only dim the lane.
 
 ## Sources

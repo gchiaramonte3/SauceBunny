@@ -232,6 +232,27 @@ export function spliceIn(edit: TeEdit, source: string, srcIn: number, srcOut: nu
   return { ...split.edit, segments };
 }
 
+/** Add Edit: cut every track at a program position and remove nothing. */
+export function addEdit(edit: TeEdit, program: number): TeEdit {
+  const split = splitAt(edit, program);
+  return split.edit.segments.length === edit.segments.length ? edit : split.edit;
+}
+
+/**
+ * Lift: silence a program range on every track the source has a mic for,
+ * leaving the time where it was. The mirror of extractProgram, which closes up.
+ */
+export function liftProgram(edit: TeEdit, programIn: number, programOut: number, speakersOf: (source: string) => string[]): TeEdit {
+  const mutes = [...edit.mutes];
+  let at = 0;
+  for (const segment of edit.segments) {
+    const from = Math.max(programIn, at), to = Math.min(programOut, at + segmentLength(segment));
+    if (to > from) for (const speaker of speakersOf(segment.source)) mutes.push({ source: segment.source, speaker, srcIn: segment.srcIn + from - at, srcOut: segment.srcIn + to - at });
+    at += segmentLength(segment);
+  }
+  return mutes.length === edit.mutes.length ? edit : { ...edit, mutes };
+}
+
 /** Take a program range out of the edit, returning the pieces that were in it. */
 export function extractProgram(edit: TeEdit, programIn: number, programOut: number): { edit: TeEdit; pieces: TeSegment[] } {
   const first = splitAt(edit, programIn);
