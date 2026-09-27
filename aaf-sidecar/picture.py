@@ -159,8 +159,9 @@ def resolve(seg, rate, steps):
             timecode = mob_timecode(mob)
             if timecode is not None and (summary is None or clip['source_start_frame'] is None):
                 _, tc, tc_rate = timecode
-                clip.update(source_start_frame=int(tc.start or 0) + round_sample(position * tc_rate / rate),
-                            source_timecode_fps=int(tc.fps), source_drop_frame=bool(tc.drop))
+                frame = int(tc.start or 0) + round_sample(position * tc_rate / rate)
+                if frame >= 0:
+                    clip.update(source_start_frame=frame, source_timecode_fps=int(tc.fps), source_drop_frame=bool(tc.drop))
         seg = slot.segment
     if clip['kind'] == 'muted':
         clip['group'] = False
