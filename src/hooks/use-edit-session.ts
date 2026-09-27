@@ -30,15 +30,19 @@ export function useEditSession(editId: string | null) {
   }), []);
 
   // One at a time, in order. A failure reports and leaves the head as it was.
-  const run = useCallback((work: (id: string) => Promise<EditHead | null>) => {
+  // Resolves true only when the log took a new head, so a caller can tell a
+  // step that happened from one that failed or had nothing to do.
+  const run = useCallback((work: (id: string) => Promise<EditHead | null>): Promise<boolean> => {
     const id = current.current.id;
-    if (!id) return Promise.resolve();
+    if (!id) return Promise.resolve(false);
     const next = queue.current.then(async () => {
       try {
         const result = await work(id);
         if (result && current.current.id === id) { setHead(result); setError(null); await refreshHistory(id); }
+        return !!result;
       } catch (cause) {
         if (current.current.id === id) setError(formatError(cause));
+        return false;
       }
     });
     queue.current = next;

@@ -3,7 +3,7 @@ import type { EditDocument } from "../bindings/EditDocument";
 import type { EditMarker } from "../bindings/EditMarker";
 import type { EditRate } from "../bindings/EditRate";
 import type { EditSegment } from "../bindings/EditSegment";
-import { GAP, type Timeline, type TimelineWord } from "./edit-model";
+import { GAP, isGap, programToSource, segmentLength, segmentStarts, type Timeline, type TimelineWord } from "./edit-model";
 import { framesToTc, secondsToFrames } from "./timecode";
 
 /**
@@ -29,6 +29,30 @@ export const toSeconds = (frames: number, rate: EditRate) => (frames * rate.deno
 
 /** A marker in program seconds, as the editor holds it. */
 export type TimelineMarker = { id: string; at: number; track: string | null; name: string; comment: string; color: string };
+
+/**
+ * Markers ride on the material under them, as Avid's do: a change that moves
+ * that material moves the marker, and one that removes it removes the marker.
+ * A source range that plays twice keeps the marker on the appearance nearest
+ * where it was.
+ */
+export function rippleMarkers(before: Timeline, after: Timeline, markers: TimelineMarker[]): TimelineMarker[] {
+  if (before.segments === after.segments || !markers.length) return markers;
+  const was = segmentStarts(before), now = segmentStarts(after);
+  return markers.flatMap((marker) => {
+    const under = programToSource(before, marker.at);
+    if (!under) return [];
+    const segment = before.segments[under.segment], offset = marker.at - was[under.segment];
+    let best: number | null = null;
+    after.segments.forEach((next, index) => {
+      const position = isGap(segment)
+        ? next.id === segment.id && offset <= segmentLength(next) + 1e-6 ? now[index] + offset : null
+        : next.source === segment.source && under.source >= next.srcIn - 1e-6 && under.source <= next.srcOut + 1e-6 ? now[index] + under.source - next.srcIn : null;
+      if (position != null && (best == null || Math.abs(position - marker.at) < Math.abs(best - marker.at))) best = position;
+    });
+    return best == null ? [] : [{ ...marker, at: best }];
+  });
+}
 
 /** The document as the editor works on it: the model plus what rides along. */
 export type OpenEdit = { document: EditDocument; timeline: Timeline; markers: TimelineMarker[] };

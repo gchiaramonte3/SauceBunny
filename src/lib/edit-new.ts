@@ -23,14 +23,25 @@ function sourceId(edit: EditDocument | null): string {
   return `s${index}`;
 }
 
-/** Record timecode starts where Avid starts a new sequence: 01:00:00:00. */
-const hourOne = (numerator: number, denominator: number) => Math.round((3600 * numerator) / denominator);
+/**
+ * Record timecode starts where Avid starts a new sequence: 01:00:00:00, as a
+ * frame count in the sequence's own timecode (24 per second at 23.976, and at
+ * 29.97 drop-frame the hour is 107,892 frames because 108 labels are skipped).
+ */
+export function hourOne(timecodeFps: number, dropFrame: boolean): number {
+  const fps = Math.max(1, Math.round(timecodeFps));
+  if (!dropFrame) return 3600 * fps;
+  const skipped = Math.round(fps / 15);
+  return 3600 * fps - skipped * (60 - 6);
+}
+
+const hourOf = (document: AafDocument) => hourOne(document.manifest.timecode_fps || Math.ceil(document.manifest.edit_rate.numerator / document.manifest.edit_rate.denominator), document.manifest.drop_frame);
 
 export function editFromSequence(document: AafDocument, title: string, whole: boolean): EditDocument {
   const rate = document.manifest.edit_rate;
   const empty: EditDocument = {
     schema_version: EDIT_SCHEMA_VERSION, title: title.trim() || document.manifest.name, edit_rate: { numerator: rate.numerator, denominator: rate.denominator },
-    start_timecode_frames: hourOne(rate.numerator, rate.denominator), sources: [], tracks: [], segments: [], mutes: [], markers: [],
+    start_timecode_frames: hourOf(document), sources: [], tracks: [], segments: [], mutes: [], markers: [],
   };
   const edit = addSource(empty, document);
   const source = edit.sources[0].id;
@@ -39,13 +50,19 @@ export function editFromSequence(document: AafDocument, title: string, whole: bo
     : edit;
 }
 
-/** Add a sequence as a source, matching its people to the edit's lanes by name. */
-export function addSource(edit: EditDocument, document: AafDocument): EditDocument {
+/**
+ * Add a sequence as a source, matching its people to the edit's lanes by name.
+ * An edit with no sources yet takes the first one's frame rate and timecode:
+ * an empty string out is only a placeholder until something is cut into it.
+ */
+export function addSource(target: EditDocument, document: AafDocument): EditDocument {
   const rate = document.manifest.edit_rate;
+  const edit = target.sources.length || target.segments.length ? target
+    : { ...target, edit_rate: { numerator: rate.numerator, denominator: rate.denominator }, start_timecode_frames: hourOf(document) };
   if (edit.sources.length && (rate.numerator * edit.edit_rate.denominator !== edit.edit_rate.numerator * rate.denominator)) {
     throw new Error(`${document.manifest.name} runs at a different frame rate from this edit, so it cannot be cut into it.`);
   }
-  if (edit.sources.some((source) => source.document_id === document.id)) return edit;
+  if (edit.sources.some((source) => source.document_id === document.id)) return target;
   const id = sourceId(edit);
   const tracks: EditTrack[] = edit.tracks.map((track) => ({ ...track, source_tracks: { ...track.source_tracks } }));
   const byName = new Map(tracks.map((track) => [track.name.normalize("NFC"), track]));

@@ -21,7 +21,7 @@ type Props = {
   editId: string; document: EditDocument; words: TimelineWord[]; used: Set<string>; lengths: Record<string, number>;
   lanes: TimelineLane[]; colors: Record<string, string>; ws: ReturnType<typeof useEditWorkspace>;
   tab: EditSideTab; onTab: (tab: EditSideTab) => void; history: EditHistory | null; jump: (state: number) => void; pin: (state: number, name: string | null) => void;
-  commit: (label: string, change: (open: OpenEdit) => EditChange, group?: string | null) => Promise<unknown>;
+  commit: (label: string, change: (open: OpenEdit) => EditChange, group?: string | null) => Promise<boolean>;
   tc: (seconds: number) => string; sourceName: (source: string) => string; nameOf: (track: string) => string; where: (line: AskCitation) => string;
   onJump: (line: AskCitation) => void; onOpenEdit: (id: string) => void; onSettings: () => void; appLocalModelId: string | null | undefined;
 };
@@ -42,14 +42,14 @@ export function EditSidePanel(props: Props) {
         next = layoutEditBites(document, action.lines, action.title, props.lengths);
         if (into === "here") {
           const opened = fromDocument(next);
-          await props.commit(`Ask: ${action.title}`, () => ({ document: next, timeline: opened.timeline, markers: opened.markers }));
-          return ask.markApplied(message.id, "here");
+          if (await props.commit(`Ask: ${action.title}`, () => ({ document: next, timeline: opened.timeline, markers: opened.markers }))) ask.markApplied(message.id, "here");
+          return;
         }
       } else {
         const ids = new Set(action.lines.flatMap((line) => line.wordIds));
         if (into === "here") {
-          await props.commit("Ask: Remove Lines", (state) => ({ timeline: removeWithoutCuttingOvertalk(words, state.timeline, ids) }));
-          return ask.markApplied(message.id, "here");
+          if (await props.commit("Ask: Remove Lines", (state) => ({ timeline: removeWithoutCuttingOvertalk(words, state.timeline, ids) }))) ask.markApplied(message.id, "here");
+          return;
         }
         const opened = fromDocument(document);
         next = toDocument({ ...document, title: `${document.title}, without ${action.lines.length} line${action.lines.length === 1 ? "" : "s"}` },

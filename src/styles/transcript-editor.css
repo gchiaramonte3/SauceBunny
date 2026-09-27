@@ -781,6 +781,7 @@
 
 /* ── The left column: Ask, Inspector, History ─────────────────────── */
 .cp-te-pane-side { width: 320px; border-right: 1px solid var(--line-1); }
+.cp-te-pane-side[hidden] { display: none; }
 .cp-te-side { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 .cp-te-side-tabs { flex: none; display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--line-1); }
 .cp-te-side-tab {

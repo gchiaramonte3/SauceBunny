@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EditDocument } from "../bindings/EditDocument";
-import { audibleSpans, fromDocument, toDocument, toFrames, toSeconds, wordsFromSpeech } from "./edit-document";
+import { audibleSpans, fromDocument, rippleMarkers, toDocument, toFrames, toSeconds, wordsFromSpeech } from "./edit-document";
 import { GAP, liftProgram, type Timeline } from "./edit-model";
 
 const base: EditDocument = {
@@ -51,5 +51,15 @@ describe("edit document", () => {
     const [word] = wordsFromSpeech(speech, "s", "rosa");
     expect(word).toMatchObject({ source: "s", track: "rosa", text: "Okay", start: 1, end: 1.5 });
     expect(audibleSpans(speech)).toEqual([[1, 2], [3, 3.5]]);
+  });
+
+  it("markers ride on the material under them, and go with it when it is removed", () => {
+    const before: Timeline = { segments: [{ id: "a", source: "s", srcIn: 0, srcOut: 10 }], mutes: [] };
+    const after: Timeline = { segments: [{ id: "a", source: "s", srcIn: 0, srcOut: 2 }, { id: "b", source: "s", srcIn: 5, srcOut: 10 }], mutes: [] };
+    const marker = (id: string, at: number) => ({ id, at, track: null, name: id, comment: "", color: "red" });
+    const moved = rippleMarkers(before, after, [marker("early", 1), marker("gone", 3), marker("late", 6)]);
+    expect(moved.map((item) => [item.id, item.at])).toEqual([["early", 1], ["late", 3]]);
+    const same = [marker("x", 1)];
+    expect(rippleMarkers(before, before, same)).toBe(same);
   });
 });

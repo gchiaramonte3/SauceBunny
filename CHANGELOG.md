@@ -16,6 +16,15 @@ All notable changes to Sauce Bunny. Format loosely follows
 - A range lifted off a track in String Outs now shows as a gap in that
   track's clip, the way it lands in the exported AAF, and Extract asks
   before taking words from a track that is not selected.
+- String Outs fixes: a new string out starts at 01:00:00:00 in the
+  sequence's own timecode (it read 00:59:56:10 at 23.976, and drop-frame is
+  now counted right), and an empty one takes its first sequence's frame rate.
+  Markers move with the words under them. Adding a selection that crosses a
+  cut to another string out keeps the cut words out. ⌫ at the caret deletes
+  the word before it on the first press. A dead-space review closes when the
+  cut changes under it, Ask marks a proposal applied only when it landed, and
+  hiding the side panel no longer stops an answer. A step whose readable copy
+  in Documents could not be written is still kept.
 - AAF Audio and String Outs reopen what you had open, including after a
   relaunch. Their welcome panels show only until you have imported an AAF or
   made a string out.

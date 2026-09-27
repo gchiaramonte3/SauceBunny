@@ -37,7 +37,7 @@ it("creates an empty string out at 23.976 from one hour and opens it", async () 
   const document = create.args.document as EditDocument;
   expect(document.title).toBe("Rosa stringout");
   expect(document.edit_rate).toEqual({ numerator: 24000, denominator: 1001 });
-  expect(document.start_timecode_frames).toBe(Math.round(3600 * 24000 / 1001));
+  expect(document.start_timecode_frames).toBe(86400);
   expect(document.segments).toEqual([]);
   expect(onOpen).toHaveBeenCalledWith(create.args.id);
 });
@@ -66,4 +66,5 @@ it("forgets a remembered string out that no longer exists instead of failing to 
   answers.edit_list = [{ id: "e1", title: "First pass", created_at: 1, updated_at: 2, head: 3, states: 3 }];
   render(<EditPage active onOpenSettings={() => undefined} />);
   expect(await screen.findByRole("button", { name: /First pass/ })).toBeTruthy();
+  expect(localStorage.getItem(LAST_STRING_OUT)).toBeNull();
 });

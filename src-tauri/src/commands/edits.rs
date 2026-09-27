@@ -73,8 +73,14 @@ fn write_copy(path: &Path, document: &EditDocument) -> Result<(), AppError> {
 
 /// The readable copy is written after the step is safely in the history; a
 /// failure here is reported but never loses the step.
-fn mirror(app: &AppHandle, id: &str, head: &EditHead) -> Result<(), AppError> {
-    write_copy(&copy_path(app, id, &head.document.title)?, &head.document)
+/// The Documents copy is a convenience; the step is already committed to the
+/// log. Failing the command here would tell the UI the step did not happen and
+/// leave it showing a document the log has moved past, so a mirror failure is
+/// logged and the next step rewrites the copy.
+fn mirror(app: &AppHandle, id: &str, head: &EditHead) {
+    if let Err(error) = copy_path(app, id, &head.document.title).and_then(|path| write_copy(&path, &head.document)) {
+        log::warn!("[edits] could not write the readable copy of {id}: {error}");
+    }
 }
 
 #[tauri::command]
@@ -86,7 +92,7 @@ pub fn edit_list(app: AppHandle, store: State<EditStore>) -> Result<Vec<EditSumm
 pub fn edit_create(app: AppHandle, store: State<EditStore>, id: String, document: EditDocument) -> Result<EditHead, AppError> {
     valid_id(&id)?;
     let head = with_log(&app, &store, |log| log.create(&id, &document, now_ms()))?;
-    mirror(&app, &id, &head)?;
+    mirror(&app, &id, &head);
     Ok(head)
 }
 
@@ -111,7 +117,7 @@ pub fn edit_commit(app: AppHandle, store: State<EditStore>, id: String, label: S
         return Err(AppError::invalid("A step needs a name."));
     }
     let head = with_log(&app, &store, |log| log.commit(&id, &label, group.as_deref(), &document, now_ms()))?;
-    mirror(&app, &id, &head)?;
+    mirror(&app, &id, &head);
     Ok(head)
 }
 
@@ -119,7 +125,7 @@ pub fn edit_commit(app: AppHandle, store: State<EditStore>, id: String, label: S
 pub fn edit_undo(app: AppHandle, store: State<EditStore>, id: String) -> Result<EditHead, AppError> {
     valid_id(&id)?;
     let head = with_log(&app, &store, |log| log.undo(&id, now_ms()))?;
-    mirror(&app, &id, &head)?;
+    mirror(&app, &id, &head);
     Ok(head)
 }
 
@@ -127,7 +133,7 @@ pub fn edit_undo(app: AppHandle, store: State<EditStore>, id: String) -> Result<
 pub fn edit_redo(app: AppHandle, store: State<EditStore>, id: String) -> Result<EditHead, AppError> {
     valid_id(&id)?;
     let head = with_log(&app, &store, |log| log.redo(&id, now_ms()))?;
-    mirror(&app, &id, &head)?;
+    mirror(&app, &id, &head);
     Ok(head)
 }
 
@@ -135,7 +141,7 @@ pub fn edit_redo(app: AppHandle, store: State<EditStore>, id: String) -> Result<
 pub fn edit_jump(app: AppHandle, store: State<EditStore>, id: String, state: i64) -> Result<EditHead, AppError> {
     valid_id(&id)?;
     let head = with_log(&app, &store, |log| log.jump(&id, state, now_ms()))?;
-    mirror(&app, &id, &head)?;
+    mirror(&app, &id, &head);
     Ok(head)
 }
 

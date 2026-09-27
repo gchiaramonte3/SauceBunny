@@ -11,11 +11,11 @@ const word = (id: string, track: string, start: number, end: number): TimelineWo
 // Rosa talks 1-3 s, Dev says "yeah" over her at 2.0-2.4 s, Rosa again at 6-7 s.
 const words = [word("so", "rosa", 1, 1.4), word("anyway", "rosa", 1.5, 2.5), word("yeah", "dev", 2, 2.4), word("later", "rosa", 6, 7)];
 const timeline: Timeline = { segments: [{ id: "whole", source: "s1", srcIn: 0, srcOut: 10 }], mutes: [] };
-const open = { document: {} as OpenEdit["document"], timeline, markers: [] } satisfies OpenEdit;
+const openEdit = { document: {} as OpenEdit["document"], timeline, markers: [] } satisfies OpenEdit;
 
-function setup() {
+function setup(open: OpenEdit = openEdit) {
   const commits: { label: string; change: EditChange }[] = [];
-  const commit = vi.fn(async (label: string, change: (state: OpenEdit) => EditChange) => { commits.push({ label, change: change(open) }); });
+  const commit = vi.fn(async (label: string, change: (state: OpenEdit) => EditChange) => { commits.push({ label, change: change(open) }); return true; });
   const hook = renderHook(() => useEditWorkspace({ open, words, lanes, sourceLanes: { s1: ["rosa", "dev"] }, durations: { s1: 10 },
     audible: new Map([["s1", [[1, 3], [6, 7]]]]), playhead: 0, seek: vi.fn(), commit, nameOf: (id) => id === "rosa" ? "Rosa" : "Dev", tc: (s) => `${s}` }));
   const select = (from: number, to: number) => act(() => hook.result.current.setSelection({ anchor: from, focus: to, collapsed: false }));
@@ -72,4 +72,34 @@ it("extracts without asking when every track with words in the range is selected
   act(() => hook.result.current.setMarks({ in: 1.9, out: 2.6 }));
   act(() => hook.result.current.takeMarked(true, true));
   expect(commits.map((item) => item.label)).toEqual(["Extract", "Extract"]);
+});
+
+it("a delete moves the markers after it and drops one on the words it removed", () => {
+  const marker = (id: string, at: number) => ({ id, at, track: null, name: id, comment: "", color: "red" });
+  const { hook, commits, select } = setup({ ...openEdit, markers: [marker("on", 6.5), marker("after", 9)] });
+  const index = hook.result.current.placed.findIndex((item) => item.word.id === "later");
+  select(index, index);
+  act(() => hook.result.current.remove(false));
+  const markers = commits[0].change!.markers!;
+  expect(markers.map((item) => item.id)).toEqual(["after"]);
+  expect(markers[0].at).toBeLessThan(9);
+});
+
+it("⌫ at a caret deletes the word it names, not the selection the last render saw", () => {
+  const { hook, commits } = setup();
+  const index = hook.result.current.placed.findIndex((item) => item.word.id === "later");
+  act(() => hook.result.current.remove(false, [index, index]));
+  expect(commits.map((item) => item.label)).toEqual(["Delete 1 Word"]);
+});
+
+it("retires a dead-space review once the cut changes under it", () => {
+  const hook = renderHook(({ open }) => useEditWorkspace({ open, words, lanes, sourceLanes: { s1: ["rosa", "dev"] }, durations: { s1: 10 },
+    audible: new Map([["s1", [[1, 3], [6, 7]]]]), playhead: 0, seek: vi.fn(), commit: vi.fn(), nameOf: String, tc: String }), { initialProps: { open: openEdit } });
+  act(() => hook.result.current.findDead("air"));
+  expect(hook.result.current.dead).not.toBeNull();
+  // Same cut, new objects (a marker was added): the review stands.
+  hook.rerender({ open: { ...openEdit, timeline: { ...timeline, segments: timeline.segments.map((segment) => ({ ...segment })) } } });
+  expect(hook.result.current.dead).not.toBeNull();
+  hook.rerender({ open: { ...openEdit, timeline: { ...timeline, segments: [{ id: "whole", source: "s1", srcIn: 0, srcOut: 9 }] } } });
+  expect(hook.result.current.dead).toBeNull();
 });

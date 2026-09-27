@@ -14,7 +14,7 @@ type Props = { onOpen: (id: string) => void; onCancel: (() => void) | null; appL
 
 /** A new string out with nothing in it, at 23.976 from 01:00:00:00, ready to cut into. */
 const emptyEdit = (title: string): EditDocument => ({ schema_version: EDIT_SCHEMA_VERSION, title: title.trim() || "Untitled string out",
-  edit_rate: { numerator: 24000, denominator: 1001 }, start_timecode_frames: 86314, sources: [], tracks: [], segments: [], mutes: [], markers: [] });
+  edit_rate: { numerator: 24000, denominator: 1001 }, start_timecode_frames: 86400, sources: [], tracks: [], segments: [], mutes: [], markers: [] });
 
 /**
  * Starting a string out: empty, from an AAF Audio sequence (whole, to cut

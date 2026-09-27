@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EditExportResult } from "../bindings/EditExportResult";
 import { exportEdit, exportName, type EditExportApproach } from "../lib/edit-export";
 import { formatError } from "../lib/error-format";
@@ -18,6 +18,13 @@ export function EditExportButton({ editId, title, disabled, onDone }: Props) {
   const [busy, setBusy] = useState(false);
   const [approach, setApproach] = useState<EditExportApproach>("C");
   const job = useRef<string | null>(null);
+  // Opening another string out unmounts this one; its export stops with it
+  // rather than finishing behind a screen that can no longer report it.
+  useEffect(() => () => {
+    const jobId = job.current;
+    job.current = null;
+    if (jobId) void invoke("cancel_job", { jobId }).catch(() => undefined);
+  }, []);
   const run = async () => {
     const jobId = newJobId();
     job.current = jobId;

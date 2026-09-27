@@ -23,7 +23,7 @@ import { EditTranscript } from "./EditTranscript";
 
 type Props = {
   editId: string; head: EditHead; open: OpenEdit; history: EditHistory | null; data: EditSourceData; active: boolean;
-  commit: (label: string, change: (open: OpenEdit) => EditChange, group?: string | null) => Promise<unknown>;
+  commit: (label: string, change: (open: OpenEdit) => EditChange, group?: string | null) => Promise<boolean>;
   undo: () => void; redo: () => void; jump: (state: number) => void; pin: (state: number, name: string | null) => void; onClose: () => void; addSource: React.ReactNode;
   onOpenEdit: (id: string) => void; onSettings: () => void; appLocalModelId: string | null | undefined;
 };
@@ -95,18 +95,19 @@ export function EditEditor({ editId, head, open, history, data, active, commit, 
     <EditToolbar title={document.title} subtitle={sources || "Empty string out"} source={showSource} onSource={() => setShowSource((value) => !value)}
       side={showSide} onSide={() => setShowSide((value) => !value)} showRemoved={showRemoved} onShowRemoved={() => setShowRemoved((value) => !value)}
       undo={head.undo} redo={head.redo} onUndo={undo} onRedo={redo} onClose={onClose}>
-      <EditSendTo editId={editId} selected={ws.selected.map((item) => item.word)} sequenceOf={(source) => data.documents.get(source)} onDone={ws.setMessage} />
+      <EditSendTo editId={editId} selected={ws.selected} sequenceOf={(source) => data.documents.get(source)} onDone={ws.setMessage} />
       {addSource}
       <EditExportButton editId={editId} title={document.title} disabled={!document.segments.some((segment) => segment.kind === "source")} onDone={ws.setMessage} />
     </EditToolbar>
     {data.errors.length > 0 && <p className="cp-te-errors" role="alert">{data.errors.join(" · ")}</p>}
     <div className="cp-te-panes">
-      {showSide && <div className="cp-te-pane cp-te-pane-side">
+      {/* Hidden rather than unmounted: an Ask answer in flight keeps going. */}
+      <div className="cp-te-pane cp-te-pane-side" hidden={!showSide}>
         <EditSidePanel editId={editId} document={head.document} words={data.words} used={used} lengths={data.durations} lanes={lanes} colors={colors} ws={ws}
           tab={sideTab} onTab={setSideTab} history={history} jump={jump} pin={pin} commit={commit} tc={tc} sourceName={sourceName} nameOf={nameOf}
           where={(line) => `${sourceName(line.source)} · ${nameOf(line.track)} · ${editTc(line.from, fps, infos.find((info) => info.id === line.source)?.startFrames ?? 0)}`}
           onJump={jumpTo} onOpenEdit={onOpenEdit} onSettings={onSettings} appLocalModelId={appLocalModelId} />
-      </div>}
+      </div>
       {showSource && <div className="cp-te-pane cp-te-pane-source">
         <EditSourceHost document={head.document} sources={infos} lanes={lanes} colors={colors} fps={fps} words={data.words} used={used} active={active}
           text={text.source} onText={(style) => setText((state) => ({ ...state, source: style }))} onInsert={(source, words, atEnd) => { ws.insert(source, words, atEnd); focusDoc(); }} />
@@ -122,7 +123,7 @@ export function EditEditor({ editId, head, open, history, data, active, commit, 
               onDelete={ws.remove} onScrub={seek} onMove={ws.move} onEdit={() => ws.setMessage("Correct words in AAF Audio's transcript; the string out follows it.")} />}
           {ws.prompt && <EditOvertalkPrompt title={`${ws.names(ws.prompt.result.crosstalk.map((word) => word.track))} talks under this.`}
             body={`Silenced ${ws.names(ws.prompt.who)} only. Cutting for everyone also removes ${ws.prompt.result.crosstalk.length === 1 ? "one word" : `${ws.prompt.result.crosstalk.length} words`} of ${ws.names(ws.prompt.result.crosstalk.map((word) => word.track))}'s.`}
-            keep="Keep" other="Cut for everyone" onKeep={() => { ws.setPrompt(null); focusDoc(); }} onOther={() => ws.prompt && ws.applyDelete(ws.prompt.result, ws.prompt.count)} />}
+            keep="Keep" other="Cut for everyone" onKeep={() => { ws.setPrompt(null); focusDoc(); }} onOther={() => ws.prompt && ws.applyDelete(ws.prompt.keys, ws.prompt.count)} />}
           {ws.extractGuard && <EditOvertalkPrompt title={`${ws.names(ws.extractGuard.who)} ${ws.extractGuard.who.length > 1 ? "talk" : "talks"} in this range.`}
             body={`Extract closes the range up on every track, so ${ws.extractGuard.count === 1 ? "one word" : `${ws.extractGuard.count} words`} on a track that is not selected would go too. Lift takes it off the selected tracks only.`}
             keep="Lift selected tracks" other="Extract anyway" onKeep={() => ws.takeMarked(false)} onOther={() => ws.takeMarked(true, true)} />}

@@ -18,7 +18,7 @@ type Props = {
   /** Removed lines to show in place, or null while they are hidden. */
   ghosts: Ghost[] | null; onRestore: (ghost: Ghost) => void;
   corrections: Record<string, string>; editing: string | null; onCorrect: (id: string, text: string | null) => void;
-  onSelect: (selection: EditSelection, seek: boolean) => void; onDelete: (lift: boolean) => void; onScrub: (program: number) => void;
+  onSelect: (selection: EditSelection, seek: boolean) => void; onDelete: (lift: boolean, words?: [number, number]) => void; onScrub: (program: number) => void;
   onMove: (paragraph: number, direction: -1 | 1) => void; onEdit: (id: string) => void;
 };
 
@@ -81,6 +81,8 @@ export function EditTranscript(props: Props) {
         const target = event.key === "Backspace" ? selection.anchor - 1 : selection.anchor;
         if (target < 0 || target >= count) return;
         props.onSelect({ anchor: target, focus: target, collapsed: false }, false);
+        // The selection above lands on the next render; name the word outright.
+        return props.onDelete(event.shiftKey, [target, target]);
       }
       return props.onDelete(event.shiftKey);
     }

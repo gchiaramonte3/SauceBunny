@@ -26,8 +26,8 @@ export function EditPage({ active, aiModelId, onOpenSettings }: Props) {
     editStore.list().then((items) => {
       if (!live) return;
       setEdits(items);
-      // A remembered string out that no longer exists: open the list instead.
-      setEditId((id) => id && !items.some((item) => item.id === id) ? null : id);
+      // A remembered string out that no longer exists: open the list, and stop remembering it.
+      if (editId && !items.some((item) => item.id === editId)) { rememberLast(LAST_STRING_OUT, null); setEditId(null); }
     }).catch(() => { if (live) setEdits([]); });
     return () => { live = false; };
   }, [active, editId]);

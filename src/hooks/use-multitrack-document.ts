@@ -42,7 +42,9 @@ export function useMultitrackDocument(active: boolean) {
   useEffect(() => {
     if (!active) return;
     let valid = true;
-    void invoke<AafDocumentSummary[]>("aaf_list").then((items) => { if (valid) { setSaved(items); setListed(true); } }).catch((cause) => { if (valid) setError(formatError(cause)); });
+    void invoke<AafDocumentSummary[]>("aaf_list").then((items) => { if (valid) { setSaved(items); setListed(true); } })
+      // A failed list still ends the wait: the page shows the error and the import button, not a blank.
+      .catch((cause) => { if (valid) { setError(formatError(cause)); setListed(true); } });
     return () => { valid = false; };
   }, [active, document?.id]);
 
