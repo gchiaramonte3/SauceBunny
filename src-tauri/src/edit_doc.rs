@@ -129,10 +129,6 @@ pub struct EditDocument {
 }
 
 impl EditDocument {
-    pub fn program_frames(&self) -> i64 {
-        self.segments.iter().map(EditSegment::frames).sum()
-    }
-
     /// Refuse anything the rest of the pipeline could not honour. A document
     /// from a NEWER build is refused rather than rewritten, like every other
     /// versioned store (store-version-contract).
@@ -226,7 +222,7 @@ mod tests {
     fn a_valid_edit_passes_and_runs_the_sum_of_its_segments() {
         let doc = sample();
         assert!(doc.validate().is_ok());
-        assert_eq!(doc.program_frames(), 184);
+        assert_eq!(doc.segments.iter().map(EditSegment::frames).sum::<i64>(), 184);
     }
 
     #[test]
