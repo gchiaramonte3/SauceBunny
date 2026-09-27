@@ -16,6 +16,10 @@
  * segment and mute names the source its times are in, so "4.2 s" always
  * means 4.2 s of a particular recording.
  *
+ * A GAP is a segment too (source `TE_GAP`): time that plays nothing on any
+ * track, as a magnetic timeline's gap clip or Avid's filler. Lift leaves one,
+ * and dead-space removal takes them out.
+ *
  * Times are seconds of source time here. Production works in frames and
  * samples; the arithmetic is the same.
  */
@@ -51,6 +55,10 @@ export type TeParagraph = {
 
 const PAUSE_BREAK = 1.2; // seconds of silence that starts a new paragraph
 const HANDLE = 0.12;     // seconds of air kept around a cut, never into a neighbour
+
+/** The source id of a gap segment. Its srcIn is 0 and srcOut its length. */
+export const TE_GAP = "gap";
+export const isGap = (segment: TeSegment) => segment.source === TE_GAP;
 
 let counter = 0;
 const nextId = (prefix: string) => `${prefix}-${++counter}`;
@@ -239,18 +247,114 @@ export function addEdit(edit: TeEdit, program: number): TeEdit {
 }
 
 /**
- * Lift: silence a program range on every track the source has a mic for,
- * leaving the time where it was. The mirror of extractProgram, which closes up.
+ * Lift: take a program range out and leave a gap of the same length, so
+ * nothing after it moves (Avid's Lift, FCP's Replace with Gap). The mirror of
+ * extractProgram, which closes up.
  */
-export function liftProgram(edit: TeEdit, programIn: number, programOut: number, speakersOf: (source: string) => string[]): TeEdit {
+export function liftProgram(edit: TeEdit, programIn: number, programOut: number): TeEdit {
+  if (programOut <= programIn) return edit;
+  const first = splitAt(edit, programIn);
+  const second = splitAt(first.edit, programOut);
+  const segments = [...second.edit.segments];
+  segments.splice(first.index, second.index - first.index, { id: nextId("gap"), source: TE_GAP, srcIn: 0, srcOut: programOut - programIn });
+  return { ...second.edit, segments: mergeGaps(segments) };
+}
+
+/**
+ * Lift on some tracks only (Avid, with only those track selectors on): the
+ * range goes silent on each selected track that has a mic in that source,
+ * and nothing moves. A gap cannot do this, because a segment plays on every
+ * track at once.
+ */
+export function liftOnTracks(edit: TeEdit, programIn: number, programOut: number, speakersOf: (source: string) => string[]): TeEdit {
   const mutes = [...edit.mutes];
   let at = 0;
   for (const segment of edit.segments) {
     const from = Math.max(programIn, at), to = Math.min(programOut, at + segmentLength(segment));
-    if (to > from) for (const speaker of speakersOf(segment.source)) mutes.push({ source: segment.source, speaker, srcIn: segment.srcIn + from - at, srcOut: segment.srcIn + to - at });
+    if (to > from && !isGap(segment)) for (const speaker of speakersOf(segment.source)) mutes.push({ source: segment.source, speaker, srcIn: segment.srcIn + from - at, srcOut: segment.srcIn + to - at });
     at += segmentLength(segment);
   }
   return mutes.length === edit.mutes.length ? edit : { ...edit, mutes };
+}
+
+/** Mark Clip: the segment under a program position, as In and Out. */
+export function clipAround(edit: TeEdit, program: number): [number, number] | null {
+  const starts = segmentStarts(edit);
+  const index = edit.segments.findIndex((segment, i) => program >= starts[i] && program < starts[i] + segmentLength(segment));
+  return index < 0 ? null : [starts[index], starts[index] + segmentLength(edit.segments[index])];
+}
+
+/** Neighbouring gaps become one, so a gap never shows a pointless edit point. */
+function mergeGaps(segments: TeSegment[]): TeSegment[] {
+  const out: TeSegment[] = [];
+  for (const segment of segments) {
+    const last = out[out.length - 1];
+    if (last && isGap(last) && isGap(segment)) out[out.length - 1] = { ...last, srcOut: last.srcOut + segmentLength(segment) };
+    else out.push(segment);
+  }
+  return out;
+}
+
+/** An empty stretch of this length at a program position (Insert Gap). */
+export function insertGap(edit: TeEdit, program: number, seconds: number): TeEdit {
+  if (seconds <= 0) return edit;
+  const split = splitAt(edit, program);
+  const segments = [...split.edit.segments];
+  segments.splice(split.index, 0, { id: nextId("gap"), source: TE_GAP, srcIn: 0, srcOut: seconds });
+  return { ...split.edit, segments: mergeGaps(segments) };
+}
+
+/**
+ * Dead space: stretches of program time where nobody is speaking. A stretch
+ * counts only when BOTH say so: no word of the transcript falls in it (with
+ * `pad` of air kept around every word), and every mic the source has stays
+ * under `threshold`. A gap segment is dead space whole. The transcript alone
+ * would take laughs, gasps and a door slam, which Whisper does not write
+ * down; the waveform alone would take a quiet line, which bleed makes loud.
+ */
+export type TeDeadSpace = { from: number; to: number; gap: boolean };
+export type TeDeadOptions = { threshold: number; minimum: number; pad: number; step: number };
+export const teDeadDefaults: TeDeadOptions = { threshold: 0.12, minimum: 0.7, pad: 0.15, step: 0.05 };
+
+export function findDeadSpace(edit: TeEdit, words: TeWord[], loudest: (source: string, from: number, to: number) => number, options: TeDeadOptions = teDeadDefaults): TeDeadSpace[] {
+  const starts = segmentStarts(edit);
+  const found: TeDeadSpace[] = [];
+  const push = (from: number, to: number, gap: boolean) => {
+    const last = found[found.length - 1];
+    if (last && Math.abs(last.to - from) < 1e-6) { last.to = to; last.gap = last.gap && gap; } else found.push({ from, to, gap });
+  };
+  edit.segments.forEach((segment, index) => {
+    const at = starts[index];
+    if (isGap(segment)) return push(at, at + segmentLength(segment), true);
+    const spoken = words.filter((word) => word.source === segment.source && word.end + options.pad > segment.srcIn && word.start - options.pad < segment.srcOut);
+    let quietFrom: number | null = null;
+    for (let t = segment.srcIn; t < segment.srcOut - 1e-9; t += options.step) {
+      const until = Math.min(segment.srcOut, t + options.step);
+      const talking = spoken.some((word) => word.start - options.pad < until && word.end + options.pad > t);
+      const quiet = !talking && loudest(segment.source, t, until) < options.threshold;
+      if (quiet && quietFrom == null) quietFrom = t;
+      if (!quiet && quietFrom != null) { push(at + quietFrom - segment.srcIn, at + t - segment.srcIn, false); quietFrom = null; }
+    }
+    if (quietFrom != null) push(at + quietFrom - segment.srcIn, at + segmentLength(segment), false);
+  });
+  return found.filter((space) => space.gap || space.to - space.from >= options.minimum);
+}
+
+/**
+ * Take dead space out, leaving `keep` seconds of each stretch (split either
+ * side, so the pause still breathes) and nothing of a gap. Later ranges
+ * first, so earlier program positions stay valid.
+ */
+export function removeDeadSpace(edit: TeEdit, spaces: TeDeadSpace[], keep: number): { edit: TeEdit; seconds: number } {
+  let next = edit, seconds = 0;
+  for (const space of [...spaces].sort((a, b) => b.from - a.from)) {
+    const leave = space.gap ? 0 : Math.min(keep, space.to - space.from);
+    const from = space.from + leave / 2, to = space.to - leave / 2;
+    if (to - from < 1e-6) continue;
+    next = extractProgram(next, from, to).edit;
+    seconds += to - from;
+  }
+  return { edit: { ...next, segments: mergeGaps(next.segments) }, seconds };
 }
 
 /** Take a program range out of the edit, returning the pieces that were in it. */
@@ -312,9 +416,9 @@ export function healSeam(edit: TeEdit, index: number): TeEdit {
  * plays nowhere else, so it can be restored. A through edit skips nothing. A
  * jump goes somewhere the editor put there on purpose (a move or a splice):
  * the source it skips is still in the edit, so "restoring" it would play
- * those words twice.
+ * those words twice. A gap edge is where a gap starts or ends.
  */
-export type TeSeamKind = "cut" | "through" | "jump";
+export type TeSeamKind = "cut" | "through" | "jump" | "gap";
 /** `gap` is the source time the seam skips; NaN when the two sides are different sources. */
 export type TeSeam = { index: number; at: number; gap: number; kind: TeSeamKind; removed: TeWord[]; clipped: Set<string> };
 
@@ -324,6 +428,7 @@ export function seamList(edit: TeEdit, words: TeWord[]): TeSeam[] {
   const used = new Set(placeWords(words, edit).map((item) => item.word.id));
   return edit.segments.slice(1).map((next, offset) => {
     const prev = edit.segments[offset];
+    if (isGap(prev) || isGap(next)) return { index: offset + 1, at: starts[offset + 1], gap: NaN, kind: "gap" as const, removed: [], clipped: new Set<string>() };
     const same = prev.source === next.source;
     const gap = same ? next.srcIn - prev.srcOut : NaN;
     const skipped = !(gap > 0) ? [] : sourceWords(words, prev.source, prev.srcOut, next.srcIn);
@@ -357,6 +462,13 @@ export type TeGhost = { id: string; at: number; source: string; speaker: string;
  * speaker and by long pauses, the same way the edit's paragraphs are.
  */
 export function ghostLines(edit: TeEdit, words: TeWord[], durations: Record<string, number>): TeGhost[] {
+  // Look through gaps: a lifted line sits between the same two stretches of
+  // source that a deleted one would, and restores into its gap.
+  const real = edit.segments.map((segment, index) => ({ segment, index })).filter((item) => !isGap(item.segment));
+  if (real.length !== edit.segments.length) {
+    const view = ghostLines({ ...edit, segments: real.map((item) => item.segment) }, words, durations);
+    return view.map((ghost) => ({ ...ghost, at: ghost.at >= real.length ? edit.segments.length : real[ghost.at].index }));
+  }
   if (!edit.segments.length) return [];
   const used = new Set(placeWords(words, edit).map((item) => item.word.id));
   const first = edit.segments[0], last = edit.segments[edit.segments.length - 1];
@@ -392,6 +504,21 @@ export function ghostLines(edit: TeEdit, words: TeWord[], durations: Record<stri
  * three-line cut leaves the other two cut.
  */
 export function restoreRange(edit: TeEdit, at: number, source: string, from: number, to: number): TeEdit {
+  // Restoring into a lifted hole fills it: the gap before `at` gives up the
+  // restored length, so nothing after the hole moves.
+  const hole = edit.segments[at - 1];
+  if (hole && isGap(hole)) {
+    const rest = segmentLength(hole) - (to - from);
+    const filled = restoreRange({ ...edit, segments: edit.segments.filter((_, index) => index !== at - 1) }, at - 1, source, from, to);
+    if (rest <= 1e-6) return filled;
+    // What is left of the hole stays on the side the line did not come from.
+    const home = filled.segments.findIndex((segment) => segment.source === source && segment.srcIn <= from + 1e-6 && segment.srcOut >= to - 1e-6);
+    const before = filled.segments[home - 1];
+    const joinedBefore = !!before && before.source === source ? false : filled.segments[home].srcIn < from - 1e-6;
+    const segments = [...filled.segments];
+    segments.splice(joinedBefore || filled.segments[home].srcOut <= to + 1e-6 ? home + 1 : home, 0, { ...hole, srcOut: rest });
+    return { ...filled, segments };
+  }
   const segments = [...edit.segments];
   const prev = segments[at - 1], next = segments[at];
   const joinsPrev = prev?.source === source && prev.srcOut >= from - 1e-6;

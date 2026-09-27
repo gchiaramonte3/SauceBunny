@@ -3,7 +3,7 @@ import { IconFolder, IconPlus, IconTranscript } from "../src/components/Icons";
 export type TeLibraryItem = { id: string; name: string; detail: string; ready: boolean; open?: boolean };
 export type TeLibraryGroup = { title: string; items: TeLibraryItem[] };
 
-type Props = { groups: TeLibraryGroup[]; current: string; onOpen: (item: TeLibraryItem) => void; onNew: () => void };
+type Props = { groups: TeLibraryGroup[]; current: string; onOpen: (item: TeLibraryItem) => void; onNew: (empty: boolean) => void };
 
 /**
  * The library panel: where an edit's material comes from. Sequences from AAF
@@ -25,7 +25,9 @@ export function TeSidebar({ groups, current, onOpen, onNew }: Props) {
         </li>)}
       </ul>
     </section>)}
-    <button type="button" className="btn btn-ghost cp-te-btn cp-te-side-new" onClick={onNew} title="Start a new edit from the whole scene">
-      <IconPlus size={12} />New edit from this sequence</button>
+    <div className="cp-te-side-new">
+      <button type="button" className="btn btn-ghost cp-te-btn" onClick={() => onNew(true)} title="New empty edit (⇧⌘N)"><IconPlus size={12} />New edit</button>
+      <button type="button" className="btn btn-ghost cp-te-btn" onClick={() => onNew(false)} title="New edit from the whole scene">From scene</button>
+    </div>
   </nav>;
 }

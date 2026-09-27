@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { multitrackTextLayout } from "../src/lib/multitrack-text-layout";
 import { teTc } from "./transcript-editor-fixture";
 import type { TeEdit, TePlacedWord, TeSeam, TeSpeaker } from "./transcript-editor-model";
-import { placementKey, programDuration, segmentLength, segmentStarts } from "./transcript-editor-model";
+import { isGap, placementKey, programDuration, segmentLength, segmentStarts } from "./transcript-editor-model";
+import { TeDeadSpaceBar, type TeDeadPreset, type TeDeadReview } from "./TeDeadSpace";
 import { TeTimelineTools, type TeTimelineAudio, type TeTimelineView } from "./TeTimelineTools";
 import { TeWave } from "./TeWave";
 
@@ -17,9 +18,12 @@ type Props = {
   sourceSpeakers: Record<string, string[]>; sourceName: (id: string) => string;
   onScrubStart: () => void; onScrubEnd: () => void;
   zoom: number; onZoom: (zoom: number) => void; markers: number[]; tools: ToolProps;
+  /** Avid's track selectors: on tracks take Lift and show the marked region. */
+  tracks: Set<string>; onTrack: (speaker: string, only: boolean) => void;
+  dead: TeDeadReview | null; onDeadSkip: (index: number) => void; onDeadPreset: (preset: TeDeadPreset) => void; onDeadApply: () => void; onDeadCancel: () => void;
 };
 
-const describe = (seam: TeSeam, fps: number) => `${seam.kind === "cut" ? "Cut" : seam.kind === "through" ? "Through edit" : "Jump"} at ${teTc(seam.at, fps)}`
+const describe = (seam: TeSeam, fps: number) => `${seam.kind === "cut" ? "Cut" : seam.kind === "through" ? "Through edit" : seam.kind === "gap" ? "Gap" : "Jump"} at ${teTc(seam.at, fps)}`
   + (seam.kind === "cut" ? `, ${seam.gap.toFixed(2)} s removed` : seam.kind === "jump" ? (Number.isNaN(seam.gap) ? ", to another source" : `, ${seam.gap < 0 ? "back" : "ahead"} ${Math.abs(seam.gap).toFixed(1)} s in the scene`) : "")
   + (seam.clipped.size ? ", cuts into a word" : "");
 
@@ -37,8 +41,9 @@ function phrases(placed: TePlacedWord[], speaker: string) {
 
 /**
  * The magnetic timeline: one track per speaker, and every clip is a segment
- * of the edit playing on all of them at once. There is no gap to leave, so
- * there is no gap tool; a cut in the text closes up here by construction.
+ * of the edit playing on all of them at once, so a cut in the text closes up
+ * here by construction. A gap is a segment too (Lift leaves one), drawn as
+ * empty time across every lane.
  * Each lane wears its speaker's colour, so who is talking reads across the
  * whole scene at a glance; View ▸ Speaker colours off draws them the way
  * AAF Audio does (one violet). Either way a soloed track lifts and the rest
@@ -128,7 +133,8 @@ export function TeTimeline(props: Props) {
     <TeTimelineTools {...props.tools} zoom={zoom} onZoom={(direction) => props.onZoom(direction === 0 ? 1 : Math.max(1, Math.min(32, direction > 0 ? zoom * 2 : zoom / 2)))}
       view={view} onView={setView} audio={audio} onAudio={setAudio}
       allText={speakers.every((s) => text.has(s.id))} onAllText={() => setText(speakers.every((s) => text.has(s.id)) ? new Set() : new Set(speakers.map((s) => s.id)))} />
-    <div className="cp-te-tl-grid">
+    {props.dead && <TeDeadSpaceBar review={props.dead} onPreset={props.onDeadPreset} onApply={props.onDeadApply} onCancel={props.onDeadCancel} />}
+    <div className="cp-te-tl-grid" style={{ "--te-rows": speakers.length + 1 } as React.CSSProperties}>
       <div className="cp-te-tl-corner" aria-hidden="true" />
       <div ref={ruler} className="cp-te-tl-ruler" {...scrub}>
         {ticks.map((t) => <span key={t} className="cp-te-tl-tick" style={{ left: x(t) }}>{teTc(t, fps)}</span>)}
@@ -144,7 +150,8 @@ export function TeTimeline(props: Props) {
         return <div key={speaker.id} className={`cp-te-tl-row${soloed ? " is-solo" : ""}${quiet ? " is-unsoloed" : ""}${mute.has(speaker.id) ? " is-muted" : ""}${shown ? " has-text" : ""}`}
           style={{ "--te-speaker": colors[speaker.id] } as React.CSSProperties}>
           <div className="cp-te-tl-head">
-            <span className="cp-te-tl-track">A{speaker.track}</span><span className="cp-te-swatch" aria-hidden="true" /><span className="cp-te-tl-name" title={speaker.name}>{speaker.name}</span>
+            <button type="button" className="cp-te-tl-track" aria-pressed={props.tracks.has(speaker.id)} aria-label={`Track A${speaker.track}`}
+              title={`Track A${speaker.track} (⌥-click: only this)`} onClick={(event) => props.onTrack(speaker.id, event.altKey)}>A{speaker.track}</button><span className="cp-te-swatch" aria-hidden="true" /><span className="cp-te-tl-name" title={speaker.name}>{speaker.name}</span>
             <span className="cp-te-tl-switches">
               <button type="button" className="cp-te-tl-toggle" aria-pressed={soloed} aria-label={`Solo ${speaker.name}`} title={`Solo ${speaker.name}`} onClick={() => props.onSolo(speaker.id)}>S</button>
               <button type="button" className="cp-te-tl-toggle" aria-pressed={mute.has(speaker.id)} aria-label={`Mute ${speaker.name}`} title={`Mute ${speaker.name}`} onClick={() => props.onMute(speaker.id)}>M</button>
@@ -158,18 +165,24 @@ export function TeTimeline(props: Props) {
                 title={`${speaker.name} · ${props.sourceName(segment.source)}`}>
                 {view.waveforms && <TeWave source={segment.source} speaker={speaker.id} srcIn={segment.srcIn} srcOut={segment.srcOut} muted={mutes[`${segment.source}:${speaker.id}`]} roomTone={audio.roomTone} />}
               </div>)}
+            {marked && props.tracks.has(speaker.id) && <span className="cp-te-tl-marked-lane" style={{ left: x(marked[0]), width: w(marked[1] - marked[0]) }} />}
             {shown && <div className="cp-te-tl-words">{lane.map((cue) => <span key={cue.id} className={cue.summary ? "is-summary" : undefined} title={cue.title} style={cue.style}>{cue.text}</span>)}</div>}
             {seams.filter((cut) => cut.clipped.has(speaker.id)).map((cut) => <span key={cut.index} className="cp-te-tl-clipped" style={{ left: x(cut.at) }} title={`Cuts into a word of ${speaker.name}'s`} />)}
           </div>
         </div>;
       })}
       <div className="cp-te-tl-overlay" aria-hidden="true">
-        {marked && <span className="cp-te-tl-marked-band" style={{ left: x(marked[0]), width: w(marked[1] - marked[0]) }} />}
+        {edit.segments.map((segment, index) => isGap(segment) && <span key={segment.id} className="cp-te-tl-gap" style={{ left: x(starts[index]), width: w(segmentLength(segment)) }} />)}
         {band && <span className="cp-te-tl-band" style={{ left: x(band[0]), width: w(band[1] - band[0]) }} />}
         {seams.map((cut) => <span key={cut.index} className={`cp-te-tl-seam${cut.kind === "through" ? " is-through" : ""}${props.seam === cut.index ? " is-selected" : ""}`} style={{ left: x(cut.at) }} />)}
         {fade > 0 && seams.filter((cut) => cut.kind !== "through").map((cut) => <span key={`f${cut.index}`} className="cp-te-tl-fade" style={{ left: x(cut.at - fade / 2), width: w(fade) }} />)}
         <span className="cp-te-tl-playhead" style={{ left: x(playhead) }} />
       </div>
+      {props.dead && <div className="cp-te-tl-deadlayer">
+        {props.dead.spaces.map((space, index) => <button key={index} type="button" className="cp-te-tl-dead" aria-pressed={!props.dead!.skip.has(index)}
+          style={{ left: x(space.from), width: w(space.to - space.from) }} aria-label={`${(space.to - space.from).toFixed(1)} s at ${teTc(space.from, fps)}`}
+          title={props.dead!.skip.has(index) ? "Kept. Click to remove" : "Removing. Click to keep"} onClick={() => props.onDeadSkip(index)} />)}
+      </div>}
     </div>
     {zoom > 1 && <input className="cp-te-tl-pan" type="range" aria-label="Scroll timeline" min={0} max={Math.max(0, total - span)} step={0.01} value={start} onChange={(event) => setPan(Number(event.target.value))} />}
   </section>;

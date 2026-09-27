@@ -1,7 +1,7 @@
 import { teTc } from "./transcript-editor-fixture";
 import { placementKey, type TeGhost, type TeParagraph as Paragraph, type TePlacedWord, type TeSpeaker } from "./transcript-editor-model";
 
-export type TeSeamInfo = { kind: "cut" | "through" | "jump"; seconds: number | null };
+export type TeSeamInfo = { kind: "cut" | "through" | "jump" | "gap"; seconds: number | null };
 
 type Props = {
   paragraph: Paragraph; speaker: TeSpeaker; color: string; fps: number;
@@ -32,7 +32,7 @@ export function TeParagraph(props: Props) {
   const mark = (index: number) => {
     const info = props.seams[index];
     if (!info || info.kind === "through") return null;
-    const label = info.kind === "jump" ? "Jump" : `Cut, ${(info.seconds ?? 0).toFixed(2)} s removed`;
+    const label = info.kind === "gap" ? "Gap" : info.kind === "jump" ? "Jump" : `Cut, ${(info.seconds ?? 0).toFixed(2)} s removed`;
     return <button type="button" className={`cp-te-cutmark${props.seam === index ? " is-selected" : ""}`} aria-label={label} title={label}
       onClick={() => props.onSeam(index)}>¦</button>;
   };

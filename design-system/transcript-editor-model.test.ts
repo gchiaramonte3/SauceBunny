@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  addEdit, extractProgram, liftProgram, deleteWords as deleteKeys, ghostLines, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration, programToSource,
+  addEdit, clipAround, extractProgram, findDeadSpace, insertGap, isGap, liftOnTracks, liftProgram, removeDeadSpace, TE_GAP, deleteWords as deleteKeys, ghostLines, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration, programToSource,
   healSeam, removeRange, restoreRange, seamList, spliceIn, unmuteWords, type TeEdit, type TeWord,
 } from "./transcript-editor-model";
 import { teDurations, teWholeScene, teWords } from "./transcript-editor-fixture";
@@ -166,20 +166,70 @@ describe("transcript editor model", () => {
     expect(addEdit(whole(), 0)).toEqual(whole());
   });
 
-  it("lift silences In to Out on every mic and keeps the time; extract closes it up", () => {
-    const lifted = liftProgram(whole(), 1.45, 2.7, () => ["a", "b"]);
-    expect(programDuration(lifted)).toBe(5);
-    const muted = placeWords(words, lifted).filter((item) => item.muted).map((item) => item.word.id);
-    expect(muted).toEqual(["a2", "a3", "b2"]);
-    const extracted = extractProgram(whole(), 1.45, 2.45).edit;
-    expect(programDuration(extracted)).toBeCloseTo(4);
-    expect(placeWords(words, extracted).map((item) => item.word.id)).toEqual(["a1", "b1"]);
+  it("lift leaves a gap and nothing after it moves; extract closes it up", () => {
+    const lifted = liftProgram(whole(), 1.45, 2.7);
+    expect(programDuration(lifted)).toBeCloseTo(5);
+    expect(lifted.segments.map((segment) => isGap(segment))).toEqual([false, true, false]);
+    expect(placeWords(words, lifted).map((item) => item.word.id)).toEqual(["a1", "b1"]);
+    expect(placeWords(words, lifted).find((item) => item.word.id === "b1")!.programStart).toBe(3);
+    const extracted = extractProgram(whole(), 1.45, 2.7).edit;
+    expect(programDuration(extracted)).toBeCloseTo(3.75);
+    expect(liftProgram(whole(), 2, 2)).toEqual(whole());
   });
 
-  it("lift maps a range that spans two segments back to each source", () => {
+  it("a lifted line is a ghost that restores into its gap without moving what follows", () => {
+    const lifted = liftProgram(whole(), 1.45, 2.7);
+    const ghosts = ghostLines(lifted, words, { s: 5 });
+    const ghost = ghosts.find((item) => item.words.some((word) => word.id === "a2"))!;
+    expect(ghost).toBeTruthy();
+    const restored = restoreRange(lifted, ghost.at, ghost.source, ghost.from, ghost.to);
+    expect(programDuration(restored)).toBeCloseTo(5);
+    expect(placeWords(words, restored).map((item) => item.word.id)).toContain("a2");
+  });
+
+  it("lift on some tracks silences only those mics and moves nothing", () => {
     const edit: TeEdit = { segments: [{ id: "x", source: "s", srcIn: 3, srcOut: 5 }, { id: "y", source: "s", srcIn: 0, srcOut: 2 }], mutes: [] };
-    const lifted = liftProgram(edit, 1, 3, () => ["a"]);
+    const lifted = liftOnTracks(edit, 1, 3, () => ["a"]);
     expect(lifted.mutes).toEqual([{ source: "s", speaker: "a", srcIn: 4, srcOut: 5 }, { source: "s", speaker: "a", srcIn: 0, srcOut: 1 }]);
-    expect(liftProgram(edit, 2, 2, () => ["a"])).toBe(edit);
+    expect(programDuration(lifted)).toBe(4);
+    expect(liftOnTracks(edit, 2, 2, () => ["a"])).toBe(edit);
+  });
+
+  it("gaps merge, can be inserted, and Mark Clip marks the segment under the playhead", () => {
+    const gapped = insertGap(liftProgram(whole(), 1, 2), 2, 0.5);
+    expect(gapped.segments.filter(isGap)).toHaveLength(1);
+    expect(gapped.segments.find(isGap)!.srcOut).toBeCloseTo(1.5);
+    expect(programDuration(gapped)).toBeCloseTo(5.5);
+    expect(clipAround(gapped, 1.2)).toEqual([1, 2.5]);
+    expect(clipAround({ segments: [], mutes: [] }, 0)).toBeNull();
+    expect(gapped.segments.find(isGap)!.source).toBe(TE_GAP);
+  });
+
+  it("dead space needs both a quiet transcript and quiet mics, and a gap is dead whole", () => {
+    // Loud only in [3.9, 4.4): a noise with no words (a laugh), which must survive.
+    const loudest = (_source: string, from: number, to: number) => (from < 4.4 && to > 3.9 ? 0.6 : 0.02);
+    const options = { threshold: 0.12, minimum: 0.5, pad: 0.1, step: 0.05 };
+    const spaces = findDeadSpace(liftProgram(whole(), 4.6, 5), words, loudest, options);
+    // Words (padded) cover 0.9 to 2.7 and 2.9 to 3.5; the laugh holds 3.9 to 4.4.
+    // 2.7 to 2.9 and 3.5 to 3.9 are too short; the quiet run into the gap joins it.
+    // Edges land on the analysis step (50 ms), so compare within one step.
+    const expected: [number, number][] = [[0, 0.9], [4.4, 5]];
+    expect(spaces).toHaveLength(expected.length);
+    spaces.forEach((space, index) => {
+      expect(Math.abs(space.from - expected[index][0])).toBeLessThanOrEqual(options.step + 1e-9);
+      expect(Math.abs(space.to - expected[index][1])).toBeLessThanOrEqual(options.step + 1e-9);
+      expect(space.gap).toBe(false);
+    });
+    expect(findDeadSpace(liftProgram(whole(), 4.6, 5), words, () => 1, options)).toEqual([{ from: 4.6, to: 5, gap: true }]);
+  });
+
+  it("removing dead space keeps a breath of each pause and none of a gap", () => {
+    const edit = liftProgram(whole(), 4.5, 5);
+    const spaces = [{ from: 0, to: 0.9, gap: false }, { from: 4.5, to: 5, gap: true }];
+    const { edit: tight, seconds } = removeDeadSpace(edit, spaces, 0.3);
+    expect(seconds).toBeCloseTo(0.6 + 0.5);
+    expect(programDuration(tight)).toBeCloseTo(5 - 1.1);
+    expect(tight.segments.some(isGap)).toBe(false);
+    expect(placeWords(words, tight).map((item) => item.word.id)).toEqual(placeWords(words, whole()).map((item) => item.word.id));
   });
 });

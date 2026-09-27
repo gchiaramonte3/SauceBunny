@@ -9,9 +9,9 @@ export type TeTimelineAudio = { crossfade: 0 | 1 | 2 | 4; roomTone: boolean };
 
 type Props = {
   marks: { in: number | null; out: number | null };
-  canMark: boolean; snap: boolean; follow: boolean; loop: boolean;
+  canMark: boolean; snap: boolean; follow: boolean; loop: boolean; finding: boolean;
   hasPrevious: boolean; hasNext: boolean;
-  onAddEdit: () => void; onMarkIn: () => void; onMarkOut: () => void; onLift: () => void; onExtract: () => void; onMarker: () => void;
+  onAddEdit: () => void; onMarkIn: () => void; onMarkClip: () => void; onFindDead: () => void; onMarkOut: () => void; onLift: () => void; onExtract: () => void; onMarker: () => void;
   onSnap: () => void; onFollow: () => void; onLoop: () => void; onPrevious: () => void; onNext: () => void;
   allText: boolean; onAllText: () => void;
   view: TeTimelineView; onView: (view: TeTimelineView) => void;
@@ -21,6 +21,8 @@ type Props = {
 
 const IconLift = () => <Icon size={15}><path d="M4 18h5M15 18h5" /><path d="M12 15V5M8.5 8.5 12 5l3.5 3.5" /></Icon>;
 const IconExtract = () => <Icon size={15}><path d="M3 18h6M15 18h6" /><path d="M9 13l3 3 3-3M12 5v11" /></Icon>;
+const IconMarkClip = () => <Icon size={15}><path d="M5 5v14M19 5v14" /><rect x="8" y="8" width="8" height="8" rx="1" /></Icon>;
+const IconDeadSpace = () => <Icon size={15}><path d="M3 12h3M18 12h3" /><path d="M8 9v6M10 7v10M14 7v10M16 9v6" /><path d="M11.5 4v16" strokeDasharray="2 2" /></Icon>;
 const IconMarker = () => <Icon size={15}><path d="M7 4h10v16l-5-4-5 4z" /></Icon>;
 const IconSnap = () => <Icon size={15}><path d="M6 4v8a6 6 0 0 0 12 0V4" /><path d="M6 8h4M14 8h4" /></Icon>;
 const IconFollow = () => <Icon size={15}><path d="M8 4v16" /><path d="M12 12h8M17 9l3 3-3 3" /></Icon>;
@@ -69,9 +71,11 @@ export function TeTimelineTools(props: Props) {
       <Tool label="Add edit at playhead" keys="⌘B" disabled={!props.canMark} onClick={props.onAddEdit}><IconScissors size={15} /></Tool>
       <Tool label="Mark in" keys="I" pressed={marks.in != null} onClick={props.onMarkIn}><IconMarkIn size={15} /></Tool>
       <Tool label="Mark out" keys="O" pressed={marks.out != null} onClick={props.onMarkOut}><IconMarkOut size={15} /></Tool>
-      <Tool label="Lift in to out, leave the gap" keys="Z" disabled={!ranged} onClick={props.onLift}><IconLift /></Tool>
-      <Tool label="Extract in to out, close the gap" keys="X" disabled={!ranged} onClick={props.onExtract}><IconExtract /></Tool>
+      <Tool label="Mark clip" keys="T" disabled={!props.canMark} onClick={props.onMarkClip}><IconMarkClip /></Tool>
+      <Tool label="Lift in to out on selected tracks" keys="Z" disabled={!ranged} onClick={props.onLift}><IconLift /></Tool>
+      <Tool label="Extract in to out, all tracks" keys="X" disabled={!ranged} onClick={props.onExtract}><IconExtract /></Tool>
       <Tool label="Add marker" keys="M" onClick={props.onMarker}><IconMarker /></Tool>
+      <Tool label="Remove dead space" pressed={props.finding} disabled={!props.canMark} onClick={props.onFindDead}><IconDeadSpace /></Tool>
     </div>
     <span className="cp-te-tl-sep" aria-hidden="true" />
     <div className="cp-te-tl-group">

@@ -909,21 +909,31 @@ test.describe("Transcript Editor prototype", () => {
     await expect(page.getByRole("button", { name: "Undo Restore Line" })).toBeEnabled();
   });
 
-  test("a deletion over crosstalk asks first, and a speaker-only removal moves nothing", async ({ page }) => {
+  test("deleting over crosstalk silences only that speaker, and cutting for everyone is a second choice", async ({ page }) => {
     await open(page);
+    const running = () => page.locator(".cp-te-readout-of").first().textContent();
+    const start = await running();
     const at = await indexOf(page, ["take", "the", "grill."]);
     expect(at).toBeGreaterThan(0);
     await word(page, at + 1).click();
     await word(page, at + 2).click({ modifiers: ["Shift"] });
     await page.keyboard.press("Backspace");
-    const prompt = page.getByRole("alertdialog", { name: "Tamsin is talking under this." });
-    await expect(prompt).toBeVisible();
-    await expect(prompt.getByRole("button", { name: "Cut for everyone" })).toBeFocused();
-    await prompt.getByRole("button", { name: "Only Wes's words" }).click();
-    await expect(prompt).toBeHidden();
-    await expect(clipsOnFirstLane(page)).toHaveCount(1);
+    // Filled with silence on Wes's track; nothing came down.
     await expect(page.locator(".cp-te-word.is-lifted")).toHaveCount(2);
-    await expect(page.getByRole("status")).toContainText("Silenced 2 words");
+    await expect(clipsOnFirstLane(page)).toHaveCount(1);
+    expect(await running()).toBe(start);
+    const prompt = page.getByRole("alertdialog", { name: "Tamsin talks under this." });
+    await expect(prompt.getByRole("button", { name: "Keep" })).toBeFocused();
+    await prompt.getByRole("button", { name: "Cut for everyone" }).click();
+    await expect(prompt).toBeHidden();
+    expect(await running()).not.toBe(start);
+    await expect(clipsOnFirstLane(page)).toHaveCount(2);
+    // One undo brings back the silenced state, a second the original.
+    await page.keyboard.press("Meta+z");
+    expect(await running()).toBe(start);
+    await expect(page.locator(".cp-te-word.is-lifted")).toHaveCount(2);
+    await page.keyboard.press("Meta+z");
+    await expect(page.locator(".cp-te-word.is-lifted")).toHaveCount(0);
   });
 
   test("sources open as tabs, and a tab moves to another panel by its menu or by dragging", async ({ page }) => {
@@ -989,16 +999,31 @@ test.describe("Transcript Editor prototype", () => {
     await expect(page.locator(".cp-te-tl-marker")).toHaveCount(1);
     // Lift and Extract wait for a range.
     const tools = page.getByRole("toolbar", { name: "Timeline tools" });
-    await expect(tools.getByRole("button", { name: "Extract in to out, close the gap" })).toBeDisabled();
+    await expect(tools.getByRole("button", { name: "Extract in to out, all tracks" })).toBeDisabled();
     await at(0.5); await page.keyboard.press("i");
     await at(0.6); await page.keyboard.press("o");
     await expect(page.locator(".cp-te-tl-marked")).toHaveCount(1);
-    await tools.getByRole("button", { name: "Lift in to out, leave the gap" }).click();
+    // Marked on every selected track only: turn A2 off and its lane loses the highlight.
+    await expect(page.locator(".cp-te-tl-marked-lane")).toHaveCount(7);
+    await page.getByRole("button", { name: "Track A2" }).click();
+    await expect(page.locator(".cp-te-tl-marked-lane")).toHaveCount(6);
+    // Lift with a track off silences only the selected tracks and moves nothing.
+    await tools.getByRole("button", { name: "Lift in to out on selected tracks" }).click();
     expect(await running()).toBe(start);
     await expect(page.locator(".cp-te-doc .cp-te-word.is-lifted").first()).toBeVisible();
-    await expect(page.locator(".cp-te-tl-marked")).toHaveCount(0);
+    await expect(page.locator(".cp-te-tl-gap")).toHaveCount(0);
     await page.keyboard.press("Meta+z");
     await expect(page.locator(".cp-te-doc .cp-te-word.is-lifted")).toHaveCount(0);
+    // With every track on, Lift leaves a gap: same running time, the words become removed lines.
+    await page.getByRole("button", { name: "Track A2" }).click();
+    await at(0.5); await page.keyboard.press("i");
+    await at(0.6); await page.keyboard.press("o");
+    await page.keyboard.press("z");
+    expect(await running()).toBe(start);
+    await expect(page.locator(".cp-te-tl-gap")).toHaveCount(1);
+    await expect(page.locator(".cp-te-tl-marked")).toHaveCount(0);
+    await page.keyboard.press("Meta+z");
+    await expect(page.locator(".cp-te-tl-gap")).toHaveCount(0);
     await at(0.5); await page.keyboard.press("i");
     await at(0.6); await page.keyboard.press("o");
     await page.keyboard.press("x");
@@ -1075,6 +1100,43 @@ test.describe("Transcript Editor prototype", () => {
     await page.keyboard.type("Client cut");
     await page.keyboard.press("Enter");
     await expect(history.locator(".cp-te-hist-row.is-head")).toContainText("Client cut");
+  });
+
+  test("remove dead space finds the pauses, lets you keep one, and closes the rest up in one undo", async ({ page }) => {
+    await open(page);
+    const running = () => page.locator(".cp-te-readout-of").first().textContent();
+    const start = await running();
+    const words = (await live(page)).length;
+    await page.getByRole("button", { name: "Remove dead space" }).click();
+    await page.getByRole("radio", { name: "Tighten" }).click();
+    const bands = page.locator(".cp-te-tl-dead");
+    const found = await bands.count();
+    expect(found).toBeGreaterThan(3);
+    await bands.nth(1).click();
+    await expect(bands.nth(1)).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator(".cp-te-dead-count")).toContainText(`${found - 1} of ${found}`);
+    await page.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(bands).toHaveCount(0);
+    expect(await running()).not.toBe(start);
+    // Only silence went: every word is still in the edit.
+    expect((await live(page)).length).toBe(words);
+    await expect(page.getByRole("button", { name: "Undo Remove Dead Space" })).toBeEnabled();
+    await page.keyboard.press("Meta+z");
+    expect(await running()).toBe(start);
+  });
+
+  test("a new empty edit is built by appending from a source", async ({ page }) => {
+    await open(page);
+    await page.keyboard.press("Meta+Shift+n");
+    await expect(page.locator(".cp-te-doc-empty")).toBeVisible();
+    expect(await live(page)).toHaveLength(0);
+    const source = page.locator("[data-source-id=mg3]");
+    await source.locator("[data-src-index]").nth(0).click();
+    await source.locator("[data-src-index]").nth(5).click({ modifiers: ["Shift"] });
+    await page.getByRole("button", { name: "Append" }).click();
+    expect(await live(page)).toHaveLength(6);
+    await expect(page.locator(".cp-te-doc-empty")).toHaveCount(0);
+    await expect(page.locator(".cp-te-tl-clip").first()).toBeVisible();
   });
 
   test("the timeline scrubs as you drag, and the text settings resize the edit", async ({ page }) => {

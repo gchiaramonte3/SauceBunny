@@ -1,7 +1,7 @@
 import { teTc } from "./transcript-editor-fixture";
 import type { TePlacedWord, TeSpeaker, TeWord } from "./transcript-editor-model";
 
-export type TeSeamDetail = { index: number; at: number; gap: number; kind: "cut" | "through" | "jump"; removed: number; clipped: string[] };
+export type TeSeamDetail = { index: number; at: number; gap: number; kind: "cut" | "through" | "jump" | "gap"; removed: number; clipped: string[] };
 export type TeSummary = { running: number; sources: string[]; removedLines: number; clips: number; cuts: number; lifted: number; corrections: number };
 
 type Props = {
@@ -54,9 +54,9 @@ export function TeInspector(props: Props) {
     </section>
     {props.seam && <section className="cp-te-insp-section" aria-labelledby="cp-te-insp-seam">
       <h3 id="cp-te-insp-seam" className="cp-te-insp-title">Edit point</h3>
-      <p className="cp-te-insp-lead">{props.seam.kind === "cut" ? "Cut" : props.seam.kind === "through" ? "Through edit" : "Jump"} at {tc(props.seam.at, fps)}</p>
+      <p className="cp-te-insp-lead">{props.seam.kind === "cut" ? "Cut" : props.seam.kind === "through" ? "Through edit" : props.seam.kind === "gap" ? "Gap" : "Jump"} at {tc(props.seam.at, fps)}</p>
       <p className="cp-te-insp-meta">{props.seam.kind === "cut" ? `${props.seam.gap.toFixed(2)} s removed · ${plural(props.seam.removed, "word")}`
-        : props.seam.kind === "through" ? "Nothing removed."
+        : props.seam.kind === "through" ? "Nothing removed." : props.seam.kind === "gap" ? "Silence on every track."
         : Number.isNaN(props.seam.gap) ? "Joins two sources."
         : `Jumps ${props.seam.gap < 0 ? "back" : "ahead"} ${Math.abs(props.seam.gap).toFixed(1)} s.`}</p>
       {props.seam.clipped.length > 0 && <p className="cp-te-insp-warn" role="note">Cuts into a word: {names(props.seam.clipped)}.</p>}

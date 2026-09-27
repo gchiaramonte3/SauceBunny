@@ -44,8 +44,9 @@ Phase 1, and the text and the tracks are drawn from the same data.
      next one.
 2. Turn **Removed lines** off in the toolbar and the struck lines collapse to
    a **¦** mark. Turn it back on to restore any of them.
-3. Select Wes's "the grill." and press Delete. Tamsin talks over it, so you
-   are asked: cut the time for everyone, or silence only Wes's words.
+3. Select Wes's "the grill." and press Delete. Tamsin talks over it, so
+   Wes's words are silenced on his track and nothing moves. **Cut for
+   everyone** is offered as a second step.
 4. **Shift-Delete** silences words on their speaker's track only. Nothing
    moves; the words dim and their waveform goes quiet.
 5. **Option-↑ / Option-↓** (or the arrows on a paragraph's header) move a
@@ -75,8 +76,18 @@ Phase 1, and the text and the tracks are drawn from the same data.
     - **I** and **O** mark a range, then **Z** lifts it (the time stays,
       silent) or **X** extracts it (everything closes up);
     - **M** drops a marker, **A** and **S** jump between edit points;
-    - **N** snap, **⌘L** loop, **⌘=** / **⌘−** / **⇧Z** zoom.
-14. Make three deletions, undo two, then make a different one. Open
+    - **N** snap, **⌘L** loop, **⌘=** / **⌘−** / **⇧Z** zoom;
+    - **T** marks the clip under the playhead.
+    - Click a track number (A1, A2, …) to turn that track off, as with
+      Avid's track selectors. The marked region then highlights only the
+      tracks that are on, and Lift silences only those. ⌥-click turns on
+      that track alone.
+14. Press **Remove dead space** (the waveform icon). Dead air is marked
+    across the lanes; click one to keep it, choose **Dead air** or
+    **Tighten**, and **Remove** closes the rest up in one undo.
+15. **⇧⌘N** (or **New edit** in the Library) starts an empty edit. Select
+    lines in a source and press **Append** or **V** to build it.
+16. Make three deletions, undo two, then make a different one. Open
     **History** (⌘Y): the two undone steps are still there under
     **2 undone**. Click one to go back to it, and ★ to pin a state with a
     name.
@@ -94,7 +105,7 @@ Phase 1, and the text and the tracks are drawn from the same data.
   every lane.
 - Double-click selects a line; the caret stays put after a delete.
 - Ask: @ mentions, cited lines, and changes that wait for Apply.
-- The crosstalk question, and its wording.
+- Overtalk: a delete never cuts through someone else's words by default.
 - Source/record: read-only source beside the edit, V to splice, F to match.
 - How the timeline looks: one lane per speaker, in the speaker's colour,
   keeping the AAF's track numbers.
@@ -112,7 +123,10 @@ lanes   A1 Rosa  ▇▇▇▇▇▇▇|▇▇▇▇▇▇▇▇▇▇▇|▇▇�
         A2 Dev ▇▇▇▇▇▇|▇▇▇▇▇▇▇▇▇▇▇|▇▇▇▇▇     same boundaries on every lane
 ```
 
-That is why the timeline is magnetic: there is nothing that could leave a gap.
+That is why the timeline is magnetic: removing a range closes up by
+construction. A **gap** is a segment too (source `gap`): empty time on every
+track, like Final Cut's gap clip or Avid's filler. Lift leaves one, and dead
+space removal takes them out.
 It is Media Composer's Extract with every sync lock on, Pro Tools' Shuffle
 across all tracks, and Final Cut's Blade All on every edit. The failure that
 magnetic timelines are criticised for (a connected clip that rides along a
@@ -120,8 +134,9 @@ ripple and drifts out of sync) cannot happen, because no track is ever
 connected to another; they are all the storyline.
 
 A **speaker-only removal** is the one exception, and it never ripples. It is a
-**mute** on one track over a source range: Avid's Lift, Final Cut's Replace
-with Gap. Time on the other tracks is untouched.
+**mute** on one track over a source range: silence on that track, time on
+the other tracks untouched. Lift with only some track selectors on is the
+same thing, over a marked range.
 
 Rules the model enforces, and the prototype's tests pin
 (`design-system/transcript-editor-model.test.ts`):
@@ -182,10 +197,15 @@ cut lands on a frame boundary, because Avid cannot represent anything finer
   of the line you were on and the playhead stays at the cut. Nothing scrolls,
   and the next line is not selected; going there is a click (or a
   double-click, for the whole line).
-- **Crosstalk asks before it cuts.** When the time you delete also holds
-  someone else's words, the editor chooses between cutting the time for
-  everyone or silencing only the selected speaker. Return picks the first;
-  Escape changes nothing. Riverside asks the same question.
+- **Overtalk is never cut through by default.** On a magnetic timeline a
+  cut takes the time from every track, so deleting words that someone
+  else talks under would take their words down too. Instead the delete
+  fills the selected words with silence on their own track and moves
+  nothing, then offers **Cut for everyone** as a second, explicit step
+  (Return keeps the silence; ⌘Z undoes either). The same rule holds for
+  Ask's filler removal (a filler with overtalk under it is silenced, the
+  rest close up) and for dead space (a stretch counts only when every mic
+  is quiet, selected or not).
 - **Pauses show as dots**, scaled to their length: • from 0.35 s, •• from
   0.8 s, ••• from 1.5 s.
 - **Speakers come from the mic, not from diarisation.** Each paragraph's rule
@@ -564,8 +584,9 @@ It follows [DESIGN.md](DESIGN.md) and the production stylesheet rules:
 
 ## Build order
 
-This supersedes the build order in AAF-ASSEMBLY-RESEARCH.md. Each phase is
-useful on its own.
+Superseded by [TRANSCRIPT-EDITOR-PLAN.md](TRANSCRIPT-EDITOR-PLAN.md), the
+production plan (nine phases with gates, from the Avid round-trip proof to
+release). The order below is kept for the reasoning it records.
 
 - **Phase 0: prove the AAF round trip.** Unchanged, and it comes first, as
   asked.

@@ -156,7 +156,8 @@
 .cp-te-side-name, .cp-te-side-detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cp-te-side-name { font-size: var(--text-md); font-weight: var(--weight-semibold); line-height: var(--leading-snug); }
 .cp-te-side-detail { font-size: var(--text-sm); line-height: var(--leading-snug); color: var(--fg-4); }
-.cp-te-side-new.btn { width: calc(100% - 16px); margin: 4px 8px; justify-content: flex-start; }
+.cp-te-side-new { display: flex; gap: 4px; margin: 4px 8px; }
+.cp-te-side-new .btn:first-child { flex: 1; justify-content: flex-start; }
 
 /* ── Source ──────────────────────────────────────────────────────────── */
 .cp-te-source, .cp-te-record { display: flex; flex-direction: column; min-height: 0; position: relative; }
@@ -182,6 +183,7 @@
 
 /* ── Edit (record) ───────────────────────────────────────────────────── */
 .cp-te-doc { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 28px 48px; }
+.cp-te-doc-empty { margin-top: 40px; text-align: center; font-size: var(--text-md); color: var(--fg-4); }
 .cp-te .cp-te-doc:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--focus-ring); }
 .cp-te-para { max-width: 720px; margin: 0 auto 20px; }
 .cp-te-para-head { display: flex; align-items: center; gap: 8px; height: 22px; margin-bottom: 2px; }
@@ -446,7 +448,23 @@
   border-bottom: 1px solid var(--line-1);
 }
 .cp-te-tl-row.is-solo .cp-te-tl-head { background: var(--sel-soft); }
-.cp-te-tl-track { flex: none; font-size: var(--text-sm); color: var(--fg-3); font-variant-numeric: tabular-nums; }
+/* The track selector, as in Avid: the track number is a switch. Lit when on. */
+.cp-te-tl-track {
+  flex: none;
+  min-width: 26px;
+  height: 18px;
+  padding: 0 3px;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--fg-5);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.cp-te-tl-track:hover { color: var(--fg-2); border-color: var(--line-2); }
+.cp-te-tl-track[aria-pressed="true"] { background: var(--bg-4); color: var(--fg-1); border-color: var(--line-3); }
 .cp-te-tl-head .cp-te-swatch { width: 6px; height: 6px; }
 .cp-te-tl-name { flex: 1; min-width: 0; font-size: var(--text-base); color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cp-te-tl-switches { flex: none; display: flex; gap: 3px; }
@@ -501,8 +519,18 @@
 /* Absolutely positioned, so it takes no part in auto-placement (a placed
    item spanning every row pushed the lanes into implicit rows below it), and
    its grid lines still make it exactly as wide as the lanes. */
-.cp-te-tl-overlay { position: absolute; inset: 0; grid-column: 2; grid-row: 1 / -1; z-index: 4; overflow: hidden; pointer-events: none; }
-.cp-te-tl-marked-band { position: absolute; top: 22px; bottom: 0; background: color-mix(in srgb, var(--marker) 10%, transparent); }
+.cp-te-tl-overlay { position: absolute; inset: 0; grid-column: 2; grid-row: 1 / span var(--te-rows, 2); z-index: 4; overflow: hidden; pointer-events: none; }
+/* In to out on the selected tracks only, as Avid highlights it. */
+.cp-te-tl-marked-lane { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; background: color-mix(in srgb, var(--marker) 22%, transparent); box-shadow: inset 1px 0 0 var(--marker), inset -1px 0 0 var(--marker); }
+/* A gap: empty time on every track. */
+.cp-te-tl-gap { position: absolute; top: 22px; bottom: 0; background: repeating-linear-gradient(135deg, var(--line-1) 0 1px, transparent 1px 6px); box-shadow: inset 1px 0 0 var(--line-2), inset -1px 0 0 var(--line-2); }
+/* Dead space under review: removing is filled, kept is outlined only. */
+.cp-te-tl-deadlayer { position: absolute; inset: 0; grid-column: 2; grid-row: 1 / span var(--te-rows, 2); z-index: 5; overflow: hidden; pointer-events: none; }
+.cp-te-tl-dead { position: absolute; top: 22px; bottom: 0; min-width: 3px; padding: 0; border: 1px dashed var(--warning); border-radius: var(--r-2xs); background: color-mix(in srgb, var(--warning) 22%, transparent); pointer-events: auto; cursor: pointer; }
+.cp-te-tl-dead[aria-pressed="false"] { background: transparent; border-color: var(--line-3); }
+.cp-te-dead { flex: none; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px; border-top: 1px solid var(--line-1); }
+.cp-te-dead-seg { width: 180px; }
+.cp-te-dead-count { flex: 1; min-width: 0; font-size: var(--text-base); color: var(--fg-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cp-te-tl-band {
   position: absolute;
   top: 22px;

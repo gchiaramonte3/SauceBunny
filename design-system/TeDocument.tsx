@@ -142,5 +142,6 @@ export function TeDocument(props: Props) {
       </div>;
     })}
     {ghostsBetween(lastSegment, Infinity).map(ghostLine)}
+    {!props.paragraphs.length && <p className="cp-te-doc-empty">Empty. Select lines in a source, then Insert (V) or Append.</p>}
   </div>;
 }

@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { secondsToTc } from "../src/lib/timecode";
 import { answer, type TeAgentContext, type TeLine } from "./transcript-editor-agent";
 import { activate, closeTab, columnOf, defaultDock, isClosable, isSourceTab, moveTab, openTab, sourceTab, teColumnNames, teColumns, TE_PINNED, type TeColumn } from "./transcript-editor-dock";
-import { teDurations, teScene, teSources, teSpeakers, teTc, teWholeScene, teWords } from "./transcript-editor-fixture";
+import { teDurations, tePeaks, teScene, teSources, teSpeakers, teTc, teWholeScene, teWords } from "./transcript-editor-fixture";
 import { clampTimeline, layoutPanes, tePaneLimits, teTimelineLimits, type TePane } from "./transcript-editor-layout";
 import {
-  addEdit, cutRange, deleteWords, extractProgram, liftProgram, ghostLines, healSeam, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration,
+  addEdit, clipAround, cutRange, deleteWords, extractProgram, findDeadSpace, isGap, teDeadDefaults, liftOnTracks, liftProgram, removeDeadSpace, TE_GAP, ghostLines, healSeam, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration,
   programToSource, restoreRange, seamList, segmentStarts, spliceIn, unmuteWords, type TeDeleteResult, type TeEdit, type TeGhost,
 } from "./transcript-editor-model";
 import { TeAsk, type TeAskMessage } from "./TeAsk";
@@ -21,6 +21,7 @@ import { TeSource } from "./TeSource";
 import { TeSplitter } from "./TeSplitter";
 import { TeTabBar, type TeTab } from "./TeTabBar";
 import type { TeTextStyle } from "./TeTextSettings";
+import { teDeadPresets, type TeDeadPreset, type TeDeadReview } from "./TeDeadSpace";
 import { TeTimeline } from "./TeTimeline";
 import { TeToolbar } from "./TeToolbar";
 import { TeTransport } from "./TeTransport";
@@ -32,6 +33,7 @@ const colors: Record<string, string> = Object.fromEntries(teSpeakers.map((speake
   [speaker.id, ["#FD8A8C", "#EB9A04", "#0AF2CD", "#75B0FF", "#E887FE", "#ABF201", "#F886BB"][index]]));
 const fps = teScene.fps;
 const sourceOf = (id: string) => teSources.find((source) => source.id === id)!;
+const shortName = (id: string) => id === TE_GAP ? "Gap" : sourceOf(id).short;
 const sourceSpeakers = Object.fromEntries(teSources.map((source) => [source.id, source.speakers]));
 const sourcePlaced = Object.fromEntries(teSources.map((source) => [source.id, placeWords(teWords, teWholeScene(source.id))]));
 const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
@@ -80,6 +82,10 @@ export function TranscriptEditorPrototype() {
   const [followHead, setFollowHead] = useState(true);
   const [looping, setLooping] = useState(false);
   const [zoom, setZoom] = useState(1);
+  // Avid's track selectors: which tracks Lift, Mark Clip and dead-space
+  // detection act on. Extract always ripples every track (sync locked).
+  const [tracks, setTracks] = useState<Set<string>>(() => new Set(teSpeakers.map((speaker) => speaker.id)));
+  const [dead, setDead] = useState<TeDeadReview | null>(null);
 
   const placed = useMemo(() => placeWords(teWords, edit), [edit]);
   const paras = useMemo(() => paragraphs(placed), [placed]);
@@ -154,20 +160,23 @@ export function TranscriptEditorPrototype() {
     setMessage(`Deleted ${plural(words, "word")}, ${result.seconds.toFixed(2)} s.`);
     focusDoc();
   };
-  const lift = (ids: Set<string>, who: string[]) => {
+  const lift = (ids: Set<string>, who: string[], focus = true) => {
     const restoring = selected.every((item) => item.muted);
     commit(restoring ? "Restore on Track" : `Remove from ${names(who)}'s Track`, (present) =>
       ({ edit: restoring ? unmuteWords(teWords, present.edit, ids) : muteWords(teWords, present.edit, ids) }));
     setPrompt(null);
     setMessage(`${restoring ? "Unsilenced" : "Silenced"} ${plural(ids.size, "word")}.`);
-    focusDoc();
+    if (focus) focusDoc();
   };
   const remove = (speakerOnly: boolean) => {
     if (!dryRun || !selected.length) return;
     const ids = new Set(selected.map((item) => item.word.id));
     const who = selected.map((item) => item.word.speaker);
     if (speakerOnly) return lift(ids, who);
-    if (dryRun.crosstalk.length) return setPrompt({ result: dryRun, lift: ids, who });
+    // Overtalk: rippling would take the other speaker's words down with the
+    // cut. So the deleted words are filled with silence on their own track
+    // only, nothing moves, and closing the time up for everyone is a choice.
+    if (dryRun.crosstalk.length) { lift(ids, who, false); return setPrompt({ result: dryRun, lift: ids, who }); }
     applyDelete(dryRun, selected.length);
   };
   const restore = (ghost: TeGhost) => {
@@ -261,12 +270,34 @@ export function TranscriptEditorPrototype() {
   const takeMarked = (close: boolean) => {
     if (!marked) return;
     const [from, to] = marked;
+    const every = teSpeakers.every((speaker) => tracks.has(speaker.id));
     commit(close ? "Extract" : "Lift", (present) => close
       ? { edit: extractProgram(present.edit, from, to).edit, markers: present.markers.filter((t) => t <= from || t >= to).map((t) => t >= to ? t - (to - from) : t) }
-      : { edit: liftProgram(present.edit, from, to, (source) => sourceSpeakers[source] ?? []) });
+      : { edit: every ? liftProgram(present.edit, from, to) : liftOnTracks(present.edit, from, to, (source) => (sourceSpeakers[source] ?? []).filter((id) => tracks.has(id))) });
     setMarks({ in: null, out: null });
     seek(from);
     setMessage(`${close ? "Extracted" : "Lifted"} ${(to - from).toFixed(2)} s.`);
+  };
+  const markClip = () => { const clip = clipAround(edit, playhead); if (clip) setMarks({ in: clip[0], out: clip[1] }); };
+  // Dead space: quiet on EVERY mic and nothing in the transcript. Every
+  // track, not just the selected ones: removing it ripples all of them.
+  const loudest = (source: string, from: number, to: number) => Math.max(0, ...(sourceSpeakers[source] ?? [])
+    .map((id) => Math.max(...tePeaks(source, id, from, to, 4).map(([, high]) => high))));
+  const findDead = (preset: TeDeadPreset = dead?.preset ?? "air") => {
+    const spaces = findDeadSpace(edit, teWords, loudest, { ...teDeadDefaults, minimum: teDeadPresets[preset].minimum });
+    setDead({ spaces, skip: new Set(), preset });
+  };
+  const applyDead = () => {
+    if (!dead) return;
+    const chosen = dead.spaces.filter((_, index) => !dead.skip.has(index));
+    const result = removeDeadSpace(edit, chosen, teDeadPresets[dead.preset].keep);
+    if (result.seconds > 0) commit("Remove Dead Space", () => ({ edit: result.edit, markers: [] }));
+    setDead(null);
+    setMessage(`Removed ${result.seconds.toFixed(1)} s.`);
+  };
+  const newEdit = (empty: boolean) => {
+    commit(empty ? "New Empty Edit" : "New Edit", () => ({ edit: empty ? { segments: [], mutes: [] } : teWholeScene(), markers: [] }));
+    setSelection({ anchor: 0, focus: 0, collapsed: true }); setMarks({ in: null, out: null }); seek(0); setMessage("");
   };
   const addMarker = () => commit("Add Marker", (present) => present.markers.some((t) => Math.abs(t - playhead) < 1 / fps) ? null
     : { markers: [...present.markers, playhead].sort((a, b) => a - b) });
@@ -303,6 +334,7 @@ export function TranscriptEditorPrototype() {
     if (event.key === " " && !target.closest("button, [role=separator], [role=tab]")) { event.preventDefault(); return playback.toggle(inSource ?? "record"); }
     if (event.metaKey && !event.ctrlKey && key === "z") { event.preventDefault(); return step(!event.shiftKey); }
     if (event.metaKey && !event.ctrlKey && key === "k") { event.preventDefault(); return openAsk(); }
+    if (event.metaKey && event.shiftKey && !event.ctrlKey && key === "n") { event.preventDefault(); return newEdit(true); }
     if (event.metaKey && !event.ctrlKey && key === "y") { event.preventDefault(); return showPanel("history", "right"); }
     if (event.metaKey && event.ctrlKey && (key === "s" || key === "i")) { event.preventDefault(); return toggle(key === "s" ? "left" : "right"); }
     const onEdit = !inSource;
@@ -311,9 +343,10 @@ export function TranscriptEditorPrototype() {
       if (action) { event.preventDefault(); return action(); }
     }
     if (onEdit && event.altKey && !event.metaKey && event.code === "KeyX") { event.preventDefault(); return setMarks({ in: null, out: null }); }
+    if (key === "escape" && dead) { event.preventDefault(); return setDead(null); }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (onEdit && event.shiftKey && key === "z") { event.preventDefault(); return zoomBy(0); }
-    const tool = onEdit && !event.shiftKey ? ({ i: markIn, o: markOut, z: () => takeMarked(false), x: () => takeMarked(true), m: addMarker, n: () => setSnap((value) => !value),
+    const tool = onEdit && !event.shiftKey ? ({ i: markIn, o: markOut, z: () => takeMarked(false), x: () => takeMarked(true), m: addMarker, t: markClip, n: () => setSnap((value) => !value),
       a: () => previousEdit && chooseSeam(previousEdit.index), s: () => nextEdit && chooseSeam(nextEdit.index) } as Record<string, () => void>)[key] : undefined;
     if (tool) { event.preventDefault(); return tool(); }
     if (key === "v") { event.preventDefault(); return insert(false); }
@@ -332,7 +365,7 @@ export function TranscriptEditorPrototype() {
   }, []);
 
   const panel = (tab: string) => {
-    if (tab === "library") return <TeSidebar groups={library(dock)} current="edit" onNew={() => { commit("New Edit", () => ({ edit: teWholeScene() })); setSelection({ anchor: 0, focus: 0, collapsed: true }); seek(0); setMessage("New edit."); }}
+    if (tab === "library") return <TeSidebar groups={library(dock)} current="edit" onNew={newEdit}
       onOpen={(item) => item.id === "edit" ? setMessage("") : item.ready ? (showPanel(sourceTab(item.id), "source"), setFocusSource(item.id)) : setMessage("Placeholder.")} />;
     if (tab === "inspector") return <TeInspector speakers={teSpeakers.filter((speaker) => talk[speaker.id] || placed.some((item) => item.word.speaker === speaker.id))} colors={colors} fps={fps}
       selected={selected} caretWord={placed[caret] ?? null} crosstalk={dryRun?.crosstalk ?? []} cutSeconds={dryRun?.seconds ?? 0} onDelete={remove} onMatch={findInSource}
@@ -345,7 +378,7 @@ export function TranscriptEditorPrototype() {
         setMessage(`Restored ${info.gap.toFixed(2)} s.`);
       }}
       onCloseSeam={() => setSeam(null)}
-      summary={{ running: total, sources: [...new Set(edit.segments.map((segment) => sourceOf(segment.source).short))], removedLines: ghosts.length,
+      summary={{ running: total, sources: [...new Set(edit.segments.filter((segment) => !isGap(segment)).map((segment) => sourceOf(segment.source).short))], removedLines: ghosts.length,
         clips: edit.segments.length, cuts: seams.length, lifted: placed.filter((item) => item.muted).length, corrections: Object.keys(corrections).length }}
       talk={talk} />;
     if (tab === "history") return <TeHistory log={log} onJump={(id) => moveHead(jump(log, id), log.states[id].pinned ?? log.states[id].label)}
@@ -363,8 +396,12 @@ export function TranscriptEditorPrototype() {
         if (proposal.kind === "insert") splice(proposal.lines, null, `Ask: ${proposal.label}`);
         else {
           const ids = new Set(proposal.ids);
-          const result = deleteWords(teWords, edit, new Set(placed.filter((word) => ids.has(word.word.id)).map(placementKey)));
-          commit(`Ask: ${proposal.label}`, () => ({ edit: result.edit }));
+          // Never cut through someone else's words: a filler with overtalk
+          // under it is silenced on its own track; the rest close up.
+          const under = new Set([...ids].filter((id) => { const mine = teWords.find((word) => word.id === id)!;
+            return teWords.some((other) => other.source === mine.source && other.speaker !== mine.speaker && other.start < mine.end && other.end > mine.start); }));
+          const result = deleteWords(teWords, edit, new Set(placed.filter((word) => ids.has(word.word.id) && !under.has(word.word.id)).map(placementKey)));
+          commit(`Ask: ${proposal.label}`, () => ({ edit: under.size ? muteWords(teWords, result.edit, under) : result.edit }));
         }
         setMessages((list) => list.map((entry) => entry.id === item.id ? { ...entry, applied: true } : entry));
         requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".cp-te-ask-input")?.focus());
@@ -386,7 +423,7 @@ export function TranscriptEditorPrototype() {
       onScrub={seek} onScrubStart={playback.scrubStart} onScrubEnd={playback.scrubEnd}
       text={text.edit} onText={(style) => setText((state) => ({ ...state, edit: style }))}>
       <TeDocument speakers={teSpeakers} colors={colors} fps={fps} paragraphs={paras} placed={placed} selection={selection} current={currentKey}
-        sourceLabel={(id) => sourceOf(id).short} seams={seamInfo} seam={seam} onSeam={chooseSeam}
+        sourceLabel={shortName} seams={seamInfo} seam={seam} onSeam={chooseSeam}
         ghosts={showRemoved ? ghosts : null} onRestore={restore} corrections={corrections} editing={editing}
         onCorrect={(id, value) => {
           setEditing(null);
@@ -412,7 +449,7 @@ export function TranscriptEditorPrototype() {
           setMessage(`Moved ${direction < 0 ? "up" : "down"}.`);
         }} />
       {prompt && <TePrompt who={names(prompt.who)} under={names(prompt.result.crosstalk.map((word) => word.speaker))} count={prompt.result.crosstalk.length}
-        onEveryone={() => applyDelete(prompt.result, prompt.lift.size)} onOnly={() => lift(prompt.lift, prompt.who)} onCancel={() => { setPrompt(null); focusDoc(); }} />}
+        onEveryone={() => applyDelete(prompt.result, prompt.lift.size)} onKeep={() => { setPrompt(null); focusDoc(); }} />}
     </TeRecord>;
   };
 
@@ -442,7 +479,7 @@ export function TranscriptEditorPrototype() {
   };
 
   const sourceIndex = placed.length ? programToSource(edit, playhead) : null;
-  const sourceAtHead = sourceIndex ? edit.segments[sourceIndex.segment].source : null;
+  const sourceAtHead = sourceIndex && !isGap(edit.segments[sourceIndex.segment]) ? edit.segments[sourceIndex.segment].source : null;
   return <div ref={root} className={`cp-te${drag ? " is-dragging" : ""}`} data-testid="transcript-editor">
     <TeToolbar title="Kitchen Challenge, first pass" subtitle={`${sourceOf("mg3").name} · ${teScene.aaf}`}
       left={layout.shown.left} source={layout.shown.source} right={layout.shown.right}
@@ -471,14 +508,17 @@ export function TranscriptEditorPrototype() {
       onChange={setTimeline} onReset={() => setTimeline(null)} />
     <div className="cp-te-lower" style={{ height: timelineHeight }}>
       <TeTransport playing={playback.playing === "record"} onToggle={() => playback.toggle("record")} onStart={() => seek(0)} playhead={playhead} total={total} fps={fps}
-        source={sourceIndex ? sourceIndex.source : null} sourceBase={sourceAtHead ? sourceOf(sourceAtHead).startTc : "00:00:00:00"}
+        source={sourceAtHead && sourceIndex ? sourceIndex.source : null} sourceBase={sourceAtHead ? sourceOf(sourceAtHead).startTc : "00:00:00:00"}
         sourceName={sourceAtHead ? sourceOf(sourceAtHead).short : ""}
         speaking={speaking.map((id) => ({ id, name: nameOf(id), color: colors[id] }))} message={message} />
       <TeTimeline speakers={teSpeakers} edit={edit} seams={seams} placed={placed} selection={keys} playhead={playhead} fps={fps} colors={colors}
-        solo={solo} mute={mute} onSeek={seek} seam={seam} onSeam={chooseSeam} sourceSpeakers={sourceSpeakers} sourceName={(id) => sourceOf(id).short}
+        solo={solo} mute={mute} onSeek={seek} seam={seam} onSeam={chooseSeam} sourceSpeakers={sourceSpeakers} sourceName={shortName}
+        tracks={tracks} onTrack={(id, only) => setTracks((state) => { if (only) return new Set([id]); const next = new Set(state); if (!next.delete(id)) next.add(id); return next; })}
+        dead={dead} onDeadSkip={(index) => setDead((state) => { if (!state) return state; const skip = new Set(state.skip); if (!skip.delete(index)) skip.add(index); return { ...state, skip }; })}
+        onDeadPreset={findDead} onDeadApply={applyDead} onDeadCancel={() => setDead(null)}
         onScrubStart={playback.scrubStart} onScrubEnd={playback.scrubEnd} zoom={zoom} onZoom={setZoom} markers={markers}
         tools={{ marks, canMark: count > 0, snap, follow: followHead, loop: looping, hasPrevious: !!previousEdit, hasNext: !!nextEdit,
-          onAddEdit: cutHere, onMarkIn: markIn, onMarkOut: markOut, onLift: () => takeMarked(false), onExtract: () => takeMarked(true), onMarker: addMarker,
+          onAddEdit: cutHere, onMarkIn: markIn, onMarkClip: markClip, onFindDead: () => (dead ? setDead(null) : findDead()), finding: !!dead, onMarkOut: markOut, onLift: () => takeMarked(false), onExtract: () => takeMarked(true), onMarker: addMarker,
           onSnap: () => setSnap((value) => !value), onFollow: () => setFollowHead((value) => !value), onLoop: () => setLooping((value) => !value),
           onPrevious: () => previousEdit && chooseSeam(previousEdit.index), onNext: () => nextEdit && chooseSeam(nextEdit.index) }}
         onSolo={(id) => setSolo((state) => { const next = new Set(state); if (!next.delete(id)) next.add(id); return next; })}
