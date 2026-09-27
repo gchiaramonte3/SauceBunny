@@ -1,0 +1,25 @@
+{
+  "picture-op1a": {
+    "height": 1080,
+    "nb_frames": 30,
+    "r_frame_rate": "30000/1001",
+    "timecode": "00:59:59;28",
+    "tracks": [
+      {
+        "aligned": true,
+        "material_track_id": 3,
+        "mob_id": "urn:smpte:umid:060a2b34.01010105.01010d00.134188a7.52947134.f74188a7.00529471.34f74101",
+        "slot_id": 3
+      }
+    ],
+    "width": 1920
+  },
+  "picture-opatom": {
+    "height": 1080,
+    "nb_frames": 24,
+    "r_frame_rate": "24000/1001",
+    "timecode": "01:00:00:00",
+    "tracks": "MXF header has no recognized audio source mappings. The media is not confirmed to be a wrong recording; export diagnostics for this file.",
+    "width": 1920
+  }
+}

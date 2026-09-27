@@ -331,9 +331,9 @@ mod tests {
     }
     #[test]
     fn op1a_uses_source_slot_and_material_track_not_channel_or_stream_order() {
-        use super::super::linked_probe::{MxfTrack,material_track};
+        use super::super::linked_probe::{MxfTrack,MxfTrackKind,material_track};
         let mut s=source(); s.slot_id=38;
-        let tracks=vec![MxfTrack{material_track_id:7,mob_id:s.mob_id.clone(),slot_id:38,aligned:true},MxfTrack{material_track_id:5,mob_id:s.mob_id.clone(),slot_id:42,aligned:true}];
+        let tracks=vec![MxfTrack{material_track_id:7,mob_id:s.mob_id.clone(),slot_id:38,aligned:true,kind:MxfTrackKind::Sound},MxfTrack{material_track_id:5,mob_id:s.mob_id.clone(),slot_id:42,aligned:true,kind:MxfTrackKind::Sound}];
         assert_eq!(material_track(&tracks,&s).unwrap(),7);
         s.slot_id=42; assert_eq!(material_track(&tracks,&s).unwrap(),5);
         s.slot_id=7; assert!(material_track(&tracks,&s).is_err());

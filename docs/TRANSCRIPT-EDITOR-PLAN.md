@@ -43,7 +43,8 @@ An editor on a reality show can:
 | Transcript Editor (Phase 5) | In the app (⌘7): picker, source and record, removed lines, overtalk prompt, timeline, dead space, History, edit-list playback. No dockable tabs, Ask or word corrections yet |
 | AAF export (Phase 6) | Shipped: `write-edit` sidecar command with a frame-by-frame self-check, driven by `aaf_export_edit`; **not yet tried in Media Composer** (Phase 0) |
 | String-outs (Phase 7) | Manual (Add to…), rules (one per person) and AI proposals (ask in words, accept or discard; local Qwen or the chosen cloud model) shipped; revisions as diffs to an existing edit and season-wide batches not started |
-| Media index (Phase 2), hardening (Phase 8) | Not started |
+| Media index (Phase 2) | Native MXF header reads picture descriptors and timecode; the PMR reader is not started (no sample files) |
+| Hardening (Phase 8) | Not started |
 
 ## Invariants
 
@@ -154,6 +155,13 @@ The one thing no amount of fixture testing can answer.
 - **Extend the native header reader** with picture descriptors (CDCI,
   RGBA) and the timecode component, so picture media relinks by the same
   path as audio.
+  - [x] Done in `mxf_header.rs`: picture tracks map to their file package
+    slot like audio, a CDCI/RGBA/MPEG descriptor summary and the file
+    package's timecode are read, and none of it can fail an audio file.
+    Pinned on DNxHD OP-Atom and OP1a fixtures against ffprobe. The relink
+    itself still binds audio only; picture relink uses these facts later.
+  - [ ] Open: the `msmFMID.pmr` reader above, pending real sample files
+    (the plan requires a clean-room reader validated on them).
 - **Gate:** relink of the 495-source NEXIS sequence in under 10 seconds warm
   (it was 116 s before PR #17), zero wrong bindings, and a clean fallback
   with the PMR deleted, truncated or stale. A fuzz test on the PMR parser.

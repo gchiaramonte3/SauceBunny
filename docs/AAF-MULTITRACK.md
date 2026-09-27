@@ -31,6 +31,36 @@ choice. Ancestor recorder-WAV references retain their different time origins;
 they are not guessed as substitutes for trimmed Avid MXF. No server is mounted,
 no credentials are requested, and network URLs in metadata are never opened.
 
+### MXF picture and timecode in the native header reader
+
+`src-tauri/src/commands/aaf/mxf_header.rs` reads an MXF's identity from its
+header partition without the Python parser. Besides sound, it now recognizes
+picture tracks (the SMPTE picture data definition, or Avid's legacy picture
+AUID stored half-swapped) and maps each one to its file source package slot by
+the same path as audio. `Inspection` carries them separately from the audio
+identity: `picture_tracks` (each `MxfTrack` has `kind: "picture"`; the field
+defaults to `sound`, so cached headers and sidecar output still load), and for
+a single picture track `picture`, read from a CDCI, RGBA, generic picture or
+MPEG-2 video descriptor, directly or inside an OP1a MultipleDescriptor: stored
+width and height, frame layout, edit rate, ContainerDuration and the track's
+own length when present (FFmpeg writes no ContainerDuration for picture), and
+the picture essence coding UL. `timecode` is the file source package's single
+Timecode component (start frame, rounded base, drop frame), read only when
+every mapped track comes from that one package.
+
+These facts are additive. A picture mapping or descriptor that does not parse,
+or a timecode that is missing or malformed, empties only those fields; the
+audio identity, the single-track PCM shortcut and every audio error are
+exactly what they were. A picture-only OP-Atom file now returns an
+inspection with no audio tracks instead of an error, and the relink still
+hands it to the full parser, as before. Picture facts appear in the relink
+diagnostics log but are not yet cached or used to relink picture; the header
+cache still holds audio only. Timecode on an Avid tape or import package
+(upstream of the file package) is not followed yet. Fixtures
+`picture-opatom` (DNxHD 1080p 23.976, TC 01:00:00:00) and `picture-op1a`
+(DNxHD 29.97 DF plus PCM, TC 00:59:59;28) are pinned against ffprobe and the
+reference parser by `aaf-sidecar/make_mxf_header_fixtures.py`.
+
 The graph manifest is v2, saved documents v3, and the embedded PCM index v2;
 older embedded documents remain readable. Original track IDs, labels, cast
 snapshots and transcripts survive compatible migration. New branch IDs depend
