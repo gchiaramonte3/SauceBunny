@@ -328,3 +328,16 @@
 .cp-multitrack-cast-preference > span { overflow: hidden; text-overflow: ellipsis; }
 .cp-cast-marker-fields { display: flex; gap: 8px; min-width: 0; }
 .cp-cast-marker-fields > select { flex: 1; min-width: 0; }
+
+/* Picture as metadata: V1's cuts as named blocks above the mics. No video is
+   decoded, so the lane stays one row high at every track size and reads as
+   quieter than the audio it frames. */
+.cp-multitrack-lane.cp-multitrack-picture-lane { height: 30px; min-height: 30px; }
+.cp-multitrack-picture-label { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 6px 0 10px; background: var(--bg-1); color: var(--fg-3); font-size: var(--text-sm); }
+.cp-multitrack-picture-track { flex: 0 0 auto; font-weight: var(--weight-semibold); color: var(--fg-2); }
+.cp-multitrack-picture-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-multitrack-picture-clips { position: relative; min-width: 0; overflow: hidden; background: var(--bg-0); }
+.cp-multitrack-picture-clip { position: absolute; top: 2px; bottom: 2px; display: flex; align-items: center; min-width: 0; box-sizing: border-box; padding: 0 4px; background: var(--bg-3); border-left: 1px solid var(--line-3); border-radius: var(--r-2xs); color: var(--fg-2); font-size: var(--text-sm); }
+.cp-multitrack-picture-clip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-multitrack-picture-clip.is-group { border-left-width: 2px; }
+.cp-multitrack-picture-clip.is-muted { background: transparent; border: 1px dashed var(--line-2); color: var(--fg-4); }
