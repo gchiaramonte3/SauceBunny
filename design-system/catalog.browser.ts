@@ -1036,6 +1036,17 @@ test.describe("Transcript Editor prototype", () => {
     await expect(page.locator(".cp-te-wave")).toHaveCount(0);
   });
 
+  test("each lane wears its speaker's colour, and View turns that off for AAF Audio's one violet", async ({ page }) => {
+    await open(page);
+    const tint = (index: number) => page.locator(".cp-te-tl-lane").nth(index).locator(".cp-te-tl-clip").first().evaluate((clip) => getComputedStyle(clip).backgroundColor);
+    const [rosa, dev] = [await tint(0), await tint(1)];
+    expect(rosa).not.toBe(dev);
+    await page.getByRole("button", { name: "View" }).click();
+    await page.getByRole("menuitemcheckbox", { name: "Speaker colours" }).click();
+    expect(await tint(0)).toBe(await tint(1));
+    expect(await tint(0)).not.toBe(rosa);
+  });
+
   test("history keeps every state: an edit after undo branches, and the undone steps can still be opened", async ({ page }) => {
     await open(page);
     const deleteWord = async (text: string) => {

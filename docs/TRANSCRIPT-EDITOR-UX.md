@@ -251,12 +251,12 @@ source can stay compact while the edit reads large.
   now" names all move on every pointer move, not on release. Playback pauses
   while you hold and resumes where you let go. The Edit's scrub rail and
   ⌥-drag in the text do the same.
-- Each clip is a segment, drawn exactly as AAF Audio draws a lane: one
-  violet for every clip and waveform, deep violet on a soloed track, grey on
-  the others while anything is soloed. Speaker colours stay in the text; on
-  the timeline they are a 6 px swatch by the name, so a lane does not turn
-  into a rainbow. A lifted range draws flat, or as a low bed when
-  **Audio ▸ Room tone in lifts** is on.
+- Each clip is a segment, and each lane wears its speaker's colour: the same
+  hue the text gives that person, so who is talking reads across the whole
+  scene at a glance. A soloed lane lifts and the others go grey while
+  anything is soloed. **View ▸ Speaker colours** off draws every lane the way
+  AAF Audio does, in one violet. A lifted range draws flat, or as a low bed
+  when **Audio ▸ Room tone in lifts** is on.
 - **S, M and T** sit together on each track head at 18×16, one size down from
   AAF Audio's. **T** puts that track's words over its waveform where they are
   said, using AAF Audio's own layout (`src/lib/multitrack-text-layout.ts`):
@@ -294,7 +294,7 @@ there (research below). Each icon's tooltip names it and its key.
 | | Follow playhead (turns the page when it runs off) | none | Premiere's page scroll |
 | | Loop (in to out, else the whole edit) | ⌘L | Premiere, FCP |
 | Navigate | Previous / next edit | A / S | Avid |
-| View ▾ | Waveforms, Text on every track, Track height S/M/L | | Resolve's View Options, FCP's Clip Appearance |
+| View ▾ | Waveforms, Speaker colours, Text on every track, Track height S/M/L | | Resolve's View Options, FCP's Clip Appearance |
 | Audio ▾ | Crossfade at cuts (off, 1, 2, 4 frames), Room tone in lifts | | Descript's room tone |
 | | Zoom out / Fit / in | ⌘− / ⇧Z / ⌘= | FCP |
 
@@ -523,8 +523,8 @@ It follows [DESIGN.md](DESIGN.md) and the production stylesheet rules:
   - Green appears nowhere, because nothing here is a positive outcome or a
     live feed.
   - Warnings (a clipped word, crosstalk) use `--warning`.
-  - Speaker colours are seven hues from `SPEAKER_SOLIDS`, in the text and the
-    track swatch only. The timeline uses AAF Audio's violet lanes.
+  - Speaker colours are seven hues from `SPEAKER_SOLIDS`, in the text and on
+    the timeline lanes. AAF Audio's single violet is a View option.
   - Menus reuse production's `cp-view-popover` / `cp-popover-item` (the
     monitor's View menu), opening upward over the timeline.
 - **Type:** Nunito Sans everywhere, at the `--text-*` scale, including the

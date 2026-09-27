@@ -360,7 +360,8 @@
 /* ── Timeline ────────────────────────────────────────────────────────── */
 /* Lanes follow AAF Audio (src/styles/multitrack.css): one violet for every
    clip, grey when another track is soloed, deep violet on the soloed one.
-   Speaker hues stay in the text; here they are only the swatch. */
+   By default each lane wears its speaker's hue instead (View ▸ Speaker
+   colours), the same colour the text gives that person. */
 .cp-te-timeline { --te-lane-h: 36px; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .cp-te-timeline.is-small { --te-lane-h: 24px; }
 .cp-te-timeline.is-large { --te-lane-h: 58px; }
@@ -481,7 +482,13 @@
 }
 .cp-te-tl-row.has-text .cp-te-tl-clip { top: 20px; }
 .cp-te-tl-row.is-solo .cp-te-tl-clip { background: color-mix(in srgb, var(--novella-violet-deep) 55%, var(--bg-2)); }
-.cp-te-tl-row.is-unsoloed .cp-te-tl-clip { background: var(--bg-2); }
+.cp-te-timeline.is-speaker .cp-te-tl-clip {
+  background: color-mix(in srgb, var(--te-speaker) 12%, var(--bg-2));
+  border-left-color: color-mix(in srgb, var(--te-speaker) 40%, transparent);
+  color: var(--te-speaker);
+}
+.cp-te-timeline.is-speaker .cp-te-tl-row.is-solo .cp-te-tl-clip { background: color-mix(in srgb, var(--te-speaker) 20%, var(--bg-2)); }
+.cp-te-tl-row.is-unsoloed .cp-te-tl-clip, .cp-te-timeline.is-speaker .cp-te-tl-row.is-unsoloed .cp-te-tl-clip { background: var(--bg-2); }
 .cp-te-tl-row.is-unsoloed .cp-te-wave { filter: grayscale(1); opacity: 0.45; }
 .cp-te-tl-row.is-unsoloed .cp-te-tl-words { opacity: 0.6; }
 .cp-te-tl-row.is-muted .cp-te-wave { opacity: 0.35; }

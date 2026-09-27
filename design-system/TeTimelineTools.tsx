@@ -4,7 +4,7 @@ import { useDismiss } from "../src/hooks/use-dismiss";
 import { useMenuKeys } from "../src/hooks/use-menu-keys";
 
 export type TeTrackHeight = "small" | "medium" | "large";
-export type TeTimelineView = { waveforms: boolean; height: TeTrackHeight };
+export type TeTimelineView = { waveforms: boolean; speakerColours: boolean; height: TeTrackHeight };
 export type TeTimelineAudio = { crossfade: 0 | 1 | 2 | 4; roomTone: boolean };
 
 type Props = {
@@ -87,6 +87,7 @@ export function TeTimelineTools(props: Props) {
     <div className="cp-te-tl-end">
       <Menu label="View">{() => <>
         <Check checked={view.waveforms} onChange={() => props.onView({ ...view, waveforms: !view.waveforms })}>Waveforms</Check>
+        <Check checked={view.speakerColours} onChange={() => props.onView({ ...view, speakerColours: !view.speakerColours })}>Speaker colours</Check>
         <Check checked={props.allText} onChange={props.onAllText}>Text on every track</Check>
         <div className="cp-popover-header" role="presentation">Track height</div>
         {(["small", "medium", "large"] as const).map((height) => <Radio key={height} checked={view.height === height} onChoose={() => props.onView({ ...view, height })}>

@@ -39,9 +39,11 @@ function phrases(placed: TePlacedWord[], speaker: string) {
  * The magnetic timeline: one track per speaker, and every clip is a segment
  * of the edit playing on all of them at once. There is no gap to leave, so
  * there is no gap tool; a cut in the text closes up here by construction.
- * Lanes are drawn the way AAF Audio draws them (one violet, grey when
- * another track is soloed), and T puts a track's words over its waveform
- * where they are said, with the same layout AAF Audio uses.
+ * Each lane wears its speaker's colour, so who is talking reads across the
+ * whole scene at a glance; View ▸ Speaker colours off draws them the way
+ * AAF Audio does (one violet). Either way a soloed track lifts and the rest
+ * go grey. T puts a track's words over its waveform where they are said,
+ * with the same layout AAF Audio uses.
  * It never scrolls sideways on its own: zoom, then pan with the slider, so a
  * Mac that always shows scrollbars does not grow one across the tracks.
  */
@@ -49,7 +51,7 @@ export function TeTimeline(props: Props) {
   const { speakers, edit, placed, selection, playhead, fps, colors, solo, mute, seams, zoom } = props;
   const { marks, snap, follow } = props.tools;
   const [pan, setPan] = useState(0);
-  const [view, setView] = useState<TeTimelineView>({ waveforms: true, height: "medium" });
+  const [view, setView] = useState<TeTimelineView>({ waveforms: true, speakerColours: true, height: "medium" });
   const [audio, setAudio] = useState<TeTimelineAudio>({ crossfade: 2, roomTone: false });
   const [text, setText] = useState<Set<string>>(new Set());
   const [width, setWidth] = useState(800);
@@ -122,7 +124,7 @@ export function TeTimeline(props: Props) {
   };
   const toggleText = (id: string) => setText((current) => { const next = new Set(current); if (!next.delete(id)) next.add(id); return next; });
   const fade = audio.crossfade / fps;
-  return <section className={`cp-te-timeline is-${view.height}`} aria-label="Edit timeline">
+  return <section className={`cp-te-timeline is-${view.height}${view.speakerColours ? " is-speaker" : ""}`} aria-label="Edit timeline">
     <TeTimelineTools {...props.tools} zoom={zoom} onZoom={(direction) => props.onZoom(direction === 0 ? 1 : Math.max(1, Math.min(32, direction > 0 ? zoom * 2 : zoom / 2)))}
       view={view} onView={setView} audio={audio} onAudio={setAudio}
       allText={speakers.every((s) => text.has(s.id))} onAllText={() => setText(speakers.every((s) => text.has(s.id)) ? new Set() : new Set(speakers.map((s) => s.id)))} />
