@@ -612,7 +612,6 @@
 .cp-te-page > .cp-te { flex: 1; min-height: 0; }
 .cp-te-page .cp-te-lower { height: clamp(200px, 34%, 420px); border-top: 1px solid var(--line-1); }
 .cp-te-pane-source { width: 340px; border-right: 1px solid var(--line-1); }
-.cp-te-pane-history { width: 290px; border-left: 1px solid var(--line-1); }
 .cp-te-source-pick.cp-select { flex: none; margin: 6px 8px 0; min-height: 26px; }
 .cp-te-add-source.cp-select, .cp-te-export-mode.cp-select { width: auto; max-width: 180px; min-height: 26px; font-size: var(--text-base); }
 .cp-te-export { display: flex; align-items: center; gap: 6px; }
@@ -656,3 +655,141 @@
   font-size: var(--text-xs); line-height: var(--leading-none); white-space: nowrap; text-overflow: ellipsis; display: flex; align-items: center;
 }
 .cp-te-tl-pic.is-muted { background: transparent; border: 1px dashed var(--line-2); }
+
+/* ── Inspector (ported from the catalog prototype) ─────────────────── */
+.cp-te-inspector { overflow-y: auto; padding-bottom: 16px; }
+.cp-te-insp-section { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px 14px; border-bottom: 1px solid var(--line-1); }
+.cp-te-insp-lead { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--fg-1); }
+.cp-te-insp-meta { font-size: var(--text-base); color: var(--fg-3); }
+.cp-te-insp-note { font-size: var(--text-base); line-height: var(--leading-snug); color: var(--fg-4); }
+.cp-te-insp-quote {
+  padding-left: 10px;
+  border-left: 2px solid var(--line-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  color: var(--fg-2);
+}
+.cp-te-insp-warn {
+  padding: 6px 8px;
+  font-size: var(--text-base);
+  line-height: var(--leading-snug);
+  color: var(--fg-2);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: var(--r-sm);
+}
+.cp-te-insp-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.cp-te-insp-actions .cp-te-btn.btn { justify-content: space-between; }
+.cp-te-insp-facts { display: flex; flex-direction: column; gap: 4px; }
+.cp-te-insp-facts div { display: flex; justify-content: space-between; gap: 8px; font-size: var(--text-base); }
+.cp-te-insp-facts dt { color: var(--fg-3); }
+.cp-te-insp-facts dd { color: var(--fg-1); }
+.cp-te-insp-talk li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 72px) minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  font-size: var(--text-base);
+}
+.cp-te-insp-talk-name { color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-te-insp-talk-bar {
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(var(--te-speaker), var(--te-speaker)) left / var(--te-share, 0%) 100% no-repeat, var(--bg-4);
+}
+.cp-te-insp-talk-time { text-align: right; font-size: var(--text-sm); color: var(--fg-3); }
+
+/* ── Ask ──────────────────────────────────────────────────────────── */
+.cp-te-ask { display: flex; flex-direction: column; min-height: 0; }
+.cp-te-ask-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.cp-te-ask-log::-webkit-scrollbar { width: 10px; }
+.cp-te-ask-log::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.24); border: 2px solid transparent; border-radius: var(--r-sm); background-clip: padding-box; }
+.cp-te-msg { display: flex; flex-direction: column; gap: 6px; }
+.cp-te-msg.is-you { align-items: flex-end; }
+.cp-te-msg-text { max-width: 92%; padding: 7px 10px; border-radius: var(--r-md); font-size: var(--text-md); line-height: var(--leading-snug); color: var(--fg-2); background: var(--bg-3); }
+.cp-te-msg.is-you .cp-te-msg-text { background: var(--bg-4); color: var(--fg-1); }
+.cp-te-chip { display: inline-block; padding: 0 5px; border-radius: var(--r-xs); background: var(--sel-soft); color: var(--fg-0); font-weight: var(--weight-semibold); }
+.cp-te-msg-lines { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.cp-te-msg-line {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  column-gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--fg-2);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cp-te-msg-line:hover { background: rgba(255,255,255,0.05); }
+.cp-te-msg-line .cp-te-swatch { margin-top: 4px; grid-row: span 2; }
+.cp-te-msg-where { font-size: var(--text-xs); color: var(--fg-4); }
+.cp-te-msg-quote { font-size: var(--text-md); line-height: var(--leading-snug); }
+.cp-te-msg-more { padding-left: 20px; font-size: var(--text-sm); color: var(--fg-4); }
+.cp-te-ask-form { position: relative; flex: none; display: flex; flex-direction: column; gap: 6px; padding: 10px 8px 8px; border-top: 1px solid var(--line-1); }
+/* The prompt's top edge is the handle: drag up for a taller box. */
+.cp-te-ask-resize { top: -5px; left: 0; right: 0; --rail-inset: 4px; }
+.cp-te-ask-form .cp-te-ask-input { flex: none; height: var(--te-ask-h, 120px); }
+.cp-te-ask-send { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cp-te-ask-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px; border-bottom: 1px solid var(--line-1); }
+.cp-te-ask-status { margin: 0; font-size: var(--text-base); color: var(--fg-3); }
+.cp-te-model { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cp-te-model-pick.cp-select { min-width: 0; max-width: 200px; min-height: 26px; font-size: var(--text-base); }
+.cp-te-msg.is-failed .cp-te-msg-text { color: var(--danger-text); }
+.cp-te-msg-action { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line-2); border-radius: var(--r-md); }
+.cp-te-msg-proposal { margin: 0; font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--fg-1); }
+.cp-te-msg-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.cp-te-msg-done { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-base); color: var(--fg-3); }
+.cp-te-ask-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+}
+.cp-te-ask-input::placeholder { color: var(--fg-4); }
+.cp-te .cp-te-ask-input:focus-visible { outline: none; border-color: var(--focus-ring); }
+.cp-te-mentions {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% - 4px);
+  z-index: var(--z-popover);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--color-surface-elevated);
+  box-shadow: var(--shadow-card);
+}
+.cp-te-mentions li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; padding: 2px 6px; border-radius: var(--r-sm); font-size: var(--text-base); cursor: pointer; }
+.cp-te-mentions li.is-active { background: var(--sel-fill); color: var(--sel-ink); }
+.cp-te-mention-kind { font-size: var(--text-sm); color: var(--fg-4); }
+.cp-te-mentions li.is-active .cp-te-mention-kind { color: var(--sel-ink); }
+
+/* ── The left column: Ask, Inspector, History ─────────────────────── */
+.cp-te-pane-side { width: 320px; border-right: 1px solid var(--line-1); }
+.cp-te-side { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.cp-te-side-tabs { flex: none; display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--line-1); }
+.cp-te-side-tab {
+  min-height: 28px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; background: transparent;
+  color: var(--fg-3); font-family: var(--font-ui); font-size: var(--text-base); font-weight: var(--weight-semibold); cursor: pointer;
+}
+.cp-te-side-tab:hover { color: var(--fg-1); }
+.cp-te-side-tab.is-on { color: var(--fg-0); border-bottom-color: var(--fg-1); }
+.cp-te-side-tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.cp-te-side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cp-te-side-body > * { flex: 1; min-height: 0; }
+.cp-te-side-body > .cp-te-pane-note { flex: none; padding: 12px; }

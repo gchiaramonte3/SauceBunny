@@ -4,16 +4,14 @@ type Props = {
   /** A whole source track's overview: [min, max] pairs spread over `duration` seconds. */
   peaks: [number, number][] | undefined; duration: number;
   srcIn: number; srcOut: number;
-  /** Silenced source ranges on this track, in source seconds. */
-  muted: [number, number][];
 };
 
 /**
  * One clip's waveform, sliced from the source track's overview (AAF Audio's
- * cached pyramid, so nothing is decoded for the editor), in the lane's ink. A
- * silenced stretch draws flat.
+ * cached pyramid, so nothing is decoded for the editor), in the lane's ink.
+ * A silenced stretch is never drawn: the timeline cuts the clip there instead.
  */
-export function EditWave({ peaks, duration, srcIn, srcOut, muted }: Props) {
+export function EditWave({ peaks, duration, srcIn, srcOut }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -34,10 +32,7 @@ export function EditWave({ peaks, duration, srcIn, srcOut, muted }: Props) {
         const a = Math.floor(first + (column / columns) * span), b = Math.max(a + 1, Math.floor(first + ((column + 1) / columns) * span));
         let low = 0, high = 0;
         for (let index = Math.max(0, a); index < Math.min(peaks.length, b); index++) { low = Math.min(low, peaks[index][0]); high = Math.max(high, peaks[index][1]); }
-        const t = srcIn + ((column + 0.5) / columns) * (srcOut - srcIn);
-        const silent = muted.some(([from, to]) => t >= from && t <= to);
-        if (silent) { low = 0; high = 0; }
-        ctx.globalAlpha = silent ? 0.25 : 0.85;
+        ctx.globalAlpha = 0.85;
         const x = (column / columns) * w;
         ctx.fillRect(x, cy - high * amp, Math.max(1, w / columns - 0.25), Math.max(dpr * 0.75, (high - low) * amp));
       }
@@ -48,6 +43,6 @@ export function EditWave({ peaks, duration, srcIn, srcOut, muted }: Props) {
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [peaks, duration, srcIn, srcOut, muted]);
+  }, [peaks, duration, srcIn, srcOut]);
   return <canvas ref={ref} className="cp-te-wave" aria-hidden="true" />;
 }

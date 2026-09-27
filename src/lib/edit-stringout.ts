@@ -122,3 +122,37 @@ export function appendBite(target: EditDocument, sequence: AafDocument, from: nu
   segments.push({ kind: "source", id: `bite-${stamp}`, source, in_frame: inFrame, out_frame: outFrame });
   return { ...withSource, segments };
 }
+
+/** A line from any source of an edit, in that edit's source and lane ids and source seconds. */
+export type EditBite = { source: string; track: string; from: number; to: number; text: string };
+
+/**
+ * A new string out from lines of an existing one's sources, in the order
+ * given: same sources, lanes, rate and start timecode, so it relinks and
+ * exports exactly as the one it came from. Handles, filler and a marker per
+ * bite as the per-person string outs have. `lengths` bounds each source in
+ * seconds, so a tail handle never runs past the end of the media.
+ */
+export function layoutEditBites(base: EditDocument, bites: EditBite[], title: string, lengths: Record<string, number>, rules: StringoutRules = stringoutDefaults): EditDocument {
+  const rate = base.edit_rate, fps = rate.numerator / rate.denominator;
+  const segments: EditSegment[] = [], markers: EditMarker[] = [];
+  let at = 0;
+  const last = new Map<string, { inFrame: number; outFrame: number }>();
+  bites.forEach((bite, index) => {
+    const person = base.tracks.findIndex((track) => track.id === bite.track);
+    if (!base.sources.some((source) => source.id === bite.source)) return;
+    const end = lengths[bite.source] != null ? Math.floor(lengths[bite.source] * fps) : Infinity;
+    const inFrame = Math.max(0, Math.floor((bite.from - rules.head) * fps)), outFrame = Math.min(end, Math.ceil((bite.to + rules.tail) * fps));
+    // Going forward in the same source, a head never replays the previous tail.
+    const previous = last.get(bite.source);
+    const start = previous && inFrame >= previous.inFrame ? Math.max(inFrame, previous.outFrame) : inFrame;
+    if (outFrame <= start) return;
+    if (segments.length && rules.gapFrames > 0) { segments.push({ kind: "gap", id: `gap-${index}`, frames: rules.gapFrames }); at += rules.gapFrames; }
+    segments.push({ kind: "source", id: `bite-${index}`, source: bite.source, in_frame: start, out_frame: outFrame });
+    const lane = base.tracks[person];
+    markers.push({ id: `bite-${index}`, frame: at, track: lane?.id ?? null, name: lane?.name ?? "Bite", comment: snippet(bite.text), color: COLORS[Math.max(0, person) % COLORS.length] });
+    at += outFrame - start;
+    last.set(bite.source, { inFrame, outFrame });
+  });
+  return { ...base, title: title.trim() || base.title, segments, mutes: [], markers };
+}

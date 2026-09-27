@@ -1,0 +1,85 @@
+import { useMemo } from "react";
+import type { EditDocument } from "../bindings/EditDocument";
+import type { EditHistory } from "../bindings/EditHistory";
+import { useEditAsk } from "../hooks/use-edit-ask";
+import type { EditChange } from "../hooks/use-edit-session";
+import type { useEditWorkspace } from "../hooks/use-edit-workspace";
+import { askLines, askMentions, type AskCitation, type AskMessage } from "../lib/edit-ask";
+import { fromDocument, toDocument, type OpenEdit } from "../lib/edit-document";
+import { removeWithoutCuttingOvertalk, type TimelineLane, type TimelineWord } from "../lib/edit-model";
+import { editStore, newEditId } from "../lib/edit-store";
+import { layoutEditBites } from "../lib/edit-stringout";
+import { formatError } from "../lib/error-format";
+import { EditAsk } from "./EditAsk";
+import { EditHistoryPanel } from "./EditHistoryPanel";
+import { EditInspector } from "./EditInspector";
+
+export type EditSideTab = "ask" | "inspector" | "history";
+const TABS: { id: EditSideTab; label: string }[] = [{ id: "ask", label: "Ask" }, { id: "inspector", label: "Inspector" }, { id: "history", label: "History" }];
+
+type Props = {
+  editId: string; document: EditDocument; words: TimelineWord[]; used: Set<string>; lengths: Record<string, number>;
+  lanes: TimelineLane[]; colors: Record<string, string>; ws: ReturnType<typeof useEditWorkspace>;
+  tab: EditSideTab; onTab: (tab: EditSideTab) => void; history: EditHistory | null; jump: (state: number) => void; pin: (state: number, name: string | null) => void;
+  commit: (label: string, change: (open: OpenEdit) => EditChange, group?: string | null) => Promise<unknown>;
+  tc: (seconds: number) => string; sourceName: (source: string) => string; nameOf: (track: string) => string; where: (line: AskCitation) => string;
+  onJump: (line: AskCitation) => void; onOpenEdit: (id: string) => void; onSettings: () => void; appLocalModelId: string | null | undefined;
+};
+
+/** The left column: Ask, then the Inspector, then History. */
+export function EditSidePanel(props: Props) {
+  const { document, words, ws } = props;
+  const lines = useMemo(() => askLines(words, props.used), [words, props.used]);
+  const mentions = useMemo(() => askMentions(props.lanes, document.sources), [props.lanes, document.sources]);
+  const ask = useEditAsk({ editId: props.editId, lines, mentions, nameOf: props.nameOf, sourceName: props.sourceName, appLocalModelId: props.appLocalModelId });
+  /** A proposal lands here as one undo step, or as a new string out that leaves this one alone. */
+  const apply = async (message: AskMessage, into: "here" | "new") => {
+    const action = message.action;
+    if (!action) return;
+    try {
+      let next: EditDocument;
+      if (action.kind === "build") {
+        next = layoutEditBites(document, action.lines, action.title, props.lengths);
+        if (into === "here") {
+          const opened = fromDocument(next);
+          await props.commit(`Ask: ${action.title}`, () => ({ document: next, timeline: opened.timeline, markers: opened.markers }));
+          return ask.markApplied(message.id, "here");
+        }
+      } else {
+        const ids = new Set(action.lines.flatMap((line) => line.wordIds));
+        if (into === "here") {
+          await props.commit("Ask: Remove Lines", (state) => ({ timeline: removeWithoutCuttingOvertalk(words, state.timeline, ids) }));
+          return ask.markApplied(message.id, "here");
+        }
+        const opened = fromDocument(document);
+        next = toDocument({ ...document, title: `${document.title}, without ${action.lines.length} line${action.lines.length === 1 ? "" : "s"}` },
+          removeWithoutCuttingOvertalk(words, opened.timeline, ids), opened.markers);
+      }
+      const id = newEditId();
+      await editStore.create(id, next);
+      ask.markApplied(message.id, "new", id);
+    } catch (cause) {
+      ws.setMessage(`Could not apply: ${formatError(cause)}`);
+    }
+  };
+  return <div className="cp-te-side">
+    <div className="cp-te-side-tabs" role="tablist" aria-label="String out panels">
+      {TABS.map((tab) => <button key={tab.id} type="button" role="tab" id={`cp-te-side-${tab.id}`} aria-controls="cp-te-side-body" aria-selected={props.tab === tab.id}
+        tabIndex={props.tab === tab.id ? 0 : -1} className={`cp-te-side-tab${props.tab === tab.id ? " is-on" : ""}`} onClick={() => props.onTab(tab.id)}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          const index = TABS.findIndex((item) => item.id === props.tab), next = TABS[(index + (event.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
+          props.onTab(next.id);
+          window.document.getElementById(`cp-te-side-${next.id}`)?.focus();
+        }}>{tab.label}</button>)}
+    </div>
+    <div id="cp-te-side-body" className="cp-te-side-body" role="tabpanel" aria-labelledby={`cp-te-side-${props.tab}`}>
+      {props.tab === "ask" && <EditAsk ask={ask} mentions={mentions} colors={props.colors} appLocalModelId={props.appLocalModelId} where={props.where}
+        onJump={props.onJump} onApply={(message, into) => void apply(message, into)} onOpen={props.onOpenEdit} onSettings={props.onSettings} />}
+      {props.tab === "inspector" && <EditInspector ws={ws} words={words} lanes={props.lanes} colors={props.colors} tc={props.tc} sourceName={props.sourceName} />}
+      {props.tab === "history" && (props.history ? <EditHistoryPanel history={props.history} onJump={props.jump} onPin={props.pin} />
+        : <p className="cp-te-pane-note" role="status">Reading the history…</p>)}
+    </div>
+  </div>;
+}

@@ -1,5 +1,5 @@
 import type { Seam, Timeline, TimelineLane } from "../lib/edit-model";
-import { segmentLength } from "../lib/edit-model";
+import { clipPieces, segmentLength } from "../lib/edit-model";
 import type { multitrackTextLayout } from "../lib/multitrack-text-layout";
 import { EditWave } from "./EditWave";
 
@@ -35,10 +35,15 @@ export function EditTimelineRow(props: Props) {
     <div className="cp-te-tl-lane" {...props.scrub}>
       {edit.segments.map((segment, index) => starts[index] + segmentLength(segment) < start || starts[index] > start + span
         || !props.sourceSpeakers[segment.source]?.includes(speaker.id) ? null
-        : <div key={segment.id} className="cp-te-tl-clip" style={{ left: x(starts[index]), width: w(segmentLength(segment)) }}
-          title={`${speaker.name} · ${props.sourceName(segment.source)}`}>
-          {props.waveforms && <EditWave peaks={props.peaksOf(segment.source, speaker.id)} duration={props.durationOf(segment.source)} srcIn={segment.srcIn} srcOut={segment.srcOut} muted={props.mutes[`${segment.source}:${speaker.id}`]} />}
-        </div>)}
+        // A range silenced on this track is not drawn at all: the clip is cut
+        // there, as the AAF writes it, rather than shown with a quiet waveform.
+        : clipPieces(segment, props.mutes[`${segment.source}:${speaker.id}`] ?? []).map((piece) => {
+          const at = starts[index] + piece.srcIn - segment.srcIn;
+          return <div key={`${segment.id}:${piece.srcIn}`} className="cp-te-tl-clip" style={{ left: x(at), width: w(piece.srcOut - piece.srcIn) }}
+            title={`${speaker.name} · ${props.sourceName(segment.source)}`}>
+            {props.waveforms && <EditWave peaks={props.peaksOf(segment.source, speaker.id)} duration={props.durationOf(segment.source)} srcIn={piece.srcIn} srcOut={piece.srcOut} />}
+          </div>;
+        }))}
       {marked && props.selected && <span className="cp-te-tl-marked-lane" style={{ left: x(marked[0]), width: w(marked[1] - marked[0]) }} />}
       {props.shown && <div className="cp-te-tl-words">{props.cues.map((cue) => <span key={cue.id} className={cue.summary ? "is-summary" : undefined} title={cue.title} style={cue.style}>{cue.text}</span>)}</div>}
       {props.seams.filter((cut) => cut.clipped.has(speaker.id)).map((cut) => <span key={cut.index} className="cp-te-tl-clipped" style={{ left: x(cut.at) }} title={`Cuts into a word of ${speaker.name}'s`} />)}

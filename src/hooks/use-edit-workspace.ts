@@ -38,6 +38,8 @@ export function useEditWorkspace({ open, words, lanes, sourceLanes, durations, a
   const [tracks, setTracks] = useState<Set<string> | null>(null);
   const [dead, setDead] = useState<EditDeadReview | null>(null);
   const [prompt, setPrompt] = useState<Prompt | null>(null);
+  /** An Extract that would take words from a track that is not selected, waiting for a choice. */
+  const [extractGuard, setExtractGuard] = useState<{ who: string[]; count: number } | null>(null);
   const [seam, setSeam] = useState<number | null>(null);
   const [message, setMessage] = useState("");
 
@@ -119,10 +121,22 @@ export function useEditWorkspace({ open, words, lanes, sourceLanes, durations, a
     void commit("Restore Cut", (state) => ({ timeline: healSeam(state.timeline, seam) }));
     setSeam(null);
   };
-  const takeMarked = (close: boolean) => {
+  /**
+   * Lift (Z) takes the marked range off the SELECTED tracks and leaves a hole;
+   * the others keep playing. Extract (X) closes the range up on EVERY track,
+   * because a magnetic timeline stays in sync. So an Extract over someone on
+   * a track that is not selected would take their words too, and asks first,
+   * the way a delete over overtalk does.
+   */
+  const takeMarked = (close: boolean, force = false) => {
     if (!marked) return;
     const [from, to] = marked;
     const every = lanes.every((lane) => onTracks.has(lane.id));
+    if (close && !force && !every) {
+      const caught = placed.filter((item) => !item.muted && !onTracks.has(item.word.track) && item.programStart < to && item.programEnd > from);
+      if (caught.length) return setExtractGuard({ who: caught.map((item) => item.word.track), count: caught.length });
+    }
+    setExtractGuard(null);
     const shiftMarkers = (list: TimelineMarker[]) => list.filter((m) => m.at <= from || m.at >= to).map((m) => m.at >= to ? { ...m, at: m.at - (to - from) } : m);
     void commit(close ? "Extract" : "Lift", (state) => close
       ? { timeline: extractProgram(state.timeline, from, to).edit, markers: shiftMarkers(state.markers) }
@@ -149,7 +163,7 @@ export function useEditWorkspace({ open, words, lanes, sourceLanes, durations, a
   const setTimeline = (label: string, timeline: Timeline) => void commit(label, () => ({ timeline, markers: [] }));
 
   return {
-    edit, markers, placed, paras, seams, ghosts, total, count, range, caret, selected, keys, marks, marked, onTracks, selection, dead, prompt, seam, message,
+    edit, markers, placed, paras, seams, ghosts, total, count, range, caret, selected, keys, marks, marked, onTracks, selection, dead, prompt, seam, message, extractGuard, setExtractGuard,
     setSelection, setMarks, setSeam, setMessage, setPrompt, setDead, names,
     toggleTrack: (id: string, only: boolean) => setTracks((state) => only ? new Set([id]) : toggled(state ?? new Set(lanes.map((lane) => lane.id)), id)),
     skipDead: (index: number) => setDead((state) => state && { ...state, skip: toggled(state.skip, index) }),

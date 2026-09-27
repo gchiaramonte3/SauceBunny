@@ -1,13 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
-import type { LlmModel } from "../bindings/LlmModel";
-import { loadAiProvider } from "../lib/ai-provider";
 import { biteRecords, proposeStringout } from "../lib/edit-ai-stringout";
 import { editFromSequence } from "../lib/edit-new";
 import { laneBites, type LaneBite } from "../lib/edit-stringout";
 import { formatError } from "../lib/error-format";
-import { ensureLocalAiServer, selectLocalAiModel } from "../lib/local-ai-server";
+import { connectModel, loadStringOutModel } from "../lib/string-out-model";
 
 export type AiStringout = { document: AafDocument; title: string; bites: LaneBite[]; names: Record<string, string> };
 
@@ -34,15 +32,9 @@ export function useAiStringout(modelId?: string | null) {
       const bites = laneBites(document);
       if (!bites.length) throw new Error("Nobody in this sequence has a transcript yet. Transcribe it in AAF Audio first.");
       const names = Object.fromEntries(editFromSequence(document, "", false).tracks.map((track) => [track.id, track.name]));
-      const provider = loadAiProvider();
-      let model: Parameters<typeof proposeStringout>[2];
-      if (provider === "local") {
-        if (!live()) return;
-        setStatus({ busy: true, message: "Loading local AI…" });
-        const chosen = selectLocalAiModel(await invoke<LlmModel[]>("list_llm_models"), modelId);
-        if (!chosen) throw new Error("No local AI model is installed. Download one in Settings → AI Summary.");
-        model = { kind: "local", server: await ensureLocalAiServer(chosen.id, ctrl.signal) };
-      } else model = { kind: "cloud", provider, ctx: 32000 };
+      if (!live()) return;
+      setStatus({ busy: true, message: "Connecting to the model…" });
+      const model = await connectModel(loadStringOutModel(), modelId, ctrl.signal);
       if (!live()) return;
       setStatus({ busy: true, message: `Choosing from ${bites.length} bites…` });
       const answer = await proposeStringout(biteRecords(bites, (lane) => names[lane] ?? lane), request, model, ctrl.signal);

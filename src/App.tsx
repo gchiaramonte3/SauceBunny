@@ -1200,7 +1200,7 @@ export default function App() {
     if (!import.meta.env.DEV) return false;
     try { return localStorage.getItem("saucebunny.devPeerStream") === "1"; } catch { return false; }
   });
-  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "video-intelligence" | "commands" | "about" | "integrations">("general");
+  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "video-intelligence" | "commands" | "about" | "integrations" | "ai-apis">("general");
 
   // ====== Media info modal ======
   // Deep inspector over the ORIGINAL local source file (never the ffmpeg
@@ -4873,7 +4873,8 @@ export default function App() {
           {/* The Transcript Editor owns its audio (edit-audio.ts) and its undo
               log on disk; kept mounted so leaving it never drops an open edit. */}
           <div ref={editorViewRef} tabIndex={-1} className="cp-view cp-view-editor" hidden={activeView !== "editor"}>
-            <EditPage active={activeView === "editor"} />
+            <EditPage active={activeView === "editor"} aiModelId={defaults.llmSummarizationModel}
+              onOpenSettings={(tab) => { setSettingsInitialTab(tab); setSettingsOpen(true); }} />
           </div>
           <div ref={multitrackViewRef} tabIndex={-1} className="cp-view cp-view-multitrack" hidden={activeView !== "multitrack"}>
             <MultitrackPage

@@ -541,3 +541,37 @@ export function trackPhrases(placed: PlacedWord[], speaker: string) {
   return out;
 }
 
+
+/**
+ * Remove words the way the Ask panel's proposals do: words nobody talks over
+ * are cut (the time closes up on every track); a word someone else talks
+ * under is silenced on its own track instead, so their words stay. The same
+ * rule a delete in the text follows, applied without asking.
+ */
+export function removeWithoutCuttingOvertalk(words: TimelineWord[], edit: Timeline, ids: Set<string>): Timeline {
+  const bySource = new Map<string, TimelineWord[]>();
+  for (const word of words) bySource.set(word.source, [...(bySource.get(word.source) ?? []), word]);
+  const under = new Set<string>();
+  for (const word of words) {
+    if (!ids.has(word.id)) continue;
+    if ((bySource.get(word.source) ?? []).some((other) => other.track !== word.track && other.start < word.end && other.end > word.start)) under.add(word.id);
+  }
+  const placed = placeWords(words, edit);
+  const cut = deleteWords(words, edit, new Set(placed.filter((item) => ids.has(item.word.id) && !under.has(item.word.id)).map(placementKey)));
+  return under.size ? muteWords(words, cut.edit, under) : cut.edit;
+}
+
+/**
+ * The parts of a segment a track actually plays: the segment's source range
+ * with that track's silenced ranges taken out. The timeline draws each part
+ * as its own clip, so a lifted range reads as a hole in the clip, the way the
+ * exported AAF writes it (filler on that track between two source clips).
+ */
+export function clipPieces(segment: TimelineSegment, silenced: [number, number][]): { srcIn: number; srcOut: number }[] {
+  let pieces = [{ srcIn: segment.srcIn, srcOut: segment.srcOut }];
+  for (const [from, to] of silenced) {
+    pieces = pieces.flatMap((piece) => to <= piece.srcIn || from >= piece.srcOut ? [piece]
+      : [{ srcIn: piece.srcIn, srcOut: Math.max(piece.srcIn, from) }, { srcIn: Math.min(piece.srcOut, to), srcOut: piece.srcOut }]);
+  }
+  return pieces.filter((piece) => piece.srcOut - piece.srcIn > 1e-6);
+}

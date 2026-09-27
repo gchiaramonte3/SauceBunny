@@ -1,8 +1,6 @@
-import type { LlmServerInfo } from "../bindings/LlmServerInfo";
-import { streamChat } from "./ai-chat";
-import { cloudChat, type CloudProvider } from "./ai-provider";
 import type { LaneBite } from "./edit-stringout";
 import { buildSourcePrefix } from "./prompt-prefix";
+import { chat, contextOf, type AskModel } from "./string-out-model";
 
 /**
  * AI string-outs (plan Phase 7, step 3). The model sees every bite in the
@@ -44,15 +42,10 @@ export function parseProposal(reply: string, count: number): StringoutProposal {
   return { title, bites: [...new Set(bites as number[])] };
 }
 
-type Model = { kind: "local"; server: LlmServerInfo } | { kind: "cloud"; provider: CloudProvider; ctx: number };
-
-export async function proposeStringout(records: string[], request: string, model: Model, signal: AbortSignal): Promise<StringoutProposal> {
-  const source = buildSourcePrefix(records, model.kind === "local" ? model.server.ctx : model.ctx);
+export async function proposeStringout(records: string[], request: string, model: AskModel, signal: AbortSignal): Promise<StringoutProposal> {
+  const source = buildSourcePrefix(records, contextOf(model));
   if (source.sampled) throw new Error("This sequence has more to read than the model can hold at once. Choose a model with a larger context.");
-  const user = proposalPrompt(request);
-  const reply = model.kind === "local"
-    ? await streamChat(model.server, [{ role: "system", content: source.system }, { role: "user", content: user }], () => undefined, signal, { temperature: 0, maxTokens: 800 })
-    : await cloudChat(model.provider, source.system, [{ role: "user", content: user }], signal, 0);
+  const reply = await chat(model, source.system, [{ role: "user", content: proposalPrompt(request) }], signal, 800);
   signal.throwIfAborted();
   return parseProposal(reply, records.length);
 }

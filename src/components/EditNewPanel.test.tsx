@@ -52,11 +52,11 @@ it("shows why a string out could not be created and stays open", async () => {
 });
 
 it("welcomes a first-time user, and lists their work once there is any", async () => {
-  const first = render(<EditPage active />);
+  const first = render(<EditPage active onOpenSettings={() => undefined} />);
   expect(await screen.findByRole("heading", { name: "Pull the story out, bite by bite" })).toBeTruthy();
   first.unmount();
   answers.edit_list = [{ id: "e1", title: "First pass", created_at: 1, updated_at: 2, head: 3, states: 3 }];
-  render(<EditPage active />);
+  render(<EditPage active onOpenSettings={() => undefined} />);
   expect(await screen.findByRole("button", { name: /First pass/ })).toBeTruthy();
   expect(screen.queryByRole("heading", { name: "Pull the story out, bite by bite" })).toBeNull();
 });
@@ -64,6 +64,6 @@ it("welcomes a first-time user, and lists their work once there is any", async (
 it("forgets a remembered string out that no longer exists instead of failing to open it", async () => {
   localStorage.setItem(LAST_STRING_OUT, "gone");
   answers.edit_list = [{ id: "e1", title: "First pass", created_at: 1, updated_at: 2, head: 3, states: 3 }];
-  render(<EditPage active />);
+  render(<EditPage active onOpenSettings={() => undefined} />);
   expect(await screen.findByRole("button", { name: /First pass/ })).toBeTruthy();
 });

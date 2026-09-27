@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
-import { IconChevronLeft, IconHistory, IconRedo, IconUndo } from "./Icons";
+import { IconChevronLeft, IconPanelLeft, IconRedo, IconUndo } from "./Icons";
 
 type Props = {
   title: string; subtitle: string;
-  source: boolean; onSource: () => void; history: boolean; onHistory: () => void;
+  source: boolean; onSource: () => void; side: boolean; onSide: () => void;
   showRemoved: boolean; onShowRemoved: () => void;
   undo: string | null; redo: string | null; onUndo: () => void; onRedo: () => void;
   onClose: () => void; children?: ReactNode;
@@ -16,6 +16,8 @@ type Props = {
 export function EditToolbar(props: Props) {
   return <header className="cp-te-toolbar">
     <button type="button" className="cp-icon-btn" aria-label="All string outs" title="All string outs" onClick={props.onClose}><IconChevronLeft size={15} /></button>
+    <button type="button" className={`cp-icon-btn${props.side ? " active" : ""}`} aria-pressed={props.side} onClick={props.onSide}
+      aria-label="Ask, Inspector and History" title={`${props.side ? "Hide" : "Show"} Ask, Inspector and History`}><IconPanelLeft size={15} /></button>
     <div className="cp-te-titles">
       <h2 className="cp-te-title">{props.title}</h2>
       <span className="cp-te-subtitle">{props.subtitle}</span>
@@ -30,8 +32,6 @@ export function EditToolbar(props: Props) {
         aria-label={props.undo ? `Undo ${props.undo}` : "Undo"} title={props.undo ? `Undo ${props.undo} (⌘Z)` : "Nothing to undo"}><IconUndo size={15} /></button>
       <button type="button" className="cp-icon-btn" disabled={!props.redo} onClick={props.onRedo}
         aria-label={props.redo ? `Redo ${props.redo}` : "Redo"} title={props.redo ? `Redo ${props.redo} (⇧⌘Z)` : "Nothing to redo"}><IconRedo size={15} /></button>
-      <button type="button" className={`cp-icon-btn${props.history ? " active" : ""}`} aria-pressed={props.history} onClick={props.onHistory}
-        aria-label="History" title={`${props.history ? "Hide" : "Show"} history (⌘Y)`}><IconHistory size={15} /></button>
     </div>
     {props.children}
   </header>;

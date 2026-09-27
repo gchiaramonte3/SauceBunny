@@ -8,7 +8,7 @@ import { EditWorkspace } from "./EditWorkspace";
 import { IconPlus } from "./Icons";
 import { IconStringOut } from "./IconStringOut";
 
-type Props = { active: boolean };
+type Props = { active: boolean; aiModelId?: string | null; onOpenSettings: (tab: "ai-apis") => void };
 
 /**
  * String Outs, laid out like AAF Audio: the page title and its actions on
@@ -16,7 +16,7 @@ type Props = { active: boolean };
  * welcome shows only to someone who has never made one; after that the page
  * opens on their work or, if they closed it, on their list.
  */
-export function EditPage({ active }: Props) {
+export function EditPage({ active, aiModelId, onOpenSettings }: Props) {
   const [editId, setEditId] = useState<string | null>(() => recallLast(LAST_STRING_OUT));
   const [edits, setEdits] = useState<EditSummary[] | null>(null);
   const [creating, setCreating] = useState(false);
@@ -44,8 +44,9 @@ export function EditPage({ active }: Props) {
         <button type="button" className="btn btn-ghost" onClick={() => setCreating(true)}><IconPlus size={14} />New string out…</button>
       </div>
     </header>
-    {creating ? <EditNewPanel onOpen={open} onCancel={() => setCreating(false)} />
-      : editId ? <EditWorkspace key={editId} editId={editId} active={active} onClose={() => open(null)} />
+    {creating ? <EditNewPanel onOpen={open} onCancel={() => setCreating(false)} appLocalModelId={aiModelId} />
+      : editId ? <EditWorkspace key={editId} editId={editId} active={active} onClose={() => open(null)} onOpenEdit={open}
+        onSettings={() => onOpenSettings("ai-apis")} appLocalModelId={aiModelId} />
       : edits === null ? null
       : hasEdits ? <EditList edits={edits} onOpen={open} />
       : <div className="cp-multitrack-empty"><IconStringOut size={32} /><h2>Pull the story out, bite by bite</h2>

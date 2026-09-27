@@ -50,3 +50,26 @@ it("finds dead space only where no mic is audible and no word is said", () => {
   expect(spaces.length).toBeGreaterThan(0);
   for (const space of spaces) expect(space.to <= 1 || space.from >= 3).toBe(true);
 });
+
+it("asks before an Extract takes words from a track that is not selected, and Lift leaves them", () => {
+  const { hook, commits } = setup();
+  act(() => hook.result.current.toggleTrack("rosa", true));
+  act(() => hook.result.current.setMarks({ in: 1.9, out: 2.6 }));
+  act(() => hook.result.current.takeMarked(true));
+  expect(commits).toEqual([]);
+  expect(hook.result.current.extractGuard).toEqual({ who: ["dev"], count: 1 });
+  act(() => hook.result.current.takeMarked(false));
+  expect(commits.map((item) => item.label)).toEqual(["Lift"]);
+  expect(hook.result.current.extractGuard).toBeNull();
+});
+
+it("extracts without asking when every track with words in the range is selected, or when told to", () => {
+  const { hook, commits } = setup();
+  act(() => hook.result.current.setMarks({ in: 1.9, out: 2.6 }));
+  act(() => hook.result.current.takeMarked(true));
+  expect(commits.map((item) => item.label)).toEqual(["Extract"]);
+  act(() => hook.result.current.toggleTrack("rosa", true));
+  act(() => hook.result.current.setMarks({ in: 1.9, out: 2.6 }));
+  act(() => hook.result.current.takeMarked(true, true));
+  expect(commits.map((item) => item.label)).toEqual(["Extract", "Extract"]);
+});

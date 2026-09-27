@@ -4,7 +4,7 @@ import { layoutBites } from "../lib/edit-stringout";
 import { editStore, newEditId } from "../lib/edit-store";
 import { formatError } from "../lib/error-format";
 
-type Props = { documentId: string; onOpen: (id: string) => void };
+type Props = { documentId: string; onOpen: (id: string) => void; appLocalModelId?: string | null };
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 
@@ -13,10 +13,10 @@ const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.fl
  * is a list of real bites to read before anything is made; accepting it
  * creates a new edit, which has its own undo history like any other.
  */
-export function EditAskStringout({ documentId, onOpen }: Props) {
+export function EditAskStringout({ documentId, onOpen, appLocalModelId }: Props) {
   const [request, setRequest] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const ai = useAiStringout();
+  const ai = useAiStringout(appLocalModelId);
   const proposal = ai.proposal;
   const accept = async () => {
     if (!proposal) return;

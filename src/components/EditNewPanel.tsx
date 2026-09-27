@@ -10,7 +10,7 @@ import { stringoutsFor } from "../lib/edit-stringout";
 import { editStore, newEditId } from "../lib/edit-store";
 import { formatError } from "../lib/error-format";
 
-type Props = { onOpen: (id: string) => void; onCancel: (() => void) | null };
+type Props = { onOpen: (id: string) => void; onCancel: (() => void) | null; appLocalModelId?: string | null };
 
 /** A new string out with nothing in it, at 23.976 from 01:00:00:00, ready to cut into. */
 const emptyEdit = (title: string): EditDocument => ({ schema_version: EDIT_SCHEMA_VERSION, title: title.trim() || "Untitled string out",
@@ -21,7 +21,7 @@ const emptyEdit = (title: string): EditDocument => ({ schema_version: EDIT_SCHEM
  * down, or as a source to build up from), one per person, or asked for in
  * words.
  */
-export function EditNewPanel({ onOpen, onCancel }: Props) {
+export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
   const [saved, setSaved] = useState<AafDocumentSummary[]>([]);
   const [title, setTitle] = useState("");
   const [from, setFrom] = useState("");
@@ -72,6 +72,6 @@ export function EditNewPanel({ onOpen, onCancel }: Props) {
       {onCancel && <button type="button" className="btn btn-ghost" disabled={busy} onClick={onCancel}>Cancel</button>}
     </form>
     {error && <p className="cp-te-errors" role="alert">{error}</p>}
-    {from && <EditAskStringout documentId={from} onOpen={onOpen} />}
+    {from && <EditAskStringout documentId={from} onOpen={onOpen} appLocalModelId={appLocalModelId} />}
   </div>;
 }
