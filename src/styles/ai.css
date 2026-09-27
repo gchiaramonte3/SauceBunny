@@ -114,7 +114,10 @@
   color: var(--fg-4);
   font-size: var(--text-base);
   cursor: pointer;
-  text-decoration: underline dotted;
+  /* Longhands, not `underline dotted`: WebKit before Safari 26.2 drops a
+     text-decoration shorthand that carries a style, underline and all. */
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
 }
 .cp-ai-model-alt:hover:not(:disabled) { color: var(--fg-2); }
 .cp-ai-model-alt:disabled { opacity: 0.5; cursor: default; }

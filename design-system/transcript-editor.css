@@ -214,9 +214,9 @@
 .cp-te-word:hover { background: rgba(255,255,255,0.07); }
 .cp-te-word.is-current { color: var(--fg-0); background: rgba(255,255,255,0.14); }
 .cp-te-word.is-selected { background: var(--sel-fill); color: var(--sel-ink); }
-.cp-te-word.is-lifted { color: var(--fg-5); text-decoration: line-through dotted; text-decoration-color: var(--fg-4); }
+.cp-te-word.is-lifted { color: var(--fg-5); text-decoration-line: line-through; text-decoration-style: dotted; text-decoration-color: var(--fg-4); }
 .cp-te-word.is-selected.is-lifted { color: var(--sel-ink); text-decoration-color: var(--sel-ink); }
-.cp-te-word.is-corrected { text-decoration: underline dotted; text-decoration-color: var(--fg-4); text-underline-offset: 3px; }
+.cp-te-word.is-corrected { text-decoration-line: underline; text-decoration-style: dotted; text-decoration-color: var(--fg-4); text-underline-offset: 3px; }
 .cp-te-word.is-removed {
   color: var(--fg-5);
   font-size: var(--text-lg);
