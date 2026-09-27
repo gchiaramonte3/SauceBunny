@@ -34,13 +34,14 @@ type Loaded = { documents: Map<string, AafDocument>; speech: Map<string, AafSpee
 export function useEditSources(document: EditDocument | null): EditSourceData {
   const [loaded, setLoaded] = useState<Loaded>({ documents: new Map(), speech: new Map(), peaks: new Map(), errors: [] });
   const [loading, setLoading] = useState(false);
-  const jobs = useRef(new Set<string>());
+  // One lane loads at a time, so at most one speech job and one waveform job
+  // are ever in flight; these hold them for the cleanup's cancel.
+  const speechJob = useRef<string | null>(null), waveJob = useRef<string | null>(null);
   const key = document ? JSON.stringify([document.sources, document.tracks.map((track) => track.source_tracks)]) : "";
 
   useEffect(() => {
     if (!document) return;
     let live = true;
-    const running = jobs.current;
     setLoading(true);
     void (async () => {
       const next: Loaded = { documents: new Map(), speech: new Map(), peaks: new Map(), errors: [] };
@@ -52,13 +53,15 @@ export function useEditSources(document: EditDocument | null): EditSourceData {
           for (const lane of document.tracks) {
             const trackId = lane.source_tracks[source.id];
             if (!trackId) continue;
-            const speechJob = newJobId(), waveJob = newJobId();
-            running.add(speechJob); running.add(waveJob);
+            const speechId = newJobId();
+            speechJob.current = speechId;
+            const waveId = newJobId();
+            waveJob.current = waveId;
             const [speech, wave] = await Promise.allSettled([
-              loadSpeech(source.document_id, trackId, speechJob),
-              invoke<AafWaveform>("aaf_waveform", { documentId: source.document_id, trackId, jobId: waveJob, startFrame: null, durationFrames: null }),
+              loadSpeech(source.document_id, trackId, speechId),
+              invoke<AafWaveform>("aaf_waveform", { documentId: source.document_id, trackId, jobId: waveId, startFrame: null, durationFrames: null }),
             ]);
-            running.delete(speechJob); running.delete(waveJob);
+            speechJob.current = null; waveJob.current = null;
             if (!live) return;
             if (speech.status === "fulfilled") next.speech.set(`${source.id}:${lane.id}`, speech.value);
             else next.errors.push(`${source.name} · ${lane.name}: ${formatError(speech.reason)}`);
@@ -72,8 +75,10 @@ export function useEditSources(document: EditDocument | null): EditSourceData {
     })();
     return () => {
       live = false;
-      for (const jobId of running) void invoke("cancel_job", { jobId }).catch(() => undefined);
-      running.clear();
+      for (const held of [speechJob, waveJob]) {
+        if (held.current) void invoke("cancel_job", { jobId: held.current }).catch(() => undefined);
+        held.current = null;
+      }
     };
     // The key captures what matters; `document` itself changes on every step.
     // eslint-disable-next-line react-hooks/exhaustive-deps

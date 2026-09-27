@@ -213,6 +213,41 @@ pub async fn aaf_speech(app: AppHandle, document_id: String, track_id: String, j
     }).await
 }
 
+/// Write an edit's head as a new AAF for Media Composer (`write-edit`, the
+/// sidecar's one writing command). The sidecar re-reads what it wrote and
+/// compares every frame before publishing, and never overwrites a file.
+#[tauri::command]
+pub async fn aaf_export_edit(app: AppHandle, edit_id: String, output_path: String, approach: String, job_id: String) -> Result<crate::edit_export::EditExportResult, AppError> {
+    diagnostics::operation(&app, &job_id, "export-edit", &format!("Export edit {edit_id} · {}", diagnostics::describe_path(std::path::Path::new(&output_path))), async {
+    let _job = process::JobGuard::begin(&app, &job_id)?;
+    let document = crate::commands::edits::head_document(&app, &edit_id)?;
+    let root = store::root(&app)?;
+    let mut sources = Vec::new();
+    for source in &document.sources {
+        let aaf = store::load(&root, &source.document_id)?;
+        store::source_ready(&aaf)?;
+        let graph = aaf.manifest.graph.as_ref().ok_or_else(|| AppError::invalid(format!(
+            "{} was imported before sequences could be written back. Import its AAF again, then export.", aaf.manifest.name)))?;
+        sources.push(crate::edit_export::ExportSource { id: source.id.clone(), aaf_path: aaf.source_path.clone(),
+            sequence_id: graph.sequence_id.clone(),
+            picture_slot: graph.picture_tracks.iter().find(|track| !track.clips.is_empty()).map(|track| track.slot_id) });
+    }
+    let request = crate::edit_export::build_request(&document, &sources, &approach, &output_path)?;
+    let cache = app.path().app_cache_dir().map_err(|e| AppError::internal(format!("app_cache_dir: {e}")))?;
+    let scratch = crate::commands::scratch_dir(&cache);
+    std::fs::create_dir_all(&scratch)?;
+    let request_path = scratch.join(format!("write-edit-{job_id}.json"));
+    std::fs::write(&request_path, serde_json::to_vec(&request)?)?;
+    process::progress(&app, &job_id, None, "writing", 0, 0);
+    let result = process::run(&app, &job_id, "write-edit", "saucebunny-aaf",
+        vec!["write-edit".into(), "--request".into(), request_path.to_string_lossy().into_owned()]).await;
+    let _ = std::fs::remove_file(&request_path);
+    let result = result?;
+    result.require_success("saucebunny-aaf")?;
+    Ok(serde_json::from_str(&result.stdout)?)
+    }).await
+}
+
 #[cfg(test)]
 mod native_reader_tests {
     use super::*;

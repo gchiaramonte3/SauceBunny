@@ -1,6 +1,7 @@
 import { frameRate, secondsToFrames } from "./lib/timecode";
 import { RoomAccessDialog } from "./components/RoomAccessDialog";
 import { MultitrackPage } from "./components/MultitrackPage";
+import { EditPage } from "./components/EditPage";
 import { lazy, Suspense, type ComponentProps } from "react";
 import {
   useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"; import { invoke } from "@tauri-apps/api/core"; import { notifyFramesChanged } from "./lib/frames"; import { getVersion } from "@tauri-apps/api/app"; import { listen } from "@tauri-apps/api/event"; import { save as saveDialog } from "@tauri-apps/plugin-dialog"; import {   isPermissionGranted, requestPermission, sendNotification, } from "@tauri-apps/plugin-notification"; import { Toolbar } from "./components/Toolbar"; import { NavRail } from "./components/NavRail";  import { LibraryView } from "./components/LibraryView"; import { LibraryBrowser } from "./components/LibraryBrowser"; import { useTranscriptListeners } from "./hooks/use-transcript-listeners"; import { useDiarizerPrepare } from "./hooks/use-diarizer-prepare"; import { useLibraryScan } from "./hooks/use-library-scan"; import { Sidebar } from "./components/Sidebar"; import { PeoplePanel } from "./components/PeoplePanel"; import { ReactionLayer } from "./components/ReactionLayer";
@@ -79,7 +80,7 @@ function nowHms(): string {
  * A state switch, NOT a router (CLAUDE.md) — and the Clip view is never
  * unmounted, only [hidden], so playback/jobs/listeners survive navigation.
  */
-export type AppView = "home" | "library" | "clip" | "coreview" | "reader" | "multitrack";
+export type AppView = "home" | "library" | "clip" | "coreview" | "reader" | "multitrack" | "editor";
 
 // v2 bump: re-encode default flipped from ON to OFF. Older v1 settings are
 // intentionally abandoned so users get the new, much faster default.
@@ -946,6 +947,7 @@ export default function App() {
   const coreviewViewRef = useRef<HTMLDivElement>(null);
   const readerViewRef = useRef<HTMLDivElement>(null);
   const multitrackViewRef = useRef<HTMLDivElement>(null);
+  const editorViewRef = useRef<HTMLDivElement>(null);
   // Shared library scan state — owned here so Home's shelves and the Library
   // browser read the SAME scan results (switching views never rescans) and
   // the same thumbnail cache. Both views are keep-alive-mounted below.
@@ -3020,7 +3022,7 @@ export default function App() {
   // deliberately continues), so entering the reader must pause it, and leaving
   // must pause the reader player.
   useEffect(() => {
-    if (activeView === "reader" || activeView === "multitrack") { try { playerRef.current?.pause(); } catch { /* no clip player */ } }
+    if (activeView === "reader" || activeView === "multitrack" || activeView === "editor") { try { playerRef.current?.pause(); } catch { /* no clip player */ } }
     if (activeView !== "reader") { try { readerPlayerRef.current?.pause(); } catch { /* no reader player */ } }
   }, [activeView]);
 
@@ -3388,7 +3390,7 @@ export default function App() {
     programInputActive: privateInspectionVisible || (activeView === "coreview" && (!!ndiProgram || !!ndiRoomSource || screenProgramActive)),
     comboToAction, status, fps, readerFps, durationFrames, settingsOpen, exportOpts,
     activeViewRef, homeViewRef, libraryViewRef, clipViewRef, coreviewViewRef,
-    readerViewRef, multitrackViewRef, readerPlayerRef, tcEntryRef, kHeldRef,
+    readerViewRef, multitrackViewRef, editorViewRef, readerPlayerRef, tcEntryRef, kHeldRef,
     reviewRangeGateRef, reviewRangeKeysRef: reviewSession.rangeCommandsRef,
     onPlayToggle, shuttleStep, onMarkIn, onMarkOut, onClearMarks,
     onGotoIn, onGotoOut, onStep, onSeek, readerSeekRel,
@@ -4625,6 +4627,7 @@ export default function App() {
   const coreviewCombo = bindingsFor("view.coreview", keybindings)[0];
   const readerCombo = bindingsFor("view.reader", keybindings)[0];
   const multitrackCombo = bindingsFor("view.multitrack", keybindings)[0];
+  const editorCombo = bindingsFor("view.editor", keybindings)[0];
 
   // ── Stale-binary banner ──────────────────────────────────────────────
   // Only shows when the Rust backend doesn't match the frontend's expected
@@ -4713,6 +4716,7 @@ export default function App() {
             coreviewShortcut={coreviewCombo ? formatCombo(coreviewCombo) : undefined}
             readerShortcut={readerCombo ? formatCombo(readerCombo) : undefined}
             multitrackShortcut={multitrackCombo ? formatCombo(multitrackCombo) : undefined}
+            editorShortcut={editorCombo ? formatCombo(editorCombo) : undefined}
             sessionActive={coSessionActive}
             sessionPeers={coSession.peers.length}
           />
@@ -4866,6 +4870,11 @@ export default function App() {
           </div>
           {/* AAF documents own their audio and jobs, not the Clip transport.
               Keep the workspace mounted so navigation cannot discard work. */}
+          {/* The Transcript Editor owns its audio (edit-audio.ts) and its undo
+              log on disk; kept mounted so leaving it never drops an open edit. */}
+          <div ref={editorViewRef} tabIndex={-1} className="cp-view cp-view-editor" hidden={activeView !== "editor"}>
+            <EditPage active={activeView === "editor"} />
+          </div>
           <div ref={multitrackViewRef} tabIndex={-1} className="cp-view cp-view-multitrack" hidden={activeView !== "multitrack"}>
             <MultitrackPage
               openRequest={multitrackOpenRequest}

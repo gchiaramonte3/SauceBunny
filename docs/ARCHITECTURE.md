@@ -20,6 +20,14 @@ A macOS desktop app for **clipping sections out of online videos** (YouTube, Vim
 - Auto-loading transcripts when you re-open the same source
 - A separate Multitrack workspace for read-only embedded-audio AAF inspection
   and per-microphone local transcription (see [AAF-MULTITRACK.md](AAF-MULTITRACK.md))
+- The Transcript Editor (`EditPage` and its `Edit*` components), which cuts
+  AAF Audio sequences by their words. The edit model is TypeScript
+  (`src/lib/edit-model.ts`, seconds); the saved document is typed Rust in whole
+  frames (`src-tauri/src/edit_doc.rs`), kept with a branching undo log in
+  SQLite (`edit_log.rs`, `app_data_dir()/timelines.sqlite`) and mirrored as
+  JSON to `~/Documents/Sauce Bunny/Edits/`. Playback is `src/lib/edit-audio.ts`
+  on one AudioContext; export goes through `edit_export.rs` to the AAF
+  sidecar's `write-edit`. See [TRANSCRIPT-EDITOR-PLAN.md](TRANSCRIPT-EDITOR-PLAN.md)
 
 What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Everything runs on your machine.
 

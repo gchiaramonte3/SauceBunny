@@ -1086,3 +1086,27 @@ client receives.
 
 `review-writer-contract` now records this. Deleting its `setStatus` entry is
 the acceptance test for whenever the verdict UI gets built.
+
+### Transcript Editor (needs a transcribed AAF Audio sequence and Media Composer)
+
+Nothing below can be checked by the browser suite: it needs real linked
+media, WKWebView's audio, and Avid.
+
+1. ⌘7 opens the editor. **New edit** from a transcribed sequence with "whole
+   sequence" on: the text shows every person, coloured by lane.
+2. Press Space. Audio plays from the linked MXFs; delete a sentence and play
+   across the cut: no click at the join (10 ms crossfade). Delete a line with
+   someone talking over it: the prompt appears and nothing below moves until
+   you choose **Close up for everyone**.
+3. ⌘Z / ⇧⌘Z step through the History panel (⌘Y). Quit and reopen: the edit
+   and its whole history come back, and `~/Documents/Sauce Bunny/Edits/`
+   holds a readable JSON copy.
+4. Mark In/Out (I/O), Lift (Z) leaves a gap, Extract (X) closes it. Remove
+   dead space: the review lists spans, Apply removes them.
+5. **Export AAF** (Keep groups), import into Media Composer: the sequence
+   relinks to the original master clips, picture on V1, markers imported
+   from the `- Avid markers.txt` beside it, gaps as filler. Repeat with
+   **Clip that plays**. This is the Phase 0 question: record which one Avid
+   accepts.
+6. **String-out per person** on a transcribed sequence: one edit per person,
+   each bite with a marker naming them; export one and check it in Avid.

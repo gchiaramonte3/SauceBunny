@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { EditDocument } from "../bindings/EditDocument";
 import type { EditHead } from "../bindings/EditHead";
 import type { EditHistory } from "../bindings/EditHistory";
 import { fromDocument, toDocument, type OpenEdit, type TimelineMarker } from "../lib/edit-document";
@@ -6,8 +7,8 @@ import type { Timeline } from "../lib/edit-model";
 import { editStore } from "../lib/edit-store";
 import { formatError } from "../lib/error-format";
 
-/** What a change produces: a new model state, new markers, or both. */
-export type EditChange = { timeline?: Timeline; markers?: TimelineMarker[] } | null;
+/** What a change produces: a new model state, new markers, or a new frame (sources and lanes). */
+export type EditChange = { timeline?: Timeline; markers?: TimelineMarker[]; document?: EditDocument } | null;
 
 /**
  * The open edit, as the undo log holds it. Every change is a round trip to the
@@ -58,7 +59,7 @@ export function useEditSession(editId: string | null) {
     const state = fromDocument(latest.document);
     const result = change(state);
     if (!result) return null;
-    const document = toDocument(latest.document, result.timeline ?? state.timeline, result.markers ?? state.markers);
+    const document = toDocument(result.document ?? latest.document, result.timeline ?? state.timeline, result.markers ?? state.markers);
     return editStore.commit(id, label, document, group);
   }), [run]);
 

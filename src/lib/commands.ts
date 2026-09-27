@@ -126,7 +126,7 @@ export type CommandDeps = {
    * not accept the argument. `settings-pointer-contract`'s sibling below
    * (keybindings vs commands) is what keeps the two in step now.
    */
-  onNavigateView: (view: "home" | "library" | "clip" | "coreview" | "reader" | "multitrack") => void;
+  onNavigateView: (view: "home" | "library" | "clip" | "coreview" | "reader" | "multitrack" | "editor") => void;
   /** Opens the ⌘/ shortcut cheat-sheet (ShortcutSheet). */
   onShowShortcuts: () => void;
   // ── scoped undo/redo (lib/undo.ts) ──
@@ -324,6 +324,11 @@ export function buildCommands(d: CommandDeps): Command[] {
       keywords: ["aaf", "avid", "audio", "tracks", "transcribe", "nav"],
       disabled: d.activeView === "multitrack",
       run: () => d.onNavigateView("multitrack") },
+    { id: "view.editor", label: "Go to Transcript Editor", group: "View",
+      hotkey: "⌘7", description: "Cut AAF Audio sequences by their words and export an AAF",
+      keywords: ["edit", "editor", "stringout", "string-out", "cut", "aaf", "avid", "export", "nav"],
+      disabled: d.activeView === "editor",
+      run: () => d.onNavigateView("editor") },
     { id: "view.captions", label: d.captionsOn ? "Hide captions" : "Show captions",
       group: "View", disabled: !d.hasSource,
       run: () => d.setCaptionsOn((p) => !p) },

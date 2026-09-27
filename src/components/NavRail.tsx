@@ -1,4 +1,4 @@
-import { IconHome, IconStack, IconScissors, IconSettings, IconCoReview, IconTranscript } from "./Icons";
+import { IconHome, IconStack, IconScissors, IconSettings, IconCoReview, IconTranscript, IconPencil } from "./Icons";
 import type { AppView } from "../App";
 import logoUrl from "../assets/saucebunny.svg";
 import { IconMultitrack } from "./IconMultitrack";
@@ -27,13 +27,14 @@ type Props = {
   coreviewShortcut?: string;
   readerShortcut?: string;
   multitrackShortcut?: string;
+  editorShortcut?: string;
   /** A co-review session is live — lights the badge dot on the Review item. */
   sessionActive: boolean;
   /** People connected to the live session — surfaced in the item's title. */
   sessionPeers?: number;
 };
 
-export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libraryShortcut, clipShortcut, coreviewShortcut, readerShortcut, multitrackShortcut, sessionActive, sessionPeers }: Props) {
+export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libraryShortcut, clipShortcut, coreviewShortcut, readerShortcut, multitrackShortcut, editorShortcut, sessionActive, sessionPeers }: Props) {
   return (
     <nav className="cp-nav" aria-label="Primary">
       {/* Brand mark — a non-interactive logo, NOT a second Home button. The
@@ -115,6 +116,17 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libr
       >
         <IconMultitrack />
         <span className="cp-nav-label">AAF Audio</span>
+      </button>
+      <button
+        type="button"
+        className={"cp-nav-item" + (active === "editor" ? " active" : "")}
+        onClick={() => onNavigate("editor")}
+        title={editorShortcut ? `Transcript Editor (${editorShortcut})` : "Transcript Editor"}
+        aria-label="Transcript Editor"
+        aria-current={active === "editor" ? "page" : undefined}
+      >
+        <IconPencil size={18} />
+        <span className="cp-nav-label">Editor</span>
       </button>
       <div className="cp-nav-spacer" />
       <button

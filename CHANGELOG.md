@@ -5,6 +5,23 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- **Transcript Editor** (nav rail, ⌘7): cut AAF Audio sequences by their
+  words. Deleting text closes the time on every track, but words spoken over
+  someone else are silenced on their own track and the rest is left for you to
+  decide. Removed lines stay visible and restorable; Avid-style track
+  selectors, In/Out, Lift, Extract, Mark Clip, markers and a dead-space
+  review work on a magnetic timeline with gaps. Every change is kept in a
+  branching undo history on disk, with a History panel.
+- The edit plays straight from the linked microphone media, with a short
+  crossfade at every join.
+- **Export AAF** writes the edit as a new sequence for Media Composer (the
+  original AAFs are never changed), checks every frame of what it wrote
+  before saving it, and writes a markers text file beside it.
+- **String-outs:** one edit per person from a transcribed sequence (their
+  bites in scene order, with handles, filler between and a marker on each),
+  or add selected words to any other edit by hand.
+
 ### Changed
 - Tab strips no longer scroll sideways, so a Mac that always shows scrollbars
   no longer draws one under them. The AAF Audio person tabs show the people

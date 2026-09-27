@@ -37,9 +37,13 @@ An editor on a reality show can:
 | AAF import, lanes, groups, relink, transcribe (AAF Audio) | Shipped on the branch |
 | Native MXF identity reader (partition pack, 8 at a time) | Shipped on the branch |
 | Range transcription, per-sequence mix and view memory | Shipped on the branch |
-| AAF string-out writer | Spike (`docs/research/aaf-stringout-spike/`): approaches B and C put 0 of 680 frames wrong against fixtures; **not yet tried in Media Composer** |
-| Transcript Editor | Clickable prototype in the design catalog: edit model, gaps, dead space, track selectors, tools, tabs, Ask, branching undo; 49 catalog browser tests, 21 model tests |
-| Everything else in this plan | Not started |
+| AAF reader: Legacy kinds, muted clips, picture as metadata (Phase 1) | Shipped on the branch; the 117-file corpus gate is open |
+| Edit document and on-disk undo log (Phase 3) | Shipped: `edit_doc.rs`, `edit_log.rs` (SQLite), `commands/edits.rs`, JSON mirror in Documents |
+| Speech analysis (Phase 4) | Shipped: `speech.rs` from the waveform pyramid (floor, hysteresis, reactions, word placement); VAD not yet combined |
+| Transcript Editor (Phase 5) | In the app (⌘7): picker, source and record, removed lines, overtalk prompt, timeline, dead space, History, edit-list playback. No dockable tabs, Ask or word corrections yet |
+| AAF export (Phase 6) | Shipped: `write-edit` sidecar command with a frame-by-frame self-check, driven by `aaf_export_edit`; **not yet tried in Media Composer** (Phase 0) |
+| String-outs (Phase 7) | Manual (Add to…) and rules (one per person) shipped; AI proposals not started |
+| Media index (Phase 2), hardening (Phase 8) | Not started |
 
 ## Invariants
 

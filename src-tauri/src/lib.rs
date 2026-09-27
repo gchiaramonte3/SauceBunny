@@ -13,6 +13,7 @@ mod acquisition_gate;
 mod premiere_bridge;
 // Transcript Editor: the edit document and its on-disk undo log.
 mod edit_doc;
+mod edit_export;
 mod edit_log;
 // Per-mic speech analysis from the waveform overview (Transcript Editor).
 mod speech;
@@ -284,6 +285,7 @@ pub fn run() {
             commands::review_code,
             commands::session_kick,
             commands::aaf_speech,
+            commands::aaf_export_edit,
             commands::edit_list,
             commands::edit_create,
             commands::edit_head,

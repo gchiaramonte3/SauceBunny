@@ -26,6 +26,7 @@ const VIEWS: Array<[string, string, string]> = [
   ["Clip", ".cp-view-clip", "Clip"],
   ["Review", ".cp-view-coreview", "Review"],
   ["Transcripts", ".cp-view-reader", "Transcript"],
+  ["Transcript Editor", ".cp-view-editor", "Transcript Editor"],
 ];
 
 test("each view exposes exactly one named main landmark", async ({ page }) => {

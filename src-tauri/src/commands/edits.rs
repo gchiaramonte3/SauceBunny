@@ -90,6 +90,13 @@ pub fn edit_create(app: AppHandle, store: State<EditStore>, id: String, document
     Ok(head)
 }
 
+/// The document at an edit's head, for commands outside this file (export).
+pub fn head_document(app: &AppHandle, id: &str) -> Result<EditDocument, AppError> {
+    valid_id(id)?;
+    let store = app.state::<EditStore>();
+    with_log(app, &store, |log| log.head(id)).map(|head| head.document)
+}
+
 #[tauri::command]
 pub fn edit_head(app: AppHandle, store: State<EditStore>, id: String) -> Result<EditHead, AppError> {
     valid_id(&id)?;
