@@ -526,8 +526,18 @@ mod tests {
         let (reader, writer) = pipe().unwrap();
         assert!(tokio::time::timeout(Duration::from_millis(10), control.send_start(0, 1, 1, writer.as_fd())).await.is_err());
         drop(writer);
-        // No reference was enqueued by the cancelled Start.
-        assert_eq!(read_byte(&reader).unwrap(), 0);
+        // No reference was enqueued by the cancelled Start. Darwin can release
+        // the right attached to the failed sendmsg a moment after it returns,
+        // so wait briefly for EOF; a real leak never reaches it.
+        let deadline = std::time::Instant::now() + Duration::from_millis(500);
+        loop {
+            match read_byte(&reader) {
+                Ok(count) => { assert_eq!(count, 0); break; }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock && std::time::Instant::now() < deadline =>
+                    std::thread::sleep(Duration::from_millis(5)),
+                Err(error) => panic!("write end still referenced after cancellation: {error}"),
+            }
+        }
         nonblocking(child.as_raw_fd()).unwrap();
         let mut received = [0u8; SIZE];
         for _ in 0..queued {
