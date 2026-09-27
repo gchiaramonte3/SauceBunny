@@ -42,7 +42,7 @@ An editor on a reality show can:
 | Speech analysis (Phase 4) | Shipped: `speech.rs` from the waveform pyramid (floor, hysteresis, reactions, word placement); VAD not yet combined |
 | Transcript Editor (Phase 5) | In the app (⌘7): picker, source and record, removed lines, overtalk prompt, timeline, dead space, History, edit-list playback. No dockable tabs, Ask or word corrections yet |
 | AAF export (Phase 6) | Shipped: `write-edit` sidecar command with a frame-by-frame self-check, driven by `aaf_export_edit`; **not yet tried in Media Composer** (Phase 0) |
-| String-outs (Phase 7) | Manual (Add to…) and rules (one per person) shipped; AI proposals not started |
+| String-outs (Phase 7) | Manual (Add to…), rules (one per person) and AI proposals (ask in words, accept or discard; local Qwen or the chosen cloud model) shipped; revisions as diffs to an existing edit and season-wide batches not started |
 | Media index (Phase 2), hardening (Phase 8) | Not started |
 
 ## Invariants

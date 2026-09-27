@@ -4,6 +4,7 @@ import type { AafDocument } from "../bindings/AafDocument";
 import type { AafDocumentSummary } from "../bindings/AafDocumentSummary";
 import type { EditDocument } from "../bindings/EditDocument";
 import type { EditSummary } from "../bindings/EditSummary";
+import { EditAskStringout } from "./EditAskStringout";
 import { EDIT_SCHEMA_VERSION } from "../lib/edit-document";
 import { editFromSequence } from "../lib/edit-new";
 import { stringoutsFor } from "../lib/edit-stringout";
@@ -76,6 +77,7 @@ export function EditPicker({ onOpen }: Props) {
         title="One edit per person: their bites in scene order, with handles, filler between and a marker on each">String-out per person</button>}
     </form>
     {error && <p className="cp-te-errors" role="alert">{error}</p>}
+    {from && <EditAskStringout documentId={from} onOpen={onOpen} />}
     <h2 className="cp-te-picker-head">Edits</h2>
     {edits === null ? <p className="cp-te-pane-note" role="status">Loading…</p>
       : !edits.length ? <p className="cp-te-pane-note">No edits yet.</p>

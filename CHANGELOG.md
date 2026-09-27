@@ -20,7 +20,8 @@ All notable changes to Sauce Bunny. Format loosely follows
   before saving it, and writes a markers text file beside it.
 - **String-outs:** one edit per person from a transcribed sequence (their
   bites in scene order, with handles, filler between and a marker on each),
-  or add selected words to any other edit by hand.
+  or add selected words to any other edit by hand, or ask for one in words
+  ("two minutes, open with Rosa") and accept or discard the proposed bites.
 
 ### Changed
 - Tab strips no longer scroll sideways, so a Mac that always shows scrollbars

@@ -49,32 +49,53 @@ export function bitesFor(document: AafDocument, trackIds: string[], rules: Strin
 
 const snippet = (text: string) => text.length <= 120 ? text : `${text.slice(0, 117).trimEnd()}…`;
 
-/** A string-out for one person (an edit lane), or null when they say nothing that qualifies. */
-export function stringoutFor(document: AafDocument, lane: string, rules: StringoutRules = stringoutDefaults): EditDocument | null {
-  const frame = editFromSequence(document, `SO_${document.manifest.name}_${lane}`, false);
-  const person = frame.tracks.find((track) => track.name === lane);
+/** A bite with the edit lane (person) it belongs to. */
+export type LaneBite = StringoutBite & { lane: string };
+
+/** Every person's bites, each tagged with their edit lane, in scene order. */
+export function laneBites(document: AafDocument, rules: StringoutRules = stringoutDefaults): LaneBite[] {
+  const frame = editFromSequence(document, "", false);
   const source = frame.sources[0]?.id;
-  if (!person || !source) return null;
+  if (!source) return [];
+  return frame.tracks.flatMap((person) => {
+    // Every mic this person owns: an owner can wear more than one across a scene.
+    const mic = person.source_tracks[source], mics = mic ? [mic] : [];
+    const owned = document.labels.filter((label) => label.owner_name.normalize("NFC") === person.name.normalize("NFC")).map((label) => label.track_id);
+    return bitesFor(document, [...new Set([...mics, ...owned])], rules).map((bite) => ({ ...bite, lane: person.id }));
+  }).sort((a, b) => a.from - b.from);
+}
+
+/**
+ * Lay bites end to end in the order given: handles, filler between, and a
+ * marker on each naming who and what, coloured per person. Going forward in
+ * the scene, a bite's head never replays the previous bite's tail.
+ */
+export function layoutBites(document: AafDocument, title: string, bites: LaneBite[], rules: StringoutRules = stringoutDefaults): EditDocument | null {
+  const frame = editFromSequence(document, title, false);
+  const source = frame.sources[0]?.id;
+  if (!source || !bites.length) return null;
   const rate = frame.edit_rate, fps = rate.numerator / rate.denominator, length = document.manifest.duration_frames;
-  // Every mic this person owns: an owner can wear more than one across a scene.
-  const mic = person.source_tracks[source], mics = mic ? [mic] : [];
-  const owned = document.labels.filter((label) => label.owner_name.normalize("NFC") === lane.normalize("NFC")).map((label) => label.track_id);
-  const bites = bitesFor(document, [...new Set([...mics, ...owned])], rules);
-  if (!bites.length) return null;
   const segments: EditSegment[] = [], markers: EditMarker[] = [];
-  const color = COLORS[frame.tracks.indexOf(person) % COLORS.length];
-  let at = 0, last = -1;
+  let at = 0, last = -1, lastIn = -1;
   bites.forEach((bite, index) => {
+    const person = frame.tracks.find((track) => track.id === bite.lane);
+    if (!person) return;
     const inFrame = Math.max(0, Math.floor((bite.from - rules.head) * fps)), outFrame = Math.min(length, Math.ceil((bite.to + rules.tail) * fps));
-    // Handles of neighbouring bites can overlap; never play a frame twice.
-    const start = Math.max(inFrame, last);
+    const start = inFrame >= lastIn ? Math.max(inFrame, last) : inFrame;
     if (outFrame <= start) return;
     if (segments.length && rules.gapFrames > 0) { segments.push({ kind: "gap", id: `gap-${index}`, frames: rules.gapFrames }); at += rules.gapFrames; }
     segments.push({ kind: "source", id: `bite-${index}`, source, in_frame: start, out_frame: outFrame });
-    markers.push({ id: `bite-${index}`, frame: at, track: person.id, name: person.name, comment: snippet(bite.text), color });
-    at += outFrame - start; last = outFrame;
+    markers.push({ id: `bite-${index}`, frame: at, track: person.id, name: person.name, comment: snippet(bite.text), color: COLORS[frame.tracks.indexOf(person) % COLORS.length] });
+    at += outFrame - start; last = outFrame; lastIn = inFrame;
   });
-  return { ...frame, segments, markers };
+  return segments.length ? { ...frame, segments, markers } : null;
+}
+
+/** A string-out for one person (an edit lane, by name), or null when they say nothing that qualifies. */
+export function stringoutFor(document: AafDocument, lane: string, rules: StringoutRules = stringoutDefaults): EditDocument | null {
+  const person = editFromSequence(document, "", false).tracks.find((track) => track.name === lane);
+  if (!person) return null;
+  return layoutBites(document, `SO_${document.manifest.name}_${lane}`, laneBites(document, rules).filter((bite) => bite.lane === person.id), rules);
 }
 
 /** Every person in the sequence who has transcribed words, as a string-out each. */

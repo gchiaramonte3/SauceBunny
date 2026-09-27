@@ -637,3 +637,13 @@
 .cp-te-picker-item:hover { background: var(--bg-3); color: var(--fg-0); }
 .cp-te-picker-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .cp-te-picker-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--weight-semibold); }
+.cp-te-ask-stringout { display: flex; flex-direction: column; gap: 8px; }
+.cp-te-picker-ask { display: flex; align-items: flex-end; gap: 12px; }
+.cp-te-picker-ask .cp-te-set-label { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.cp-te-picker-ask .cp-input { min-height: 30px; font-family: var(--font-ui); font-size: var(--text-md); }
+.cp-te-proposal { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); }
+.cp-te-proposal-list { margin: 0; padding: 0 0 0 20px; display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+.cp-te-proposal-list > li { display: grid; grid-template-columns: max-content max-content 1fr; gap: 8px; align-items: baseline; font-size: var(--text-md); line-height: var(--leading-snug); color: var(--fg-2); }
+.cp-te-proposal-who { font-weight: var(--weight-semibold); color: var(--fg-1); }
+.cp-te-proposal-at { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--fg-4); font-size: var(--text-sm); }
+.cp-te-proposal-text { min-width: 0; }
