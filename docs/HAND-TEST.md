@@ -1112,3 +1112,12 @@ media, WKWebView's audio, and Avid.
    each bite with a marker naming them; export one and check it in Avid.
 7. Quit with a string out open and relaunch: ⌘7 reopens it, with no welcome.
    Do the same in AAF Audio with a sequence open: it reopens that sequence.
+8. Ask (left column): pick a local model, then Claude with a key added in
+   Settings → AI APIs; AI Summary must keep its own choice. Ask "pull every
+   line from @Rosa about the move": the answer cites lines (click one), and
+   **Make new string out** creates one without changing the current one.
+   Drag the prompt's top edge taller; quit and relaunch, and the
+   conversation is still there.
+9. Select one track (A1), mark In/Out over a line where A2 talks, press Z:
+   A1's clip shows a gap, A2 is untouched. Press X instead: it asks first.
+   Export and check the gap is filler on A1 in Media Composer.

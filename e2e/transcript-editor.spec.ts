@@ -120,3 +120,24 @@ test("coming back reopens the string out that was open, not the welcome", async 
   await expect(page.getByRole("heading", { name: "Keep me" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Pull the story out, bite by bite" })).toHaveCount(0);
 });
+
+test("the left column is Ask, Inspector, History, with a plain prompt", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByRole("button", { name: "Create" }).click();
+  const tabs = page.getByRole("tablist", { name: "String out panels" }).getByRole("tab");
+  await expect(tabs).toHaveText(["Ask", "Inspector", "History"]);
+  await expect(tabs.first()).toHaveAttribute("aria-selected", "true");
+  const prompt = page.getByRole("combobox", { name: /Ask anything/ });
+  await expect(prompt).toHaveAttribute("placeholder", "Ask anything");
+  const box = await prompt.boundingBox();
+  expect(box!.height).toBeGreaterThanOrEqual(100);
+  // The column sits to the left of the source and the string out.
+  const side = await page.locator(".cp-te-pane-side").boundingBox(), record = await page.locator(".cp-te-pane-record").boundingBox();
+  expect(side!.x).toBeLessThan(record!.x);
+  await tabs.nth(1).click();
+  await expect(page.getByRole("complementary", { name: "Inspector" })).toBeVisible();
+  await page.keyboard.press("Meta+y");
+  await expect(tabs.nth(2)).toHaveAttribute("aria-selected", "true");
+});

@@ -6,6 +6,16 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- String Outs has a left column with **Ask**, **Inspector** and **History**.
+  Ask answers questions about the transcripts, citing the lines it used,
+  with the model you pick in the panel (downloaded local models, or Claude
+  and ChatGPT with your own key); the choice applies to String Outs only.
+  Asking it to build a string out makes a new one, so the one you are in
+  is untouched unless you choose to replace it. Conversations stay with
+  each string out.
+- A range lifted off a track in String Outs now shows as a gap in that
+  track's clip, the way it lands in the exported AAF, and Extract asks
+  before taking words from a track that is not selected.
 - AAF Audio and String Outs reopen what you had open, including after a
   relaunch. Their welcome panels show only until you have imported an AAF or
   made a string out.
