@@ -4,6 +4,7 @@ import type { EditMarker } from "../bindings/EditMarker";
 import type { EditRate } from "../bindings/EditRate";
 import type { EditSegment } from "../bindings/EditSegment";
 import { GAP, type Timeline, type TimelineWord } from "./edit-model";
+import { framesToTc, secondsToFrames } from "./timecode";
 
 /**
  * The boundary between the edit model (seconds, as the approved prototype
@@ -12,7 +13,17 @@ import { GAP, type Timeline, type TimelineWord } from "./edit-model";
  * subframe cut, and whatever plays is exactly what Avid will get.
  */
 
+/**
+ * The document format edit_doc.rs reads. The undo log refuses a newer one on
+ * open (edit_log.rs), which is where the downgrade guard for this format lives.
+ */
+export const EDIT_SCHEMA_VERSION = 1;
+
 export const fps = (rate: EditRate) => rate.numerator / rate.denominator;
+
+/** Timecode of a program position, counted in frames from the record start. */
+export const editTc = (seconds: number, framesPerSecond: number, recordStart: number) =>
+  framesToTc(recordStart + secondsToFrames(seconds, framesPerSecond), framesPerSecond);
 export const toFrames = (seconds: number, rate: EditRate) => Math.round((seconds * rate.numerator) / rate.denominator);
 export const toSeconds = (frames: number, rate: EditRate) => (frames * rate.denominator) / rate.numerator;
 

@@ -18,6 +18,8 @@
  * express a subframe cut, so neither can a saved edit.
  */
 
+/** A lane of the edit: a person, with their track number (A1, A2...). */
+export type TimelineLane = { id: string; name: string; track: number };
 export type TimelineWord = { id: string; source: string; track: string; text: string; start: number; end: number };
 export type TimelineSegment = { id: string; source: string; srcIn: number; srcOut: number };
 export type TimelineMute = { source: string; track: string; srcIn: number; srcOut: number };

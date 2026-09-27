@@ -31,6 +31,7 @@ const HOME = "src/lib/repath.ts";
  * because "it looked like a path" is how the private copies started.
  */
 const ALLOWED: ReadonlyArray<readonly [file: string, why: string]> = [
+  ["src/lib/edit-new.ts", "normalises a microphone-owner label to match people across sequences; not filesystem identity"],
   ["src/components/MultitrackLibraryRows.tsx", "normalises search query text for matching display titles, not file identity"],
   ["src/lib/review.ts", "normalises a TITLE inside reviewFingerprint, and a composite fingerprint string on lookup — neither is a path"],
   ["src/lib/library.ts", "searchLibrary folds case as well as normalising; matching text is a different job from identifying a file"],
