@@ -186,7 +186,10 @@ to the sidecar's full pyaaf2 parser, which stays the reference its tests compare
 against (`aaf-sidecar/make_mxf_header_fixtures.py`). On NEXIS the Python parse
 was ~4.7 s per file and serialized by the GIL. A single-track PCM header that
 states the source's exact rate, bits, channels and duration is bound without
-ffprobe; everything else is still confirmed by ffprobe. Each atomic
+ffprobe; everything else is still confirmed by ffprobe. The same pass reads
+picture tracks, their CDCI/RGBA descriptor and the file package timecode as
+optional facts that can never fail an audio file (see docs/AAF-MULTITRACK.md);
+relink still binds audio only. Each atomic
 graph-only checkpoint merges into the latest document and notifies the library.
 Stop retains prior checkpoints, labels and transcripts; the frontend reconciles
 from disk even when a completion event was missed. A document-scoped guard prevents

@@ -9,7 +9,14 @@ use std::{collections::BTreeMap, path::{Path, PathBuf}};
 use tauri::AppHandle;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct MxfTrack { pub material_track_id: u32, pub mob_id: String, pub slot_id: u32, pub aligned: bool }
+pub struct MxfTrack {
+    pub material_track_id: u32, pub mob_id: String, pub slot_id: u32, pub aligned: bool,
+    /// Absent in cached headers and sidecar output, which only ever held sound.
+    #[serde(default)] pub kind: MxfTrackKind,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MxfTrackKind { #[default] Sound, Picture }
 #[derive(Clone, Deserialize, Serialize)]
 struct Header {
     path: String,
@@ -75,10 +82,14 @@ impl ProbeCache {
                 process::check_cancelled(app, job)?;
                 self.header_ms += ms;
                 match result {
+                    // Picture-only: no audio identity here, so the full parser
+                    // decides exactly as it did before pictures were read.
+                    Ok(inspection) if inspection.tracks.is_empty() => diagnostics::log(app, job, "info", "mxf-file",
+                        &format!("{} · no audio mappings{} · using the full parser", path.display(), inspection.picture_summary())),
                     Ok(inspection) => {
                         let Some((expected, cache)) = pending.remove(&path) else { continue; };
                         if !self.unchanged(app, job, &path, &expected) { continue; }
-                        diagnostics::log(app, job, "info", "mxf-file", &format!("{} · {} audio mappings · {ms} ms", path.display(), inspection.tracks.len()));
+                        diagnostics::log(app, job, "info", "mxf-file", &format!("{} · {} audio mappings{} · {ms} ms", path.display(), inspection.tracks.len(), inspection.picture_summary()));
                         let header = Header { path: path.to_string_lossy().into_owned(), fingerprint: expected, tracks: inspection.tracks, sound: inspection.sound, error: None };
                         crate::commands::system::write_bytes_impl(&cache.to_string_lossy(), &serde_json::to_vec(&header)?, false, false, true)?;
                         self.headers.insert(path, header);
@@ -259,7 +270,7 @@ mod tests {
     fn empty_failed_or_changed_headers_are_never_persistent_cache_hits() {
         let mut header = Header { path: "audio.mxf".into(), fingerprint: "one".into(), tracks: vec![], sound: None, error: None };
         assert!(!reusable_header(&header, "one"));
-        header.tracks.push(MxfTrack { material_track_id: 1, mob_id: "abcd".into(), slot_id: 1, aligned: true });
+        header.tracks.push(MxfTrack { material_track_id: 1, mob_id: "abcd".into(), slot_id: 1, aligned: true, kind: MxfTrackKind::Sound });
         assert!(reusable_header(&header, "one"));
         assert!(!reusable_header(&header, "two"));
         header.error = Some("Unreadable".into());
