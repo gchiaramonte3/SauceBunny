@@ -11,7 +11,8 @@ import json
 import struct
 import aaf2
 from reader import (Timeline, PCM, ReaderError, value, rate_of, clean_name,
-                    append_warning, fail, round_sample, MAX_DEPTH)
+                    append_warning, fail, round_sample, media_kind, MAX_DEPTH)
+from picture import picture_tracks, is_muted
 
 MAX_AUDIO_LANES = 256
 
@@ -112,7 +113,7 @@ class GraphTimeline(Timeline):
         self.file = file
         main_tracks = list(self.tracks)
         extra = []
-        for slot, parent in zip([s for s in chosen.slots if s.segment.media_kind.lower() == 'sound'], main_tracks):
+        for slot, parent in zip([s for s in chosen.slots if media_kind(s.segment) == 'sound'], main_tracks):
             self.selectors = {}
             self.read_track(slot)
             pending = [(key, selector, {}) for key, selector in self.selectors.items()]
@@ -150,12 +151,11 @@ class GraphTimeline(Timeline):
             self.overrides = {}
             self.branch_only = None
         self.tracks = main_tracks + extra
-        self.picture_tracks = [{'slot_id': s.slot_id, 'physical_track_number': value(s, 'PhysicalTrackNumber'),
-                                'name': clean_name(s.name, 'Picture'), 'component': type(s.segment).__name__}
-                               for s in chosen.slots if s.segment.media_kind.lower() == 'picture']
+        self.picture_tracks = picture_tracks([s for s in chosen.slots if media_kind(s.segment) == 'picture'],
+                                             self.rate, self.warnings)
         self.markers = []
         for slot in chosen.slots:
-            if slot.segment.media_kind.lower() != 'descriptive metadata':
+            if media_kind(slot.segment) != 'descriptivemetadata':
                 continue
             # `or []`, not a default: Media Composer 23.12 writes a span marker
             # on the timecode track whose DescribedSlots property is PRESENT
@@ -231,6 +231,12 @@ class GraphTimeline(Timeline):
             if cursor != Fraction(seg.length, 1)/rate:
                 fail('A sequence component length is inconsistent.', 'invalid_media')
             return result
+        if isinstance(seg, aaf2.components.Selector) and is_muted(seg):
+            # A muted clip, not a group: Avid keeps the real clip in
+            # Alternates and plays the selected Filler. Registering it would
+            # turn the muted clip into a phantom microphone lane.
+            append_warning(warnings_list, 'Muted clip in Avid: it plays as silence here too.')
+            return [{'kind': 'gap', 'duration': duration}]
         if isinstance(seg, aaf2.components.Selector):
             key = identity(seg)
             if not self.branch_only or self.inside_branch or key == self.branch_only:

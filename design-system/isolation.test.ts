@@ -76,6 +76,9 @@ const allowedProduction = new Set([
   // The "N more" menu and its pure fitting rule, reused by the Transcript
   // Editor prototype's tab strips; dismiss/menu-key hooks are already allowed.
   "src/components/TabOverflowMenu", "src/lib/tab-overflow",
+  // The V1 picture lane: named blocks from manifest metadata and pure timecode
+  // formatting. No video element, decode, IPC or persistence.
+  "src/components/MultitrackPictureLane",
 ]);
 const pureHelpers = [...allowedProduction].flatMap(path => [".tsx", ".ts"].map(extension => resolve(root, path + extension)).filter(existsSync));
 

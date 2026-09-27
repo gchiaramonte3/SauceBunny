@@ -269,6 +269,20 @@ pub fn validate_manifest(manifest: &AafManifest) -> Result<(), AppError> {
         if graph.sequence_id.is_empty() || graph.sequence_id.len() > 256 || graph.lanes.len() != ids.len()
             || graph.sources.len() > 10000 || graph.positions.len() > 2560000 || graph.path_mappings.len() > 10000
             || graph.markers.len() > 100000 || graph.picture_tracks.len() > 256 { return Err(bad()); }
+        for track in &graph.picture_tracks {
+            if track.clips.len() > 100_000 || track.name.len() > 1024 { return Err(bad()); }
+            for clip in &track.clips {
+                let text = [&clip.name, &clip.master_mob_id, &clip.file_mob_id, &clip.tape_name, &clip.effect];
+                if clip.start_frame < 0 || clip.duration_frames <= 0 || clip.start_frame.checked_add(clip.duration_frames).is_none()
+                    || !matches!(clip.kind.as_str(), "clip" | "muted")
+                    || clip.source_start_frame.is_some_and(|frame| frame < 0)
+                    || clip.source_timecode_fps.is_some_and(|fps| !(1..=120).contains(&fps))
+                    || text.into_iter().flatten().any(|t| t.len() > 1024)
+                    || clip.descriptor.as_ref().is_some_and(|d| d.kind.len() > 256
+                        || [&d.sample_rate, &d.frame_layout, &d.compression].into_iter().flatten().any(|t| t.len() > 256))
+                { return Err(bad()); }
+            }
+        }
         let mut lanes = std::collections::HashSet::new();
         for lane in &graph.lanes {
             if !ids.contains(&lane.track_id) || !lanes.insert(&lane.track_id)
@@ -421,6 +435,44 @@ pub struct AafPictureTrack {
     pub physical_track_number: Option<u32>,
     pub name: String,
     pub component: String,
+    // Picture cuts as metadata: record ranges and provenance, never pixels.
+    // Absent in documents saved before picture clips were read.
+    #[serde(default)]
+    pub clips: Vec<AafPictureClip>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafPictureClip {
+    #[ts(type = "number")]
+    pub start_frame: i64,
+    #[ts(type = "number")]
+    pub duration_frames: i64,
+    // "clip", or "muted" for a Selector that selects Filler in Avid.
+    pub kind: String,
+    pub name: Option<String>,
+    pub master_mob_id: Option<String>,
+    pub file_mob_id: Option<String>,
+    pub tape_name: Option<String>,
+    #[ts(type = "number | null")]
+    pub source_start_frame: Option<i64>,
+    pub source_timecode_fps: Option<u32>,
+    pub source_drop_frame: Option<bool>,
+    #[serde(default)]
+    pub group: bool,
+    pub effect: Option<String>,
+    pub descriptor: Option<AafPictureDescriptor>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafPictureDescriptor {
+    pub kind: String,
+    pub sample_rate: Option<String>,
+    pub stored_width: Option<u32>,
+    pub stored_height: Option<u32>,
+    pub frame_layout: Option<String>,
+    pub compression: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -440,6 +492,20 @@ mod tests {
         let saved = serde_json::to_value(&track).unwrap();
         assert_eq!(saved["physical_track_number"], 2);
         assert_eq!(serde_json::from_value::<AafTrack>(saved).unwrap().physical_track_number, Some(2));
+    }
+    #[test]
+    fn picture_clips_are_optional_for_saved_documents_and_roundtrip() {
+        let saved = serde_json::json!({"slot_id": 3, "physical_track_number": 1, "name": "V1", "component": "Sequence"});
+        let track: AafPictureTrack = serde_json::from_value(saved).unwrap();
+        assert!(track.clips.is_empty());
+        let clip = serde_json::json!({"start_frame": 3, "duration_frames": 20, "kind": "muted", "name": "Interview A",
+            "master_mob_id": "m", "file_mob_id": null, "tape_name": "TAPE A", "source_start_frame": 86910,
+            "source_timecode_fps": 24, "source_drop_frame": false, "group": false, "effect": null,
+            "descriptor": {"kind": "CDCIDescriptor", "sample_rate": "24000/1001", "stored_width": 1920,
+                "stored_height": 1080, "frame_layout": "FullFrame", "compression": null}});
+        let parsed: AafPictureClip = serde_json::from_value(clip.clone()).unwrap();
+        assert_eq!(parsed.source_start_frame, Some(86910));
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), clip);
     }
     #[test]
     fn fractional_rate_mapping_is_rational_not_rounded_fps() {

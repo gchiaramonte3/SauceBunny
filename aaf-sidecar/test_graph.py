@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import wave
 import aaf2
 import reader
@@ -54,6 +55,59 @@ def grouped_fixture(path, *, embedded=False, alternatives=3, roots=1, rate='2400
             track.segment.length=frames
         if multiple:
             other=comp.copy(); other.mob_id=aaf2.mobid.MobID.new(); other.name='Other sequence'; file.content.mobs.append(other)
+
+
+DNXHD = '0e040201-0204-0100-060e-2b3404010101'
+
+
+def picture_chain(file, rate, clip_name, tape_name, tc_start, tape_offset, frames=400):
+    """Tape SourceMob (timecode slot) <- file SourceMob (CDCI) <- MasterMob."""
+    tape = file.create.SourceMob(tape_name); tape.descriptor = file.create.TapeDescriptor(); file.content.mobs.append(tape)
+    tape_slot = tape.create_timeline_slot(rate); tape_slot.segment = file.create.Filler(media_kind='picture', length=frames*10)
+    tc_slot = tape.create_timeline_slot(rate); tc_slot['PhysicalTrackNumber'].value = 1
+    tc_slot.segment = file.create.Timecode(fps=24, length=frames*10); tc_slot.segment.start = tc_start
+    media = file.create.SourceMob(clip_name + '.new.01'); file.content.mobs.append(media)
+    desc = file.create.CDCIDescriptor()
+    for key, raw in {'StoredWidth': 1920, 'StoredHeight': 1080, 'FrameLayout': 'FullFrame', 'SampleRate': rate,
+                     'Length': frames, 'ComponentWidth': 8, 'HorizontalSubsampling': 2,
+                     'VideoLineMap': [42, 0], 'ImageAspectRatio': '16/9'}.items():
+        desc[key].value = raw
+    desc['Compression'].value = aaf2.auid.AUID(DNXHD)
+    media.descriptor = desc
+    media_slot = media.create_timeline_slot(rate); media_slot.segment = tape.create_source_clip(tape_slot.slot_id, tape_offset, frames, 'picture')
+    master = file.create.MasterMob(clip_name); file.content.mobs.append(master)
+    master_slot = master.create_timeline_slot(rate); master_slot.segment = media.create_source_clip(media_slot.slot_id, 0, frames, 'picture')
+    return master, master_slot, media
+
+
+def add_picture_track(path, *, kind='picture', wrap=None):
+    """V1: 3 frames of filler, 20 frames of A from 10, 22 frames of B, 3 of filler."""
+    rate = '24000/1001'
+    with aaf2.open(str(path), 'rw') as file:
+        comp = next(file.content.toplevel())
+        a, a_slot, media_a = picture_chain(file, rate, 'Interview A', 'TAPE A', 86400, 500)
+        b, b_slot, media_b = picture_chain(file, rate, 'Interview B', 'TAPE B', 90000, 0)
+        clip_a = a.create_source_clip(a_slot.slot_id, 10, 20, 'picture')
+        clip_b = b.create_source_clip(b_slot.slot_id, 0, 22, 'picture')
+        if wrap:
+            clip_b = wrap(file, clip_b, clip_a)
+        track = comp.create_timeline_slot(rate); track['PhysicalTrackNumber'].value = 1; track.name = 'V1'
+        sequence = file.create.Sequence(media_kind=kind)
+        sequence.components.extend([file.create.Filler(media_kind=kind, length=3), clip_a, clip_b, file.create.Filler(media_kind=kind, length=3)])
+        track.segment = sequence
+        return {'a': str(a.mob_id), 'b': str(b.mob_id), 'media_a': str(media_a.mob_id), 'media_b': str(media_b.mob_id)}
+
+
+def mute(file, segment, media_kind='sound', scope=False):
+    """How Avid writes a muted clip: a Selector selecting Filler, real clip in Alternates."""
+    muted = file.create.Selector(media_kind=media_kind, length=segment.length)
+    if scope:
+        silence = file.create.ScopeReference(); silence.media_kind = media_kind; silence.length = segment.length
+        silence['RelativeScope'].value = 0; silence['RelativeSlot'].value = 1
+    else:
+        silence = file.create.Filler(media_kind=media_kind, length=segment.length)
+    muted['Selected'].value = silence; muted['Alternates'].append(segment)
+    return muted
 
 
 class GraphTests(unittest.TestCase):
@@ -187,5 +241,81 @@ class GraphTests(unittest.TestCase):
             track.segment.components.value=[left,transition,right]; track.segment.length=48
         clips=self.read(path)['tracks'][0]['clips']
         self.assertEqual([(c['kind'],c['start_frame'],c['duration_frames']) for c in clips],[('audio',0,20),('unavailable',20,4),('audio',24,24)])
+
+    def test_legacy_sound_and_picture_slots_are_read(self):
+        path=self.root/'legacy-kinds.aaf'; grouped_fixture(path,alternatives=0)
+        add_picture_track(path, kind='LegacyPicture')
+        with aaf2.open(str(path),'rw') as file:
+            track=next(s for s in next(file.content.toplevel()).slots if s.segment.media_kind=='Sound')
+            for component in [track.segment,*track.segment.components]: component.media_kind='LegacySound'
+        with aaf2.open(str(path),'r') as file:
+            kinds=sorted(s.segment.media_kind for s in next(file.content.toplevel()).slots)
+        self.assertIn('LegacySound',kinds); self.assertIn('LegacyPicture',kinds)
+        data=self.read(path)
+        self.assertEqual([t['name'] for t in data['tracks']],['Mic 0-0'])
+        self.assertEqual([c['kind'] for c in data['tracks'][0]['clips']],['gap','audio','gap'])
+        self.assertEqual(len(data['graph']['picture_tracks']),1)
+        self.assertEqual([c['name'] for c in data['graph']['picture_tracks'][0]['clips']],['Interview A','Interview B'])
+
+    def test_muted_clip_is_silence_not_a_group(self):
+        for scope in (False, True):
+            with self.subTest(scope=scope):
+                path=self.root/f'muted-{scope}.aaf'; grouped_fixture(path,alternatives=2)
+                with aaf2.open(str(path),'rw') as file:
+                    track=next(s for s in next(file.content.toplevel()).slots if s.segment.media_kind=='Sound')
+                    clip=track.segment.components[1]['Selected'].value.copy()
+                    track.segment.components[1]=mute(file,clip,scope=scope)
+                data=self.read(path)
+                self.assertEqual(len(data['tracks']),1)
+                self.assertEqual([c['kind'] for c in data['tracks'][0]['clips']],['gap','gap','gap'])
+                self.assertTrue(all(l['parent_track_id'] is None for l in data['graph']['lanes']))
+                self.assertIn('Muted clip in Avid: it plays as silence here too.',data['tracks'][0]['warnings'])
+
+    def test_picture_clips_are_metadata_with_tape_timecode_and_descriptor(self):
+        path=self.root/'picture.aaf'; grouped_fixture(path,alternatives=0); ids=add_picture_track(path)
+        data=self.read(path); picture=data['graph']['picture_tracks']
+        self.assertEqual(len(picture),1)
+        self.assertEqual((picture[0]['name'],picture[0]['physical_track_number']),('V1',1))
+        a,b=picture[0]['clips']
+        self.assertEqual((a['start_frame'],a['duration_frames'],a['kind']),(3,20,'clip'))
+        self.assertEqual((b['start_frame'],b['duration_frames']),(23,22))
+        self.assertEqual((a['name'],a['master_mob_id'],a['file_mob_id'],a['tape_name']),('Interview A',ids['a'],ids['media_a'],'TAPE A'))
+        self.assertEqual((b['name'],b['master_mob_id'],b['file_mob_id'],b['tape_name']),('Interview B',ids['b'],ids['media_b'],'TAPE B'))
+        # Tape timecode + the tape offset the file mob starts at + the clip's source in.
+        self.assertEqual((a['source_start_frame'],a['source_timecode_fps'],a['source_drop_frame']),(86400+500+10,24,False))
+        self.assertEqual(b['source_start_frame'],90000)
+        self.assertEqual(a['descriptor'],{'kind':'CDCIDescriptor','sample_rate':'24000/1001','stored_width':1920,
+            'stored_height':1080,'frame_layout':'FullFrame','compression':DNXHD})
+        self.assertFalse(a['group']); self.assertIsNone(a['effect'])
+        # Picture never becomes an audio lane or a source to relink.
+        self.assertEqual(len(data['tracks']),1); self.assertEqual(len(data['graph']['sources']),1)
+
+    def test_picture_group_records_the_selected_angle_and_muted_picture_is_not_a_group(self):
+        def group(file, clip_b, clip_a):
+            selector=file.create.Selector(media_kind='picture',length=clip_b.length)
+            other=clip_a.copy(); other.length=clip_b.length
+            selector['Selected'].value=clip_b; selector['Alternates'].append(other); return selector
+        path=self.root/'picture-group.aaf'; grouped_fixture(path,alternatives=0); add_picture_track(path,wrap=group)
+        clip=self.read(path)['graph']['picture_tracks'][0]['clips'][1]
+        self.assertEqual((clip['kind'],clip['group'],clip['name'],clip['tape_name']),('clip',True,'Interview B','TAPE B'))
+        path=self.root/'picture-muted.aaf'; grouped_fixture(path,alternatives=0)
+        add_picture_track(path,wrap=lambda file,clip_b,clip_a: mute(file,clip_b,'picture'))
+        data=self.read(path)
+        clip=data['graph']['picture_tracks'][0]['clips'][1]
+        self.assertEqual((clip['kind'],clip['group'],clip['name'],clip['start_frame']),('muted',False,'Interview B',23))
+        self.assertEqual(len(data['tracks']),1)
+
+    def test_picture_clip_count_is_bounded_without_failing_audio(self):
+        import picture
+        path=self.root/'picture-bound.aaf'; grouped_fixture(path,alternatives=0); add_picture_track(path)
+        with unittest.mock.patch.object(picture,'MAX_PICTURE_CLIPS',1):
+            data=self.read(path)
+        self.assertEqual(len(data['graph']['picture_tracks'][0]['clips']),1)
+        self.assertIn('A picture track has more clips than are read. The rest of its cuts are not shown.',data['warnings'])
+        with unittest.mock.patch.object(picture,'MAX_PICTURE_STEPS',3):
+            data=self.read(path)
+        self.assertEqual(data['graph']['picture_tracks'][0]['clips'],[])
+        self.assertIn('The picture tracks are too complex to read fully. Audio is not affected.',data['warnings'])
+        self.assertEqual([c['kind'] for c in data['tracks'][0]['clips']],['gap','audio','gap'])
 
 if __name__=='__main__': unittest.main()

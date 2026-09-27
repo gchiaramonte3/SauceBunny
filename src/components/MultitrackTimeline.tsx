@@ -4,6 +4,7 @@ import type { AafTrackTranscript } from "../bindings/AafTrackTranscript";
 import { audioTrackLabel, clampFrame, sequenceTimecode, trackOwner, transcriptRows } from "../lib/multitrack";
 import { MultitrackWaveform } from "./MultitrackWaveform";
 import { MultitrackLevel } from "./MultitrackLevel";
+import { MultitrackPictureLane } from "./MultitrackPictureLane";
 import { multitrackTextLayout } from "../lib/multitrack-text-layout";
 import { alternativeLane, laneMetadata, laneReady, laneStatus, visibleLanes } from "../lib/multitrack-graph";
 import { IconChevronRight, IconChevronDown, IconCircleCheck, IconAlert } from "./Icons";
@@ -100,6 +101,7 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
     </div>
     <div className="cp-multitrack-lanes">
       <div className="cp-multitrack-ruler-row"><div className="cp-multitrack-lane-heading">Track / mic owner</div><div ref={rulerRef} className="cp-multitrack-ruler" aria-hidden="true">{ruler.map((timecode, index) => <span key={index}>{timecode}</span>)}{markRange && markRange.end > viewStart && markRange.start < viewEnd && <i className="cp-multitrack-mark-range" style={{ left: `${Math.max(0, (markRange.start - viewStart) / span * 100)}%`, width: `${(Math.min(viewEnd, markRange.end) - Math.max(viewStart, markRange.start)) / span * 100}%` }} />}</div></div>
+      <MultitrackPictureLane tracks={document.manifest.graph?.picture_tracks} viewStart={viewStart} viewEnd={viewEnd} span={span} frame={frame} />
       {visibleLanes(document, expanded).map((track) => {
         const child = alternativeLane(document, track.id), ready = laneReady(document, track.id);
         const children = document.manifest.graph?.lanes.filter(lane => lane.parent_track_id === track.id).length ?? 0;
