@@ -39,10 +39,10 @@ pub fn build_request(document: &EditDocument, sources: &[ExportSource], approach
         return Err(AppError::invalid("Choose how groups are written: B (the clip that plays) or C (the whole group)."));
     }
     if !document.segments.iter().any(|segment| matches!(segment, EditSegment::Source { .. })) {
-        return Err(AppError::invalid("This edit is empty. Add something to it before exporting."));
+        return Err(AppError::invalid("This string out is empty. Add something to it before exporting."));
     }
     let find = |id: &str| sources.iter().find(|source| source.id == id)
-        .ok_or_else(|| AppError::not_found(format!("Source {id} of this edit is no longer in AAF Audio.")));
+        .ok_or_else(|| AppError::not_found(format!("Source {id} of this string out is no longer in AAF Audio.")));
     let mut out_sources = Vec::new();
     for source in &document.sources {
         let known = find(&source.id)?;

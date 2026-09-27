@@ -13,30 +13,25 @@ vi.mock("@tauri-apps/api/core", () => ({
   }),
 }));
 
-import { EditPicker } from "./EditPicker";
+import { EditNewPanel } from "./EditNewPanel";
+import { EditPage } from "./EditPage";
+import { LAST_STRING_OUT } from "../lib/last-open";
 
 afterEach(cleanup);
 beforeEach(() => {
   calls.length = 0;
+  localStorage.clear();
   for (const key of Object.keys(answers)) delete answers[key];
-  answers.edit_list = [{ id: "e1", title: "First pass", created_at: 1, updated_at: 2, head: 3, states: 3 }];
+  answers.edit_list = [];
   answers.aaf_list = [];
   answers.edit_create = {};
 });
 
-it("lists edits and opens one", async () => {
+it("creates an empty string out at 23.976 from one hour and opens it", async () => {
   const onOpen = vi.fn();
-  render(<EditPicker onOpen={onOpen} />);
-  fireEvent.click(await screen.findByRole("button", { name: /First pass/ }));
-  expect(onOpen).toHaveBeenCalledWith("e1");
-  expect(screen.getByText(/2 changes/)).toBeTruthy();
-});
-
-it("creates an empty edit at 23.976 from one hour and opens it", async () => {
-  const onOpen = vi.fn();
-  render(<EditPicker onOpen={onOpen} />);
+  render(<EditNewPanel onOpen={onOpen} onCancel={null} />);
   fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Rosa stringout" } });
-  fireEvent.click(screen.getByRole("button", { name: "New edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
   await waitFor(() => expect(onOpen).toHaveBeenCalled());
   const create = calls.find((call) => call.cmd === "edit_create")!;
   const document = create.args.document as EditDocument;
@@ -47,11 +42,28 @@ it("creates an empty edit at 23.976 from one hour and opens it", async () => {
   expect(onOpen).toHaveBeenCalledWith(create.args.id);
 });
 
-it("shows why an edit could not be created and stays on the list", async () => {
+it("shows why a string out could not be created and stays open", async () => {
   delete answers.edit_create;
   const onOpen = vi.fn();
-  render(<EditPicker onOpen={onOpen} />);
-  fireEvent.click(await screen.findByRole("button", { name: "New edit" }));
+  render(<EditNewPanel onOpen={onOpen} onCancel={null} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Create" }));
   expect((await screen.findByRole("alert")).textContent).toMatch(/edit_create/);
   expect(onOpen).not.toHaveBeenCalled();
+});
+
+it("welcomes a first-time user, and lists their work once there is any", async () => {
+  const first = render(<EditPage active />);
+  expect(await screen.findByRole("heading", { name: "Pull the story out, bite by bite" })).toBeTruthy();
+  first.unmount();
+  answers.edit_list = [{ id: "e1", title: "First pass", created_at: 1, updated_at: 2, head: 3, states: 3 }];
+  render(<EditPage active />);
+  expect(await screen.findByRole("button", { name: /First pass/ })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Pull the story out, bite by bite" })).toBeNull();
+});
+
+it("forgets a remembered string out that no longer exists instead of failing to open it", async () => {
+  localStorage.setItem(LAST_STRING_OUT, "gone");
+  answers.edit_list = [{ id: "e1", title: "First pass", created_at: 1, updated_at: 2, head: 3, states: 3 }];
+  render(<EditPage active />);
+  expect(await screen.findByRole("button", { name: /First pass/ })).toBeTruthy();
 });

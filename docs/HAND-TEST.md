@@ -1087,13 +1087,13 @@ client receives.
 `review-writer-contract` now records this. Deleting its `setStatus` entry is
 the acceptance test for whenever the verdict UI gets built.
 
-### Transcript Editor (needs a transcribed AAF Audio sequence and Media Composer)
+### String Outs (needs a transcribed AAF Audio sequence and Media Composer)
 
 Nothing below can be checked by the browser suite: it needs real linked
 media, WKWebView's audio, and Avid.
 
-1. ⌘7 opens the editor. **New edit** from a transcribed sequence with "whole
-   sequence" on: the text shows every person, coloured by lane.
+1. ⌘7 opens String Outs. A first visit shows the welcome; **New string out…**
+   from a transcribed sequence with "Start with the whole sequence" on: the text shows every person, coloured by lane.
 2. Press Space. Audio plays from the linked MXFs; delete a sentence and play
    across the cut: no click at the join (10 ms crossfade). Delete a line with
    someone talking over it: the prompt appears and nothing below moves until
@@ -1108,5 +1108,7 @@ media, WKWebView's audio, and Avid.
    from the `- Avid markers.txt` beside it, gaps as filler. Repeat with
    **Clip that plays**. This is the Phase 0 question: record which one Avid
    accepts.
-6. **String-out per person** on a transcribed sequence: one edit per person,
+6. **One per person** on a transcribed sequence: one edit per person,
    each bite with a marker naming them; export one and check it in Avid.
+7. Quit with a string out open and relaunch: ⌘7 reopens it, with no welcome.
+   Do the same in AAF Audio with a sequence open: it reopens that sequence.

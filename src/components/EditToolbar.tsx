@@ -15,9 +15,9 @@ type Props = {
  */
 export function EditToolbar(props: Props) {
   return <header className="cp-te-toolbar">
-    <button type="button" className="cp-icon-btn" aria-label="All edits" title="All edits" onClick={props.onClose}><IconChevronLeft size={15} /></button>
+    <button type="button" className="cp-icon-btn" aria-label="All string outs" title="All string outs" onClick={props.onClose}><IconChevronLeft size={15} /></button>
     <div className="cp-te-titles">
-      <h1 className="cp-te-title">{props.title}</h1>
+      <h2 className="cp-te-title">{props.title}</h2>
       <span className="cp-te-subtitle">{props.subtitle}</span>
     </div>
     <button type="button" className={`btn btn-ghost cp-te-btn${props.source ? " is-on" : ""}`} aria-pressed={props.source} onClick={props.onSource}

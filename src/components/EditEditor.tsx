@@ -82,7 +82,7 @@ export function EditEditor({ editId, head, open, history, data, active, commit, 
   const seamInfo = Object.fromEntries(ws.seams.map((item) => [item.index, { kind: item.kind, seconds: item.kind === "cut" ? item.gap : null }]));
   const sources = document.sources.map((source) => source.name).join(" · ");
   return <div ref={root} className="cp-te" data-testid="transcript-editor">
-    <EditToolbar title={document.title} subtitle={sources || "Empty edit"} source={showSource} onSource={() => setShowSource((value) => !value)}
+    <EditToolbar title={document.title} subtitle={sources || "Empty string out"} source={showSource} onSource={() => setShowSource((value) => !value)}
       history={showHistory} onHistory={() => setShowHistory((value) => !value)} showRemoved={showRemoved} onShowRemoved={() => setShowRemoved((value) => !value)}
       undo={head.undo} redo={head.redo} onUndo={undo} onRedo={redo} onClose={onClose}>
       <EditSendTo editId={editId} selected={ws.selected.map((item) => item.word)} sequenceOf={(source) => data.documents.get(source)} onDone={ws.setMessage} />
@@ -103,7 +103,7 @@ export function EditEditor({ editId, head, open, history, data, active, commit, 
               sourceLabel={sourceName} seams={seamInfo} seam={ws.seam} onSeam={ws.chooseSeam} ghosts={showRemoved ? ws.ghosts : null} onRestore={ws.restore}
               corrections={{}} editing={null} onCorrect={() => undefined}
               onSelect={(selection, seekTo) => { ws.setSelection(selection); if (seekTo) seek(selection.anchor < ws.count ? ws.placed[selection.anchor].programStart : ws.total); }}
-              onDelete={ws.remove} onScrub={seek} onMove={ws.move} onEdit={() => ws.setMessage("Correct words in AAF Audio's transcript; the edit follows it.")} />}
+              onDelete={ws.remove} onScrub={seek} onMove={ws.move} onEdit={() => ws.setMessage("Correct words in AAF Audio's transcript; the string out follows it.")} />}
           {ws.prompt && <EditOvertalkPrompt who={ws.names(ws.prompt.who)} under={ws.names(ws.prompt.result.crosstalk.map((word) => word.track))} count={ws.prompt.result.crosstalk.length}
             onEveryone={() => ws.prompt && ws.applyDelete(ws.prompt.result, ws.prompt.count)} onKeep={() => { ws.setPrompt(null); focusDoc(); }} />}
         </EditRecordPane>

@@ -26,7 +26,7 @@ export function EditSourceHost({ document, sources, lanes, colors, fps, words, u
     [document, source, frames]);
   const playback = useEditPlayback({ document: whole, audible: lanes.map((lane) => lane.id), active: active && !!source });
   const own = useMemo(() => source ? placeWords(words, { segments: [{ id: "whole", source: source.id, srcIn: 0, srcOut: source.duration }], mutes: [] }) : [], [words, source]);
-  if (!source) return <section className="cp-te-source cp-te-doc-empty" aria-label="Source"><p>Add an AAF Audio sequence to this edit to cut from it.</p></section>;
+  if (!source) return <section className="cp-te-source cp-te-doc-empty" aria-label="Source"><p>Add an AAF Audio sequence to this string out to cut from it.</p></section>;
   const range = ranges[source.id] ?? null;
   const take = (atEnd: boolean) => { if (range) onInsert(source.id, own.slice(range[0], range[1] + 1).map((item) => item.word), atEnd); };
   return <div className="cp-te-source-host" data-source-id={source.id}>

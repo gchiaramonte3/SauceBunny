@@ -13,10 +13,15 @@ import { alternativeLane, laneReady, mediaRevision } from "../lib/multitrack-gra
 import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
 import { mergeTrackTranscript } from "../lib/multitrack";
+import { LAST_AAF_DOCUMENT, pickResume, recallLast, rememberLast } from "../lib/last-open";
 
 export function useMultitrackDocument(active: boolean) {
   const [document, setDocument] = useState<AafDocument | null>(null);
   const [saved, setSaved] = useState<AafDocumentSummary[]>([]);
+  // null until the first list arrives: an empty list and an unread one are
+  // different answers to "has this person used AAF Audio before".
+  const [listed, setListed] = useState(false);
+  const resumed = useRef(false);
   const [loading, setLoading] = useState(false);
   const [resolutionRequest, setResolutionRequest] = useState<{ id: string; token: number } | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -37,9 +42,12 @@ export function useMultitrackDocument(active: boolean) {
   useEffect(() => {
     if (!active) return;
     let valid = true;
-    void invoke<AafDocumentSummary[]>("aaf_list").then((items) => { if (valid) setSaved(items); }).catch((cause) => { if (valid) setError(formatError(cause)); });
+    void invoke<AafDocumentSummary[]>("aaf_list").then((items) => { if (valid) { setSaved(items); setListed(true); } }).catch((cause) => { if (valid) setError(formatError(cause)); });
     return () => { valid = false; };
   }, [active, document?.id]);
+
+  // Reopen where the user left off rather than showing the welcome again.
+  const resuming = !resumed.current && !document && (!listed || pickResume(recallLast(LAST_AAF_DOCUMENT), saved, (item) => item.modified_ms ?? 0) !== null);
 
   const cancelImport = useCallback(() => {
     ++revision.current;
@@ -48,7 +56,7 @@ export function useMultitrackDocument(active: boolean) {
     if (jobId) void invoke("cancel_job", { jobId }).catch((cause) => setError(formatError(cause)));
   }, []);
   const stopResolution = useCallback(() => { setResolutionRequest(null); setResolving(false); }, []);
-  const load = useCallback(async (documentId?: string, selectedPath?: string, sequenceId?: string) => {
+  const load = useCallback(async (documentId?: string, selectedPath?: string, sequenceId?: string, resuming = false) => {
     if (importJob.current) return;
     const token = ++revision.current;
     setResolutionRequest(null); setResolving(false);
@@ -95,11 +103,24 @@ export function useMultitrackDocument(active: boolean) {
       }
       if (token === revision.current && mounted.current) {
         current.current = next; setDocument(next); setLabelStatus("");
+        rememberLast(LAST_AAF_DOCUMENT, next.id);
         if (next.manifest.graph?.sources.length) setResolutionRequest({ id: next.id, token });
       }
-    } catch (cause) { if (token === revision.current && mounted.current) setError(formatError(cause)); }
+    } catch (cause) {
+      // A sequence that cannot reopen on its own is forgotten, not reported:
+      // the page simply opens on its list, and choosing it again says why.
+      if (resuming) rememberLast(LAST_AAF_DOCUMENT, null);
+      else if (token === revision.current && mounted.current) setError(formatError(cause));
+    }
     finally { if (token === revision.current && mounted.current) { importJob.current = null; setLoading(false); } }
   }, []);
+
+  useEffect(() => {
+    if (!active || !listed || resumed.current || current.current) return;
+    resumed.current = true;
+    const id = pickResume(recallLast(LAST_AAF_DOCUMENT), saved, (item) => item.modified_ms ?? 0);
+    if (id) void load(id, undefined, undefined, true);
+  }, [active, listed, saved, load]);
 
   // Read only after queued owner writes. Never apply a resolver's old snapshot
   // over a newer label edit, transcript commit, or different open document.
@@ -262,6 +283,6 @@ export function useMultitrackDocument(active: boolean) {
     if (!before) return;
     const next = mergeTrackTranscript(before, transcript); current.current = next; setDocument(next);
   }, []);
-  return { document, saved, loading, resolving, mediaProgress, stopResolution, error, labelStatus, waveforms, waveformErrors, load, cancelImport, rename, retryLabels, retryWaveform, acceptTranscript, showTracks,
+  return { document, saved, resuming, loading, resolving, mediaProgress, stopResolution, error, labelStatus, waveforms, waveformErrors, load, cancelImport, rename, retryLabels, retryWaveform, acceptTranscript, showTracks,
     sequenceChoices, chooseSequence: (id: string) => { if (sequenceChoices) void load(undefined, sequenceChoices.path, id); }, cancelChoice: () => setSequenceChoices(null) };
 }

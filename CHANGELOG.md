@@ -6,7 +6,10 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Added
-- **Transcript Editor** (nav rail, ⌘7): cut AAF Audio sequences by their
+- AAF Audio and String Outs reopen what you had open, including after a
+  relaunch. Their welcome panels show only until you have imported an AAF or
+  made a string out.
+- **String Outs** (nav rail, ⌘7): cut AAF Audio sequences by their
   words. Deleting text closes the time on every track, but words spoken over
   someone else are silenced on their own track and the rest is left for you to
   decide. Removed lines stay visible and restorable; Avid-style track

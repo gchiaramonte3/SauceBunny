@@ -1,7 +1,8 @@
-import { IconHome, IconStack, IconScissors, IconSettings, IconCoReview, IconTranscript, IconPencil } from "./Icons";
+import { IconHome, IconStack, IconScissors, IconSettings, IconCoReview, IconTranscript } from "./Icons";
 import type { AppView } from "../App";
 import logoUrl from "../assets/saucebunny.svg";
 import { IconMultitrack } from "./IconMultitrack";
+import { IconStringOut } from "./IconStringOut";
 
 /**
  * Persistent left navigation rail — the app-shell switch between the
@@ -121,12 +122,12 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libr
         type="button"
         className={"cp-nav-item" + (active === "editor" ? " active" : "")}
         onClick={() => onNavigate("editor")}
-        title={editorShortcut ? `Transcript Editor (${editorShortcut})` : "Transcript Editor"}
-        aria-label="Transcript Editor"
+        title={editorShortcut ? `String Outs (${editorShortcut})` : "String Outs"}
+        aria-label="String Outs"
         aria-current={active === "editor" ? "page" : undefined}
       >
-        <IconPencil size={18} />
-        <span className="cp-nav-label">Editor</span>
+        <IconStringOut />
+        <span className="cp-nav-label">String Outs</span>
       </button>
       <div className="cp-nav-spacer" />
       <button

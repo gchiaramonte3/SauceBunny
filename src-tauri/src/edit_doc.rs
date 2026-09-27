@@ -133,7 +133,7 @@ impl EditDocument {
     /// from a NEWER build is refused rather than rewritten, like every other
     /// versioned store (store-version-contract).
     pub fn validate(&self) -> Result<(), AppError> {
-        let bad = |message: &str| Err(AppError::Invalid(format!("This edit cannot be saved: {message}.")));
+        let bad = |message: &str| Err(AppError::Invalid(format!("This string out cannot be saved: {message}.")));
         if self.schema_version > EDIT_SCHEMA_VERSION {
             return bad("it was made by a newer version of Sauce Bunny");
         }
@@ -142,7 +142,7 @@ impl EditDocument {
         }
         if self.title.chars().count() > 500 || self.sources.len() > MAX_SOURCES || self.tracks.len() > MAX_TRACKS
             || self.segments.len() > MAX_SEGMENTS || self.mutes.len() > MAX_MUTES || self.markers.len() > MAX_MARKERS {
-            return bad("it is larger than an edit can be");
+            return bad("it is larger than a string out can be");
         }
         if !(0..=MAX_FRAMES).contains(&self.start_timecode_frames) {
             return bad("its start timecode is out of range");
@@ -154,7 +154,7 @@ impl EditDocument {
         }
         for track in &self.tracks {
             if track.source_tracks.keys().any(|source| !source_ids.contains(source.as_str())) {
-                return bad("a track refers to a source the edit does not have");
+                return bad("a track refers to a source the string out does not have");
             }
         }
         let mut total: i64 = 0;
@@ -162,7 +162,7 @@ impl EditDocument {
             match segment {
                 EditSegment::Source { source, in_frame, out_frame, .. } => {
                     if !source_ids.contains(source.as_str()) {
-                        return bad("a segment refers to a source the edit does not have");
+                        return bad("a segment refers to a source the string out does not have");
                     }
                     if *in_frame < 0 || out_frame <= in_frame || *out_frame > MAX_FRAMES {
                         return bad("a segment's frames are out of range");

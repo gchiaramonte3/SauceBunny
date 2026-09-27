@@ -20,7 +20,8 @@ A macOS desktop app for **clipping sections out of online videos** (YouTube, Vim
 - Auto-loading transcripts when you re-open the same source
 - A separate Multitrack workspace for read-only embedded-audio AAF inspection
   and per-microphone local transcription (see [AAF-MULTITRACK.md](AAF-MULTITRACK.md))
-- The Transcript Editor (`EditPage` and its `Edit*` components), which cuts
+- String Outs (`EditPage` and its `Edit*` components; "String Outs" in the
+  UI, the transcript editor and `editor` view id in code), which cuts
   AAF Audio sequences by their words. The edit model is TypeScript
   (`src/lib/edit-model.ts`, seconds); the saved document is typed Rust in whole
   frames (`src-tauri/src/edit_doc.rs`), kept with a branching undo log in

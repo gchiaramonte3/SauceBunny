@@ -44,7 +44,7 @@ export function EditAskStringout({ documentId, onOpen }: Props) {
         <span className="cp-te-proposal-at">{clock(bite.from)}</span>
         <span className="cp-te-proposal-text">{bite.text}</span></li>)}</ol>
       <div className="cp-te-src-actions">
-        <button type="button" className="btn btn-primary" onClick={() => void accept()}>Make this edit</button>
+        <button type="button" className="btn btn-primary" onClick={() => void accept()}>Make this string out</button>
         <button type="button" className="btn btn-ghost" onClick={ai.discard}>Discard</button>
       </div>
     </section>}

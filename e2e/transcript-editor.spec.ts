@@ -4,7 +4,7 @@ import { multitrackFixture, multitrackTranscript } from "../src/test/multitrack-
 import { tauriMockInit } from "./tauri-mock";
 
 /**
- * The Transcript Editor, driven from the nav rail with the backend mocked at
+ * String Outs, driven from the nav rail with the backend mocked at
  * the invoke seam. The undo log is a small in-memory stand-in for
  * edit_log.rs: each commit is a new head, undo walks back. What this proves
  * is the wiring (picker, session, sources, text, delete, undo labels), not the
@@ -23,7 +23,11 @@ async function boot(page: Page) {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1"); localStorage.setItem("saucebunny.permissioned", "1");
     type Doc = { title: string };
-    const edits = new Map<string, { states: { id: number; parent: number | null; label: string; document: Doc }[]; head: number }>();
+    type Stored = { states: { id: number; parent: number | null; label: string; document: Doc }[]; head: number };
+    // Kept in sessionStorage so a reload finds the same store, the way the
+    // app finds timelines.sqlite again on the next launch.
+    const edits = new Map<string, Stored>(JSON.parse(sessionStorage.getItem("e2e.edits") ?? "[]") as [string, Stored][]);
+    const persist = () => sessionStorage.setItem("e2e.edits", JSON.stringify([...edits]));
     const headOf = (id: string) => {
       const edit = edits.get(id)!, state = edit.states.find((item) => item.id === edit.head)!;
       const parent = edit.states.find((item) => item.id === state.parent);
@@ -39,6 +43,7 @@ async function boot(page: Page) {
     }));
     app.__TAURI_INTERNALS__.invoke = (command, args = {}) => {
       app.__editCalls.push(command);
+      if (command.startsWith("edit_")) queueMicrotask(persist);
       const id = args.id as string;
       switch (command) {
         case "aaf_list": return Promise.resolve([{ id: document.id, name: document.manifest.name, track_count: 3, transcribed_tracks: 2, source_path: document.source_path }]);
@@ -57,23 +62,29 @@ async function boot(page: Page) {
     };
   }, fixture);
   await page.goto("/");
-  await page.getByRole("button", { name: "Transcript Editor", exact: true }).click();
-  await expect(page.getByRole("main", { name: "Transcript Editor" })).toBeVisible();
+  await page.getByRole("button", { name: "String Outs", exact: true }).click();
+  await expect(page.getByRole("main", { name: "String Outs" })).toBeVisible();
 }
 
-test("a new empty edit opens in the editor with nothing to export", async ({ page }) => {
+test("a first visit welcomes, and a new empty string out opens with nothing to export", async ({ page }) => {
   await boot(page);
+  await expect(page.getByRole("heading", { name: "Pull the story out, bite by bite" })).toBeVisible();
+  await page.getByRole("main", { name: "String Outs" }).getByRole("button", { name: "New string out…" }).last().click();
   await page.getByLabel("Title").fill("Rosa stringout");
-  await page.getByRole("button", { name: "New edit" }).click();
+  // With one saved sequence the form preselects it; choose the empty timeline.
+  await page.getByLabel("Start from").selectOption({ label: "An empty timeline" });
+  await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("heading", { name: "Rosa stringout" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pull the story out, bite by bite" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Export AAF/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
 });
 
 test("an edit from a sequence shows its words, and a delete is one undoable step", async ({ page }) => {
   await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
-  await page.getByRole("button", { name: "New edit" }).click();
+  await page.getByRole("button", { name: "Create" }).click();
   const moved = page.locator(".cp-te-doc [data-index]", { hasText: "moved" }).first();
   await expect(moved).toBeVisible();
   await expect(page.locator(".cp-te-doc")).toContainText("Sam answers the door.");
@@ -86,11 +97,26 @@ test("an edit from a sequence shows its words, and a delete is one undoable step
   await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
 });
 
-test("String-out per person makes one edit for each person who speaks", async ({ page }) => {
+test("One per person makes a string out for each person who speaks", async ({ page }) => {
   await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
-  await page.getByRole("button", { name: "String-out per person" }).click();
+  await page.getByRole("button", { name: "One per person" }).click();
   await expect(page.getByRole("heading", { name: "SO_Interview_Alex" })).toBeVisible();
   const created = await page.evaluate(() => (window as unknown as { __editCalls: string[] }).__editCalls.filter((c) => c === "edit_create").length);
   expect(created).toBe(2);
+});
+
+test("coming back reopens the string out that was open, not the welcome", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Title").fill("Keep me");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("heading", { name: "Keep me" })).toBeVisible();
+  // A relaunch: the page is rebuilt from nothing, so only what was
+  // remembered can bring the string out back.
+  await page.reload();
+  await page.getByRole("button", { name: "String Outs", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Keep me" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pull the story out, bite by bite" })).toHaveCount(0);
 });

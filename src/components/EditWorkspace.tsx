@@ -17,8 +17,8 @@ export function EditWorkspace({ editId, active, onClose }: Props) {
   const data = useEditSources(session.head?.document ?? null);
   if (!session.head || !session.open) {
     return <div className="cp-te cp-te-loading">
-      {session.error ? <><p className="cp-te-errors" role="alert">{session.error}</p><button type="button" className="btn btn-ghost" onClick={onClose}>All edits</button></>
-        : <p className="cp-te-pane-note" role="status">Opening the edit…</p>}
+      {session.error ? <><p className="cp-te-errors" role="alert">{session.error}</p><button type="button" className="btn btn-ghost" onClick={onClose}>All string outs</button></>
+        : <p className="cp-te-pane-note" role="status">Opening the string out…</p>}
     </div>;
   }
   const document = session.head.document;
