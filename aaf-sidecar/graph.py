@@ -77,7 +77,7 @@ def audio_descriptor(descriptor, slot_id):
 
 
 class GraphTimeline(Timeline):
-    def __init__(self, file, sequence_id=None):
+    def __init__(self, file, sequence_id=None, expand_alternates=True):
         self.external = {}
         self.overrides = {}
         self.selectors = {}
@@ -113,7 +113,11 @@ class GraphTimeline(Timeline):
         self.file = file
         main_tracks = list(self.tracks)
         extra = []
-        for slot, parent in zip([s for s in chosen.slots if media_kind(s.segment) == 'sound'], main_tracks):
+        # The writer's self-check compares only what plays, and a string-out
+        # holds one Selector per bite: expanding every alternate there would
+        # multiply lanes per bite rather than per branch.
+        sound_slots = [s for s in chosen.slots if media_kind(s.segment) == 'sound'] if expand_alternates else []
+        for slot, parent in zip(sound_slots, main_tracks):
             self.selectors = {}
             self.read_track(slot)
             pending = [(key, selector, {}) for key, selector in self.selectors.items()]
@@ -197,7 +201,7 @@ class GraphTimeline(Timeline):
 
     def expand(self, seg, rate, start, duration, trail, warnings_list, depth=0):
         self.expanded += 1
-        if self.expanded > 10000:
+        if self.expanded > self.MAX_EXPANSIONS:
             fail('The AAF source graph is too complex.', 'limit_exceeded')
         if depth > MAX_DEPTH:
             fail('The AAF source graph is too deep.', 'limit_exceeded')
@@ -205,7 +209,7 @@ class GraphTimeline(Timeline):
             fail('A source reference extends outside its segment.', 'invalid_media')
         if isinstance(seg, aaf2.components.Sequence) and any(isinstance(c, aaf2.components.Transition) for c in seg.components):
             children = list(seg.components)
-            if len(children) > 10000:
+            if len(children) > self.MAX_COMPONENTS:
                 fail('Too many sequence components.', 'limit_exceeded')
             result, cursor = [], Fraction(0)
             for index, child in enumerate(children):

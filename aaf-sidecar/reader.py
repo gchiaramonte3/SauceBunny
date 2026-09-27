@@ -1,4 +1,8 @@
-"""Read-only AAF inspection and embedded PCM extraction. Never opens locators."""
+"""AAF inspection, embedded PCM extraction and edit export. Never opens locators.
+
+Every command reads its AAF inputs read-only. `write-edit` (writer.py) is the
+one command that creates an AAF, always as a new file published atomically.
+"""
 from __future__ import annotations
 import argparse
 from contextlib import contextmanager
@@ -44,6 +48,17 @@ class ReaderError(Exception):
 
 def fail(message, code='unsupported_aaf'):
     raise ReaderError(code, message)
+
+
+# Media Composer writes OMF-era `LegacySound`/`LegacyPicture` data definitions
+# on older and OP-Atom material. They mean the same media as `Sound`/`Picture`;
+# comparing names alone dropped those tracks without a word.
+LEGACY_KINDS = {'legacysound': 'sound', 'legacypicture': 'picture', 'legacytimecode': 'timecode'}
+
+
+def media_kind(component):
+    kind = str(component.media_kind or '').lower()
+    return LEGACY_KINDS.get(kind, kind)
 
 
 def value(obj, key, default=None):
@@ -201,6 +216,11 @@ def timecode_segment(segment):
 
 
 class Timeline:
+    # Safety budgets for untrusted input. Instance-overridable so the AAF
+    # writer can re-read an edit it just built and bounded itself.
+    MAX_EXPANSIONS = MAX_SEGMENTS
+    MAX_COMPONENTS = MAX_SEGMENTS
+
     def __init__(self, file):
         self.file = file
         self.warnings = []
@@ -273,7 +293,7 @@ class Timeline:
 
     def expand(self, seg, rate, start, duration, trail, warnings_list, depth=0):
         self.expanded += 1
-        if depth > MAX_DEPTH or self.expanded > MAX_SEGMENTS:
+        if depth > MAX_DEPTH or self.expanded > self.MAX_EXPANSIONS:
             fail('The AAF source graph is too complex.', 'limit_exceeded')
         length = Fraction(seg.length, 1)/rate
         if start < 0 or duration < 0 or start+duration > length:
@@ -285,7 +305,7 @@ class Timeline:
         if isinstance(seg, aaf2.components.Sequence):
             result, cursor = [], Fraction(0)
             for index, child in enumerate(seg.components):
-                if index >= MAX_SEGMENTS:
+                if index >= self.MAX_COMPONENTS:
                     fail('Too many sequence components.', 'limit_exceeded')
                 if isinstance(child, aaf2.components.Transition):
                     fail('AAF transitions are not supported. Render fades before exporting.')
@@ -512,6 +532,11 @@ def run(args):
     if args.command == 'mxf-info':
         from mxf_info import inspect_many
         return inspect_many(args.input)
+    if args.command == 'write-edit':
+        # The one command that writes an AAF. It reads its sources read-only
+        # and publishes a new file only after re-reading it frame by frame.
+        from writer import write_edit_request
+        return write_edit_request(args.request)
     path = Path(args.input)
     identity = fingerprint(path)
     if args.expected_fingerprint and args.expected_fingerprint != identity:
@@ -608,6 +633,8 @@ def main():
     commands = parser.add_subparsers(dest='command',required=True)
     child = commands.add_parser('mxf-info')
     child.add_argument('--input', nargs='+', required=True)
+    child = commands.add_parser('write-edit')
+    child.add_argument('--request', required=True)
     for command in ('inspect','index','extract','peaks','sequences'):
         child = commands.add_parser(command)
         child.add_argument('--input',required=True)
