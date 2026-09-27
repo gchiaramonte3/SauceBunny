@@ -528,3 +528,16 @@ export function restoreRange(edit: Timeline, at: number, source: string, from: n
   else segments.splice(at, 0, { id: nextId("seg"), source, srcIn: from, srcOut: to });
   return { ...edit, segments };
 }
+
+/** A speaker's words as lines: a new line at a pause over 1.2 s or an edit point. */
+export function trackPhrases(placed: PlacedWord[], speaker: string) {
+  const out: { id: string; text: string; startFrame: number; endFrame: number; segment: number }[] = [];
+  for (const item of placed) {
+    if (item.word.track !== speaker || item.muted) continue;
+    const last = out[out.length - 1];
+    if (last && last.segment === item.segment && item.programStart - last.endFrame < 1.2) { last.text += ` ${item.word.text}`; last.endFrame = item.programEnd; }
+    else out.push({ id: placementKey(item), text: item.word.text, startFrame: item.programStart, endFrame: item.programEnd, segment: item.segment });
+  }
+  return out;
+}
+

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { editTc } from "../lib/edit-document";
 import type { Timeline, PlacedWord, Seam, TimelineLane } from "../lib/edit-model";
-import { isGap, placementKey, programDuration, segmentLength, segmentStarts } from "../lib/edit-model";
+import { isGap, placementKey, programDuration, segmentLength, segmentStarts, trackPhrases } from "../lib/edit-model";
 import { multitrackTextLayout } from "../lib/multitrack-text-layout";
+import { EditDeadLayer } from "./EditDeadLayer";
 import { EditDeadSpaceBar, type EditDeadPreset, type EditDeadReview } from "./EditDeadSpaceBar";
 import { EditTimelineTools, type EditTimelineAudio, type EditTimelineView } from "./EditTimelineTools";
-import { EditWave } from "./EditWave";
+import { EditTimelineRow } from "./EditTimelineRow";
+import { EditTimelineRuler } from "./EditTimelineRuler";
 
 type ToolProps = Omit<React.ComponentProps<typeof EditTimelineTools>, "allText" | "onAllText" | "view" | "onView" | "audio" | "onAudio" | "zoom" | "onZoom">;
 
@@ -28,18 +30,6 @@ type Props = {
 const describe = (seam: Seam, fps: number, recordStart: number) => `${seam.kind === "cut" ? "Cut" : seam.kind === "through" ? "Through edit" : seam.kind === "gap" ? "Gap" : "Jump"} at ${editTc(seam.at, fps, recordStart)}`
   + (seam.kind === "cut" ? `, ${seam.gap.toFixed(2)} s removed` : seam.kind === "jump" ? (Number.isNaN(seam.gap) ? ", to another source" : `, ${seam.gap < 0 ? "back" : "ahead"} ${Math.abs(seam.gap).toFixed(1)} s in the scene`) : "")
   + (seam.clipped.size ? ", cuts into a word" : "");
-
-/** A speaker's words as lines: a new line at a pause over 1.2 s or an edit point. */
-function phrases(placed: PlacedWord[], speaker: string) {
-  const out: { id: string; text: string; startFrame: number; endFrame: number; segment: number }[] = [];
-  for (const item of placed) {
-    if (item.word.track !== speaker || item.muted) continue;
-    const last = out[out.length - 1];
-    if (last && last.segment === item.segment && item.programStart - last.endFrame < 1.2) { last.text += ` ${item.word.text}`; last.endFrame = item.programEnd; }
-    else out.push({ id: placementKey(item), text: item.word.text, startFrame: item.programStart, endFrame: item.programEnd, segment: item.segment });
-  }
-  return out;
-}
 
 /**
  * The magnetic timeline: one track per speaker, and every clip is a segment
@@ -86,7 +76,7 @@ export function EditTimeline(props: Props) {
   // AAF Audio's layout, except that a column holding a single phrase shows the
   // phrase itself rather than "1 passage": the words are the point of T.
   const words = useMemo(() => Object.fromEntries(speakers.filter((s) => text.has(s.id)).map((s) => {
-    const lines = phrases(placed, s.id);
+    const lines = trackPhrases(placed, s.id);
     return [s.id, multitrackTextLayout(lines, start, span, width).map((cue) => {
       const line = cue.summary && cue.text === "1 passage" ? lines.find((item) => item.text === cue.title.split("\n")[1]) : undefined;
       if (!line) return cue;
@@ -99,11 +89,6 @@ export function EditTimeline(props: Props) {
   const chosen = placed.filter((item) => selection.has(placementKey(item)));
   const band = chosen.length ? [Math.min(...chosen.map((i) => i.programStart)), Math.max(...chosen.map((i) => i.programEnd))] : null;
   const marked = marks.in != null && marks.out != null && marks.out > marks.in ? [marks.in, marks.out] : null;
-  // Ticks on whole timecode seconds, which at 23.976 are not whole seconds of media.
-  const second = Math.round(fps) / fps;
-  const step = ([1, 2, 5, 10, 15, 30, 60].find((s) => span / (s * second) <= 8) ?? 120) * second;
-  const ticks = Array.from({ length: Math.floor(span / step) + 2 }, (_, i) => (Math.floor(start / step) + i) * step)
-    .filter((t) => t >= start && t <= start + span * 0.94);
   // Snap pulls a scrub onto an edit point, a marker, a mark or a word edge within 8 px.
   const targets = useMemo(() => [0, total, ...seams.map((s) => s.at), ...props.markers, ...(marks.in != null ? [marks.in] : []), ...(marks.out != null ? [marks.out] : []),
     ...placed.flatMap((item) => [item.programStart, item.programEnd])], [total, seams, props.markers, marks.in, marks.out, placed]);
@@ -138,41 +123,13 @@ export function EditTimeline(props: Props) {
     {props.dead && <EditDeadSpaceBar review={props.dead} onPreset={props.onDeadPreset} onApply={props.onDeadApply} onCancel={props.onDeadCancel} />}
     <div className="cp-te-tl-grid" style={{ "--te-rows": speakers.length + 1 } as React.CSSProperties}>
       <div className="cp-te-tl-corner" aria-hidden="true" />
-      <div ref={ruler} className="cp-te-tl-ruler" {...scrub}>
-        {ticks.map((t) => <span key={t} className="cp-te-tl-tick" style={{ left: x(t) }}>{editTc(t, fps, props.recordStart)}</span>)}
-        {marked && <span className="cp-te-tl-marked" style={{ left: x(marked[0]), width: w(marked[1] - marked[0]) }} aria-hidden="true" />}
-        {props.markers.filter((t) => t >= start && t <= start + span).map((t) => <span key={t} className="cp-te-tl-marker" style={{ left: x(t) }} title={`Marker at ${editTc(t, fps, props.recordStart)}`} />)}
-        {seams.filter((cut) => cut.at >= start && cut.at <= start + span).map((cut) => <button key={cut.index} type="button"
-          className={`cp-te-tl-seam-mark${props.seam === cut.index ? " is-selected" : ""}${cut.clipped.size ? " is-clipped" : ""}`} style={{ left: x(cut.at) }}
-          aria-pressed={props.seam === cut.index} aria-label={describe(cut, fps, props.recordStart)} title={describe(cut, fps, props.recordStart)}
-          onClick={() => { props.onSeek(cut.at); props.onSeam(cut.index); }} />)}
-      </div>
-      {speakers.map((speaker) => {
-        const soloed = solo.has(speaker.id), quiet = solo.size > 0 && !soloed, shown = text.has(speaker.id), lane = words[speaker.id] ?? [];
-        return <div key={speaker.id} className={`cp-te-tl-row${soloed ? " is-solo" : ""}${quiet ? " is-unsoloed" : ""}${mute.has(speaker.id) ? " is-muted" : ""}${shown ? " has-text" : ""}`}
-          style={{ "--te-speaker": colors[speaker.id] } as React.CSSProperties}>
-          <div className="cp-te-tl-head">
-            <button type="button" className="cp-te-tl-track" aria-pressed={props.tracks.has(speaker.id)} aria-label={`Track A${speaker.track}`}
-              title={`Track A${speaker.track} (⌥-click: only this)`} onClick={(event) => props.onTrack(speaker.id, event.altKey)}>A{speaker.track}</button><span className="cp-te-swatch" aria-hidden="true" /><span className="cp-te-tl-name" title={speaker.name}>{speaker.name}</span>
-            <span className="cp-te-tl-switches">
-              <button type="button" className="cp-te-tl-toggle" aria-pressed={soloed} aria-label={`Solo ${speaker.name}`} title={`Solo ${speaker.name}`} onClick={() => props.onSolo(speaker.id)}>S</button>
-              <button type="button" className="cp-te-tl-toggle" aria-pressed={mute.has(speaker.id)} aria-label={`Mute ${speaker.name}`} title={`Mute ${speaker.name}`} onClick={() => props.onMute(speaker.id)}>M</button>
-              <button type="button" className="cp-te-tl-toggle" aria-pressed={shown} aria-label={`Text on ${speaker.name}`} title={`Text on ${speaker.name}`} onClick={() => toggleText(speaker.id)}>T</button>
-            </span>
-          </div>
-          <div className="cp-te-tl-lane" {...scrub}>
-            {edit.segments.map((segment, index) => starts[index] + segmentLength(segment) < start || starts[index] > start + span
-              || !props.sourceSpeakers[segment.source]?.includes(speaker.id) ? null
-              : <div key={segment.id} className="cp-te-tl-clip" style={{ left: x(starts[index]), width: w(segmentLength(segment)) }}
-                title={`${speaker.name} · ${props.sourceName(segment.source)}`}>
-                {view.waveforms && <EditWave peaks={props.peaksOf(segment.source, speaker.id)} duration={props.durationOf(segment.source)} srcIn={segment.srcIn} srcOut={segment.srcOut} muted={mutes[`${segment.source}:${speaker.id}`]} />}
-              </div>)}
-            {marked && props.tracks.has(speaker.id) && <span className="cp-te-tl-marked-lane" style={{ left: x(marked[0]), width: w(marked[1] - marked[0]) }} />}
-            {shown && <div className="cp-te-tl-words">{lane.map((cue) => <span key={cue.id} className={cue.summary ? "is-summary" : undefined} title={cue.title} style={cue.style}>{cue.text}</span>)}</div>}
-            {seams.filter((cut) => cut.clipped.has(speaker.id)).map((cut) => <span key={cut.index} className="cp-te-tl-clipped" style={{ left: x(cut.at) }} title={`Cuts into a word of ${speaker.name}'s`} />)}
-          </div>
-        </div>;
-      })}
+      <EditTimelineRuler rulerRef={ruler} fps={fps} recordStart={props.recordStart} start={start} span={span} x={x} w={w} marked={marked} markers={props.markers}
+        seams={seams} seam={props.seam} describe={(cut) => describe(cut, fps, props.recordStart)} onSeam={(cut) => { props.onSeek(cut.at); props.onSeam(cut.index); }} scrub={scrub} />
+      {speakers.map((speaker) => <EditTimelineRow key={speaker.id} speaker={speaker} color={colors[speaker.id]} soloed={solo.has(speaker.id)} quiet={solo.size > 0 && !solo.has(speaker.id)}
+        muted={mute.has(speaker.id)} shown={text.has(speaker.id)} cues={words[speaker.id] ?? []} selected={props.tracks.has(speaker.id)}
+        onTrack={props.onTrack} onSolo={props.onSolo} onMute={props.onMute} onText={toggleText}
+        edit={edit} starts={starts} start={start} span={span} x={x} w={w} sourceSpeakers={props.sourceSpeakers} sourceName={props.sourceName}
+        waveforms={view.waveforms} peaksOf={props.peaksOf} durationOf={props.durationOf} mutes={mutes} marked={marked} seams={seams} scrub={scrub} />)}
       <div className="cp-te-tl-overlay" aria-hidden="true">
         {edit.segments.map((segment, index) => isGap(segment) && <span key={segment.id} className="cp-te-tl-gap" style={{ left: x(starts[index]), width: w(segmentLength(segment)) }} />)}
         {band && <span className="cp-te-tl-band" style={{ left: x(band[0]), width: w(band[1] - band[0]) }} />}
@@ -180,11 +137,7 @@ export function EditTimeline(props: Props) {
         {fade > 0 && seams.filter((cut) => cut.kind !== "through").map((cut) => <span key={`f${cut.index}`} className="cp-te-tl-fade" style={{ left: x(cut.at - fade / 2), width: w(fade) }} />)}
         <span className="cp-te-tl-playhead" style={{ left: x(playhead) }} />
       </div>
-      {props.dead && <div className="cp-te-tl-deadlayer">
-        {props.dead.spaces.map((space, index) => <button key={index} type="button" className="cp-te-tl-dead" aria-pressed={!props.dead!.skip.has(index)}
-          style={{ left: x(space.from), width: w(space.to - space.from) }} aria-label={`${(space.to - space.from).toFixed(1)} s at ${editTc(space.from, fps, props.recordStart)}`}
-          title={props.dead!.skip.has(index) ? "Kept. Click to remove" : "Removing. Click to keep"} onClick={() => props.onDeadSkip(index)} />)}
-      </div>}
+      {props.dead && <EditDeadLayer review={props.dead} x={x} w={w} at={(seconds) => editTc(seconds, fps, props.recordStart)} onSkip={props.onDeadSkip} />}
     </div>
     {zoom > 1 && <input className="cp-te-tl-pan" type="range" aria-label="Scroll timeline" min={0} max={Math.max(0, total - span)} step={0.01} value={start} onChange={(event) => setPan(Number(event.target.value))} />}
   </section>;
