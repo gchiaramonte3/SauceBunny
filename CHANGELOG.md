@@ -16,6 +16,12 @@ All notable changes to Sauce Bunny. Format loosely follows
 - A range lifted off a track in String Outs now shows as a gap in that
   track's clip, the way it lands in the exported AAF, and Extract asks
   before taking words from a track that is not selected.
+- Opening an AAF on NEXIS (or any network share) is faster. The AAF is
+  copied to the local cache in one sequential read before it is parsed,
+  instead of being read in thousands of 4 KB pieces over the network, twice.
+  A waveform build no longer re-checks every microphone file twice per
+  minute of audio, and each MXF's ffprobe result is kept, so a relink or
+  re-import does not probe the same files again.
 - String Outs fixes: a new string out starts at 01:00:00:00 in the
   sequence's own timecode (it read 00:59:56:10 at 23.976, and drop-frame is
   now counted right), and an empty one takes its first sequence's frame rate.

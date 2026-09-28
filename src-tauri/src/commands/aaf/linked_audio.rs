@@ -24,16 +24,22 @@ fn header(samples: u64) -> Result<Vec<u8>, AppError> {
 pub async fn render(app: &AppHandle, document: &AafDocument, id: &str, start: i64, duration: i64, job: &str, output: &Path) -> Result<u64, AppError> {
     super::audio::validate_range(document, start, duration)?;
     let _permit = super::audio::preparation(app, job).await?;
-    render_window(app, document, id, start, duration, job, output).await
+    let track = store::track(document, id)?;
+    linked::check_sources(document, track)?;
+    let total = render_window(app, document, id, start, duration, job, output).await?;
+    linked::check_sources(document, track)?; store::source_ready(document)?;
+    Ok(total)
 }
 
-/// The caller holds whichever gate governs this work: a playback permit, or
-/// the overview build gate for the chunks of a waveform.
+/// The caller holds whichever gate governs this work (a playback permit, or
+/// the overview build gate for the chunks of a waveform) and checks that the
+/// media is unchanged before and after. Checking inside, per window, meant
+/// fingerprinting every source of the track twice for each minute of an
+/// overview: tens of thousands of opens over NEXIS for an hour-long lane.
 async fn render_window(app: &AppHandle, document: &AafDocument, id: &str, start: i64, duration: i64, job: &str, output: &Path) -> Result<u64, AppError> {
     super::audio::validate_range(document, start, duration)?;
     process::check_cancelled(app, job)?;
     let track = store::track(document, id)?;
-    linked::check_sources(document, track)?;
     let graph = document.manifest.graph.as_ref().ok_or_else(|| AppError::invalid("Missing source graph"))?;
     let rate = &document.manifest.edit_rate;
     let total = sample(start+duration, rate)-sample(start, rate);
@@ -78,7 +84,7 @@ async fn render_window(app: &AppHandle, document: &AafDocument, id: &str, start:
         let take = bytes.len().min((count*3) as usize);
         pcm[at..at+take].copy_from_slice(&bytes[..take]);
     }
-    linked::check_sources(document, track)?; store::source_ready(document)?; process::check_cancelled(app, job)?;
+    process::check_cancelled(app, job)?;
     let mut file = std::fs::File::create(output)?;
     file.write_all(&header(total)?)?; file.write_all(&pcm)?;
     if !pcm.len().is_multiple_of(2) { file.write_all(&[0])?; } file.flush()?;
@@ -118,7 +124,7 @@ pub async fn waveform(app: &AppHandle, document: &AafDocument, id: &str, start: 
     if bucket>0 { values.push([low,high]); }
     let partial = work.0.join("peaks.bin");
     super::peaks::write_pyramid(values, total, HZ, &partial, || process::check_cancelled(app,job))?;
-    linked::check_sources(document, track)?; process::check_cancelled(app,job)?;
+    linked::check_sources(document, track)?; store::source_ready(document)?; process::check_cancelled(app,job)?;
     std::fs::rename(partial, &path)?;
     Ok(AafWaveform { track_id:id.into(), peaks: super::peaks::query(&path,sample(start,rate),sample(start+duration,rate),total,HZ)? })
 }

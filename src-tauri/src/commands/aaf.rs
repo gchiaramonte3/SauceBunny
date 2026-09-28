@@ -9,6 +9,7 @@ mod linked;
 mod linked_paths;
 mod linked_probe;
 mod linked_audio;
+mod local_read;
 mod mxf_header;
 pub mod model;
 mod process;
@@ -30,7 +31,8 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String, sequence_i
     let metadata = std::fs::metadata(&source)?;
     if !metadata.is_file() { return Err(AppError::invalid("Choose an AAF file, not a folder")); }
     process::progress(&app, &job_id, None, "inspecting", 0, 0);
-    let mut args = vec!["inspect".into(), "--graph".into(), "--input".into(), source.to_string_lossy().into_owned()];
+    let local = local_read::for_parser(&app, &job_id, &source).await?;
+    let mut args = vec!["inspect".into(), "--graph".into(), "--input".into(), local.to_string_lossy().into_owned()];
     if let Some(sequence) = sequence_id { args.extend(["--sequence".into(), sequence]); }
     let result = process::run(&app, &job_id, "inspect", "saucebunny-aaf", args).await?;
     result.require_success("saucebunny-aaf")?;
@@ -61,7 +63,8 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String, sequence_i
 pub async fn aaf_sequences(app: AppHandle, path: String, job_id: String) -> Result<Vec<AafSequenceChoice>, AppError> {
     diagnostics::operation(&app, &job_id, "sequences", &diagnostics::describe_path(std::path::Path::new(&path)), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
-    let result = process::run(&app, &job_id, "sequences", "saucebunny-aaf", vec!["sequences".into(), "--input".into(), path]).await?;
+    let local = local_read::for_parser(&app, &job_id, &std::fs::canonicalize(&path)?).await?;
+    let result = process::run(&app, &job_id, "sequences", "saucebunny-aaf", vec!["sequences".into(), "--input".into(), local.to_string_lossy().into_owned()]).await?;
     result.require_success("saucebunny-aaf")?;
     Ok(serde_json::from_str(&result.stdout)?)
     }).await
@@ -78,8 +81,9 @@ pub async fn aaf_resolve_media(app: AppHandle, document_id: String, source_id: O
     store::source_ready(&document)?;
     if document.manifest.schema_version < SCHEMA_VERSION {
         if let Some(graph) = &document.manifest.graph {
+            let local = local_read::for_parser(&app, &job_id, std::path::Path::new(&document.source_path)).await?;
             let result = process::run(&app, &job_id, "refresh-aaf-graph", "saucebunny-aaf", vec![
-                "inspect".into(), "--graph".into(), "--input".into(), document.source_path.clone(),
+                "inspect".into(), "--graph".into(), "--input".into(), local.to_string_lossy().into_owned(),
                 "--sequence".into(), graph.sequence_id.clone(), "--expected-fingerprint".into(), document.manifest.source_fingerprint.clone()]).await?;
             result.require_success("saucebunny-aaf")?;
             store::upgrade_graph(&mut document, serde_json::from_str(&result.stdout)?)?;
@@ -134,7 +138,8 @@ pub async fn aaf_read_recording_dates(app: AppHandle, document_id: String, job_i
     let root = store::root(&app)?;
     let document = store::load(&root, &document_id)?;
     store::source_ready(&document)?;
-    let mut args = vec!["inspect".into(), "--input".into(), document.source_path.clone()];
+    let local = local_read::for_parser(&app, &job_id, std::path::Path::new(&document.source_path)).await?;
+    let mut args = vec!["inspect".into(), "--input".into(), local.to_string_lossy().into_owned()];
     if let Some(graph) = &document.manifest.graph { args.extend(["--graph".into(), "--sequence".into(), graph.sequence_id.clone()]); }
     let result = process::run(&app, &job_id, "inspect", "saucebunny-aaf", args).await?;
     result.require_success("saucebunny-aaf")?;

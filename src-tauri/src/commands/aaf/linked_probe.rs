@@ -215,6 +215,13 @@ impl ProbeCache {
             format!("i:{track}")
         } else { "a".into() };
         let key = (fingerprint.clone(), selector.clone());
+        // ffprobe's answer depends only on the bytes, which the fingerprint
+        // names, so it is kept on disk beside the header cache. A relink or a
+        // re-import of the same media then costs no process per file.
+        let saved = store::cache(app)?.join(format!("ffprobe-v1-{fingerprint}-{}.json", selector.replace(':', "_")));
+        if !self.probes.contains_key(&key) {
+            if let Ok(stdout) = std::fs::read_to_string(&saved) { self.probes.insert(key.clone(), stdout); }
+        }
         if !self.probes.contains_key(&key) {
             let started = std::time::Instant::now();
             let result = process::run(app, job, "probe-linked-audio", "ffprobe", vec!["-v".into(), "error".into(),
@@ -222,6 +229,8 @@ impl ProbeCache {
                 "-show_streams".into(), "-show_format".into(), "-of".into(), "json".into(), path.to_string_lossy().into_owned()]).await?;
             self.ffprobe_ms += started.elapsed().as_millis();
             result.require_success("ffprobe")?;
+            // Best effort: a cache that cannot be written only costs the next probe.
+            let _ = crate::commands::system::write_bytes_impl(&saved.to_string_lossy(), result.stdout.as_bytes(), false, false, true);
             self.probes.insert(key.clone(), result.stdout);
         }
         let stream_index = linked::compatible_stream(source, &self.probes[&key])?;
