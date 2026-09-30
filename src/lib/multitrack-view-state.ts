@@ -12,7 +12,14 @@ export const VIEW_STATE_LIMIT = 50;
 
 export type MultitrackViewState = {
   solo?: string[]; mute?: string[]; levels?: Record<string, number>;
-  zoom?: number; density?: string; text?: string[]; expanded?: string[]; selected?: string[]; waveforms?: boolean;
+  zoom?: number; density?: string; text?: string[]; expanded?: string[]; selected?: string[];
+  /**
+   * Whether the user turned Waveforms on. Deliberately not `waveforms`: that
+   * field was written for every sequence ever opened while waveforms defaulted
+   * to on, so it records the old default rather than a choice, and honouring
+   * it would start hours of NEXIS reads on every sequence someone had opened.
+   */
+  showWaveforms?: boolean;
   updatedAt?: number;
 };
 type Store = Record<string, MultitrackViewState>;
@@ -32,7 +39,7 @@ export function loadViewState(documentId: string, trackIds: string[]): Multitrac
     zoom: typeof saved.zoom === "number" && saved.zoom >= 1 && saved.zoom <= 1024 && Number.isInteger(Math.log2(saved.zoom)) ? saved.zoom : undefined,
     density: saved.density === "small" || saved.density === "medium" || saved.density === "large" ? saved.density : undefined,
     text: ids(saved.text, known), expanded: ids(saved.expanded, known), selected: ids(saved.selected, known),
-    waveforms: typeof saved.waveforms === "boolean" ? saved.waveforms : undefined,
+    showWaveforms: typeof saved.showWaveforms === "boolean" ? saved.showWaveforms : undefined,
   };
 }
 

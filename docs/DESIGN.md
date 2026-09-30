@@ -433,9 +433,21 @@ leaves on the timeline are one shape. `IconRange` stays a `[` / `]` bracket
 on purpose: a review comment range is not a clip range, and it is drawn on
 the same track.
 
+Rulers draw it with `.cp-mark-range` (both marks: a closed band, 2px stems,
+a wing outward on each) and `.cp-mark.in` / `.cp-mark.out` (one mark alone),
+in `marks.css`, at the same 4x6 wing and dark hairline as Clip's track. AAF
+Audio and String Outs use them; Clip's film track and the reader's pins keep
+their own rules for film and a 5px bar, drawing the same glyph. A lane-wide
+tint of the marked span (String Outs' selected lanes, the reader's scrub bar)
+is a region, not a mark, and carries no wing because the mark sits beside it.
+`src/lib/mark-shape-contract.test.ts` fails on a marker-coloured side edge
+that has no wing and is not one of those named regions.
+
 Also live and not covered above: `--danger-2` (the solid danger for fills, as
 against `--danger-text` for glyphs), `--gold` (host crown and winner accents —
-no status meaning), and `--marker` (the in/out marker violet).
+no status meaning), and `--marker` (In and Out: white marks, with
+`--marker-region` grey between them and `--marker-edge` closing the span; it
+was violet until 2026-09-29, and String Outs' markers (M) keep that violet).
 
 Two literals are correct and are not drift: `#000` inside a `mask-image`
 (black there is the alpha channel, not paint), and a colour no token holds —
@@ -551,8 +563,14 @@ padding or a transparent `::before` — not the icon.
 ## Specialty controls are part of the system
 
 **Multitrack timecode:** center the current source timecode directly above Play.
-Keep the passive TRT readout at the right of the transport, separate from the
-AAF's start-timecode offset. Clicking current timecode or typing a digit opens
+The passive TRT readout sits immediately to its right in the same timecode
+box, with a small `TRT` label, and stays a duration, separate from the AAF's
+start-timecode offset. Once In or Out is marked, an `I/O` box with the marked
+duration takes the matching place on the left, its border tinted `--marker`;
+the row's outer columns are equal, so the timecode stays centred either way.
+(Owner direction, 2026-09-28: TRT used to sit at the far right of the
+transport in small type.) The transport does not report solo state; each
+lane's S button already does. Clicking current timecode or typing a digit opens
 the existing Clip-style numeric HUD. Digits fill from the right; Return commits
 a frame-aligned seek, Escape cancels, and letters never enter the value. Names,
 search fields, menus and other modals retain their keyboard ownership. The HUD

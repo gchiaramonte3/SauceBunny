@@ -114,8 +114,8 @@ Transcription works in bounded chunks rather than making a second full copy of
 every track in advance.
 
 Group alternatives have independent waveforms, audition, selection and saved
-results. Opening a disclosure starts optional waveforms but never playback or
-recognition. Different microphones can be deliberately mixed; identical
+results. Opening a disclosure starts optional waveforms (when Waveforms is on)
+but never playback or recognition. Different microphones can be deliberately mixed; identical
 parent/child source mappings are deduplicated. TXT/CSV/PDF/SRT exports identify alternative
 provenance; Avid markers for alternative lanes are deliberately unavailable.
 Root sequence markers keep their original A1/A2/etc. destinations.
@@ -143,14 +143,20 @@ SourceMob's MobID and a descriptor summary (descriptor class, sample rate,
 stored width and height, frame layout, compression UL), the tape or import
 SourceMob's name, and the source timecode at the in point, read from that
 mob's own timecode slot (frames, fps and drop frame). Filler is omitted. A
-group Selector records its selected angle with `group: true`; a muted picture
+group Selector records its selected angle with `group: true`, and the
+outermost group also names itself (`group_name`, the group mob's name when
+the sequence reaches it through one; HEAT 2's group sits inline, so it has
+none) and its angles (`angles`, each the first master clip name down that
+angle's chain, the one that plays first, at most 16). Names only: the walk
+still opens no media. A muted picture
 Selector reads as `kind: "muted"`, named after the clip it hides. No essence
 is opened and no locator followed. A picture track stops at 100,000 clips and
 the walk at one million steps; either limit costs picture clips and a
 sequence warning, never the audio import. AAF Audio draws V1 (or the first
 picture track with clips) as one row of named blocks above the microphones,
-with no thumbnails and no video. Documents saved before this read as having no
-picture clips.
+with no thumbnails and no video; a group clip shows how many angles it has.
+Documents saved before this read as having no picture clips, and ones saved
+before groups were named have no `group_name` or `angles`.
 
 ## Writer
 
@@ -170,11 +176,18 @@ result shapes are in [`aaf-sidecar/README.md`](../aaf-sidecar/README.md).
   Media Composer relinks by MobID. No essence is written.
 - **Groups.** Approach `C` copies the group Selector for the range with every
   alternate and keeps the angle the editor chose. Approach `B` follows what
-  plays to the master clip channel. Only Media Composer can decide between
-  them (the Phase 0 Mac test plan in
+  plays to the master clip channel. A track can carry its own `approach`, and
+  String Outs' default ("Keep picture groups") sends V1 as C and every sound
+  track as B: the picture stays switchable in Avid, and each person's audio
+  is their own mic rather than a twenty-way group per bite. An alternate that
+  C cannot cut (HEAT 2's slow-motion camera, a speed change) is left out of
+  that bite's group with a warning instead of failing the export; the
+  selected angle must still copy. Only Media Composer can confirm the import
+  (the Phase 0 Mac test plan in
   [AAF-ASSEMBLY-RESEARCH.md](AAF-ASSEMBLY-RESEARCH.md)).
 - **What is refused.** A cut that splits a transition (a bite holding a whole
-  dissolve keeps it), speed changes, keyframed picture effects, and anything
+  dissolve keeps it), speed changes and keyframed picture effects on what
+  plays (an alternate carrying one is left out of its group, above), and anything
   not a clip, filler, selector, sequence or effect. Automated Audio Pan or
   Gain is dropped with a raw-microphone warning, the reader's own policy;
   constant pan and gain travel with the clip. A fade survives only on an
@@ -198,9 +211,11 @@ result shapes are in [`aaf-sidecar/README.md`](../aaf-sidecar/README.md).
 The reader changes this needed are small: `LegacySound`/`LegacyPicture`
 tracks are read as sound/picture (they were silently dropped), and the reader's
 expansion budget can be sized by the writer for the edit it just bounded.
-Still open for the app's own reader: re-reading a many-bite C string-out with
-alternates expanded counts lanes per Selector instance and can exceed the
-256-lane cap (AAF-ASSEMBLY-RESEARCH.md, "Found in the current reader").
+Still open for the app's own reader (not the self-check, which never expands
+alternates): opening a many-bite C string-out in AAF Audio with alternates
+expanded counts lanes per Selector instance and can exceed the 256-lane cap
+(AAF-ASSEMBLY-RESEARCH.md, "Found in the current reader"). Keep picture
+groups keeps that to V1.
 
 ## Track-first controls
 
@@ -218,8 +233,12 @@ disabling AI cancels obsolete work. Exports still cover the selected transcript,
 not just the current search results.
 
 Timecode and transport sit centered above the tracks. Audio scrub defaults on;
-waveforms and per-track ASR text overlays can be toggled. Small/Medium/Large lane
-heights and playhead-centered zoom use the existing app controls. Small fits the
+waveforms and per-track ASR text overlays can be toggled. Waveforms start off
+and nothing is built until they are turned on: on network media each mic's
+overview reads every file it uses (see ARCHITECTURE.md). Small/Medium/Large lane
+heights and playhead-centered zoom use the existing app controls; zoom is a
+slider between magnifier buttons, one stop per doubling from 1x to 1024x,
+beside Fit. Small fits the
 20-track fixture at 1920×1080 with text overlays off; smaller windows still scroll.
 JKL uses Clip's signed shuttle ladder, K stops, K+J/L and arrows step frames.
 Rewind and fast-forward buttons flank Play and use the same signed ladder.

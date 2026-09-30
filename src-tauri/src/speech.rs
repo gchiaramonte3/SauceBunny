@@ -179,6 +179,11 @@ pub struct AafSpeech {
     #[ts(type = "Array<[number, number]>")]
     pub reactions: Vec<(i64, i64)>,
     pub words: Vec<AafWord>,
+    /// False when the track's waveform was never built. Words are then placed
+    /// by length alone, and `activity` and `reactions` are empty because
+    /// nobody measured them, not because the mic was quiet. Anything that
+    /// would treat empty as silence (dead-space removal) must check this.
+    pub measured: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -226,7 +231,24 @@ pub fn analyse(track_id: &str, pairs: &[[i16; 2]], hz: u32, bucket: u64, cues: &
         activity: activity(&levels, &floors, bucket_seconds).iter().map(pair).collect(),
         reactions: reactions(&levels, &floors, &spans, bucket_seconds).iter().map(pair).collect(),
         words,
+        measured: true,
     }
+}
+
+/// One track's words without its waveform: each cue split across its words by
+/// length, with no snapping to quiet points. Building a waveform means reading
+/// every source the track uses, which on a network volume takes minutes a
+/// track, so the transcript is readable first and measured when asked.
+pub fn unmeasured(track_id: &str, cues: &[CueInput]) -> AafSpeech {
+    let mut words = Vec::new();
+    for cue in cues {
+        // One bucket per 16 kHz sample, and no levels, so nothing moves.
+        let (start, end) = (cue.start_sample.max(0) as usize, cue.end_sample.max(0) as usize);
+        for (text, span) in place_words(cue.text, start, end, &[], 1.0 / ASR_HZ) {
+            words.push(AafWord { cue_id: cue.id.to_string(), text, start_sample: span.start as i64, end_sample: span.end as i64 });
+        }
+    }
+    AafSpeech { track_id: track_id.to_string(), floor_db: SILENT_DB, activity: vec![], reactions: vec![], words, measured: false }
 }
 
 #[cfg(test)]
@@ -311,6 +333,21 @@ mod tests {
         assert_eq!(speech.reactions.len(), 1);
         assert!(speech.reactions[0].0 > 11_000);
         assert!(speech.floor_db < -50.0);
+    }
+
+    #[test]
+    fn unmeasured_words_split_each_cue_by_length_and_claim_no_activity() {
+        let cues = [
+            CueInput { id: "c1", start_sample: 16_000, end_sample: 32_000, text: "Okay everybody" },
+            CueInput { id: "c2", start_sample: 40_000, end_sample: 48_000, text: "go" },
+        ];
+        let speech = unmeasured("t", &cues);
+        assert!(!speech.measured);
+        assert!(speech.activity.is_empty() && speech.reactions.is_empty());
+        let words: Vec<_> = speech.words.iter().map(|w| (w.cue_id.as_str(), w.text.as_str(), w.start_sample, w.end_sample)).collect();
+        // "Okay" weighs 5 and "everybody" 10: the split sits a third of the way in.
+        assert_eq!(words, vec![("c1", "Okay", 16_000, 21_333), ("c1", "everybody", 21_333, 32_000), ("c2", "go", 40_000, 48_000)]);
+        assert!(analyse("t", &signal(&[(10, 33)]), 48_000, 256, &[]).measured);
     }
 
     #[test]

@@ -50,6 +50,9 @@ it("prefers V1 and formats drop-frame source timecode", () => {
   expect(pictureSourceTimecode(clip(0, 1, { source_start_frame: 1800, source_timecode_fps: 30, source_drop_frame: true }))).toBe("00:01:00;02");
   expect(pictureSourceTimecode(clip(0, 1, { source_start_frame: null }))).toBeNull();
   expect(pictureClipTitle(clip(0, 1, { kind: "muted", effect: "Resize", tape_name: null, source_start_frame: null }))).toBe("Interview A · Muted in Avid · Effect Resize");
+  // A group names its angles, the one that plays first, and the group when it has a name.
+  expect(pictureClipTitle(clip(0, 1, { group: true, group_name: "MG 3", angles: ["CAM A", "CAM B"], tape_name: null, source_start_frame: null })))
+    .toBe("Interview A · Group MG 3, 2 angles: CAM A, CAM B");
 });
 
 it("sits above the audio lanes in the AAF Audio timeline", () => {

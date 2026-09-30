@@ -48,6 +48,11 @@ const CURVE_POINTS = 64;
 const HELD_WINDOWS = 6;
 
 const segmentFrames = (segment: EditDocument["segments"][number]) => segment.kind === "gap" ? segment.frames : segment.out_frame - segment.in_frame;
+/** Whether a clip plays a track: every track unless the clip was cut with only some (a bite of one person). */
+const clipPlays = (document: EditDocument, index: number, track: string) => {
+  const segment = document.segments[index];
+  return !segment || segment.kind !== "source" || !segment.tracks || segment.tracks.includes(track);
+};
 export const programLength = (document: EditDocument) => document.segments.reduce((sum, segment) => sum + Math.max(0, segmentFrames(segment)), 0);
 
 export function planBlocks(document: EditDocument, windowFrames: number): EditBlock[] {
@@ -354,7 +359,7 @@ export class EditAudio {
     const startSource = block.at + from - block.program;
     for (const track of this.tracks) {
       const mic = track.source_tracks[block.source], buffer = mic ? buffers.get(mic) : undefined;
-      if (!buffer) continue;
+      if (!buffer || !clipPlays(this.document, block.segment, track.id)) continue;
       for (const piece of trackPieces(this.document, block, track.id, from)) {
         const offset = (piece.from - block.window) / this.fps, start = when + (piece.from - startSource) / this.fps;
         const length = Math.min((piece.to - piece.from) / this.fps, buffer.duration - offset);
@@ -417,7 +422,7 @@ export class EditAudio {
     const offset = Math.max(0, (sourceFrame - block.window) / this.fps - (program - plan.offsetSec)), when = this.context.currentTime;
     for (const track of this.tracks) {
       const mic = track.source_tracks[block.source], buffer = mic ? held.get(mic) : undefined;
-      if (!buffer) continue;
+      if (!buffer || !clipPlays(this.document, block.segment, track.id)) continue;
       if (this.document.mutes.some((mute) => mute.source === block.source && mute.track === track.id && sourceFrame >= mute.in_frame && sourceFrame < mute.out_frame)) continue;
       const length = Math.min(plan.durationSec, buffer.duration - offset);
       if (length <= 0) continue;

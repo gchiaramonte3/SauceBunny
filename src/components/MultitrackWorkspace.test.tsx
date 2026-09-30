@@ -3,13 +3,13 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { multitrackFixture, multitrackGroupFixture, multitrackTranscript } from "../test/multitrack-fixture";
 import { MultitrackWorkspace } from "./MultitrackWorkspace";
-const mocks = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), seek: vi.fn().mockResolvedValue(undefined), pause: vi.fn(), toggle: vi.fn(), shuttle: vi.fn() }));
+const mocks = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), seek: vi.fn().mockResolvedValue(undefined), pause: vi.fn(), toggle: vi.fn(), shuttle: vi.fn(), solo: new Set<string>() }));
 vi.mock("../hooks/use-multitrack-transcription", () => ({ useMultitrackTranscription: () => ({ engine: "parakeet", models: [], ready: true, loading: false, status: "", error: null, resolution: null, ...mocks }) }));
-vi.mock("../hooks/use-multitrack-audition", () => ({ useMultitrackAudition: () => ({ ...mocks, frame: 0, rate: 0, solo: new Set(), mute: new Set(), scrubbing: true, volume: .8, muted: false }) }));
+vi.mock("../hooks/use-multitrack-audition", () => ({ useMultitrackAudition: () => ({ ...mocks, frame: 0, rate: 0, solo: mocks.solo, mute: new Set(), scrubbing: true, volume: .8, muted: false }) }));
 vi.mock("../hooks/use-multitrack-detail", () => ({ useMultitrackDetail: () => ({}) }));
 vi.mock("./MultitrackCast", () => ({ MultitrackCast: () => <div>Save Mic Owners as Cast</div> }));
 vi.mock("./MultitrackTranscript", () => ({ MultitrackTranscript: () => null }));
-beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); mocks.solo = new Set(); });
 afterEach(cleanup);
 it("group disclosure never selects an alternative or starts playback/transcription", () => {
   const visible = vi.fn();
@@ -177,17 +177,23 @@ it("Select all includes collapsed alternatives; Option-click sets one group and 
   expect(screen.queryByRole("checkbox", { name: "Select Sam mic" })).toBeNull();
 });
 it("reopening a sequence restores its zoom, track size, open groups, checked mics and waveform toggle", () => {
-  const doc = multitrackGroupFixture();
-  const first = render(<MultitrackWorkspace document={doc} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  const doc = multitrackGroupFixture(), onWaveforms = vi.fn();
+  const first = render(<MultitrackWorkspace document={doc} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} onWaveforms={onWaveforms} />);
+  // Off until asked: the document hook builds nothing while this is off.
+  expect(screen.getByRole("button", { name: "Waveforms" }).getAttribute("aria-pressed")).toBe("false");
+  expect(onWaveforms).toHaveBeenLastCalledWith(doc.id, false);
+  fireEvent.click(screen.getByRole("button", { name: "Waveforms" }));
+  expect(onWaveforms).toHaveBeenLastCalledWith(doc.id, true);
   fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
   fireEvent.click(screen.getByRole("button", { name: "Alternative microphones for A1" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Select Sam mic" }));
-  fireEvent.click(screen.getByRole("button", { name: "Waveforms" }));
   first.unmount();
-  render(<MultitrackWorkspace document={doc} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
-  expect(screen.getByText("2×")).toBeTruthy();
+  const reopened = vi.fn();
+  render(<MultitrackWorkspace document={doc} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} onWaveforms={reopened} />);
+  expect(screen.getByRole("slider", { name: "Zoom" }).getAttribute("aria-valuetext")).toBe("2×");
   expect((screen.getByRole("checkbox", { name: "Select Sam mic" }) as HTMLInputElement).checked).toBe(true);
-  expect(screen.getByRole("button", { name: "Waveforms" }).getAttribute("aria-pressed")).toBe("false");
+  expect(screen.getByRole("button", { name: "Waveforms" }).getAttribute("aria-pressed")).toBe("true");
+  expect(reopened).toHaveBeenLastCalledWith(doc.id, true);
 });
 it("I/O marks switch generation to the marked range and G returns it to the whole sequence", () => {
   render(<MultitrackWorkspace document={multitrackFixture()} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
@@ -206,4 +212,30 @@ it("I/O marks switch generation to the marked range and G returns it to the whol
   fireEvent.keyDown(window, { key: "g" });
   expect(scope.value).toBe("all");
   expect((scope.options[1] as HTMLOptionElement).disabled).toBe(true);
+});
+it("TRT sits beside the timecode in its box, and In to Out appears once something is marked", () => {
+  render(<MultitrackWorkspace document={multitrackFixture()} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  const row = screen.getByRole("button", { name: "Current timecode" }).parentElement!;
+  const trt = screen.getByLabelText("Total runtime");
+  expect(trt.parentElement).toBe(row);
+  expect(trt.classList.contains("cp-tc")).toBe(true);
+  expect(screen.queryByLabelText("Marked range duration")).toBeNull();
+  // Marking out at the first frame marks one frame; marking in with no out runs to the end.
+  fireEvent.keyDown(window, { key: "o" });
+  expect(screen.getByLabelText("Marked range duration").textContent).toBe("I/O00:00:00:01");
+  // Only Out is set, so the ruler shows Clip's lone mark: a stem and its wing.
+  expect(document.querySelector(".cp-multitrack-ruler .cp-mark.out")).not.toBeNull();
+  expect(document.querySelector(".cp-multitrack-ruler .cp-mark-range")).toBeNull();
+  fireEvent.keyDown(window, { key: "g" });
+  expect(screen.queryByLabelText("Marked range duration")).toBeNull();
+  fireEvent.keyDown(window, { key: "i" });
+  expect(screen.getByLabelText("Marked range duration").textContent).toBe("I/O00:16:40:00");
+  expect(screen.getByLabelText("Marked range duration").parentElement).toBe(row);
+});
+it("says nothing about solo: the S buttons already show it", () => {
+  mocks.solo = new Set(["track-1"]);
+  render(<MultitrackWorkspace document={multitrackFixture()} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "Solo Alex mic" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByText(/soloed/)).toBeNull();
+  expect(screen.queryByText("All mics")).toBeNull();
 });

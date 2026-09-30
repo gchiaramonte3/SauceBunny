@@ -3,6 +3,9 @@ import type { EditDeadPreset, EditDeadReview } from "../components/EditDeadSpace
 import { editDeadPresets } from "../components/EditDeadSpaceBar";
 import type { EditSelection } from "../components/EditTranscript";
 import { rippleMarkers, type OpenEdit } from "../lib/edit-document";
+import type { AafDocument } from "../bindings/AafDocument";
+import { giveTracks, patchAt, unpatch } from "../lib/edit-new";
+import { alternativeLane } from "../lib/multitrack-graph";
 import {
   addEdit, clipAround, cutRange, deadDefaults, deleteWords, extractProgram, findDeadSpace, ghostLines, healSeam, liftOnTracks, liftProgram,
   moveParagraph, muteWords, paragraphs, placementKey, placeWords, programDuration, removeDeadSpace, restoreRange, seamList, segmentStarts,
@@ -19,10 +22,14 @@ const toggled = <T,>(set: Set<T>, item: T) => { const next = new Set(set); if (!
 
 type Options = {
   open: OpenEdit; words: TimelineWord[]; lanes: TimelineLane[]; durations: Record<string, number>;
+  /** Everyone's words, group angles without a track included (`words` is only the people on tracks). */
+  everyone?: TimelineWord[];
   /** Which lanes each source has a mic for. */
   sourceLanes: Record<string, string[]>;
   audible: Map<string, [number, number][]>; playhead: number; seek: (seconds: number) => void; commit: Commit;
   nameOf: (lane: string) => string; tc: (seconds: number) => string;
+  /** The sources' AAF Audio sequences, which say who has a track of their own in one. */
+  documents?: Map<string, AafDocument>;
 };
 
 /**
@@ -31,7 +38,7 @@ type Options = {
  * `commit`, which snaps it to frames. Marks, selection, solo and the dead-space
  * review are view state and never enter the history.
  */
-export function useEditWorkspace({ open, words, lanes, sourceLanes, durations, audible, playhead, seek, commit, nameOf, tc }: Options) {
+export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, durations, audible, playhead, seek, commit, nameOf, tc, documents }: Options) {
   const edit = open.timeline, markers = open.markers;
   const [selection, setSelection] = useState<EditSelection>({ anchor: 0, focus: 0, collapsed: true });
   const [marks, setMarks] = useState<EditMarks>({ in: null, out: null });
@@ -113,13 +120,53 @@ export function useEditWorkspace({ open, words, lanes, sourceLanes, durations, a
     const [before, after] = [placed[index - 1], placed[index]];
     return before.segment !== after.segment ? starts[after.segment] : (before.programEnd + after.programStart) / 2;
   };
-  /** Splice source words in at the caret (or the end), as a splice-in does. */
-  const insert = (source: string, sourceWords: TimelineWord[], atEnd: boolean) => {
-    if (!sourceWords.length) return;
-    const [srcIn, srcOut] = cutRange(words, sourceWords, { id: "whole", source, srcIn: 0, srcOut: durations[source] ?? Infinity });
+  /**
+   * Splice source words in at the caret (or the end), as a splice-in does.
+   * With `take`, the source side decides the rest, as Avid's source monitor
+   * and track selectors do: with no words selected its In to Out is the clip
+   * (room tone has no words), and the clip plays exactly the lanes whose mics
+   * are on, each patched to the next record track down if it has none yet.
+   * Without it, the clip plays the people whose words were selected.
+   */
+  const insert = (source: string, sourceWords: TimelineWord[], atEnd: boolean, take?: { from: number; to: number; lanes: string[] }) => {
+    if (!sourceWords.length && !take) return;
+    // Their own neighbouring words bound the air kept around the cut.
+    const speakers = new Set(sourceWords.map((word) => word.track));
+    const bounds = words.concat((everyone ?? []).filter((word) => speakers.has(word.track)));
+    const [srcIn, srcOut] = sourceWords.length ? cutRange(bounds, sourceWords, { id: "whole", source, srcIn: 0, srcOut: durations[source] ?? Infinity }) : [take!.from, take!.to];
+    const lanes = take ? take.lanes : [...speakers];
     const position = atEnd ? total : insertionPoint(range ? range[0] : caret);
-    void change(`Insert ${plural(sourceWords.length, "Word")}`, (timeline) => spliceIn(timeline, source, srcIn, srcOut, position));
-    setMessage(`Inserted ${plural(sourceWords.length, "word")} at ${tc(position)}.`);
+    const given = open.document.tracks.filter((lane) => lane.featured === false && lanes.includes(lane.id)).map((lane) => lane.name);
+    void commit(sourceWords.length ? `Insert ${plural(sourceWords.length, "Word")}` : "Insert Clip", (state) => {
+      const timeline = spliceIn(state.timeline, source, srcIn, srcOut, position, lanes);
+      return { timeline, markers: rippleMarkers(state.timeline, timeline, state.markers), document: giveTracks(state.document, lanes) };
+    });
+    const what = sourceWords.length ? plural(sourceWords.length, "word") : `${(srcOut - srcIn).toFixed(1)} s`;
+    setMessage(`Inserted ${what} at ${tc(position)}.${given.length ? ` ${given.join(", ")} ${given.length === 1 ? "is" : "are"} now on ${given.length === 1 ? "a track" : "tracks"}.` : ""}`);
+  };
+  /** Take someone off their record track; the tracks below move up. */
+  const untrack = (id: string) => void commit(`Take ${nameOf(id)} Off a Track`, (state) => {
+    const document = unpatch(state.document, id);
+    return document === state.document ? null : { document };
+  });
+  /** The patch panel: put someone on record track `position` (0 for A1). */
+  const patch = (id: string, position: number) => void commit(`Patch ${nameOf(id)} to A${position + 1}`, (state) => {
+    const document = patchAt(state.document, id, position);
+    return document === state.document ? null : { document };
+  });
+  /** An empty string out's quickest start: a source whole, as the first clip. */
+  const addWhole = (source: string) => {
+    const length = durations[source] ?? 0;
+    if (length <= 0) return;
+    // Everyone with a track of their own in it comes on a track, in the sequence's order, as the whole sequence has them.
+    const aaf = documents?.get(source);
+    const own = aaf ? aaf.manifest.tracks.filter((track) => !alternativeLane(aaf, track.id))
+      .flatMap((track) => open.document.tracks.filter((lane) => lane.source_tracks[source] === track.id).map((lane) => lane.id)) : [];
+    void commit("Add Whole Sequence", (state) => {
+      const timeline = spliceIn(state.timeline, source, 0, length, programDuration(state.timeline));
+      return { timeline, markers: rippleMarkers(state.timeline, timeline, state.markers), document: giveTracks(state.document, own) };
+    });
+    setMessage("Added the whole sequence.");
   };
   const move = (index: number, direction: -1 | 1) => {
     const paragraph = paras[index];
@@ -188,7 +235,7 @@ export function useEditWorkspace({ open, words, lanes, sourceLanes, durations, a
     setSelection, setMarks, setSeam, setMessage, setPrompt, setDead, names,
     toggleTrack: (id: string, only: boolean) => setTracks((state) => only ? new Set([id]) : toggled(state ?? new Set(lanes.map((lane) => lane.id)), id)),
     skipDead: (index: number) => setDeadHeld((state) => state && { ...state, review: { ...state.review, skip: toggled(state.review.skip, index) } }),
-    remove, applyDelete, restore, insert, move, chooseSeam, healCut, takeMarked, findDead, applyDead, addMarker, cutHere, setTimeline,
+    remove, applyDelete, restore, insert, untrack, patch, addWhole, move, chooseSeam, healCut, takeMarked, findDead, applyDead, addMarker, cutHere, setTimeline,
     markIn: () => setMarks((m) => ({ in: playhead, out: m.out != null && m.out > playhead ? m.out : null })),
     markOut: () => setMarks((m) => ({ in: m.in != null && m.in < playhead ? m.in : null, out: playhead })),
     markClip: () => { const clip = clipAround(edit, playhead); if (clip) setMarks({ in: clip[0], out: clip[1] }); },

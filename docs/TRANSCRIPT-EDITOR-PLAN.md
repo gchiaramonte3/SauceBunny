@@ -40,8 +40,8 @@ An editor on a reality show can:
 | AAF reader: Legacy kinds, muted clips, picture as metadata (Phase 1) | Shipped on the branch; the 117-file corpus gate is open |
 | Edit document and on-disk undo log (Phase 3) | Shipped: `edit_doc.rs`, `edit_log.rs` (SQLite), `commands/edits.rs`, JSON mirror in Documents |
 | Speech analysis (Phase 4) | Shipped: `speech.rs` from the waveform pyramid (floor, hysteresis, reactions, word placement); VAD not yet combined |
-| Transcript Editor (Phase 5) | In the app (⌘7): picker, source and record, removed lines, overtalk prompt, timeline, dead space, History, edit-list playback. No dockable tabs, Ask or word corrections yet |
-| AAF export (Phase 6) | Shipped: `write-edit` sidecar command with a frame-by-frame self-check, driven by `aaf_export_edit`; **not yet tried in Media Composer** (Phase 0) |
+| Transcript Editor (Phase 5) | In the app (⌘7): picker, a tab per open string out, source and record, removed lines, overtalk prompt, timeline, dead space, Ask, Inspector, History, edit-list playback. No word corrections yet |
+| AAF export (Phase 6) | Shipped: `write-edit` sidecar command with a frame-by-frame self-check, driven by `aaf_export_edit`. Group angles export on tracks of their own (see "Group angles" below). Written and self-checked on a real 99-mic grouped AAF (HEAT 2) with B; **not yet imported into Media Composer** (Phase 0) |
 | String-outs (Phase 7) | Manual (Add to…), rules (one per person) and AI proposals (ask in words, accept or discard; local Qwen or the chosen cloud model) shipped; revisions as diffs to an existing edit and season-wide batches not started |
 | Media index (Phase 2) | Native MXF header reads picture descriptors and timecode; the PMR reader is not started (no sample files) |
 | Hardening (Phase 8) | Not started |
@@ -108,6 +108,187 @@ The one thing no amount of fixture testing can answer.
   OTIO file through the otio-aaf-adapter is the second route (it rebuilds
   its own mobs, so groups are lost). EDL is a last resort (tape name + TC,
   no groups).
+- **Found on HEAT 2 (2026-09-29), before any Avid run:** C cannot write a bite
+  whose picture group carries Motion Control (a timewarp; trimming it would
+  change what plays), and HEAT 2's V1 does throughout. So B was the export
+  default, and C says so and points at B when it stops.
+- **Looked at more closely (2026-09-30):** HEAT 2's V1 is ONE inline group
+  Selector with 16+ camera angles, and the Motion Control (a constant
+  SpeedRatio of 2/5, no keyframes) wraps a single ALTERNATE, one slow-motion
+  camera. Nothing is keyframed, so retiming keyframes would have fixed
+  nothing. Keep groups now leaves an angle it cannot cut out of that bite's
+  group with a warning (AAF §7.20 permits a Selector with fewer alternates;
+  the angle that plays is unchanged). The default is now **Keep picture
+  groups** ("V"): V1 as C, switchable in Avid, and every sound track as B,
+  each person's own mic. That is the model the 2026-09-29 research arrived
+  at (below): writing twenty lavs as C puts a twenty-way group on every
+  track of every bite, which nobody switches. B wrote and
+  self-checked: 23 tracks, 653 frames, 154 mobs copied with their original
+  MobIDs, NEXIS locators intact. C's audio path, run without V1, also
+  self-checked (the whole group closure, 3,474 mobs).
+
+### Source and Record, as Avid does it (built 2026-09-30, planned 2026-09-29)
+
+The owner's direction after the first hand test: String Outs should work the
+way Media Composer does with a sequence loaded in the Source monitor, where
+the whole AAF, every track, is on the source side and the record side is the
+new sequence being built, starting empty. Media Composer's pieces:
+
+- **Toggle Source/Record in Timeline** (a button at the bottom of the
+  Timeline) switches the Timeline to show what is loaded in the Source
+  monitor, every track with its waveform, and turns the position indicator
+  green, so In and Out can be placed precisely on the source.
+- **Track selectors in two columns**: the source's tracks on the left, the
+  sequence's on the right. Source tracks patch to record tracks
+  automatically, or by right-clicking a record track and choosing the source.
+- **Splice-in (V)** puts the marked source range into the sequence at the
+  record position and pushes the rest right; Overwrite (B) replaces.
+
+What that means here, in order:
+
+1. **Any AAF Audio sequence can be the source**, not only one already added
+   to the string out. The Source pane's picker lists the shelf (one entry per
+   sequence). A sequence joins the string out's sources, and its people join
+   the lanes, only when something of it is cut in, so the record holds only
+   what was edited into it.
+2. **Toggle Source/Record in the timeline.** In Source mode the timeline
+   shows the loaded sequence: every mic as a track, its words (T) and
+   waveforms, the source's own timecode, a green playhead, and In/Out on the
+   source (the same marks the source text selection makes). Record mode is
+   the timeline as it is now. The toggle and the playhead colour say which
+   side you are on.
+3. **Source track selectors.** In Source mode each mic has a selector, all
+   on by default. Insert and Append take the selected tracks only; the others
+   are silenced in the new clip. Patching is automatic by person (Rosa's mic
+   plays on Rosa's lane); choosing another lane is a later step.
+4. **Splice-in and Append** use the source In/Out when set, else the text
+   selection. Overwrite comes after.
+5. **A new string out starts empty at 01:00:00:00**, and AAF Audio's Open in
+   String Outs starts one with that sequence loaded as the source (done).
+
+What was built (2026-09-30), and where it differs from the list above:
+
+- **The switch** is "Source | Record" in the timeline's corner, over the
+  track headers, with ⇧T. Not in the tool row: that row is locked as it is,
+  and the same row serves both views (its record-only edits rest in Source).
+  **No green playhead**: `green-contract` reserves green for outcomes and live
+  feeds, so Source is marked by the switch and the source timecode instead.
+- **Source view** (`EditSourceTimeline`, `EditSourceTrack`): every track of
+  the loaded sequence, laid out by AAF Audio's own `visibleLanes`, so group
+  alternates sit under a disclosure behind a ↳ exactly as in AAF Audio. The
+  sequence's real clips, V1, waveforms and T words, in source timecode.
+- **Source track selectors** (step 3): main tracks on, alternates off, as in
+  AAF Audio. The new clip plays the mics that are on plus whoever said the
+  selected words (a line chosen in someone's tab always brings them), and
+  names those lanes itself, so a mic that is off is filler in that clip only
+  (the first version silenced it with a mute, which leaked to everywhere the
+  same stretch of source already played).
+- **Marks** (step 4): selecting text marks the source; I and O mark it
+  directly (in Source view, or in the source pane). Insert takes the words
+  when text is selected, else the marked time, so room tone can be cut in.
+- **The source pane reads a person at a time** through AAF Audio's own
+  `MultitrackTranscriptTabs` (All voices, then everyone with a mic in that
+  sequence, "N more" when they do not fit). All voices keeps each cue whole,
+  so twenty bleeding lavs read by turn rather than word by word. Words arrive
+  a mic at a time with "Reading each microphone's words… 4 of 20".
+- **Ask @person** reads that person's own mic, the words their tab shows, as
+  lines that end with each transcript cue, in compact records with source
+  timecode. A cited line not in the string out opens in the source, selected,
+  ready for V.
+- Step 1 (any shelf sequence as the source without adding it) is not built.
+
+### The record side: research (2026-09-29) and the next step
+
+The owner's direction after seeing the Source/Record work: the record side
+should not be organised by people's names. It should be plain Avid tracks,
+A1, A2, A3, A4 and V1, with a patch panel that says which person plays where,
+filled from the top down: ask for Harry and Jane and Harry goes on A1, Jane
+on A2, and there are no other tracks. A string out is a NEW sequence of
+chunks of the AAF, the way Quickture builds one, never the whole sequence
+with words taken out of it.
+
+A deep-research pass (vendor docs, the AAF object spec, verified claim by
+claim) found:
+
+- **Every transcript tool that documents its export assembles a new
+  sequence** from source ranges and never changes the editor's sequence:
+  Quickture 2 ("Every build is a new sequence"), Simon Says Assemble,
+  Jumper's API, Descript's timeline export. Media Composer's own transcript
+  tools are the exception: plain Insert/Overwrite into the loaded sequence.
+- **None documents per-person top-down patching.** Quickture does the
+  opposite: every source track stays in the sequence, muted rather than
+  removed, and it cuts straight through multicam groups so every angle stays
+  switchable. How any of them picks each person's iso mic inside a
+  multigroup is undocumented.
+- **Most never reach Avid as AAF**: Simon Says and Jumper write Premiere XML,
+  Descript's AAF is for Pro Tools and Logic.
+- **Avid keeps patching as UI state** (source and record track selectors in
+  two columns, audio to audio only). An AAF carries only the record
+  composition, so a string out's patching can only exist as which source
+  channel each record track references.
+- **AAF mechanics** (AMWA MS-01): a bite is a SourceClip naming a MasterMob,
+  slot, StartTime and Length; a switchable angle is a Selector whose selected
+  segment and every alternate must be trimmed to the same length (§7.20),
+  and dropping an alternate is conformant. Whether ControlPoint times are
+  normalised 0 to 1 was not confirmed either way.
+
+Recommended record-side model (a design inference, not an industry
+standard): a fresh composition; V1 a trimmed copy of the group Selector
+(switchable); audio patched top-down, one record track per person asked
+for, A1 to An in the order they were asked, each referencing that person's
+own mic channel, filler where a bite's source has no mic for them; no
+handles in the timeline (every clip references the original mobs, so the
+editor trims into handles in Avid); a marker at each bite. The writer
+already did all of this except the top-down patching, which is now built
+(2026-09-30):
+
+- **Patched, not listed.** A lane is a person; a record track is a lane
+  patched to it (`EditTrack.featured`: `false` listed, `true` or absent
+  patched, numbered top-down in lane order). A new string out patches
+  nobody, as an Avid sequence starts with no tracks. `giveTracks` patches in
+  the order given, each new person on the next track below the last one in
+  use; patched lanes are kept first so the numbers have no holes. The whole
+  sequence (Start with the whole sequence, Add all of) patches everyone with
+  a track of their own in it, in its order, and no group angle.
+- **Clips name their tracks.** `EditSegment.tracks` is the lanes a clip
+  plays; every other record track is filler under it (export writes a
+  whole-clip mute, which the writer turns into Filler). A bite Ask or One per
+  person builds plays on its own person's track only, and only the people it
+  cites are patched, top-down in the order they first speak: Harry on A1,
+  Jane on A2, nothing else. An insert from the source plays the mics that
+  are on plus whoever said the selected words. Absent means every patched
+  lane, so older clips and whole-sequence cuts play as before.
+- **The patch panel** is the record track header: A1, then who plays on it
+  as a menu. Choosing someone puts them on that track and moves the rest
+  down (a clip of theirs follows them, since clips name people, not track
+  numbers); × takes someone off and the tracks below move up; the empty row
+  under the last track patches the next person. Every change is one undo
+  step ("Patch Room to A1").
+- **What stayed stable:** a person's colour and the source tabs follow the
+  sequence's own track order, not lane order, so patching someone never
+  recolours or reorders anyone else. The Source view plays its own mics, not
+  the record's patch, and waveforms are built for each sequence's main mics
+  as well as patched ones, so a fresh string out's Source view has them.
+
+Open questions only Media Composer can answer are in docs/HAND-TEST.md.
+
+### Group angles
+
+In a multigroup, only one angle plays per track: HEAT 2 has 21 audio tracks
+and 99 mics, so 78 people are angles inside someone else's group. String
+Outs lists them as people (`EditTrack.featured: false`) so their words reach
+Ask and the source pane, but gives them no track, so the timeline, playback
+and the export match the source until someone's words are cut in. Then
+`featured: true` gives them a track of their own, numbered after the
+source's tracks, and the writer builds it from their group's slot with a
+`choices` list naming their angle (`<mob id>:<slot id>`, the reader's
+`branch_id`). C keeps the group with that angle selected; B follows it to
+their master clip. Outside groups that offer the angle, that track is
+silent, and the self-check reads the source the same way
+(`GraphTimeline.read_preferring`), so it still compares every frame.
+Limits: an angle nested inside another group's unselected angle is not
+reached (only the innermost choice is recorded), and two people with the
+same owner name still share one lane.
 
 ### Phase 1: reader, with picture and two fixes
 

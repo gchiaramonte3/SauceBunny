@@ -17,11 +17,14 @@
  * edit-document.ts snaps every boundary to a frame on the way out: Avid cannot
  * express a subframe cut, so neither can a saved edit.
  */
+import { multitrackTextLayout } from "./multitrack-text-layout";
 
-/** A lane of the edit: a person, with their track number (A1, A2...). */
-export type TimelineLane = { id: string; name: string; track: number };
-export type TimelineWord = { id: string; source: string; track: string; text: string; start: number; end: number };
-export type TimelineSegment = { id: string; source: string; srcIn: number; srcOut: number };
+/** A person. `track` is their AAF track number, 0 when they have none; `angle` marks a group angle given one. */
+export type TimelineLane = { id: string; name: string; track: number; angle?: boolean };
+/** `cue` is the transcript cue the word was said in (AAF Audio's cue id), when known. */
+export type TimelineWord = { id: string; source: string; track: string; text: string; start: number; end: number; cue?: string };
+/** `tracks`: the lanes this clip plays on, when it was cut with only some (a bite of one person); absent, every lane on a track. */
+export type TimelineSegment = { id: string; source: string; srcIn: number; srcOut: number; tracks?: string[] };
 export type TimelineMute = { source: string; track: string; srcIn: number; srcOut: number };
 export type Timeline = { segments: TimelineSegment[]; mutes: TimelineMute[] };
 
@@ -89,6 +92,11 @@ export function programToSource(edit: Timeline, program: number): { segment: num
   return null;
 }
 
+/** Whether a clip plays this lane: every lane unless the clip names its own. */
+export const playsOn = (segment: TimelineSegment, lane: string) => !segment.tracks || segment.tracks.includes(lane);
+/** Two clips that play the same lanes, which is when they can be one clip. */
+const sameTracks = (a: TimelineSegment, b: TimelineSegment) => (a.tracks ? [...a.tracks].sort().join("\n") : null) === (b.tracks ? [...b.tracks].sort().join("\n") : null);
+
 const isMuted = (edit: Timeline, word: TimelineWord) => edit.mutes.some((mute) =>
   mute.source === word.source && mute.track === word.track && word.start >= mute.srcIn - 1e-6 && word.end <= mute.srcOut + 1e-6);
 
@@ -100,7 +108,8 @@ export function placeWords(words: TimelineWord[], edit: Timeline): PlacedWord[] 
   edit.segments.forEach((segment, index) => {
     for (const word of words) {
       const middle = (word.start + word.end) / 2;
-      if (word.source !== segment.source || middle < segment.srcIn || middle >= segment.srcOut) continue;
+      // A clip cut with only some lanes does not carry the others' words.
+      if (word.source !== segment.source || middle < segment.srcIn || middle >= segment.srcOut || !playsOn(segment, word.track)) continue;
       const offset = starts[index] - segment.srcIn;
       placed.push({ word, segment: index, programStart: Math.max(starts[index], word.start + offset),
         programEnd: Math.min(starts[index] + segmentLength(segment), word.end + offset), muted: isMuted(edit, word) });
@@ -109,14 +118,19 @@ export function placeWords(words: TimelineWord[], edit: Timeline): PlacedWord[] 
   return placed.sort((a, b) => a.programStart - b.programStart || a.word.start - b.word.start);
 }
 
-/** Paragraphs: a new one on a track change or a long pause (in program time). */
-export function paragraphs(placed: PlacedWord[]): TimelineParagraph[] {
+/**
+ * Paragraphs: a new one on a track change or a long pause (in program time).
+ * `byCue` also starts one at every transcript cue, the way AAF Audio lists a
+ * person's transcript: one line per thing they said.
+ */
+export function paragraphs(placed: PlacedWord[], byCue = false): TimelineParagraph[] {
   const out: TimelineParagraph[] = [];
   let previous: PlacedWord | null = null;
   for (const item of placed) {
     const last = out[out.length - 1];
     const cut = !!previous && previous.segment !== item.segment;
-    if (!last || last.track !== item.word.track || item.programStart - (previous?.programEnd ?? 0) > PAUSE_BREAK) {
+    if (!last || last.track !== item.word.track || item.programStart - (previous?.programEnd ?? 0) > PAUSE_BREAK
+      || (byCue && item.word.cue !== previous?.word.cue)) {
       out.push({ id: `p-${placementKey(item)}`, track: item.word.track, words: [item], cutBefore: cut });
     } else last.words.push(item);
     previous = item;
@@ -130,8 +144,8 @@ export function removeRange(edit: Timeline, source: string, srcIn: number, srcOu
   const segments: TimelineSegment[] = [];
   for (const segment of edit.segments) {
     if (segment.source !== source || srcOut <= segment.srcIn || srcIn >= segment.srcOut) { segments.push(segment); continue; }
-    if (srcIn > segment.srcIn) segments.push({ id: nextId("seg"), source, srcIn: segment.srcIn, srcOut: srcIn });
-    if (srcOut < segment.srcOut) segments.push({ id: nextId("seg"), source, srcIn: srcOut, srcOut: segment.srcOut });
+    if (srcIn > segment.srcIn) segments.push({ ...segment, id: nextId("seg"), srcIn: segment.srcIn, srcOut: srcIn });
+    if (srcOut < segment.srcOut) segments.push({ ...segment, id: nextId("seg"), srcIn: srcOut, srcOut: segment.srcOut });
   }
   return { ...edit, segments };
 }
@@ -220,9 +234,9 @@ function splitAt(edit: Timeline, program: number): { edit: Timeline; index: numb
     if (index === edit.segments.length && program <= at + 1e-6) index = segments.length;
     if (index === edit.segments.length && program > at + 1e-6 && program < at + length - 1e-6) {
       const cut = segment.srcIn + (program - at);
-      segments.push({ id: nextId("seg"), source: segment.source, srcIn: segment.srcIn, srcOut: cut });
+      segments.push({ ...segment, id: nextId("seg"), srcIn: segment.srcIn, srcOut: cut });
       index = segments.length;
-      segments.push({ id: nextId("seg"), source: segment.source, srcIn: cut, srcOut: segment.srcOut });
+      segments.push({ ...segment, id: nextId("seg"), srcIn: cut, srcOut: segment.srcOut });
     } else segments.push(segment);
     at += length;
     if (position === edit.segments.length - 1 && index === edit.segments.length && program >= at - 1e-6) index = segments.length;
@@ -230,12 +244,12 @@ function splitAt(edit: Timeline, program: number): { edit: Timeline; index: numb
   return { edit: { ...edit, segments }, index };
 }
 
-/** Splice a source range into the edit at a program position (Avid's splice-in). */
-export function spliceIn(edit: Timeline, source: string, srcIn: number, srcOut: number, program: number): Timeline {
+/** Splice a source range into the edit at a program position (Avid's splice-in), on `tracks` only when given. */
+export function spliceIn(edit: Timeline, source: string, srcIn: number, srcOut: number, program: number, tracks?: string[]): Timeline {
   if (srcOut <= srcIn) return edit;
   const split = splitAt(edit, program);
   const segments = [...split.edit.segments];
-  segments.splice(split.index, 0, { id: nextId("seg"), source, srcIn, srcOut });
+  segments.splice(split.index, 0, { id: nextId("seg"), source, srcIn, srcOut, ...(tracks ? { tracks } : {}) });
   return { ...split.edit, segments };
 }
 
@@ -404,9 +418,9 @@ export function moveParagraph(words: TimelineWord[], edit: Timeline, paragraph: 
  */
 export function healSeam(edit: Timeline, index: number): Timeline {
   const prev = edit.segments[index - 1], next = edit.segments[index];
-  if (!prev || !next || prev.source !== next.source || next.srcIn < prev.srcOut) return edit;
+  if (!prev || !next || prev.source !== next.source || next.srcIn < prev.srcOut || !sameTracks(prev, next)) return edit;
   const segments = [...edit.segments];
-  segments.splice(index - 1, 2, { id: nextId("seg"), source: prev.source, srcIn: prev.srcIn, srcOut: next.srcOut });
+  segments.splice(index - 1, 2, { ...prev, id: nextId("seg"), srcIn: prev.srcIn, srcOut: next.srcOut });
   return { ...edit, segments };
 }
 
@@ -522,11 +536,25 @@ export function restoreRange(edit: Timeline, at: number, source: string, from: n
   const prev = segments[at - 1], next = segments[at];
   const joinsPrev = prev?.source === source && prev.srcOut >= from - 1e-6;
   const joinsNext = next?.source === source && next.srcIn <= to + 1e-6;
-  if (joinsPrev && joinsNext) segments.splice(at - 1, 2, { id: nextId("seg"), source, srcIn: prev.srcIn, srcOut: next.srcOut });
+  if (joinsPrev && joinsNext && sameTracks(prev, next)) segments.splice(at - 1, 2, { ...prev, id: nextId("seg"), srcIn: prev.srcIn, srcOut: next.srcOut });
   else if (joinsPrev) segments.splice(at - 1, 1, { ...prev, id: nextId("seg"), srcOut: Math.max(prev.srcOut, to) });
   else if (joinsNext) segments.splice(at, 1, { ...next, id: nextId("seg"), srcIn: Math.min(next.srcIn, from) });
   else segments.splice(at, 0, { id: nextId("seg"), source, srcIn: from, srcOut: to });
   return { ...edit, segments };
+}
+
+/** Where each paragraph's words start in the run of placed words. */
+export function paragraphStarts(paragraphs: { words: unknown[] }[]): number[] {
+  let at = 0;
+  return paragraphs.map((paragraph) => { const first = at; at += paragraph.words.length; return first; });
+}
+
+/** The paragraph holding word `index`, found by its start; null for no word. */
+export function paragraphHolding(starts: number[], index: number | null): number | null {
+  if (index == null || index < 0 || !starts.length) return null;
+  let low = 0, high = starts.length - 1;
+  while (low < high) { const mid = (low + high + 1) >> 1; if (starts[mid] <= index) low = mid; else high = mid - 1; }
+  return low;
 }
 
 /** A speaker's words as lines: a new line at a pause over 1.2 s or an edit point. */
@@ -541,6 +569,20 @@ export function trackPhrases(placed: PlacedWord[], speaker: string) {
   return out;
 }
 
+/**
+ * A lane's words laid over its clips (T), with AAF Audio's layout, except
+ * that a column holding a single phrase shows the phrase itself rather than
+ * "1 passage": the words are the point of T.
+ */
+export function phraseLabels(placed: PlacedWord[], speaker: string, start: number, span: number, width: number) {
+  const lines = trackPhrases(placed, speaker);
+  return multitrackTextLayout(lines, start, span, width).map((cue) => {
+    const line = cue.summary && cue.text === "1 passage" ? lines.find((item) => item.text === cue.title.split("\n")[1]) : undefined;
+    if (!line) return cue;
+    const from = Math.max(start, line.startFrame), to = Math.min(start + span, line.endFrame);
+    return { ...cue, summary: false, text: line.text, style: { left: `${((from - start) / span) * 100}%`, width: `${((to - from) / span) * 100}%` } };
+  });
+}
 
 /**
  * Remove words the way the Ask panel's proposals do: words nobody talks over

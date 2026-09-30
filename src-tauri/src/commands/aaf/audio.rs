@@ -6,9 +6,35 @@ use tauri::{AppHandle, Manager};
 
 /// Playback windows and transcription extracts. Waveform overviews have their
 /// own gate, so an hour-long build never holds up audition on a network volume.
-static PREPARATION: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+const PREPARATION_PERMITS: usize = 2;
+static PREPARATION: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(PREPARATION_PERMITS);
 pub async fn preparation(app: &AppHandle, job: &str) -> Result<tokio::sync::SemaphorePermit<'static>, AppError> {
     acquire(app, job, &PREPARATION).await
+}
+
+/// True while audition or transcription is reading audio.
+pub fn foreground_busy() -> bool { PREPARATION.available_permits() < PREPARATION_PERMITS }
+
+/// A separate gate is not enough on its own: an overview build and an audition
+/// window still share one network volume and one set of cores, and measured
+/// on NEXIS each audition window took 1.5-2.3 s while a build ran. So a build
+/// waits between its windows while anyone is preparing audio. Transcription
+/// releases the gate while it recognises, which is when a build catches up.
+pub async fn yield_to_foreground(app: &AppHandle, job: &str) -> Result<(), AppError> {
+    while foreground_busy() {
+        process::check_cancelled(app, job)?;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Ok(())
+}
+
+/// `yield_to_foreground` for a build running on a blocking thread.
+pub fn yield_to_foreground_blocking(check: impl Fn() -> Result<(), AppError>) -> Result<(), AppError> {
+    while foreground_busy() {
+        check()?;
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    check()
 }
 
 /// Wait for a permit, but leave the queue as soon as the job is stopped. A

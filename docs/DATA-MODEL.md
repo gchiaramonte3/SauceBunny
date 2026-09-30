@@ -74,6 +74,15 @@ part a person backs up. Schema-versioned: a newer log is refused, not
 rewritten. This IS the user's work, unlike the rest of this folder, so the
 Edits copy exists to keep that true when app data is wiped.
 
+Two optional fields carry the record side's patching (2026-09-30), both
+absent in every string out saved before, which therefore opens exactly as it
+was: a lane's `featured` says whether that person is patched to a record
+track (`false`: listed, on no track; `true` or absent: patched, numbered
+top-down in lane order), and a source clip's `tracks` names the lanes it
+plays on (absent: every patched lane). Neither needed a schema bump, since
+an older build reading a newer file ignores neither in a way that loses
+work: it would play a one-person clip on every track, not drop it.
+
 ### `app_cache_dir()` — three named directories
 
 The root used to be one organized subtree plus a flat pile of
@@ -167,7 +176,11 @@ Not all of these are preferences. Sorted by what losing them would cost:
 - **Identity**: `installId`, `review.author`, `review.authorColor`.
 - **Genuine preference**: layout, widths, open/closed, `keybindings.v1`,
   `playbackRate`, `streamRungPref`, `streamKeep`, `mediaDevices`, the
-  `*Dismissed*` flags, `welcomed`, `onboarding`.
+  `*Dismissed*` flags, `welcomed`, `onboarding`, and String Outs' open tabs,
+  last open string out and Ask model (`stringOuts.tabs`, `editor.lastEdit`,
+  `stringOuts.model`), and the string out Open in String Outs made for each
+  AAF Audio sequence (`stringOuts.forSequence`, so asking again reuses it). A tab only names a string out; closing one, or losing
+  the key, never touches the edit, which lives in `timelines.sqlite`.
 - **Cache**: `panelSnapshot` (the panel's synchronous boot seed),
   `lastUpdateCheck`, `ytdlpVersion`, `diarizerModelsReady`.
 

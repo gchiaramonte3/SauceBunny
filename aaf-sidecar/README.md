@@ -59,7 +59,17 @@ design notes in `docs/AAF-MULTITRACK.md`, "Writer"). The request, at most
   `markers` are frames of the new sequence on a track index; `color` is one
   of Red, Green, Blue, Cyan, Magenta, Yellow, White, Black.
 - `approach` `"C"` copies group Selectors (every alternate, the chosen angle
-  kept); `"B"` references the clip that plays (the master clip channel).
+  kept); `"B"` references the clip that plays (the master clip channel). A
+  track may set its own `"approach"`, which String Outs uses to keep V1's
+  groups (C) while every sound track is the clip that plays (B). Under C an
+  alternate that cannot be cut (a speed change) is left out of that bite's
+  group with a warning; the selected angle must copy.
+- A sound track may add `"choices": { "s1": ["<mob id>:<slot id>"] }`: group
+  angles (the reader's lane `branch_id`) to play instead of the chosen one.
+  That is how a mic that is only an angle inside a group gets a track of its
+  own. C writes the group with that angle selected, B its master clip, and
+  the track is Filler outside groups offering the angle. The self-check reads
+  the source the same way (`GraphTimeline.read_preferring`).
 - Bounds: 1 to 256 tracks with 1 to 64 sound tracks, 1 to 100,000
   segments, 256 sources, 100,000 markers, 24 hours. All paths absolute;
   `output_path` ends in `.aaf` and must not exist.

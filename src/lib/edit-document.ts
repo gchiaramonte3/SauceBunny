@@ -61,7 +61,7 @@ export function fromDocument(document: EditDocument): OpenEdit {
   const rate = document.edit_rate;
   const segments = document.segments.map((segment) => segment.kind === "gap"
     ? { id: segment.id, source: GAP, srcIn: 0, srcOut: toSeconds(segment.frames, rate) }
-    : { id: segment.id, source: segment.source, srcIn: toSeconds(segment.in_frame, rate), srcOut: toSeconds(segment.out_frame, rate) });
+    : { id: segment.id, source: segment.source, srcIn: toSeconds(segment.in_frame, rate), srcOut: toSeconds(segment.out_frame, rate), ...(segment.tracks ? { tracks: segment.tracks } : {}) });
   const mutes = document.mutes.map((mute) => ({ source: mute.source, track: mute.track, srcIn: toSeconds(mute.in_frame, rate), srcOut: toSeconds(mute.out_frame, rate) }));
   const markers = document.markers.map((marker) => ({ id: marker.id, at: toSeconds(marker.frame, rate), track: marker.track, name: marker.name, comment: marker.comment, color: marker.color }));
   return { document, timeline: { segments, mutes }, markers };
@@ -75,13 +75,16 @@ export function fromDocument(document: EditDocument): OpenEdit {
 export function toDocument(base: EditDocument, timeline: Timeline, markers: TimelineMarker[]): EditDocument {
   const rate = base.edit_rate;
   const segments: EditSegment[] = [];
+  const lanes = new Set(base.tracks.map((track) => track.id));
   for (const segment of timeline.segments) {
     if (segment.source === GAP) {
       const frames = toFrames(segment.srcOut - segment.srcIn, rate);
       if (frames > 0) segments.push({ kind: "gap", id: segment.id, frames });
     } else {
       const inFrame = toFrames(segment.srcIn, rate), outFrame = toFrames(segment.srcOut, rate);
-      if (outFrame > inFrame) segments.push({ kind: "source", id: segment.id, source: segment.source, in_frame: Math.max(0, inFrame), out_frame: outFrame });
+      // A clip's own track list, minus any lane the string out no longer has.
+      const tracks = segment.tracks?.filter((lane) => lanes.has(lane));
+      if (outFrame > inFrame) segments.push({ kind: "source", id: segment.id, source: segment.source, in_frame: Math.max(0, inFrame), out_frame: outFrame, ...(tracks ? { tracks } : {}) });
     }
   }
   const total = segments.reduce((sum, segment) => sum + (segment.kind === "gap" ? segment.frames : segment.out_frame - segment.in_frame), 0);
@@ -102,7 +105,7 @@ export function toDocument(base: EditDocument, timeline: Timeline, markers: Time
 export function wordsFromSpeech(speech: AafSpeech, source: string, track: string): TimelineWord[] {
   return speech.words.map((word, index) => ({
     id: `${source}:${track}:${word.cue_id}:${index}`, source, track, text: word.text,
-    start: word.start_sample / 16_000, end: word.end_sample / 16_000,
+    start: word.start_sample / 16_000, end: word.end_sample / 16_000, cue: word.cue_id,
   }));
 }
 

@@ -1,6 +1,8 @@
-import { useRef } from "react";
-import type { Ghost, TimelineParagraph as Paragraph, PlacedWord, TimelineLane } from "../lib/edit-model";
+import { useMemo, useRef } from "react";
+import { paragraphHolding, paragraphStarts, placementKey, type Ghost, type TimelineParagraph as Paragraph, type PlacedWord, type TimelineLane } from "../lib/edit-model";
+import { EditGhostLine } from "./EditGhostLine";
 import { EditParagraph, type EditSeamInfo } from "./EditParagraph";
+import { EditWindowedParagraphs } from "./EditWindowedParagraphs";
 
 /**
  * A caret sits BEFORE word `anchor` when collapsed, or right after word
@@ -13,6 +15,8 @@ export type EditSelection = { anchor: number; focus: number; collapsed: boolean;
 type Props = {
   speakers: TimelineLane[]; colors: Record<string, string>; fps: number; recordStart: number;
   paragraphs: Paragraph[]; placed: PlacedWord[]; selection: EditSelection; current: string | null;
+  /** Some source time is cut in, whether or not any of it has words. */
+  hasCut?: boolean;
   sourceLabel: (source: string) => string;
   seams: Record<number, EditSeamInfo>; seam: number | null; onSeam: (index: number) => void;
   /** Removed lines to show in place, or null while they are hidden. */
@@ -33,6 +37,11 @@ const ends = (text: string) => /[.!?]["”']?$/.test(text);
 export function EditTranscript(props: Props) {
   const { placed, selection } = props;
   const drag = useRef<{ index: number; scrub: boolean } | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  // Drawn a page at a time (EditWindowedParagraphs): a real 20-mic sequence cut in whole is 146k words.
+  const firsts = useMemo(() => paragraphStarts(props.paragraphs), [props.paragraphs]);
+  const sizes = useMemo(() => props.paragraphs.map((paragraph) => paragraph.words.length), [props.paragraphs]);
+  const playing = props.current == null ? null : placed.findIndex((item) => placementKey(item) === props.current);
   const count = placed.length;
   const range: [number, number] | null = selection.collapsed ? null
     : [Math.min(selection.anchor, selection.focus), Math.max(selection.anchor, selection.focus)];
@@ -43,14 +52,10 @@ export function EditTranscript(props: Props) {
     const found = (target as HTMLElement | null)?.closest?.("[data-index]");
     return found ? Number(found.getAttribute("data-index")) : null;
   };
-  const paragraphOf = (index: number) => {
-    let seen = 0;
-    return props.paragraphs.findIndex((paragraph) => (seen += paragraph.words.length) > index);
-  };
+  const paragraphOf = (index: number) => paragraphHolding(firsts, index) ?? -1;
   const lineAround = (index: number): [number, number] => {
     const paragraph = paragraphOf(index);
-    const first = props.paragraphs.slice(0, paragraph).reduce((sum, item) => sum + item.words.length, 0);
-    const last = first + props.paragraphs[paragraph].words.length - 1;
+    const first = firsts[paragraph], last = first + props.paragraphs[paragraph].words.length - 1;
     let from = index, to = index;
     while (from > first && !ends(placed[from - 1].word.text)) from--;
     while (to < last && !ends(placed[to].word.text)) to++;
@@ -90,16 +95,9 @@ export function EditTranscript(props: Props) {
     if (event.key === "Escape" && range) { event.preventDefault(); return props.onSelect({ anchor: range[0], focus: range[0], collapsed: true }, false); }
     if (event.key.toLowerCase() === "a" && event.metaKey && count) { event.preventDefault(); return props.onSelect({ anchor: 0, focus: count - 1, collapsed: false }, false); }
   };
-  const ghostLine = (ghost: Ghost) => <div key={ghost.id} className="cp-te-ghost-line" style={{ "--te-speaker": props.colors[ghost.track] } as React.CSSProperties}>
-    <div className="cp-te-para-head"><span className="cp-te-swatch" aria-hidden="true" /><span className="cp-te-para-name">{nameOf(ghost.track)}</span>
-      <span className="cp-te-ghost-tag">Removed</span>
-      <button type="button" className="btn btn-ghost cp-te-btn cp-te-ghost-restore" onClick={() => props.onRestore(ghost)}
-        aria-label={`Restore ${nameOf(ghost.track)}'s line “${ghost.words.map((word) => word.text).join(" ")}”`} title="Put this line back on every track">↺ Restore</button></div>
-    <p className="cp-te-para-text cp-te-ghost-text">{ghost.words.map((word) => word.text).join(" ")}</p>
-  </div>;
-  let offset = 0;
+  const ghostLine = (ghost: Ghost) => <EditGhostLine key={ghost.id} ghost={ghost} color={props.colors[ghost.track]} name={nameOf(ghost.track)} onRestore={props.onRestore} />;
   const lastSegment = placed.length ? placed[placed.length - 1].segment : -1;
-  return <div className="cp-te-doc" role="region" aria-label="Edit transcript" aria-describedby="cp-te-doc-help" tabIndex={0} onKeyDown={keys}
+  return <div ref={root} className="cp-te-doc" role="region" aria-label="Edit transcript" aria-describedby="cp-te-doc-help" tabIndex={0} onKeyDown={keys}
     onPointerDown={(event) => {
       const index = indexOf(event.target);
       if (index == null || event.button !== 0) return;
@@ -121,14 +119,15 @@ export function EditTranscript(props: Props) {
       if (index == null || event.altKey) return;
       if (event.detail === 2) { const [from, to] = lineAround(index); props.onSelect({ anchor: from, focus: to, collapsed: false }, false); }
       if (event.detail === 3) {
-        const paragraph = paragraphOf(index), first = props.paragraphs.slice(0, paragraph).reduce((sum, item) => sum + item.words.length, 0);
+        const paragraph = paragraphOf(index), first = firsts[paragraph];
         props.onSelect({ anchor: first, focus: first + props.paragraphs[paragraph].words.length - 1, collapsed: false }, false);
       }
     }}>
     <p id="cp-te-doc-help" className="cp-visually-hidden">Arrows move by word. Double-click a line, triple-click a paragraph. Delete cuts all tracks; Shift-Delete one speaker. Option-drag scrubs. Option-Up/Down moves a paragraph. Return corrects a word.</p>
-    {props.paragraphs.map((paragraph, index) => {
-      const first = offset;
-      offset += paragraph.words.length;
+    <EditWindowedParagraphs root={root} sizes={sizes}
+      keep={[playing, selection.anchor, selection.focus].map((index) => paragraphHolding(firsts, index))}
+      render={(index) => {
+      const paragraph = props.paragraphs[index], first = firsts[index];
       const speaker = props.speakers.find((item) => item.id === paragraph.track)!;
       const previous = index ? props.paragraphs[index - 1] : null;
       const previousWord = previous?.words[previous.words.length - 1];
@@ -142,8 +141,10 @@ export function EditTranscript(props: Props) {
           corrections={props.corrections} editing={props.editing} onCorrect={props.onCorrect}
           first={index === 0} last={index === props.paragraphs.length - 1} onMove={(direction) => props.onMove(index, direction)} />
       </div>;
-    })}
+    }} />
     {ghostsBetween(lastSegment, Infinity).map(ghostLine)}
-    {!props.paragraphs.length && <p className="cp-te-doc-empty">Empty. Select lines in a source, then Insert (V) or Append.</p>}
+    {!props.paragraphs.length && <p className="cp-te-doc-empty">{props.hasCut
+      ? "Nothing cut in here has words: its mics are not transcribed yet, or are off a track. Transcribe them in AAF Audio."
+      : "Empty. Select lines in a source, then Insert (V) or Append."}</p>}
   </div>;
 }

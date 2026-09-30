@@ -114,7 +114,7 @@ pub async fn aaf_open(app: AppHandle, document_id: String) -> Result<AafDocument
 
 #[tauri::command]
 pub async fn aaf_list(app: AppHandle) -> Result<Vec<AafDocumentSummary>, AppError> {
-    store::list(&store::root(&app)?)
+    store::shelf(&store::root(&app)?)
 }
 
 #[tauri::command]
@@ -200,21 +200,30 @@ pub async fn aaf_transcribe_track(app: AppHandle, document_id: String, track_id:
 
 /// Speech analysis for one track: where its mic is open, loud moments no word
 /// covers, and word boundaries inside its saved transcript's cues. Reads the
-/// waveform overview (building it first if needed); never decodes again.
+/// waveform overview; never decodes again. With `build` false a track whose
+/// overview does not exist yet gets its words placed by length alone
+/// (`measured: false`) rather than an hours-long build nobody asked for.
 #[tauri::command]
-pub async fn aaf_speech(app: AppHandle, document_id: String, track_id: String, job_id: String) -> Result<crate::speech::AafSpeech, AppError> {
-    diagnostics::operation(&app, &job_id, "speech", &format!("Speech analysis · document {document_id} · track {track_id}"), async {
+pub async fn aaf_speech(app: AppHandle, document_id: String, track_id: String, build: bool, job_id: String) -> Result<crate::speech::AafSpeech, AppError> {
+    diagnostics::operation(&app, &job_id, "speech", &format!("Speech analysis · document {document_id} · track {track_id} · build {build}"), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let document = store::load(&store::root(&app)?, &document_id)?;
-    peaks::waveform(&app, &document, &track_id, 0, document.manifest.duration_frames, true, &job_id).await?;
-    let path = peaks::overview_path(&app, &document, &track_id)?;
-    let (pairs, hz, bucket) = tauri::async_runtime::spawn_blocking(move || peaks::read_base(&path)).await
-        .map_err(|e| AppError::internal(e.to_string()))??;
     let cues: Vec<crate::speech::CueInput> = document.transcripts.iter().filter(|transcript| transcript.track_id == track_id)
         .flat_map(|transcript| transcript.cues.iter())
         .map(|cue| crate::speech::CueInput { id: &cue.id, start_sample: cue.start_sample, end_sample: cue.end_sample, text: &cue.text })
         .collect();
-    Ok(crate::speech::analyse(&track_id, &pairs, hz, bucket, &cues))
+    store::track(&document, &track_id)?;
+    let path = peaks::overview_path(&app, &document, &track_id)?;
+    if build { peaks::waveform(&app, &document, &track_id, 0, document.manifest.duration_frames, true, &job_id).await?; }
+    else if !path.is_file() { return Ok(crate::speech::unmeasured(&track_id, &cues)); }
+    let read = tauri::async_runtime::spawn_blocking(move || peaks::read_base(&path)).await
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    match read {
+        Ok((pairs, hz, bucket)) => Ok(crate::speech::analyse(&track_id, &pairs, hz, bucket, &cues)),
+        // A damaged cache is only worth an error when a build was asked for.
+        Err(_) if !build => Ok(crate::speech::unmeasured(&track_id, &cues)),
+        Err(error) => Err(error),
+    }
     }).await
 }
 
@@ -233,9 +242,26 @@ pub async fn aaf_export_edit(app: AppHandle, edit_id: String, output_path: Strin
         store::source_ready(&aaf)?;
         let graph = aaf.manifest.graph.as_ref().ok_or_else(|| AppError::invalid(format!(
             "{} was imported before sequences could be written back. Import its AAF again, then export.", aaf.manifest.name)))?;
-        sources.push(crate::edit_export::ExportSource { id: source.id.clone(), aaf_path: aaf.source_path.clone(),
-            sequence_id: graph.sequence_id.clone(),
-            picture_slot: graph.picture_tracks.iter().find(|track| !track.clips.is_empty()).map(|track| track.slot_id) });
+        // The writer reads the source AAF the way import does: from a verified
+        // local copy with the original's fingerprint, not sector by sector
+        // over NEXIS, where a large AAF could run into the stage limit.
+        let local = local_read::for_parser(&app, &job_id, std::path::Path::new(&aaf.source_path)).await?;
+        // V1 when it has picture, else the first track that does: the same
+        // track String Outs draws, so the export carries the picture shown.
+        let picture = graph.picture_tracks.iter().find(|track| track.physical_track_number == Some(1) && !track.clips.is_empty())
+            .or_else(|| graph.picture_tracks.iter().find(|track| !track.clips.is_empty()));
+        // Group angles, so a person who is an alternate can have a track of
+        // their own that plays their mic (edit_export::build_request). Owners
+        // as String Outs names people: the mic owner label, else the track name.
+        let owner = |id: &str| aaf.labels.iter().find(|label| label.track_id == id).map(|label| label.owner_name.trim().to_string())
+            .filter(|name| !name.is_empty())
+            .or_else(|| aaf.manifest.tracks.iter().find(|track| track.id == id).map(|track| track.name.trim().to_string()))
+            .unwrap_or_else(|| id.to_string());
+        let lanes: Vec<crate::edit_export::GroupLane> = graph.lanes.iter().map(|lane| (lane.track_id.as_str(), lane.parent_track_id.as_deref(),
+            lane.branch_id.as_deref(), owner(&lane.track_id))).collect();
+        let alternates = crate::edit_export::alternates_of(&lanes);
+        sources.push(crate::edit_export::ExportSource { id: source.id.clone(), aaf_path: local.to_string_lossy().into_owned(),
+            sequence_id: graph.sequence_id.clone(), picture_slot: picture.map(|track| track.slot_id), alternates });
     }
     let request = crate::edit_export::build_request(&document, &sources, &approach, &output_path)?;
     let cache = app.path().app_cache_dir().map_err(|e| AppError::internal(format!("app_cache_dir: {e}")))?;

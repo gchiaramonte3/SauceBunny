@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { EXPECTED_BACKEND_BUILD_ID } from "../src/lib/build-id";
-import { multitrackFixture, multitrackTranscript } from "../src/test/multitrack-fixture";
+import { multitrackFixture, multitrackGroupFixture, multitrackTranscript } from "../src/test/multitrack-fixture";
 import { tauriMockInit } from "./tauri-mock";
 
 /**
@@ -10,8 +10,13 @@ import { tauriMockInit } from "./tauri-mock";
  * is the wiring (picker, session, sources, text, delete, undo labels), not the
  * Rust store, which has its own tests.
  */
-async function boot(page: Page) {
-  const fixture = multitrackFixture();
+async function boot(page: Page, grouped = false, picture = false) {
+  // Grouped: Sam's and the room's mics are angles inside Alex's multigroup.
+  const fixture = grouped ? multitrackGroupFixture() : multitrackFixture();
+  // Picture: V1 is one group clip, as a multicam sequence from Avid carries it. Metadata only.
+  if (picture && fixture.manifest.graph) fixture.manifest.graph.picture_tracks = [{ slot_id: 10, physical_track_number: 1, name: "V1", component: "Sequence",
+    clips: [{ start_frame: 0, duration_frames: 24000, kind: "clip", name: "CAM A", master_mob_id: null, file_mob_id: null, tape_name: null, source_start_frame: null,
+      source_timecode_fps: null, source_drop_frame: null, group: true, effect: null, descriptor: null }] }];
   fixture.labels = [{ track_id: "track-1", owner_name: "Alex", cast_member_id: null, color: null }, { track_id: "track-2", owner_name: "Sam", cast_member_id: null, color: null }];
   const cue = (id: string, from: number, to: number, text: string) => ({ id, start_sample: from * 16_000, end_sample: to * 16_000, text, boundary_review: false });
   fixture.transcripts = [
@@ -48,7 +53,7 @@ async function boot(page: Page) {
       switch (command) {
         case "aaf_list": return Promise.resolve([{ id: document.id, name: document.manifest.name, track_count: 3, transcribed_tracks: 2, source_path: document.source_path }]);
         case "aaf_open": return Promise.resolve(document);
-        case "aaf_speech": return Promise.resolve({ track_id: args.trackId, floor_db: -60, activity: [[160_000, 720_000]], reactions: [], words: words(args.trackId as string) });
+        case "aaf_speech": return Promise.resolve({ track_id: args.trackId, floor_db: -60, activity: [[160_000, 720_000]], reactions: [], words: words(args.trackId as string), measured: true });
         case "aaf_waveform": return Promise.resolve({ track_id: args.trackId, peaks: [] });
         case "edit_list": return Promise.resolve([...edits.entries()].map(([key, edit]) => ({ id: key, title: headOf(key).document.title, created_at: 1, updated_at: 2, head: edit.head, states: edit.states.length })));
         case "edit_create": edits.set(id, { states: [{ id: 1, parent: null, label: "New Edit", document: args.document as Doc }], head: 1 }); return Promise.resolve(headOf(id));
@@ -78,6 +83,22 @@ test("a first visit welcomes, and a new empty string out opens with nothing to e
   await expect(page.getByRole("heading", { name: "Pull the story out, bite by bite" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Export AAF/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
+  // Nothing to cut from: the timeline says where sequences come from.
+  await expect(page.getByText("Nothing to cut from yet.", { exact: false })).toBeVisible();
+});
+
+test("a sequence added with nothing cut in offers the whole sequence, in one undoable step", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByText("Start with the whole sequence").click();
+  await page.getByRole("button", { name: "Create" }).click();
+  const add = page.getByRole("button", { name: "Add all of Interview" });
+  await expect(add).toBeVisible();
+  await add.click();
+  await expect(add).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Added the whole sequence." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo Add Whole Sequence" })).toBeEnabled();
 });
 
 test("an edit from a sequence shows its words, and a delete is one undoable step", async ({ page }) => {
@@ -88,6 +109,15 @@ test("an edit from a sequence shows its words, and a delete is one undoable step
   const moved = page.locator(".cp-te-doc [data-index]", { hasText: "moved" }).first();
   await expect(moved).toBeVisible();
   await expect(page.locator(".cp-te-doc")).toContainText("Sam answers the door.");
+  // Play and the readouts lead the timeline's tool row; there is no line of their own.
+  await expect(page.getByRole("toolbar", { name: "Timeline tools" }).getByRole("group", { name: "Transport" })).toBeVisible();
+  // Undo and redo side by side, and every person's name whole in its track header.
+  const [undoBox, redoBox] = await Promise.all([page.locator(".cp-te-undo button").first().boundingBox(), page.locator(".cp-te-undo button").last().boundingBox()]);
+  expect(Math.abs(undoBox!.y - redoBox!.y)).toBeLessThan(1);
+  expect(redoBox!.x).toBeGreaterThan(undoBox!.x);
+  // Each record track says who is patched to it (the patch panel), and no header overflows.
+  expect(await page.getByRole("combobox", { name: /^Who plays on A\d+$/ }).count()).toBeGreaterThan(0);
+  expect(await page.locator(".cp-te-tl-head").evaluateAll((all) => all.filter((head) => head.scrollWidth > head.clientWidth + 1).length)).toBe(0);
   await page.locator(".cp-te-doc [data-index]", { hasText: "Rosa" }).first().dblclick();
   await page.keyboard.press("Backspace");
   const undo = page.getByRole("button", { name: /^Undo / });
@@ -95,6 +125,90 @@ test("an edit from a sequence shows its words, and a delete is one undoable step
   await expect(undo).toHaveAccessibleName(/Undo (Delete|Remove)/);
   await page.keyboard.press("Meta+z");
   await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
+});
+
+test("a group angle has no track until their words are cut in, then plays on one of their own", async ({ page }) => {
+  await boot(page, true);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByRole("button", { name: "Create" }).click();
+  const record = page.locator(".cp-te-doc");
+  // Who each record track plays, top-down: the patch panel in the track headers.
+  const patched = () => page.getByRole("combobox", { name: /^Who plays on A\d+$/ }).evaluateAll((all) => all.map((panel) => (panel as HTMLSelectElement).selectedOptions[0]?.text));
+  await expect(record).toContainText("I moved here in May.");
+  // Sam is a person (the source pane has his words) but on no track, so the cut does not play him.
+  await expect.poll(patched).toEqual(["Alex"]);
+  await expect(record).not.toContainText("Sam answers the door.");
+  // The source reads a person at a time, as AAF Audio does: Sam's words are under his tab.
+  await page.getByRole("tab", { name: "Sam" }).click();
+  const source = page.locator(".cp-te-src-body");
+  await source.locator("[data-src-index]", { hasText: "Sam" }).first().click();
+  await source.locator("[data-src-index]", { hasText: "door." }).first().click({ modifiers: ["Shift"] });
+  await page.getByRole("button", { name: "Append", exact: true }).click();
+  await expect(page.getByText("Sam is now on a track.", { exact: false })).toBeVisible();
+  await expect.poll(patched).toEqual(["Alex", "Sam"]);
+  await expect(page.getByRole("button", { name: "Track A2" })).toBeVisible();
+  await expect(record).toContainText("Sam answers the door.");
+  await expect(page.getByRole("button", { name: /^Undo Insert/ })).toBeEnabled();
+  await page.getByRole("button", { name: "Take Sam off a track" }).click();
+  await expect.poll(patched).toEqual(["Alex"]);
+  await expect(record).not.toContainText("Sam answers the door.");
+});
+
+test("Source shows the loaded sequence's mics, its group alternates and V1, and what is marked there cuts into the record", async ({ page }) => {
+  await boot(page, true, true);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  // An empty record, the way Avid starts a new sequence: the cut is built from the source.
+  const whole = page.getByLabel(/whole sequence/i);
+  if (await whole.isChecked().catch(() => false)) await whole.uncheck();
+  await page.getByRole("button", { name: "Create" }).click();
+  const record = page.locator(".cp-te-doc");
+  await page.getByRole("radio", { name: "Source" }).click();
+  const rows = page.locator("[data-source-track]");
+  // Alex's track; Sam's and the room's mics are alternates inside his group, closed as AAF Audio opens it.
+  await expect(rows).toHaveCount(1);
+  await expect(page.getByRole("list", { name: "Picture cuts on V1" })).toContainText("CAM A");
+  await page.getByRole("button", { name: "Alternative microphones for A1" }).click();
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(1).locator(".cp-te-tl-branch")).toHaveAttribute("title", "Group fixture");
+  // As in AAF Audio the main track is on and its alternates off: what Insert brings.
+  expect(await rows.locator(".cp-te-tl-track").evaluateAll((all) => all.map((button) => button.getAttribute("aria-pressed")))).toEqual(["true", "false", "false"]);
+  // The tool row is the same one; its record-only edits rest while the source shows.
+  await expect(page.getByRole("button", { name: "Add edit at playhead" })).toBeDisabled();
+  // Selecting text marks the source, on the source timeline's ruler too.
+  const source = page.locator(".cp-te-src-body");
+  await source.locator("[data-src-index]", { hasText: "Then" }).first().click();
+  await source.locator("[data-src-index]", { hasText: "me." }).first().click({ modifiers: ["Shift"] });
+  await expect(page.locator(".cp-te-tl-ruler .cp-te-tl-marked")).toHaveCount(1);
+  // The room's mic turned on: the clip brings it too. The record starts with no tracks and
+  // patches the clip's people top-down in the sequence's order: Alex on A1, the room on A2.
+  await rows.nth(2).locator(".cp-te-tl-track").click();
+  await page.getByRole("button", { name: "Append", exact: true }).click();
+  await page.getByRole("radio", { name: "Record" }).click();
+  await expect(rows).toHaveCount(0);
+  await expect(record).toContainText("Then Rosa called me.");
+  const patched = () => page.getByRole("combobox", { name: /^Who plays on A\d+$/ }).evaluateAll((all) => all.map((panel) => (panel as HTMLSelectElement).selectedOptions[0]?.text));
+  await expect.poll(patched).toEqual(["Alex", "Room"]);
+  // The patch panel: put the room on A1, and Alex moves down.
+  await page.getByRole("combobox", { name: "Who plays on A1" }).selectOption({ label: "Room" });
+  await expect.poll(patched).toEqual(["Room", "Alex"]);
+  await expect(page.getByRole("button", { name: "Undo Patch Room to A1" })).toBeEnabled();
+});
+
+test("a new string out has no record tracks until someone is patched, and the empty track below patches the next one", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  const whole = page.getByLabel(/whole sequence/i);
+  if (await whole.isChecked().catch(() => false)) await whole.uncheck();
+  await page.getByRole("button", { name: "Create" }).click();
+  // Nothing cut in yet: no record tracks at all, only the empty one to patch someone to.
+  await expect(page.getByRole("combobox", { name: /^Who plays on A\d+$/ })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Patch someone to A1" })).toBeVisible();
+  await page.getByRole("combobox", { name: "Patch someone to A1" }).selectOption({ label: "Sam" });
+  const patched = () => page.getByRole("combobox", { name: /^Who plays on A\d+$/ }).evaluateAll((all) => all.map((panel) => (panel as HTMLSelectElement).selectedOptions[0]?.text));
+  await expect.poll(patched).toEqual(["Sam"]);
 });
 
 test("One per person makes a string out for each person who speaks", async ({ page }) => {

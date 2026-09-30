@@ -138,7 +138,9 @@ export function TeTimeline(props: Props) {
       <div className="cp-te-tl-corner" aria-hidden="true" />
       <div ref={ruler} className="cp-te-tl-ruler" {...scrub}>
         {ticks.map((t) => <span key={t} className="cp-te-tl-tick" style={{ left: x(t) }}>{teTc(t, fps)}</span>)}
-        {marked && <span className="cp-te-tl-marked" style={{ left: x(marked[0]), width: w(marked[1] - marked[0]) }} aria-hidden="true" />}
+        {marked ? <span className="cp-mark-range cp-te-tl-marked" style={{ left: x(marked[0]), width: w(marked[1] - marked[0]) }} aria-hidden="true" />
+          : <>{marks.in != null && <span className="cp-mark in" style={{ left: x(marks.in) }} aria-hidden="true" />}
+            {marks.out != null && <span className="cp-mark out" style={{ left: x(marks.out) }} aria-hidden="true" />}</>}
         {props.markers.filter((t) => t >= start && t <= start + span).map((t) => <span key={t} className="cp-te-tl-marker" style={{ left: x(t) }} title={`Marker at ${teTc(t, fps)}`} />)}
         {seams.filter((cut) => cut.at >= start && cut.at <= start + span).map((cut) => <button key={cut.index} type="button"
           className={`cp-te-tl-seam-mark${props.seam === cut.index ? " is-selected" : ""}${cut.clipped.size ? " is-clipped" : ""}`} style={{ left: x(cut.at) }}

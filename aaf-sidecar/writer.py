@@ -15,6 +15,11 @@ Two ways to carry a group (multicam) edit:
 - ``B`` follows what plays down to the speaker's master clip channel and
   references that directly. Match Frame lands on the master clip.
 
+A track may also name group angles (``choices``) to play instead of the one
+the editor chose: a person who is an alternate inside a group gets a track of
+their own, silent outside the groups that offer their mic. ``C`` keeps the
+group with that angle selected; ``B`` goes to that angle's master clip.
+
 After writing, the file is re-read with the app's own reader
 (``graph.GraphTimeline``) and every output frame of every track is compared
 with the source frame it was cut from: same source mob, same channel, same
@@ -36,6 +41,8 @@ from aaf2.components import (Filler, OperationGroup, ScopeReference, Selector, S
                              SourceReference, Transition)
 from aaf2.misc import TaggedValueHelper, VaryingValue
 
+from graph import GraphTimeline, choice_id
+from picture import is_muted
 from reader import (MAX_DEPTH, ReaderError, clean_name, fail, fingerprint, media_kind, pending_file,
                     rate_of, value)
 
@@ -51,6 +58,7 @@ MAX_MARKERS = 100000
 MAX_TEXT = 5000
 MAX_DURATION_SECONDS = 24 * 60 * 60
 MAX_CLONE_DEPTH = MAX_DEPTH * 4
+MAX_CHOICES = 64
 RAW_AUDIO_EFFECTS = ('Audio Pan', 'Audio Gain')
 FADES = ('FadeInLength', 'FadeInType', 'FadeOutLength', 'FadeOutType')
 # Media Composer's portable marker colours: the eight its text import accepts.
@@ -155,7 +163,23 @@ def validate(request):
                 invalid(f'{where}: source_slots names unknown source "{key}".')
             if type(slot) is not int or slot < 0:
                 invalid(f'{where}: the slot for source "{key}" must be a slot id.')
-        spec['tracks'].append({'kind': track['kind'], 'number': number, 'slots': dict(slots)})
+        choices = track.get('choices', {})
+        if not isinstance(choices, dict) or (choices and track['kind'] != 'sound'):
+            invalid(f'{where}: choices must map source ids to group angles, on a sound track.')
+        for key, angles in choices.items():
+            if key not in slots:
+                invalid(f'{where}: choices names source "{key}", which the track does not use.')
+            if (not isinstance(angles, list) or not 1 <= len(angles) <= MAX_CHOICES
+                    or not all(isinstance(angle, str) and 0 < len(angle) <= 512 for angle in angles)):
+                invalid(f'{where}: the choices for source "{key}" must list group angles.')
+        # A track may write its groups its own way: picture that stays a
+        # switchable multigroup (C) while each person's audio is the clip that
+        # plays (B), so twenty lavs do not become twenty-way groups per bite.
+        approach = track.get('approach', spec['approach'])
+        if approach not in ('B', 'C'):
+            invalid(f'{where}: approach must be "B" or "C".')
+        spec['tracks'].append({'kind': track['kind'], 'number': number, 'slots': dict(slots), 'approach': approach,
+                               'choices': {key: frozenset(angles) for key, angles in choices.items()}})
     sound = sum(t['kind'] == 'sound' for t in spec['tracks'])
     if not 1 <= sound <= MAX_SOUND_TRACKS:
         invalid(f'An edit needs between 1 and {MAX_SOUND_TRACKS} sound tracks.')
@@ -267,6 +291,10 @@ class Cloner:
     def __init__(self, dst, rate, approach, warnings):
         self.dst, self.rate, self.approach, self.warnings = dst, rate, approach, warnings
         self.references = set()
+        # The group angles the track being built asks for, and whether the
+        # copy is inside a group that offers one. With angles asked for,
+        # nothing outside such a group is written: the track is that person.
+        self.prefer, self.inside = frozenset(), False
 
     def warn(self, message):
         if message not in self.warnings and len(self.warnings) < 32:
@@ -287,19 +315,68 @@ class Cloner:
             return self.dst.create.Filler(media_kind=seg.media_kind, length=length)
         if isinstance(seg, Selector):
             selected = value(seg, 'Selected')
-            if self.approach == 'B':
+            options = [selected, *(value(seg, 'Alternates') or [])]
+            chosen = next((option for option in options if option is not None and choice_id(option) in self.prefer),
+                          None) if self.prefer and not is_muted(seg) else None
+            if self.prefer and not self.inside and chosen is None:
+                # Not this group's angle: keep looking in what it plays, as the
+                # reader does. An angle inside an UNSELECTED option would need
+                # both choices made, which a track's list cannot say, and
+                # writing silence there would pass the self-check, so refuse.
+                if any(self.offers(option, depth + 1) for option in options[1:] if option is not None):
+                    fail('A person given a track here is an angle inside a group that is itself an unselected '
+                         'angle of another group. Switch the outer group to that angle in Avid, export the AAF '
+                         'again, then export this string out.', 'unsupported_aaf')
                 return self.clone(selected, offset, length, depth + 1, True)
-            new = copy_without(seg, self.dst, ('Selected', 'Alternates'))   # keeps Avid's attributes
-            new['Selected'].value = self.clone(selected, offset, length, depth + 1, True)
-            new['Alternates'].value = [self.clone(a, offset, length, depth + 1, True)
-                                       for a in (value(seg, 'Alternates') or [])]
-            new.length = length
-            return new
+            play = selected if chosen is None else chosen
+            previous, self.inside = self.inside, self.inside or chosen is not None
+            try:
+                if self.approach == 'B':
+                    return self.clone(play, offset, length, depth + 1, True)
+                new = copy_without(seg, self.dst, ('Selected', 'Alternates'))   # keeps Avid's attributes
+                new['Selected'].value = self.clone(play, offset, length, depth + 1, True)
+                new['Alternates'].value = self.alternates([a for a in options if a is not play and a is not None], offset, length, depth)
+                new.length = length
+                return new
+            finally:
+                self.inside = previous
         if isinstance(seg, Sequence):
             return self.sequence(seg, offset, length, depth)
         if isinstance(seg, OperationGroup):
             return self.operation(seg, offset, length, depth)
         fail(f'{type(seg).__name__} components cannot be copied into a new sequence. Render or remove it in Avid.')
+
+    def alternates(self, options, offset, length, depth):
+        """The angles a kept group can still switch to. One that cannot be cut
+        (a speed change on a camera, as HEAT 2's slow-motion angle has) is left
+        out of this bite's group with a warning, rather than failing the whole
+        export: the spec allows a group with fewer alternates, the angle that
+        plays is unchanged, and every other angle stays switchable."""
+        kept = []
+        for option in options:
+            before = set(self.references)
+            try:
+                kept.append(self.clone(option, offset, length, depth + 1, True))
+            except ReaderError as error:
+                self.references = before
+                why = str(error).split('. ')[0].rstrip('.')
+                self.warn(f'A group angle ({why}) was left out of its group; the angle that plays and every other angle are kept.')
+        return kept
+
+    def offers(self, seg, depth):
+        """Whether a group below `seg` offers one of the angles being sought."""
+        if depth > MAX_CLONE_DEPTH or seg is None:
+            return False
+        if isinstance(seg, Selector):
+            options = [value(seg, 'Selected'), *(value(seg, 'Alternates') or [])]
+            return any(o is not None and (choice_id(o) in self.prefer or self.offers(o, depth + 1)) for o in options)
+        if isinstance(seg, Sequence):
+            return any(self.offers(c, depth + 1) for c in seg.components)
+        if isinstance(seg, OperationGroup):
+            return any(self.offers(i, depth + 1) for i in value(seg, 'InputSegments') or [])
+        if isinstance(seg, SourceClip) and isinstance(seg.mob, aaf2.mobs.CompositionMob) and seg.slot is not None:
+            return self.offers(seg.slot.segment, depth + 1)
+        return False
 
     def source_clip(self, seg, offset, length, depth):
         if seg.mob_id is None or seg.mob_id.int == 0:
@@ -311,10 +388,16 @@ class Cloner:
             fail(f'A clip points at {seg.mob_id} slot {seg.slot_id}, which is not in the source AAF. '
                  'Export it again with its master clips.', 'missing_media')
         target_rate = rate_of(target)
-        if self.approach == 'B' and isinstance(seg.mob, aaf2.mobs.CompositionMob):
+        seeking = self.prefer and not self.inside
+        if seeking and not isinstance(seg.mob, aaf2.mobs.CompositionMob):
+            return self.dst.create.Filler(media_kind=seg.media_kind, length=length)
+        # Looking for an angle, C also opens a group clip it would otherwise
+        # copy whole: the angle is chosen on the Selector inside it.
+        if (self.approach == 'B' or seeking) and isinstance(seg.mob, aaf2.mobs.CompositionMob):
             # A group or submaster clip: follow it to the clip that plays.
             if target_rate != self.rate:
-                fail('A nested group runs at a different edit rate. Use approach C for this bite.')
+                fail('A nested group runs at a different edit rate. Use approach C for this bite.' if not seeking else
+                     'A nested group runs at a different edit rate, so an angle inside it cannot be chosen.')
             return self.clone(target.segment, seg.start + offset, length, depth + 1, True)
         clip = seg.copy(root=self.dst)
         clip.start = seg.start + trim_units(offset, target_rate, self.rate)
@@ -544,14 +627,15 @@ def build(spec, sources, destination, warnings):
                     append_piece(sequence, dst.create.Filler(media_kind=target['kind'], length=segment['length']), dst, target['kind'])
                     continue
                 source_slot = sources[segment['source']].slots[slot_id]
+                prefer = track['choices'].get(segment['source'], frozenset())
                 cursor = 0
                 for first, last in muted_ranges(spec['mutes'].get((at, index), []), segment['length']):
                     if first > cursor:
-                        piece(spec, cloners, segment, at, target, source_slot, cursor, first, dst)
+                        piece(spec, cloners, segment, at, target, source_slot, cursor, first, dst, prefer, track['approach'])
                     append_piece(sequence, dst.create.Filler(media_kind=target['kind'], length=last - first), dst, target['kind'])
                     cursor = last
                 if cursor < segment['length']:
-                    piece(spec, cloners, segment, at, target, source_slot, cursor, segment['length'], dst)
+                    piece(spec, cloners, segment, at, target, source_slot, cursor, segment['length'], dst, prefer, track['approach'])
         for target in out:
             target['slot'].segment['Components'].value = target['parts']
             target['slot'].segment.length = spec['length']
@@ -584,12 +668,17 @@ def muted_ranges(ranges, length):
     return merged
 
 
-def piece(spec, cloners, segment, at, target, source_slot, first, last, dst):
+def piece(spec, cloners, segment, at, target, source_slot, first, last, dst, prefer=frozenset(), approach=None):
+    cloner = cloners[segment['source']]
+    cloner.prefer, cloner.inside = prefer, False
+    cloner.approach = approach or spec['approach']
     try:
-        component = cloners[segment['source']].clone(source_slot.segment, segment['in'] + first, last - first)
+        component = cloner.clone(source_slot.segment, segment['in'] + first, last - first)
     except ReaderError as error:
         raise ReaderError(error.code, f'Segment {at + 1} on {target["label"]} (source frames '
                           f'{segment["in"] + first} to {segment["in"] + last}): {error}') from None
+    finally:
+        cloner.prefer, cloner.inside, cloner.approach = frozenset(), False, spec['approach']
     append_piece(target['parts'], component, dst, target['kind'])
 
 
@@ -600,8 +689,6 @@ class VerifyTimeline:
 
     @staticmethod
     def open(file, sequence_id, budget):
-        from graph import GraphTimeline
-
         class Bounded(GraphTimeline):
             MAX_EXPANSIONS = budget
             MAX_COMPONENTS = budget
@@ -740,7 +827,7 @@ def verify(spec, sources, destination, built):
                  for key, source in sources.items()
                  if any(key in t['slots'] and t['kind'] == 'sound' for t in spec['tracks'])}
         out_comp = out_file.content.mobs.get(aaf2.mobid.MobID(built['sequence_id']))
-        frames = 0
+        frames, preferred = 0, {}
         for index, (track, info) in enumerate(zip(spec['tracks'], built['tracks'])):
             label = info['label']
             if track['kind'] == 'sound':
@@ -750,7 +837,7 @@ def verify(spec, sources, destination, built):
                 actual = reader_frames(timeline, got, 0, spec['length'])
             else:
                 actual = picture_frames(out_comp.slot_at(info['slot_id']).segment, rate, 0, spec['length'])
-            frames += compare(expected_frames(spec, sources, reads, track, index), actual, label, 0)
+            frames += compare(expected_frames(spec, sources, reads, track, index, preferred), actual, label, 0)
         markers = sorted((m['position'], m['comment'], m['attributes'].get('_ATN_CRM_USER'), m['attributes'].get('_ATN_CRM_COLOR'),
                           tuple(m['described_slots'])) for m in timeline.markers)
         wanted = sorted((m['frame'], m['comment'], m['name'], m['color'], (built['tracks'][m['track']]['slot_id'],))
@@ -760,7 +847,7 @@ def verify(spec, sources, destination, built):
     return {'ok': True, 'frames_checked': frames, 'tracks_checked': len(spec['tracks']), 'markers_checked': len(wanted)}
 
 
-def expected_frames(spec, sources, reads, track, index):
+def expected_frames(spec, sources, reads, track, index, preferred):
     for at, segment in enumerate(spec['segments']):
         slot_id = track['slots'].get(segment.get('source'))
         if segment['kind'] == 'gap' or slot_id is None:
@@ -772,6 +859,14 @@ def expected_frames(spec, sources, reads, track, index):
             source_track = next((t for t in timeline.tracks if t['id'] == str(slot_id)), None)
             if source_track is None:
                 fail(f'Self-check failed: the reader does not see slot {slot_id} of source "{segment["source"]}".', 'verify_failed')
+            prefer = track['choices'].get(segment['source'])
+            if prefer:
+                # Read the way the track was asked for: those angles, and
+                # nothing outside the groups that offer them.
+                read = (segment['source'], slot_id, prefer)
+                if read not in preferred:
+                    preferred[read] = timeline.read_preferring(sources[segment['source']].slots[slot_id], prefer)
+                source_track = preferred[read]
             played = reader_frames(timeline, source_track, segment['in'], segment['out'])
         else:
             played = picture_frames(sources[segment['source']].slots[slot_id].segment, spec['edit_rate'],

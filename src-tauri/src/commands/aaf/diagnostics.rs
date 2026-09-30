@@ -140,6 +140,17 @@ pub fn log(app: &AppHandle, job: &str, level: &str, stage: &str, message: &str) 
     record(app, job, level, stage, message, None);
 }
 
+/// What a Stop keeps depends on what was stopped. Every cancelled operation
+/// used to say transcripts were retained, including relinks, auditions and
+/// waveform builds that have nothing to do with transcripts.
+fn stopped(stage: &str) -> &'static str {
+    match stage {
+        "transcribe" => "Stopped; committed transcripts are retained",
+        "relink" => "Stopped; media linked so far is kept",
+        _ => "Stopped",
+    }
+}
+
 pub async fn operation<T>(app: &AppHandle, job: &str, stage: &str, description: &str,
     work: impl Future<Output = Result<T, AppError>>) -> Result<T, AppError> {
     record(app, job, "info", stage, description, Some(true));
@@ -147,7 +158,10 @@ pub async fn operation<T>(app: &AppHandle, job: &str, stage: &str, description: 
     let result = work.await;
     let (level, outcome) = match &result {
         Ok(_) => ("ok", "Completed".into()),
-        Err(AppError::Cancelled) => ("warn", "Stopped; committed transcripts are retained".into()),
+        Err(AppError::Cancelled) => ("warn", stopped(stage).into()),
+        // A cache-only look for a waveform nobody has built is an answer, not a failure,
+        // and a pass checks every lane: as errors they pushed real failures out of the log.
+        Err(AppError::Invalid(message)) if message == super::linked_audio::NOT_BUILT => ("info", "Not built yet".into()),
         Err(AppError::SidecarFailed { name, exit_code, .. }) if stage == "transcribe" =>
             ("err", format!("{name} exit {exit_code:?}; recognizer output omitted from diagnostics")),
         Err(error) => ("err", error.to_string()),
@@ -222,6 +236,12 @@ mod tests {
     fn removes_url_credentials_and_controls_without_hiding_media_paths() {
         assert_eq!(clean("file://person:password@Server/Media/test.mxf?secret=x"), "file://[redacted]@Server/Media/test.mxf[redacted]");
         assert_eq!(clean("/Volumes/Media/Show #2/a.mxf\0"), "/Volumes/Media/Show #2/a.mxf");
+    }
+    #[test]
+    fn only_a_stopped_transcription_mentions_transcripts() {
+        assert_eq!(stopped("transcribe"), "Stopped; committed transcripts are retained");
+        assert_eq!(stopped("relink"), "Stopped; media linked so far is kept");
+        for stage in ["waveform", "audio", "speech", "import"] { assert_eq!(stopped(stage), "Stopped"); }
     }
     #[test]
     fn journal_reopens_failed_imports_rotates_and_does_not_restore_running_jobs() {

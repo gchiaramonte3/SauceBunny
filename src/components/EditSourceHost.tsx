@@ -1,43 +1,35 @@
-import { useMemo, useState } from "react";
-import type { EditDocument } from "../bindings/EditDocument";
-import { useEditPlayback } from "../hooks/use-edit-playback";
-import { placeWords, type TimelineLane, type TimelineWord } from "../lib/edit-model";
-import { EditSourcePane, type EditSourceInfo } from "./EditSourcePane";
+import type { EditSourceSide } from "../hooks/use-edit-source-side";
+import type { TimelineLane } from "../lib/edit-model";
+import { EditSourcePane } from "./EditSourcePane";
 import type { EditTextStyle } from "./EditTextSettings";
 
 type Props = {
-  document: EditDocument; sources: EditSourceInfo[]; lanes: TimelineLane[]; colors: Record<string, string>; fps: number;
-  words: TimelineWord[]; used: Set<string>; active: boolean;
+  side: EditSourceSide; lanes: TimelineLane[]; colors: Record<string, string>; fps: number; used: Set<string>;
+  /** Mics read so far while the words are still arriving, else null. */
+  reading: { done: number; total: number } | null;
   text: EditTextStyle; onText: (style: EditTextStyle) => void;
-  onInsert: (source: string, words: TimelineWord[], atEnd: boolean) => void;
+  /** Insert (or, at the end, Append) what the source has marked. */
+  onInsert: (atEnd: boolean) => void;
 };
 
 /**
- * The source side, one sequence at a time. It plays the whole source through
- * the same edit-list engine as the record side, as a one-segment edit, so
- * what you hear here is exactly what an insert will put in the edit.
+ * The source side's text, one sequence at a time. What it shows, where it is
+ * parked and what is marked live in useEditSourceSide, which the timeline's
+ * Source view reads too: select a line here and the same In to Out is on the
+ * source timeline, mark I and O there and Insert takes it from here.
  */
-export function EditSourceHost({ document, sources, lanes, colors, fps, words, used, active, text, onText, onInsert }: Props) {
-  const [chosen, setChosen] = useState<string | null>(null);
-  const [ranges, setRanges] = useState<Record<string, [number, number] | null>>({});
-  const source = sources.find((item) => item.id === chosen) ?? sources[0] ?? null;
-  const frames = source ? Math.round(source.duration * fps) : 0;
-  const whole: EditDocument = useMemo(() => ({ ...document, segments: source && frames > 0 ? [{ kind: "source", id: "whole", source: source.id, in_frame: 0, out_frame: frames }] : [], mutes: [], markers: [] }),
-    [document, source, frames]);
-  const playback = useEditPlayback({ document: whole, audible: lanes.map((lane) => lane.id), active: active && !!source });
-  const own = useMemo(() => source ? placeWords(words, { segments: [{ id: "whole", source: source.id, srcIn: 0, srcOut: source.duration }], mutes: [] }) : [], [words, source]);
+export function EditSourceHost({ side, lanes, colors, fps, used, reading, text, onText, onInsert }: Props) {
+  const { source, playback } = side;
   if (!source) return <section className="cp-te-source cp-te-doc-empty" aria-label="Source"><p>Add an AAF Audio sequence to this string out to cut from it.</p></section>;
-  const range = ranges[source.id] ?? null;
-  const take = (atEnd: boolean) => { if (range) onInsert(source.id, own.slice(range[0], range[1] + 1).map((item) => item.word), atEnd); };
   return <div className="cp-te-source-host" data-source-id={source.id}>
-    {sources.length > 1 && <select className="cp-select cp-te-source-pick" aria-label="Source sequence" value={source.id}
-      onChange={(event) => { playback.pause(); setChosen(event.target.value); }}>
-      {sources.map((item) => <option key={item.id} value={item.id}>{item.short}</option>)}
+    {side.sources.length > 1 && <select className="cp-select cp-te-source-pick" aria-label="Source sequence" value={source.id}
+      onChange={(event) => side.choose(event.target.value)}>
+      {side.sources.map((item) => <option key={item.id} value={item.id}>{item.short}</option>)}
     </select>}
-    <EditSourcePane source={source} speakers={lanes} colors={colors} fps={fps} words={words} used={used} corrections={{}}
-      range={range} onRange={(next) => setRanges((state) => ({ ...state, [source.id]: next }))} match={null}
-      playhead={playback.frame / fps} playing={playback.playing} onPlay={() => void playback.toggle()}
+    <EditSourcePane source={source} speakers={lanes} colors={colors} fps={fps} placed={side.shown} used={used} corrections={{}}
+      people={side.people} tab={side.tab} onTab={side.setTab} reading={reading} range={side.range} onRange={side.setRange} match={null}
+      canInsert={side.take() != null} playhead={side.playhead} playing={playback.playing} onPlay={() => void playback.toggle()}
       onScrub={(seconds) => void playback.seek(Math.round(seconds * fps))} onScrubStart={playback.pause} onScrubEnd={() => undefined}
-      text={text} onText={onText} onInsert={() => take(false)} onAppend={() => take(true)} />
+      text={text} onText={onText} onInsert={() => onInsert(false)} onAppend={() => onInsert(true)} />
   </div>;
 }

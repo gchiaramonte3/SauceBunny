@@ -13,10 +13,10 @@ const words = [word("so", "rosa", 1, 1.4), word("anyway", "rosa", 1.5, 2.5), wor
 const timeline: Timeline = { segments: [{ id: "whole", source: "s1", srcIn: 0, srcOut: 10 }], mutes: [] };
 const openEdit = { document: {} as OpenEdit["document"], timeline, markers: [] } satisfies OpenEdit;
 
-function setup(open: OpenEdit = openEdit) {
+function setup(open: OpenEdit = openEdit, everyone?: TimelineWord[]) {
   const commits: { label: string; change: EditChange }[] = [];
   const commit = vi.fn(async (label: string, change: (state: OpenEdit) => EditChange) => { commits.push({ label, change: change(open) }); return true; });
-  const hook = renderHook(() => useEditWorkspace({ open, words, lanes, sourceLanes: { s1: ["rosa", "dev"] }, durations: { s1: 10 },
+  const hook = renderHook(() => useEditWorkspace({ open, words, everyone, lanes, sourceLanes: { s1: ["rosa", "dev"] }, durations: { s1: 10 },
     audible: new Map([["s1", [[1, 3], [6, 7]]]]), playhead: 0, seek: vi.fn(), commit, nameOf: (id) => id === "rosa" ? "Rosa" : "Dev", tc: (s) => `${s}` }));
   const select = (from: number, to: number) => act(() => hook.result.current.setSelection({ anchor: from, focus: to, collapsed: false }));
   return { hook, commits, select };
@@ -102,4 +102,68 @@ it("retires a dead-space review once the cut changes under it", () => {
   expect(hook.result.current.dead).not.toBeNull();
   hook.rerender({ open: { ...openEdit, timeline: { ...timeline, segments: [{ id: "whole", source: "s1", srcIn: 0, srcOut: 9 }] } } });
   expect(hook.result.current.dead).toBeNull();
+});
+
+it("an empty string out takes a whole source in one step", async () => {
+  const empty = { ...openEdit, timeline: { segments: [], mutes: [] } } satisfies OpenEdit;
+  const { hook, commits } = setup(empty);
+  await act(async () => hook.result.current.addWhole("s1"));
+  expect(commits).toHaveLength(1);
+  expect(commits[0].label).toBe("Add Whole Sequence");
+  const [segment] = commits[0].change!.timeline!.segments;
+  expect(segment).toMatchObject({ source: "s1", srcIn: 0, srcOut: 10 });
+  expect(hook.result.current.message).toBe("Added the whole sequence.");
+  // A source with no known length is not guessed at.
+  await act(async () => hook.result.current.addWhole("unknown"));
+  expect(commits).toHaveLength(1);
+});
+
+it("patches whoever's words are cut in to the next track down, a group angle included, and says so", () => {
+  const document = { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } },
+    { id: "ana", name: "Ana", kind: "sound", source_tracks: { s1: "branch-a" }, featured: false }] } as unknown as OpenEdit["document"];
+  const { hook, commits } = setup({ ...openEdit, document });
+  act(() => hook.result.current.insert("s1", [{ id: "hi", source: "s1", track: "ana", text: "hi", start: 4, end: 4.5 }], true));
+  expect(commits.map((item) => item.label)).toEqual(["Insert 1 Word"]);
+  expect(commits[0].change?.document?.tracks.map((track) => track.featured)).toEqual([undefined, true]);
+  // The new clip plays the person whose words they are, and nobody else.
+  expect(commits[0].change?.timeline?.segments).toHaveLength(2);
+  expect(commits[0].change?.timeline?.segments.at(-1)?.tracks).toEqual(["ana"]);
+  expect(hook.result.current.message).toBe("Inserted 1 word at 10. Ana is now on a track.");
+});
+
+it("an inserted group angle's own next word bounds the air kept after their line", () => {
+  const document = { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } },
+    { id: "ana", name: "Ana", kind: "sound", source_tracks: { s1: "branch-a" }, featured: false }] } as unknown as OpenEdit["document"];
+  // Ana says "hi" at 4.0-4.5 and "there" at 4.55: the cut may not reach into "there".
+  const ana = [{ id: "hi", source: "s1", track: "ana", text: "hi", start: 4, end: 4.5 }, { id: "there", source: "s1", track: "ana", text: "there", start: 4.55, end: 5 }];
+  const { hook, commits } = setup({ ...openEdit, document }, [...words, ...ana]);
+  act(() => hook.result.current.insert("s1", [ana[0]], true));
+  const added = commits[0].change!.timeline!.segments.at(-1)!;
+  expect(added.srcOut).toBeLessThanOrEqual(4.55);
+  expect(added.srcOut).toBeCloseTo(4.525);
+});
+
+it("takes anyone off their track, the tracks below moving up, and records nothing for someone with none", () => {
+  const document = { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } },
+    { id: "ana", name: "Ana", kind: "sound", source_tracks: { s1: "branch-a" }, featured: true },
+    { id: "kai", name: "Kai", kind: "sound", source_tracks: { s1: "3" }, featured: false }] } as unknown as OpenEdit["document"];
+  const { hook, commits } = setup({ ...openEdit, document });
+  act(() => hook.result.current.untrack("rosa"));
+  act(() => hook.result.current.untrack("kai"));
+  expect(commits.map((item) => item.change?.document?.tracks.map((track) => [track.id, track.featured]) ?? null)).toEqual([
+    [["ana", true], ["rosa", false], ["kai", false]],
+    null,
+  ]);
+});
+
+it("the patch panel puts someone on a track, and a person already there is no change", () => {
+  const document = { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" }, featured: true },
+    { id: "kai", name: "Kai", kind: "sound", source_tracks: { s1: "3" }, featured: false }] } as unknown as OpenEdit["document"];
+  const { hook, commits } = setup({ ...openEdit, document });
+  act(() => hook.result.current.patch("kai", 0));
+  act(() => hook.result.current.patch("rosa", 0));
+  expect(commits.map((item) => item.change?.document?.tracks.map((track) => [track.id, track.featured]) ?? null)).toEqual([
+    [["kai", true], ["rosa", true]],
+    null,
+  ]);
 });

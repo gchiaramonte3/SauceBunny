@@ -253,3 +253,21 @@ describe("transcript editor model", () => {
     expect(placeWords(words, tight).map((item) => item.word.id)).toEqual(placeWords(words, whole()).map((item) => item.word.id));
   });
 });
+
+describe("a clip that names its tracks", () => {
+  const word = (id: string, track: string, start: number): TimelineWord => ({ id, source: "s", track, text: id, start, end: start + 0.3 });
+  const words = [word("hi", "rosa", 1), word("mm", "dev", 1.4), word("yes", "rosa", 5), word("ok", "dev", 5.2)];
+  it("carries only its own people's words; every clip without a list carries everyone's", () => {
+    const edit = { segments: [{ id: "a", source: "s", srcIn: 0, srcOut: 2, tracks: ["rosa"] }, { id: "b", source: "s", srcIn: 4, srcOut: 6 }], mutes: [] };
+    expect(placeWords(words, edit).map((item) => item.word.id)).toEqual(["hi", "yes", "ok"]);
+  });
+  it("keeps its list when it is cut, split or healed", () => {
+    const edit = { segments: [{ id: "a", source: "s", srcIn: 0, srcOut: 10, tracks: ["rosa"] }], mutes: [] };
+    const cut = removeRange(edit, "s", 3, 4);
+    expect(cut.segments.map((segment) => segment.tracks)).toEqual([["rosa"], ["rosa"]]);
+    expect(healSeam(cut, 1).segments).toEqual([{ id: expect.any(String), source: "s", srcIn: 0, srcOut: 10, tracks: ["rosa"] }]);
+    // Two clips that play different people are not one clip.
+    const mixed = { segments: [{ id: "a", source: "s", srcIn: 0, srcOut: 3, tracks: ["rosa"] }, { id: "b", source: "s", srcIn: 4, srcOut: 6, tracks: ["dev"] }], mutes: [] };
+    expect(healSeam(mixed, 1)).toBe(mixed);
+  });
+});

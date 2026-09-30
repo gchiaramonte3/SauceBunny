@@ -8,4 +8,11 @@ export type AafSpeech = { track_id: string,
 /**
  * Median noise floor, dBFS: context for the editor, not used for decisions.
  */
-floor_db: number, activity: Array<[number, number]>, reactions: Array<[number, number]>, words: Array<AafWord>, };
+floor_db: number, activity: Array<[number, number]>, reactions: Array<[number, number]>, words: Array<AafWord>, 
+/**
+ * False when the track's waveform was never built. Words are then placed
+ * by length alone, and `activity` and `reactions` are empty because
+ * nobody measured them, not because the mic was quiet. Anything that
+ * would treat empty as silence (dead-space removal) must check this.
+ */
+measured: boolean, };

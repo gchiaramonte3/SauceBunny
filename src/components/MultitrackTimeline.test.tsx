@@ -85,6 +85,14 @@ it("preserves overlay visibility, clipping, toggles and document replacements", 
   expect(screen.getByText("No transcript in this view")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Fit" }));
   expect(screen.getByText("1 passage")).toBeTruthy();
+  // The slider is the same zoom, one stop per doubling.
+  const zoom = screen.getByRole("slider", { name: "Zoom" });
+  expect(zoom.getAttribute("aria-valuetext")).toBe("1×");
+  fireEvent.change(zoom, { target: { value: "3" } });
+  expect(zoom.getAttribute("aria-valuetext")).toBe("8×");
+  expect((screen.getByRole("button", { name: "Zoom out" }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Fit" }));
+  expect(zoom.getAttribute("aria-valuetext")).toBe("1×");
   view.rerender(<MultitrackTimeline {...props} document={{ ...document, transcripts: [] }} frame={0} />);
   expect(screen.queryByText("This is the first answer.")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Text overlay Alex mic" }));
@@ -108,4 +116,22 @@ it("says when separate range runs left part of a track untranscribed, and saves 
   const owner = screen.getByRole("textbox", { name: "Mic owner for track-2" });
   fireEvent.change(owner, { target: { value: "  Sam  " } }); fireEvent.blur(owner);
   expect(onRename).toHaveBeenCalledWith("track-2", "Sam");
+});
+it("draws In and Out on the ruler as Clip does: a lone stem and wing each, or a winged range", () => {
+  const document = multitrackFixture(); // 24000 frames at 1x
+  const props = { document, waveforms: {}, waveformErrors: {}, selected: new Set<string>(), solo: new Set<string>(), onSelect: vi.fn(), onRename: vi.fn(), onSeek: vi.fn(), frame: 0 };
+  const view = render(<MultitrackTimeline {...props} marks={{ in: 6000, out: null }} />);
+  const ruler = view.container.querySelector(".cp-multitrack-ruler")!;
+  const lone = ruler.querySelector(".cp-mark.in") as HTMLElement;
+  expect(lone.style.left).toBe("25%");
+  expect(ruler.querySelector(".cp-mark-range")).toBeNull();
+  // Out includes its frame, so its stem stands after it.
+  view.rerender(<MultitrackTimeline {...props} marks={{ in: null, out: 11999 }} />);
+  expect((ruler.querySelector(".cp-mark.out") as HTMLElement).style.left).toBe("50%");
+  view.rerender(<MultitrackTimeline {...props} marks={{ in: 6000, out: 11999 }} />);
+  const range = ruler.querySelector(".cp-mark-range") as HTMLElement;
+  expect([range.style.left, range.style.width]).toEqual(["25%", "25%"]);
+  expect(ruler.querySelectorAll(".cp-mark")).toHaveLength(0);
+  view.rerender(<MultitrackTimeline {...props} />);
+  expect(ruler.querySelectorAll(".cp-mark, .cp-mark-range")).toHaveLength(0);
 });

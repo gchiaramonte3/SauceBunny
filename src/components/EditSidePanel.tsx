@@ -23,6 +23,7 @@ type Props = {
   tab: EditSideTab; onTab: (tab: EditSideTab) => void; history: EditHistory | null; jump: (state: number) => void; pin: (state: number, name: string | null) => void;
   commit: (label: string, change: (open: OpenEdit) => EditChange, group?: string | null) => Promise<boolean>;
   tc: (seconds: number) => string; sourceName: (source: string) => string; nameOf: (track: string) => string; where: (line: AskCitation) => string;
+  sourceTc?: (source: string, seconds: number) => string;
   onJump: (line: AskCitation) => void; onOpenEdit: (id: string) => void; onSettings: () => void; appLocalModelId: string | null | undefined;
 };
 
@@ -30,8 +31,14 @@ type Props = {
 export function EditSidePanel(props: Props) {
   const { document, words, ws } = props;
   const lines = useMemo(() => askLines(words, props.used), [words, props.used]);
+  // Ask reads everyone, but a cut weighs overtalk only from people on a
+  // track: a group angle nobody hears cannot talk over anyone.
+  const heard = useMemo(() => {
+    const on = new Set(props.lanes.filter((lane) => lane.track > 0).map((lane) => lane.id));
+    return words.filter((word) => on.has(word.track));
+  }, [words, props.lanes]);
   const mentions = useMemo(() => askMentions(props.lanes, document.sources), [props.lanes, document.sources]);
-  const ask = useEditAsk({ editId: props.editId, lines, mentions, nameOf: props.nameOf, sourceName: props.sourceName, appLocalModelId: props.appLocalModelId });
+  const ask = useEditAsk({ editId: props.editId, lines, mentions, nameOf: props.nameOf, sourceName: props.sourceName, appLocalModelId: props.appLocalModelId, sourceTc: props.sourceTc });
   /** A proposal lands here as one undo step, or as a new string out that leaves this one alone. */
   const apply = async (message: AskMessage, into: "here" | "new") => {
     const action = message.action;
@@ -48,16 +55,18 @@ export function EditSidePanel(props: Props) {
       } else {
         const ids = new Set(action.lines.flatMap((line) => line.wordIds));
         if (into === "here") {
-          if (await props.commit("Ask: Remove Lines", (state) => ({ timeline: removeWithoutCuttingOvertalk(words, state.timeline, ids) }))) ask.markApplied(message.id, "here");
+          if (await props.commit("Ask: Remove Lines", (state) => ({ timeline: removeWithoutCuttingOvertalk(heard, state.timeline, ids) }))) ask.markApplied(message.id, "here");
           return;
         }
         const opened = fromDocument(document);
         next = toDocument({ ...document, title: `${document.title}, without ${action.lines.length} line${action.lines.length === 1 ? "" : "s"}` },
-          removeWithoutCuttingOvertalk(words, opened.timeline, ids), opened.markers);
+          removeWithoutCuttingOvertalk(heard, opened.timeline, ids), opened.markers);
       }
       const id = newEditId();
       await editStore.create(id, next);
       ask.markApplied(message.id, "new", id);
+      // The new string out opens in a tab of its own; this one stays in its tab.
+      props.onOpenEdit(id);
     } catch (cause) {
       ws.setMessage(`Could not apply: ${formatError(cause)}`);
     }

@@ -10,7 +10,9 @@ type Props = {
 
 /**
  * V1 through the edit: the picture cuts each segment carries, where they now
- * play. Metadata only, as in AAF Audio: names and cut points, never video.
+ * play. Metadata only, as in AAF Audio: names and cut points, never video. A
+ * group clip carries how many angles it has, which Keep picture groups keeps
+ * switchable in Media Composer.
  */
 export function EditPictureRow({ edit, starts, start, span, x, w, pictureOf }: Props) {
   const blocks = edit.segments.flatMap((segment, index) => isGap(segment) ? [] : pictureOf(segment.source)
@@ -25,7 +27,8 @@ export function EditPictureRow({ edit, starts, start, span, x, w, pictureOf }: P
     <div className="cp-te-tl-head" title="Picture cuts from the AAF. Video is not shown."><span className="cp-te-tl-track is-static">V1</span><span className="cp-te-tl-name">Picture</span></div>
     <div className="cp-te-tl-lane" role="list" aria-label="Picture cuts on V1">
       {blocks.map((block) => <span key={block.key} role="listitem" className={`cp-te-tl-pic${block.clip.kind === "muted" ? " is-muted" : ""}`}
-        style={{ left: x(block.from), width: w(block.to - block.from) }} title={pictureClipTitle(block.clip)}>{block.clip.name ?? block.clip.tape_name ?? "Clip"}</span>)}
+        style={{ left: x(block.from), width: w(block.to - block.from) }} title={pictureClipTitle(block.clip)}>{block.clip.name ?? block.clip.tape_name ?? "Clip"}
+        {block.clip.group && !!block.clip.angles?.length && <span className="cp-multitrack-picture-angles" aria-hidden="true">{block.clip.angles.length}</span>}</span>)}
     </div>
   </div>;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { multitrackFixture, multitrackTranscript } from "../test/multitrack-fixture";
-import { clampFrame, exportMultitrack, mergeTrackTranscript, sampleFrame, sequenceDurationTimecode, sequenceEntryFrame, sequenceTimecode, transcriptRows, waveformPath } from "./multitrack";
+import { clampFrame, exportMultitrack, mergeTrackTranscript, sampleFrame, sequenceDurationTimecode, sequenceEntryFrame, sequenceLabels, sequenceTimecode, transcriptRows, waveformPath } from "./multitrack";
 
 describe("multitrack sequence timing and export", () => {
   it("punches source timecode at 23.976 without adding its hour offset to TRT", () => {
@@ -8,6 +8,8 @@ describe("multitrack sequence timing and export", () => {
     expect(sequenceEntryFrame(manifest, "01001012")).toBe(252);
     expect(sequenceTimecode(manifest, 252)).toBe("01:00:10:12");
     expect(sequenceDurationTimecode(manifest)).toBe("00:16:40:00");
+    // In to out is a span too: 25 frames at 23.976 is one second and a frame.
+    expect(sequenceDurationTimecode(manifest, 25)).toBe("00:00:01:01");
     expect(sequenceEntryFrame(manifest, "01000090")).toBe(90);
     expect(sequenceEntryFrame(manifest, "0")).toBe(0);
     expect(sequenceEntryFrame(manifest, "99999999")).toBe(23999);
@@ -57,5 +59,17 @@ describe("multitrack sequence timing and export", () => {
     expect(waveformPath([], 0, 1)).toBe("");
     expect(waveformPath(peaks, 0.5, 1)).toContain("M250.00,17.50V40.00");
     expect(waveformPath(peaks, 0, 1, 2).match(/M/g)).toHaveLength(2);
+  });
+});
+
+describe("sequence picker labels", () => {
+  const item = (id: string, name: string, source_path: string, modified_ms?: number) => ({ id, name, source_path, track_count: 1, transcribed_tracks: 0, modified_ms });
+  it("shows the name alone, adds the file where names repeat, and the save time where both do", () => {
+    const labels = sequenceLabels([item("a", "Kitchen", "/x/Kitchen.aaf"), item("b", "Group fixture", "/x/Linked BWF.aaf"),
+      item("c", "Group fixture", "/x/Linked MXF.aaf", Date.UTC(2026, 8, 21, 23, 26)), item("d", "Group fixture", "/x/Linked MXF.aaf", Date.UTC(2026, 8, 21, 23, 27))]);
+    expect(labels.get("a")).toBe("Kitchen");
+    expect(labels.get("b")).toBe("Group fixture · Linked BWF.aaf");
+    expect(labels.get("c")).toMatch(/^Group fixture · Linked MXF\.aaf · /);
+    expect(labels.get("c")).not.toBe(labels.get("d"));
   });
 });

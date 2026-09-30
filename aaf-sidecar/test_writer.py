@@ -116,6 +116,30 @@ def avid_fixture(path, *, legacy=False, pan=True, transition=False, name='Kitche
     return info
 
 
+def nested_fixture(path, shape):
+    """One sound track holding a group inside a group. `selected`: the inner
+    group is the outer group's chosen option; `unselected`: it is an
+    alternate the editor did not choose. Returns the recorders' mob ids."""
+    with aaf2.open(str(path), 'w') as f:
+        recs = [master(f, f'Nested {r}', [('sound', 1)], 24000) for r in RECORDERS]
+        comp = f.create.CompositionMob('Nested edit'); comp['UsageCode'].value = 'Usage_TopLevel'; f.content.mobs.append(comp)
+        tc = comp.create_timeline_slot(RATE); tc.segment = f.create.Timecode(fps=24, drop=False, length=SEG1)
+        tc.segment.start = 86400; tc['PhysicalTrackNumber'].value = 1
+        track = comp.create_empty_sequence_slot(RATE, media_kind='sound'); track['PhysicalTrackNumber'].value = 1
+        clip = lambda m: m.create_source_clip(m.slots[0].slot_id, GROUP_IN[0], SEG1, 'sound')
+        inner = f.create.Selector(media_kind='sound', length=SEG1)
+        outer = f.create.Selector(media_kind='sound', length=SEG1)
+        if shape == 'selected':
+            inner['Selected'].value = clip(recs[0]); inner['Alternates'].value = [clip(recs[2])]
+            outer['Selected'].value = inner; outer['Alternates'].value = [clip(recs[1])]
+        else:
+            inner['Selected'].value = clip(recs[1]); inner['Alternates'].value = [clip(recs[2])]
+            outer['Selected'].value = clip(recs[0]); outer['Alternates'].value = [inner]
+        track.segment.components.append(outer); track.segment.length = SEG1
+        return {'sequence_id': str(comp.mob_id), 'A1': track.slot_id, 'recorders': [str(m.mob_id) for m in recs],
+                'angle': f"{recs[2].mob_id}:{recs[2].slots[0].slot_id}"}
+
+
 class WriterTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='sauce-writer-'); self.root = Path(self.temp.name)
@@ -244,6 +268,138 @@ class WriterTests(unittest.TestCase):
             self.assertEqual(str(v1['Selected'].value.mob_id), info['cams'][1])
             for mob_id in info['recorders'] + info['cams']:                            # every angle travels with it
                 self.assertIsNotNone(f.content.mobs.get(aaf2.mobid.MobID(mob_id)))
+
+    def test_picture_keeps_its_groups_while_each_sound_track_is_the_clip_that_plays(self):
+        # String Outs' default: V1 stays a switchable multigroup, and each
+        # person's audio is their own mic, not a group of every lav.
+        path, info = self.source()
+        tracks = [{'kind': 'picture', 'physical_track_number': 1, 'source_slots': {'s1': info['V1']}, 'approach': 'C'},
+                  {'kind': 'sound', 'physical_track_number': 1, 'source_slots': {'s1': info['A1']}}]
+        result = writer.write_edit(self.request(path, info, [{'kind': 'source', 'source': 's1', 'in_frame': LEAD + SEG1 + 5, 'out_frame': LEAD + SEG1 + 50}],
+                                                approach='B', tracks=tracks))
+        self.assertTrue(result['verify']['ok'])
+        with aaf2.open(result['output'], 'r') as f:
+            top = self.top(f)
+            v1 = top.slot_at(result['tracks'][0]['slot_id']).segment.components[0]
+            self.assertEqual(value_name(v1), 'Selector')
+            self.assertEqual(str(v1['Selected'].value.mob_id), info['cams'][1])
+            self.assertEqual([str(a.mob_id) for a in v1['Alternates'].value], [info['cams'][0]])
+            a1 = top.slot_at(result['tracks'][1]['slot_id']).segment.components[0]
+            self.assertEqual(value_name(a1), 'SourceClip')
+            self.assertEqual(str(a1.mob_id), info['recorders'][PICK2[0]])
+        bad = self.request(path, info, [{'kind': 'source', 'source': 's1', 'in_frame': LEAD, 'out_frame': LEAD + 10}],
+                           tracks=[dict(tracks[1], approach='D')])
+        with self.assertRaises(reader.ReaderError):
+            writer.validate(bad)
+
+    def test_an_angle_that_cannot_be_cut_is_left_out_of_its_group_not_the_export(self):
+        # HEAT 2: one camera of the V1 multigroup is slow motion (a Motion
+        # Control time warp). Keep groups used to refuse the whole export.
+        path, info = self.source()
+        with aaf2.open(str(path), 'rw') as f:
+            warp = f.create.OperationDef('11111111-1111-1111-1111-111111111199', 'Motion Control')
+            warp.media_kind = 'picture'; warp['NumberInputs'].value = 1; warp['IsTimeWarp'].value = True; f.dictionary.register_def(warp)
+            top = next(f.content.toplevel())
+            group = top.slot_at(info['V1']).segment.components[2]
+            slow = group['Alternates'].value[0]
+            wrapped = f.create.OperationGroup(warp, length=slow.length, media_kind='picture')
+            group['Alternates'].value = []
+            wrapped['InputSegments'].append(slow)
+            group['Alternates'].append(wrapped)
+        result = writer.write_edit(self.request(path, info, [{'kind': 'source', 'source': 's1', 'in_frame': LEAD + SEG1 + 5, 'out_frame': LEAD + SEG1 + 50}]))
+        self.assertTrue(result['verify']['ok'])
+        self.assertTrue(any('Motion Control changes speed' in w and 'left out of its group' in w for w in result['warnings']), result['warnings'])
+        with aaf2.open(result['output'], 'r') as f:
+            v1 = self.top(f).slot_at(result['tracks'][0]['slot_id']).segment.components[0]
+            self.assertEqual(value_name(v1), 'Selector')
+            self.assertEqual(str(v1['Selected'].value.mob_id), info['cams'][1])
+            self.assertEqual(v1['Alternates'].value, [])
+            # The slow camera's clip is not copied just because the attempt reached it.
+            self.assertIsNone(f.content.mobs.get(aaf2.mobid.MobID(info['cams'][0])))
+
+    def featured(self, info, recorder, channel=1):
+        """A1's layout plus a track of its own for one group angle: `recorder`
+        on `channel`, as a person who is an alternate in the group."""
+        angle = f"{info['recorders'][recorder]}:{channel}"
+        return [{'kind': 'sound', 'physical_track_number': 1, 'source_slots': {'s1': info['A1']}},
+                {'kind': 'sound', 'physical_track_number': 2, 'source_slots': {'s1': info['A1']}, 'choices': {'s1': [angle]}}]
+
+    def test_a_featured_angle_gets_its_own_track_and_keeps_the_group(self):
+        path, info = self.source()
+        cuts = [(LEAD + 10, LEAD + 60), (LEAD + SEG1 + 20, LEAD + SEG1 + 80)]
+        result = writer.write_edit(self.request(path, info, [{'kind': 'source', 'source': 's1', 'in_frame': a, 'out_frame': b} for a, b in cuts],
+                                                tracks=self.featured(info, 2)))
+        self.assertTrue(result['verify']['ok'])
+        out = self.read(result['output'], result['sequence_id'])
+        a1, a2 = (t['slot_id'] for t in result['tracks'])
+        # The group's own track still plays the editor's angle; the new one plays R3 in both groups.
+        self.assertEqual(self.played(out, a1, 0)[0], info['recorders'][0])
+        self.assertEqual(self.played(out, a1, 50)[0], info['recorders'][1])
+        self.assertEqual(self.played(out, a2, 0), (info['recorders'][2], (GROUP_IN[0] + 10) * SPF))
+        self.assertEqual(self.played(out, a2, 50), (info['recorders'][2], (GROUP_IN[1] + 20) * SPF))
+        with aaf2.open(result['output'], 'r') as f:
+            sel = self.top(f).slot_at(a2).segment.components[0]
+            self.assertEqual(value_name(sel), 'Selector')                          # still switchable in Avid
+            self.assertEqual(str(sel['Selected'].value.mob_id), info['recorders'][2])
+            self.assertEqual(sorted(str(a.mob_id) for a in sel['Alternates'].value), sorted(info['recorders'][:2]))
+
+    def test_approach_b_takes_a_featured_angle_to_its_master_clip(self):
+        path, info = self.source()
+        result = writer.write_edit(self.request(path, info, [{'kind': 'source', 'source': 's1', 'in_frame': LEAD + SEG1 - 10, 'out_frame': LEAD + SEG1 + 10}],
+                                                approach='B', tracks=self.featured(info, 2)))
+        self.assertTrue(result['verify']['ok'])
+        with aaf2.open(result['output'], 'r') as f:
+            clips = list(self.top(f).slot_at(result['tracks'][1]['slot_id']).segment.components)
+            self.assertEqual([value_name(c) for c in clips], ['SourceClip', 'SourceClip'])
+            self.assertEqual([str(c.mob_id) for c in clips], [info['recorders'][2]] * 2)
+            self.assertEqual([c.start for c in clips], [GROUP_IN[0] + SEG1 - 10, GROUP_IN[1]])
+
+    def test_a_featured_track_is_silent_outside_the_groups(self):
+        path, info = self.source()
+        # Five frames of the lead filler, then the first group; an angle no group offers plays nothing.
+        cut = [{'kind': 'source', 'source': 's1', 'in_frame': LEAD - 5, 'out_frame': LEAD + 5}]
+        result = writer.write_edit(self.request(path, info, cut, tracks=self.featured(info, 2)))
+        out = self.read(result['output'], result['sequence_id'])
+        a2 = result['tracks'][1]['slot_id']
+        self.assertEqual(self.played(out, a2, 0), 'gap')
+        self.assertEqual(self.played(out, a2, 5)[0], info['recorders'][2])
+        nowhere = self.featured(info, 2)
+        nowhere[1]['choices'] = {'s1': ['urn:smpte:umid:060a2b34.01010105.01010f10.13000000.00000000.00000000.00000000.00000000:1']}
+        result = writer.write_edit(self.request(path, info, cut, tracks=nowhere, out='nowhere.aaf'))
+        self.assertTrue(result['verify']['ok'])
+        out = self.read(result['output'], result['sequence_id'])
+        self.assertEqual({self.played(out, result['tracks'][1]['slot_id'], frame) for frame in range(10)}, {'gap'})
+
+    def nested(self, shape, approach='C'):
+        path = self.root / f'nested-{shape}.aaf'
+        info = nested_fixture(path, shape)
+        tracks = [{'kind': 'sound', 'physical_track_number': 1, 'source_slots': {'s1': info['A1']}, 'choices': {'s1': [info['angle']]}}]
+        request = self.request(path, info, [{'kind': 'source', 'source': 's1', 'in_frame': 10, 'out_frame': 40}], approach=approach,
+                               tracks=tracks, out=f'nested-{shape}-{approach}.aaf')
+        return info, request
+
+    def test_an_angle_in_a_group_nested_in_the_chosen_option_is_found(self):
+        for approach in ('B', 'C'):
+            info, request = self.nested('selected', approach)
+            result = writer.write_edit(request)
+            self.assertTrue(result['verify']['ok'])
+            out = self.read(result['output'], result['sequence_id'])
+            self.assertEqual(self.played(out, result['tracks'][0]['slot_id'], 0), (info['recorders'][2], (GROUP_IN[0] + 10) * SPF))
+
+    def test_an_angle_in_a_group_nested_in_an_unchosen_option_is_refused_not_written_silent(self):
+        _, request = self.nested('unselected')
+        with self.assertRaises(reader.ReaderError) as caught:
+            writer.write_edit(request)
+        self.assertIn('unselected angle of another group', str(caught.exception))
+        self.assertFalse(Path(request['output_path']).exists())
+
+    def test_choices_are_refused_unless_they_name_a_source_the_track_uses(self):
+        path, info = self.source()
+        cut = [{'kind': 'source', 'source': 's1', 'in_frame': LEAD, 'out_frame': LEAD + 5}]
+        for choices in ({'s2': ['x:1']}, {'s1': []}, {'s1': 'x:1'}, {'s1': [7]}):
+            tracks = self.featured(info, 2); tracks[1]['choices'] = choices
+            with self.assertRaises(reader.ReaderError, msg=json.dumps(choices)):
+                writer.write_edit(self.request(path, info, cut, tracks=tracks))
 
     def test_approach_b_points_at_the_master_clip_channel(self):
         path, info = self.source()

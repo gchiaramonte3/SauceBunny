@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { MultitrackLevel } from "./MultitrackLevel";
 import { TRACK_GAIN_MAX } from "../lib/multitrack-gain";
@@ -78,6 +78,51 @@ it("preserves exact silence at the bottom and lets typing replace it", () => {
   fireEvent.change(input, { target: { value: "+99" } }); fireEvent.blur(input);
   expect(changed).toHaveBeenLastCalledWith(TRACK_GAIN_MAX);
   fireEvent.change(slider, { target: { value: "-61" } }); expect(changed).toHaveBeenLastCalledWith(0);
+});
+it("scrolling over the open fader steps it a dB a notch, and adds up a trackpad's small deltas", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const { input } = mount();
+    const popover = screen.getByRole("group", { name: "Alex volume controls" });
+    const wheel = (deltaY: number, deltaMode = 0) => {
+      const event = new WheelEvent("wheel", { deltaY, deltaMode, bubbles: true, cancelable: true });
+      act(() => { popover.dispatchEvent(event); });
+      return event;
+    };
+    // Up is louder. The event is consumed so the track list behind stays put.
+    expect(wheel(-40).defaultPrevented).toBe(true);
+    expect(input.value).toBe("+1 dB");
+    wheel(-40); wheel(-40);
+    expect(input.value).toBe("+3 dB");
+    act(() => { vi.advanceTimersByTime(200); });
+    // A trackpad: ten 8 px deltas are two notches, not ten.
+    for (let index = 0; index < 10; index++) wheel(8);
+    expect(input.value).toBe("+1 dB");
+    act(() => { vi.advanceTimersByTime(200); });
+    // A slow single click that reports less than a notch still moves once.
+    wheel(-4);
+    expect(input.value).toBe("+1 dB");
+    act(() => { vi.advanceTimersByTime(200); });
+    expect(input.value).toBe("+2 dB");
+    // Line-mode wheels count a line as a notch, and the top stops at +36.
+    wheel(-100, 1);
+    expect(input.value).toBe("+36 dB");
+  } finally { vi.useRealTimers(); }
+});
+it("a sideways swipe does not turn the fader, and the wheel never throws away a level being typed", () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const { input } = mount();
+    const popover = screen.getByRole("group", { name: "Alex volume controls" });
+    const wheel = (deltaY: number, deltaX = 0) => act(() => { popover.dispatchEvent(new WheelEvent("wheel", { deltaY, deltaX, bubbles: true, cancelable: true })); });
+    wheel(-6, -80);
+    act(() => { vi.advanceTimersByTime(200); });
+    expect(input.value).toBe("0 dB");
+    fireEvent.change(input, { target: { value: "-12" } });
+    wheel(-40);
+    act(() => { vi.advanceTimersByTime(200); });
+    expect(input.value).toBe("-12");
+  } finally { vi.useRealTimers(); }
 });
 it("keeps fader keyboard direction and limits consistent across browsers", () => {
   const { slider, input } = mount();

@@ -2,16 +2,23 @@ import type { AafDocument } from "../bindings/AafDocument";
 import type { EditDocument } from "../bindings/EditDocument";
 import type { EditTrack } from "../bindings/EditTrack";
 import { EDIT_SCHEMA_VERSION } from "./edit-document";
+import type { TimelineLane } from "./edit-model";
 import { alternativeLane } from "./multitrack-graph";
 import { trackOwner } from "./multitrack";
 
 /**
- * Building an edit's frame from AAF Audio sequences: one edit track per person
- * (the sequence's main lanes, named by mic owner), each mapped to that
- * source's mic. A second source joins by matching owners, so Rosa's lane
- * draws on Rosa's mic in every sequence; a person new to the edit gets a lane.
- * Alternative mics in a group stay out: they are a choice inside the source,
- * not another person.
+ * Building an edit's frame from AAF Audio sequences: one lane per person
+ * (named by mic owner), each mapped to that source's mic. A second source
+ * joins by matching owners, so Rosa's lane draws on Rosa's mic in every
+ * sequence; a person new to the edit gets a lane.
+ *
+ * A lane is not a record track. Record tracks are PATCHED, as in Avid: a new
+ * string out has none, and each person goes on the next track down when
+ * their words are first cut in (`giveTracks`), so a string out of Harry and
+ * Jane has Harry on A1, Jane on A2 and nothing else. Everyone is listed
+ * (`featured: false` until patched), so Ask and the source pane can find
+ * anyone's words, a group angle's included. On the Media Composer 64-track
+ * ceiling this matters: HEAT 2 has 21 tracks and 99 people.
  */
 
 const slug = (name: string) => name.toLowerCase().normalize("NFC").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "") || "track";
@@ -45,9 +52,12 @@ export function editFromSequence(document: AafDocument, title: string, whole: bo
   };
   const edit = addSource(empty, document);
   const source = edit.sources[0].id;
-  return whole && document.manifest.duration_frames > 0
-    ? { ...edit, segments: [{ kind: "source", id: `whole-${source}`, source, in_frame: 0, out_frame: document.manifest.duration_frames }] }
-    : edit;
+  if (!whole || document.manifest.duration_frames <= 0) return edit;
+  // The whole sequence, as the sequence has it: everyone with a track of
+  // their own in it is patched, top-down in its order; group angles are not.
+  const own = document.manifest.tracks.filter((track) => !alternativeLane(document, track.id))
+    .flatMap((track) => edit.tracks.filter((lane) => lane.source_tracks[source] === track.id).map((lane) => lane.id));
+  return { ...giveTracks(edit, own), segments: [{ kind: "source", id: `whole-${source}`, source, in_frame: 0, out_frame: document.manifest.duration_frames }] };
 }
 
 /**
@@ -68,19 +78,74 @@ export function addSource(target: EditDocument, document: AafDocument): EditDocu
   const byName = new Map(tracks.map((track) => [track.name.normalize("NFC"), track]));
   const used = new Set(tracks.map((track) => track.id));
   for (const track of document.manifest.tracks) {
-    if (alternativeLane(document, track.id)) continue;
+    const angle = alternativeLane(document, track.id);
     const name = trackOwner(document, track.id).normalize("NFC");
     const existing = byName.get(name);
     if (existing) {
-      if (!existing.source_tracks[id]) existing.source_tracks[id] = track.id;
+      const had = existing.source_tracks[id];
+      // One mic per person per sequence: their own track over an angle of theirs in a group.
+      if (had && !(angle === false && alternativeLane(document, had))) continue;
+      existing.source_tracks[id] = track.id;
       continue;
     }
     let laneId = slug(name), suffix = 2;
     while (used.has(laneId)) laneId = `${slug(name)}-${suffix++}`;
     used.add(laneId);
-    const lane: EditTrack = { id: laneId, name, kind: "sound", source_tracks: { [id]: track.id } };
+    // Listed, not patched: a person gets a record track when their words are cut in.
+    const lane: EditTrack = { id: laneId, name, kind: "sound", source_tracks: { [id]: track.id }, featured: false };
     tracks.push(lane);
     byName.set(name, lane);
   }
   return { ...edit, sources: [...edit.sources, { id, name: document.manifest.name, document_id: document.id }], tracks };
+}
+
+/** Whether a lane is patched to a record track (absent: patched, as every lane was before patching). */
+export const onTrack = (lane: EditTrack) => lane.featured !== false;
+
+/**
+ * Everyone who speaks, with the record track each is patched to (0 for
+ * none). Tracks are numbered top-down in lane order, and patching keeps the
+ * patched lanes first, so the numbers are A1, A2… with no holes.
+ */
+export function peopleOf(tracks: EditTrack[]): TimelineLane[] {
+  let number = 0;
+  return tracks.filter((track) => track.kind === "sound").map((track) => ({ id: track.id, name: track.name, track: onTrack(track) ? ++number : 0, angle: track.featured === true }));
+}
+
+/** Patched lanes first, in track order, then everyone else in the order they were listed. */
+const arrange = (tracks: EditTrack[]) => [...tracks.filter(onTrack), ...tracks.filter((lane) => !onTrack(lane))];
+
+/**
+ * Patch these people onto record tracks, top-down in the order given: each
+ * one not on a track yet goes on the next track below the last one in use,
+ * so asking for Harry and then Jane puts Harry on A1 and Jane on A2. Nobody
+ * already patched moves. The same document when everyone given has a track.
+ */
+export function giveTracks(edit: EditDocument, laneIds: Iterable<string>): EditDocument {
+  const joining = [...new Set(laneIds)].filter((id) => edit.tracks.some((lane) => lane.id === id && !onTrack(lane)));
+  if (!joining.length) return edit;
+  const patched = edit.tracks.filter(onTrack);
+  const added = joining.map((id) => ({ ...edit.tracks.find((lane) => lane.id === id)!, featured: true }));
+  return { ...edit, tracks: [...patched, ...added, ...edit.tracks.filter((lane) => !onTrack(lane) && !joining.includes(lane.id))] };
+}
+
+/**
+ * The patch panel: put this person on record track `position` (0 for A1).
+ * Whoever was there, and everyone below, moves down one; the person leaves
+ * the track they were on. Clips keep playing their own people, so a clip of
+ * Jane follows Jane to her new track.
+ */
+export function patchAt(edit: EditDocument, laneId: string, position: number): EditDocument {
+  const lane = edit.tracks.find((item) => item.id === laneId);
+  if (!lane) return edit;
+  const patched = edit.tracks.filter((item) => onTrack(item) && item.id !== laneId);
+  if (onTrack(lane) && edit.tracks.filter(onTrack).indexOf(lane) === position) return edit;
+  patched.splice(Math.max(0, Math.min(position, patched.length)), 0, { ...lane, featured: true });
+  return { ...edit, tracks: [...patched, ...edit.tracks.filter((item) => !onTrack(item) && item.id !== laneId)] };
+}
+
+/** Take a person off their record track; the tracks below move up. Their clips stay, silent on no track. */
+export function unpatch(edit: EditDocument, laneId: string): EditDocument {
+  if (!edit.tracks.some((lane) => lane.id === laneId && onTrack(lane))) return edit;
+  return { ...edit, tracks: arrange(edit.tracks.map((lane) => lane.id === laneId ? { ...lane, featured: false } : lane)) };
 }

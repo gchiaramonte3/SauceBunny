@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { AafDocumentSummary } from "../bindings/AafDocumentSummary";
 import type { EditDocument } from "../bindings/EditDocument";
@@ -9,6 +9,7 @@ import { editFromSequence } from "../lib/edit-new";
 import { stringoutsFor } from "../lib/edit-stringout";
 import { editStore, newEditId } from "../lib/edit-store";
 import { formatError } from "../lib/error-format";
+import { sequenceLabels } from "../lib/multitrack";
 
 type Props = { onOpen: (id: string) => void; onCancel: (() => void) | null; appLocalModelId?: string | null };
 
@@ -23,6 +24,7 @@ const emptyEdit = (title: string): EditDocument => ({ schema_version: EDIT_SCHEM
  */
 export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
   const [saved, setSaved] = useState<AafDocumentSummary[]>([]);
+  const labels = useMemo(() => sequenceLabels(saved), [saved]);
   const [title, setTitle] = useState("");
   const [from, setFrom] = useState("");
   const [whole, setWhole] = useState(true);
@@ -63,7 +65,7 @@ export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
       <label className="cp-te-set-label">Title<input className="cp-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Rosa, first pass" /></label>
       <label className="cp-te-set-label">Start from<select className="cp-select" value={from} onChange={(event) => setFrom(event.target.value)}>
         <option value="">An empty timeline</option>
-        {saved.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        {saved.map((item) => <option key={item.id} value={item.id}>{labels.get(item.id) ?? item.name}</option>)}
       </select></label>
       {from && <label className="cp-te-picker-check"><input type="checkbox" checked={whole} onChange={(event) => setWhole(event.target.checked)} />Start with the whole sequence</label>}
       <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "Creating…" : "Create"}</button>

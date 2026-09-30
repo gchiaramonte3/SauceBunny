@@ -170,8 +170,9 @@
         so a selected row, a focused row and a live one stay three different
         things.
         Aliased rather than using --novella-violet directly: that token is
-        already the primary button and --marker, and a selection that has to
-        be retuned should not drag a button and every timeline marker with
+        already the primary button and String Outs' markers (In and Out used
+        it too, until they went white as --marker), and a selection that has
+        to be retuned should not drag a button and every timeline marker with
         it. */
   --sel-fill: var(--novella-violet-deep);
   /* For a persistent NAVIGATION selection (the folder tree), where a full

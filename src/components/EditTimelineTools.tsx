@@ -8,13 +8,21 @@ export type EditTimelineView = { waveforms: boolean; speakerColours: boolean; he
 export type EditTimelineAudio = { crossfade: 0 | 1 | 2 | 4; roomTone: boolean };
 
 type Props = {
+  /** Play and the Record/Source readouts, which lead the row. */
+  transport?: ReactNode;
+  /** The last thing the editor did ("Lifted 2.40 s."), announced politely. */
+  status?: string;
   marks: { in: number | null; out: number | null };
   canMark: boolean; snap: boolean; follow: boolean; loop: boolean; finding: boolean;
+  /** Why dead space cannot be found yet, or undefined when it can. */
+  deadHint?: string;
   hasPrevious: boolean; hasNext: boolean;
+  /** The timeline shows the source: the edits that change the string out rest until it shows Record again. */
+  sourceSide?: boolean;
   onAddEdit: () => void; onMarkIn: () => void; onMarkClip: () => void; onFindDead: () => void; onMarkOut: () => void; onLift: () => void; onExtract: () => void; onMarker: () => void;
   onSnap: () => void; onFollow: () => void; onLoop: () => void; onPrevious: () => void; onNext: () => void;
   allText: boolean; onAllText: () => void;
-  view: EditTimelineView; onView: (view: EditTimelineView) => void;
+  view: EditTimelineView; onView: (view: EditTimelineView) => void; measuring: boolean;
   audio: EditTimelineAudio; onAudio: (audio: EditTimelineAudio) => void;
   zoom: number; onZoom: (direction: -1 | 0 | 1) => void;
 };
@@ -30,8 +38,8 @@ const IconLoop = () => <Icon size={15}><path d="M17 3l3 3-3 3" /><path d="M4 11V
 const IconPrevEdit = () => <Icon size={15}><path d="M6 5v14" /><path d="M17 6l-6 6 6 6" /></Icon>;
 const IconNextEdit = () => <Icon size={15}><path d="M18 5v14" /><path d="M7 6l6 6-6 6" /></Icon>;
 
-function Tool({ label, keys, pressed, disabled, onClick, children }: { label: string; keys?: string; pressed?: boolean; disabled?: boolean; onClick: () => void; children: ReactNode }) {
-  return <button type="button" className={`cp-icon-btn cp-te-tool${pressed ? " active" : ""}`} aria-label={label} title={keys ? `${label} (${keys})` : label}
+function Tool({ label, keys, hint, pressed, disabled, onClick, children }: { label: string; keys?: string; hint?: string; pressed?: boolean; disabled?: boolean; onClick: () => void; children: ReactNode }) {
+  return <button type="button" className={`cp-icon-btn cp-te-tool${pressed ? " active" : ""}`} aria-label={label} title={`${keys ? `${label} (${keys})` : label}${hint ? `. ${hint}` : ""}`}
     aria-pressed={pressed} aria-keyshortcuts={keys} disabled={disabled} onClick={onClick}>{children}</button>;
 }
 
@@ -66,16 +74,19 @@ function Radio({ checked, onChoose, children }: { checked: boolean; onChoose: ()
 export function EditTimelineTools(props: Props) {
   const { marks, view, audio } = props;
   const ranged = marks.in != null && marks.out != null && marks.out > marks.in;
+  // Only In and Out act on the source, as in Avid's source monitor; the rest edit the record.
+  const record = props.sourceSide ? { hint: "Switch the timeline to Record to use it", off: true } : { hint: undefined, off: false };
   return <div className="cp-te-tl-tools" role="toolbar" aria-label="Timeline tools">
+    {props.transport && <>{props.transport}<span className="cp-te-tl-sep" aria-hidden="true" /></>}
     <div className="cp-te-tl-group">
-      <Tool label="Add edit at playhead" keys="⌘B" disabled={!props.canMark} onClick={props.onAddEdit}><IconScissors size={15} /></Tool>
+      <Tool label="Add edit at playhead" keys="⌘B" hint={record.hint} disabled={record.off || !props.canMark} onClick={props.onAddEdit}><IconScissors size={15} /></Tool>
       <Tool label="Mark in" keys="I" pressed={marks.in != null} onClick={props.onMarkIn}><IconMarkIn size={15} /></Tool>
       <Tool label="Mark out" keys="O" pressed={marks.out != null} onClick={props.onMarkOut}><IconMarkOut size={15} /></Tool>
-      <Tool label="Mark clip" keys="T" disabled={!props.canMark} onClick={props.onMarkClip}><IconMarkClip /></Tool>
-      <Tool label="Lift in to out on selected tracks" keys="Z" disabled={!ranged} onClick={props.onLift}><IconLift /></Tool>
-      <Tool label="Extract in to out, all tracks" keys="X" disabled={!ranged} onClick={props.onExtract}><IconExtract /></Tool>
-      <Tool label="Add marker" keys="M" onClick={props.onMarker}><IconMarker /></Tool>
-      <Tool label="Remove dead space" pressed={props.finding} disabled={!props.canMark} onClick={props.onFindDead}><IconDeadSpace /></Tool>
+      <Tool label="Mark clip" keys="T" hint={record.hint} disabled={record.off || !props.canMark} onClick={props.onMarkClip}><IconMarkClip /></Tool>
+      <Tool label="Lift in to out on selected tracks" keys="Z" hint={record.hint} disabled={record.off || !ranged} onClick={props.onLift}><IconLift /></Tool>
+      <Tool label="Extract in to out, all tracks" keys="X" hint={record.hint} disabled={record.off || !ranged} onClick={props.onExtract}><IconExtract /></Tool>
+      <Tool label="Add marker" keys="M" hint={record.hint} disabled={record.off} onClick={props.onMarker}><IconMarker /></Tool>
+      <Tool label="Remove dead space" hint={record.hint ?? props.deadHint} pressed={props.finding} disabled={record.off || !props.canMark || (!!props.deadHint && !props.finding)} onClick={props.onFindDead}><IconDeadSpace /></Tool>
     </div>
     <span className="cp-te-tl-sep" aria-hidden="true" />
     <div className="cp-te-tl-group">
@@ -85,12 +96,13 @@ export function EditTimelineTools(props: Props) {
     </div>
     <span className="cp-te-tl-sep" aria-hidden="true" />
     <div className="cp-te-tl-group">
-      <Tool label="Previous edit" keys="A" disabled={!props.hasPrevious} onClick={props.onPrevious}><IconPrevEdit /></Tool>
-      <Tool label="Next edit" keys="S" disabled={!props.hasNext} onClick={props.onNext}><IconNextEdit /></Tool>
+      <Tool label="Previous edit" keys="A" hint={record.hint} disabled={record.off || !props.hasPrevious} onClick={props.onPrevious}><IconPrevEdit /></Tool>
+      <Tool label="Next edit" keys="S" hint={record.hint} disabled={record.off || !props.hasNext} onClick={props.onNext}><IconNextEdit /></Tool>
     </div>
+    <p className="cp-te-status" role="status" aria-live="polite">{props.status}</p>
     <div className="cp-te-tl-end">
       <Menu label="View">{() => <>
-        <Check checked={view.waveforms} onChange={() => props.onView({ ...view, waveforms: !view.waveforms })}>Waveforms</Check>
+        <Check checked={view.waveforms} onChange={() => props.onView({ ...view, waveforms: !view.waveforms })}>{props.measuring ? "Waveforms (building)" : "Waveforms"}</Check>
         <Check checked={view.speakerColours} onChange={() => props.onView({ ...view, speakerColours: !view.speakerColours })}>Speaker colours</Check>
         <Check checked={props.allText} onChange={props.onAllText}>Text on every track</Check>
         <div className="cp-popover-header" role="presentation">Track height</div>

@@ -47,7 +47,7 @@ describe("edit document", () => {
 
   it("reads analysed words and audible spans in source seconds", () => {
     const speech = { track_id: "track-1", floor_db: -60, activity: [[16_000, 32_000] as [number, number]], reactions: [[48_000, 56_000] as [number, number]],
-      words: [{ cue_id: "c", text: "Okay", start_sample: 16_000, end_sample: 24_000 }] };
+      words: [{ cue_id: "c", text: "Okay", start_sample: 16_000, end_sample: 24_000 }], measured: true };
     const [word] = wordsFromSpeech(speech, "s", "rosa");
     expect(word).toMatchObject({ source: "s", track: "rosa", text: "Okay", start: 1, end: 1.5 });
     expect(audibleSpans(speech)).toEqual([[1, 2], [3, 3.5]]);

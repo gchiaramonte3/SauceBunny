@@ -50,7 +50,12 @@
 .cp-te-title { font-size: var(--text-lg); font-weight: var(--weight-bold); line-height: var(--leading-tight); color: var(--fg-1); }
 .cp-te-subtitle { font-size: var(--text-sm); line-height: var(--leading-tight); color: var(--fg-4); }
 .cp-te-toolbar-gap { flex: 1; }
-.cp-te-history { display: flex; gap: 2px; }
+.cp-te-undo { display: flex; align-items: center; gap: 2px; }
+/* Undo and redo sit side by side. They used to share .cp-te-history with the
+   History panel, whose column layout stacked them. They light on hover only
+   when there is something to undo or redo. */
+.cp-te-undo .cp-icon-btn:hover:not(:disabled) { background: var(--bg-4); color: var(--fg-1); }
+.cp-te-undo .cp-icon-btn:disabled:hover { background: transparent; }
 
 /* ── Panes ───────────────────────────────────────────────────────────── */
 .cp-te-panes { flex: 1; min-height: 0; display: flex; }
@@ -228,15 +233,14 @@
 /* ── Inspector ───────────────────────────────────────────────────────── */
 
 /* ── Transport ───────────────────────────────────────────────────────── */
-.cp-te-lower { flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--bg-2); }
+.cp-te-lower { flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--bg-2); container-type: inline-size; }
+/* Play and the readouts lead the tool row; they used to take a line of their own. */
 .cp-te-transport {
-  flex: none;
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
-  gap: 14px;
-  height: 36px;
-  padding: 0 8px;
-  border-bottom: 1px solid var(--line-1);
+  gap: 12px;
+  min-width: 0;
 }
 .cp-te-transport > .cp-icon-btn + .cp-icon-btn { margin-left: -12px; }
 .cp-te-play.cp-icon-btn { color: var(--fg-1); }
@@ -245,10 +249,8 @@
 .cp-te-readout-tc { font-size: var(--text-lg); font-weight: var(--weight-semibold); color: var(--fg-1); }
 .cp-te-readout-tc.is-quiet { color: var(--fg-3); }
 .cp-te-readout-of { font-size: var(--text-sm); color: var(--fg-4); }
-.cp-te-speaking { display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
-.cp-te-speaking-name { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-md); color: var(--fg-1); white-space: nowrap; }
-.cp-te-speaking-none { font-size: var(--text-md); color: var(--fg-4); }
-.cp-te-status { flex: 1; min-width: 0; text-align: right; font-size: var(--text-base); color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-te-transport-busy { font-size: var(--text-md); color: var(--fg-4); white-space: nowrap; }
+.cp-te-status { flex: 1; min-width: 0; margin: 0 4px; text-align: right; font-size: var(--text-base); color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Timeline ────────────────────────────────────────────────────────── */
 /* Lanes follow AAF Audio (src/styles/multitrack.css): one violet for every
@@ -258,7 +260,14 @@
 .cp-te-timeline { --te-lane-h: 36px; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .cp-te-timeline.is-small { --te-lane-h: 24px; }
 .cp-te-timeline.is-large { --te-lane-h: 58px; }
-.cp-te-tl-tools { flex: none; display: flex; align-items: center; gap: 4px; height: 32px; padding: 0 8px; }
+.cp-te-tl-tools { flex: none; display: flex; align-items: center; gap: 4px; min-height: 36px; padding: 0 8px; }
+.cp-te-tl-group, .cp-te-tl-end, .cp-te-tl-tools > .cp-te-tl-sep { flex: none; }
+/* Transport, readouts and every tool need ~1,250px on one line. Narrower,
+   the row wraps rather than pushing the zoom and menus out of the window. */
+@container (max-width: 1260px) {
+  .cp-te-tl-tools { flex-wrap: wrap; row-gap: 2px; padding-block: 4px; }
+  .cp-te-tl-tools > .cp-te-status { order: 1; flex-basis: 100%; text-align: left; }
+}
 .cp-te-tl-group { display: flex; align-items: center; gap: 2px; }
 .cp-te-tl-sep { flex: none; width: 1px; height: 16px; margin: 0 4px; background: var(--line-2); }
 .cp-te-tl-end { display: flex; align-items: center; gap: 6px; margin-left: auto; }
@@ -276,8 +285,11 @@
   min-height: 0;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: 156px minmax(0, 1fr);
-  grid-template-rows: 22px;
+  /* Headers size to the longest name, up to 280px. At a fixed 156px, S, M and
+     T left names about 12px, so every person read as one letter. */
+  grid-template-columns: fit-content(280px) minmax(0, 1fr);
+  /* The ruler row, tall enough for the Source/Record switch's 24px targets in the corner beside it. */
+  grid-template-rows: 28px;
   grid-auto-rows: auto;
   align-content: start;
   position: relative;
@@ -285,8 +297,26 @@
   border-top: 1px solid var(--line-1);
 }
 .cp-te-tl-corner, .cp-te-tl-ruler { grid-row: 1; position: sticky; top: 0; z-index: 3; background: var(--bg-1); border-bottom: 1px solid var(--line-1); }
-.cp-te-tl-corner { grid-column: 1; }
-.cp-te-tl-ruler { grid-column: 2; overflow: hidden; cursor: pointer; }
+.cp-te-tl-corner { grid-column: 1; display: flex; align-items: center; padding: 0 6px; }
+/* Source | Record: Avid's Toggle Source/Record in Timeline, over the track headers. */
+.cp-te-tl-mode { display: inline-flex; gap: 2px; padding: 1px; border: 1px solid var(--line-2); border-radius: var(--r-sm); }
+.cp-te-tl-mode-choice {
+  height: 24px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+.cp-te-tl-mode-choice:hover { color: var(--fg-1); }
+.cp-te-tl-mode-choice[aria-checked="true"] { background: var(--bg-5); color: var(--fg-1); }
+/* Clipped 8px wide rather than at its edge, so an In on the first frame or an
+   Out on the last keeps the wing that says which way it points (marks.css). */
+.cp-te-tl-ruler { grid-column: 2; clip-path: inset(0 -8px); cursor: pointer; }
 .cp-te-tl-tick {
   position: absolute;
   top: 0;
@@ -300,8 +330,9 @@
   white-space: nowrap;
   pointer-events: none;
 }
-.cp-te-tl-marked { position: absolute; top: 0; bottom: 0; pointer-events: none; background: color-mix(in srgb, var(--marker) 30%, transparent); border-left: 1px solid var(--marker); border-right: 1px solid var(--marker); }
-.cp-te-tl-marker { position: absolute; bottom: 2px; width: 8px; height: 10px; margin-left: -4px; background: var(--marker); clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%); }
+/* In to Out and lone marks on the ruler are marks.css's .cp-mark-range and .cp-mark. */
+/* Markers (M) are locators, not In and Out: they keep the violet the marks gave up. */
+.cp-te-tl-marker { position: absolute; bottom: 2px; width: 8px; height: 10px; margin-left: -4px; background: var(--novella-violet); clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%); }
 .cp-te-tl-seam-mark {
   position: absolute;
   top: 0;
@@ -358,7 +389,20 @@
 .cp-te-tl-track:hover { color: var(--fg-2); border-color: var(--line-2); }
 .cp-te-tl-track[aria-pressed="true"] { background: var(--bg-4); color: var(--fg-1); border-color: var(--line-3); }
 .cp-te-tl-head .cp-te-swatch { width: 6px; height: 6px; }
+/* The Source view's groups, as AAF Audio lays them out: a disclosure on the
+   track, and its alternates indented under it behind a ↳. */
+.cp-te-tl-disclosure.cp-icon-btn { flex: none; width: 24px; height: 24px; margin-left: -6px; }
+.cp-te-tl-branch { flex: none; font-size: var(--text-sm); color: var(--fg-4); }
+.cp-te-tl-row.is-alternative .cp-te-tl-head { padding-left: 24px; }
+.cp-te-tl-note { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: var(--text-xs); color: var(--fg-4); pointer-events: none; }
 .cp-te-tl-name { flex: 1; min-width: 0; font-size: var(--text-base); color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The patch panel: who plays on a record track, chosen in its header. Record
+   tracks are A1, A2… and a person is patched to one; choosing someone else
+   puts them on this track and the rest move down. */
+.cp-te-tl-patch.cp-select { flex: 1; min-width: 0; max-width: 200px; color: var(--fg-2); }
+/* The empty track under the last one in use, where the next person is patched. */
+.cp-te-tl-patch-row .cp-te-tl-head { opacity: 0.8; }
+.cp-te-tl-patch-row .cp-te-tl-lane { min-height: 28px; cursor: default; }
 .cp-te-tl-switches { flex: none; display: flex; gap: 3px; }
 /* S, M and T: the AAF Audio switches, at the 24px pointer minimum. */
 .cp-te-tl-toggle {
@@ -412,8 +456,15 @@
    item spanning every row pushed the lanes into implicit rows below it), and
    its grid lines still make it exactly as wide as the lanes. */
 .cp-te-tl-overlay { position: absolute; inset: 0; grid-column: 2; grid-row: 1 / span var(--te-rows, 2); z-index: 4; overflow: hidden; pointer-events: none; }
+/* An empty string out says so over its lanes, near the top: with 99 lanes the
+   middle of the grid is thousands of pixels down. */
+.cp-te-tl-empty { position: absolute; inset: 28px 0 0; grid-column: 2; grid-row: 1 / span var(--te-rows, 2); z-index: 5; display: flex; justify-content: center; align-items: flex-start; padding: 16px; pointer-events: none; }
+.cp-te-tl-empty-card { max-width: 440px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); color: var(--fg-3); font-size: var(--text-md); line-height: var(--leading-snug); text-align: center; pointer-events: auto; }
+.cp-te-tl-empty-card p { margin: 0; }
+.cp-te-tl-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 10px; }
+.cp-te-tl-empty-actions:empty { display: none; }
 /* In to out on the selected tracks only, as Avid highlights it. */
-.cp-te-tl-marked-lane { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; background: color-mix(in srgb, var(--marker) 22%, transparent); box-shadow: inset 1px 0 0 var(--marker), inset -1px 0 0 var(--marker); }
+.cp-te-tl-marked-lane { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; background: var(--marker-region); box-shadow: inset 1px 0 0 var(--marker), inset -1px 0 0 var(--marker); }
 /* A gap: empty time on every track. */
 .cp-te-tl-gap { position: absolute; top: 22px; bottom: 0; background: repeating-linear-gradient(135deg, var(--line-1) 0 1px, transparent 1px 6px); box-shadow: inset 1px 0 0 var(--line-2), inset -1px 0 0 var(--line-2); }
 /* Dead space under review: removing is filled, kept is outlined only. */
@@ -609,7 +660,12 @@
 /* ── The app view ─────────────────────────────────────────────────────── */
 .cp-te-page { height: 100%; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-1); }
 .cp-te-page[hidden] { display: none; }
-.cp-te-page > .cp-te { flex: 1; min-height: 0; }
+/* Open string outs as tabs, then the chosen one. The panel takes the height
+   the page's direct children used to. */
+.cp-te-tabs { flex: none; display: flex; align-items: flex-end; padding: 6px 12px 0; border-bottom: 1px solid var(--line-1); background: var(--bg-1); }
+.cp-te-tabs .cp-tabstrip { flex: 1; }
+.cp-te-tab-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cp-te-tab-panel > .cp-te, .cp-te-tab-panel > .cp-multitrack-empty { flex: 1; min-height: 0; }
 .cp-te-page .cp-te-lower { height: clamp(200px, 34%, 420px); border-top: 1px solid var(--line-1); }
 .cp-te-pane-source { width: 340px; border-right: 1px solid var(--line-1); }
 .cp-te-source-pick.cp-select { flex: none; margin: 6px 8px 0; min-height: 26px; }
@@ -794,3 +850,7 @@
 .cp-te-side-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .cp-te-side-body > * { flex: 1; min-height: 0; }
 .cp-te-side-body > .cp-te-pane-note { flex: none; padding: 12px; }
+/* A page of a long transcript (EditWindowedParagraphs). Its own block
+   formatting context, so a paragraph's margin cannot escape it and its
+   measured height is the height it takes. */
+.cp-te-textpage { display: flow-root; }

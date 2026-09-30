@@ -83,6 +83,11 @@ class GraphTimeline(Timeline):
         self.selectors = {}
         self.branch_only = None
         self.inside_branch = False
+        # Group angles to play instead of the selected one (choice ids). Set
+        # only while re-reading one track, for the writer's self-check of a
+        # track that features an alternate: that track plays nothing outside
+        # the groups offering the angle, exactly as the writer builds it.
+        self.prefer = frozenset()
         # A bounded scan, never a full enumeration: finding the chosen
         # sequence, or learning there is more than one, needs no list of all.
         chosen, seen = None, 0
@@ -173,6 +178,15 @@ class GraphTimeline(Timeline):
                     'described_slots': list(value(marker, 'DescribedSlots') or []),
                     'attributes': {str(t.name): str(t.value)[:20000] for t in value(marker, 'CommentMarkerAttributeList') or []}})
 
+    def read_preferring(self, slot, choices):
+        """One track as it plays with these group angles chosen, silent
+        outside the groups that offer one."""
+        self.prefer = frozenset(choices)
+        try:
+            return self.read_track(slot)
+        finally:
+            self.prefer = frozenset()
+
     def group_name(self, seg):
         if isinstance(seg, aaf2.components.SourceClip) and seg.mob:
             return clean_name(seg.mob.name, 'Group audio')
@@ -245,9 +259,13 @@ class GraphTimeline(Timeline):
             key = identity(seg)
             if not self.branch_only or self.inside_branch or key == self.branch_only:
                 self.selectors[key] = seg
-            choice = self.overrides.get(key, value(seg, 'Selected'))
+            preferred = None
+            if key not in self.overrides and self.prefer:
+                preferred = next((option for option in [value(seg, 'Selected'), *(value(seg, 'Alternates', []) or [])]
+                                  if option is not None and choice_id(option) in self.prefer), None)
+            choice = self.overrides[key] if key in self.overrides else preferred if preferred is not None else value(seg, 'Selected')
             previous = self.inside_branch
-            self.inside_branch = previous or key == self.branch_only
+            self.inside_branch = previous or key == self.branch_only or preferred is not None
             try:
                 return self.expand(choice, rate, start, duration, trail, warnings_list, depth+1)
             finally:
@@ -262,7 +280,7 @@ class GraphTimeline(Timeline):
             return [{'kind': 'unavailable', 'duration': duration}]
         if isinstance(seg, aaf2.components.SourceClip):
             mob, slot = seg.mob, seg.slot
-            if self.branch_only and not self.inside_branch and isinstance(mob, aaf2.mobs.SourceMob):
+            if (self.branch_only or self.prefer) and not self.inside_branch and isinstance(mob, aaf2.mobs.SourceMob):
                 return [{'kind': 'gap', 'duration': duration}]
             descriptor = value(mob, 'EssenceDescription') if mob else None
             if mob and slot and str(mob.mob_id) in self.essence:

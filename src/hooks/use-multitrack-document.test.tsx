@@ -42,6 +42,7 @@ describe("multitrack document ownership", () => {
       return base(command, args);
     });
     const { result } = renderHook(() => useMultitrackDocument(true)); await act(async () => result.current.load());
+    act(() => result.current.setWaveformsOn(disk.id, true));
     const ready = multitrackLinkedFixture(true);
     disk.manifest.graph!.sources[0] = ready.manifest.graph!.sources[0]; disk.manifest.graph!.lanes[0].availability = "ready";
     await act(async () => mocks.listeners.get("saucebunny:multitrack-changed")?.({ payload: disk.id }));
@@ -73,7 +74,7 @@ describe("multitrack document ownership", () => {
       return base(command, args);
     });
     const { result } = renderHook(() => useMultitrackDocument(true)); await act(async () => result.current.load());
-    act(() => result.current.showTracks(["track-1", "track-2"]));
+    act(() => { result.current.showTracks(["track-1", "track-2"]); result.current.setWaveformsOn(disk.id, true); });
     disk.manifest.graph!.sources[0] = ready.manifest.graph!.sources[0]; disk.manifest.graph!.lanes[0].availability = "ready";
     await act(async () => mocks.listeners.get("saucebunny:multitrack-changed")?.({ payload: disk.id }));
     await waitFor(() => expect(mocks.invoke.mock.calls.filter(([c, a]) => c === "aaf_waveform" && a.trackId === "track-1")).toHaveLength(1));
@@ -199,13 +200,15 @@ describe("multitrack document ownership", () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
     rerender({ active: true });
     await act(async () => result.current.load());
-    await waitFor(() => expect(mocks.invoke.mock.calls.filter(([command]) => command === "aaf_waveform")).toHaveLength(1));
-    const jobId = mocks.invoke.mock.calls.find(([command]) => command === "aaf_waveform")![1].jobId;
+    act(() => result.current.setWaveformsOn(result.current.document!.id, true));
+    // Two builds at once, never more.
+    await waitFor(() => expect(mocks.invoke.mock.calls.filter(([command]) => command === "aaf_waveform")).toHaveLength(2));
+    const jobIds = mocks.invoke.mock.calls.filter(([command]) => command === "aaf_waveform").map(([, args]) => args.jobId);
     rerender({ active: false });
-    expect(mocks.invoke).toHaveBeenCalledWith("cancel_job", { jobId });
+    for (const jobId of jobIds) expect(mocks.invoke).toHaveBeenCalledWith("cancel_job", { jobId });
     await act(async () => pending.resolve({ peaks: [[-1, 1]] }));
     expect(result.current.waveforms).toEqual({});
-    expect(mocks.invoke.mock.calls.filter(([command]) => command === "aaf_waveform")).toHaveLength(1);
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "aaf_waveform")).toHaveLength(2);
     mocks.invoke.mockImplementation(base);
     rerender({ active: true });
     await waitFor(() => expect(Object.keys(result.current.waveforms)).toHaveLength(3));
@@ -213,6 +216,98 @@ describe("multitrack document ownership", () => {
     rerender({ active: false }); rerender({ active: true });
     await act(async () => {});
     expect(mocks.invoke.mock.calls.filter(([command]) => command === "aaf_waveform")).toHaveLength(completed);
+  });
+
+  it("builds nothing until Waveforms is turned on, and turning it off stops the build", async () => {
+    const pending = deferred<{ peaks: number[][] }>();
+    const base = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((command, args) => command === "aaf_waveform" ? pending.promise : base(command, args));
+    const { result } = renderHook(() => useMultitrackDocument(true));
+    await act(async () => result.current.load());
+    await act(async () => {});
+    // Opening a sequence reads its timeline and nothing else.
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "aaf_waveform")).toBe(false);
+    const id = result.current.document!.id;
+    // Another sequence's choice is not this one's.
+    act(() => result.current.setWaveformsOn("another-sequence", true));
+    await act(async () => {});
+    expect(mocks.invoke.mock.calls.some(([command]) => command === "aaf_waveform")).toBe(false);
+    act(() => result.current.setWaveformsOn(id, true));
+    await waitFor(() => expect(result.current.waveformsBuilding).toEqual(["track-1", "track-2"]));
+    const jobIds = mocks.invoke.mock.calls.filter(([command]) => command === "aaf_waveform").map(([, args]) => args.jobId);
+    act(() => result.current.setWaveformsOn(id, false));
+    for (const jobId of jobIds) expect(mocks.invoke).toHaveBeenCalledWith("cancel_job", { jobId });
+    await act(async () => pending.resolve({ peaks: [[-1, 1]] }));
+    expect(result.current.waveforms).toEqual({});
+    expect(result.current.waveformsBuilding).toEqual([]);
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "aaf_waveform")).toHaveLength(2);
+  });
+
+  it("builds two at a time and starts the next as each one finishes", async () => {
+    const answers = new Map<string, ReturnType<typeof deferred<{ peaks: number[][] }>>>();
+    const base = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((command, args) => {
+      if (command !== "aaf_waveform") return base(command, args);
+      const answer = deferred<{ peaks: number[][] }>(); answers.set(args.trackId, answer); return answer.promise;
+    });
+    const { result } = renderHook(() => useMultitrackDocument(true));
+    await act(async () => result.current.load());
+    act(() => result.current.setWaveformsOn(result.current.document!.id, true));
+    await waitFor(() => expect([...answers.keys()]).toEqual(["track-1", "track-2"]));
+    await act(async () => answers.get("track-2")!.resolve({ peaks: [[-.5, .5]] }));
+    await waitFor(() => expect([...answers.keys()]).toEqual(["track-1", "track-2", "track-3"]));
+    expect(result.current.waveformsBuilding).toEqual(["track-1", "track-3"]);
+    expect(result.current.waveforms["track-2"]).toEqual([[-.5, .5]]);
+  });
+
+  it("a failed build blocks only its own track, even where tracks look alike", async () => {
+    // The fixture's three tracks have identical clips, so identical media revisions.
+    const base = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((command, args) => command === "aaf_waveform" && args.trackId === "track-1"
+      ? Promise.reject(new Error("Decoder failed")) : base(command, args));
+    const { result } = renderHook(() => useMultitrackDocument(true));
+    await act(async () => result.current.load());
+    act(() => result.current.setWaveformsOn(result.current.document!.id, true));
+    await waitFor(() => expect(Object.keys(result.current.waveforms).sort()).toEqual(["track-2", "track-3"]));
+    expect(result.current.waveformErrors["track-1"]).toMatch(/Decoder failed/);
+    expect(mocks.invoke.mock.calls.filter(([c, a]) => c === "aaf_waveform" && a.trackId === "track-1")).toHaveLength(1);
+  });
+
+  it("a build stopped by Waveforms off and straight back on is not a failure: it builds again", async () => {
+    const rejects: ((cause: unknown) => void)[] = [];
+    const base = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((command, args) => command === "aaf_waveform" && args.trackId === "track-1" && rejects.length === 0
+      ? new Promise((_done, fail) => { rejects.push(fail); }) : base(command, args));
+    const { result } = renderHook(() => useMultitrackDocument(true));
+    await act(async () => result.current.load());
+    const id = result.current.document!.id;
+    act(() => result.current.setWaveformsOn(id, true));
+    await waitFor(() => expect(rejects).toHaveLength(1));
+    // Off and on again before the cancel lands: the old job is still building.
+    act(() => { result.current.setWaveformsOn(id, false); result.current.setWaveformsOn(id, true); });
+    await act(async () => rejects[0]({ kind: "Cancelled" }));
+    await waitFor(() => expect(result.current.waveforms["track-1"]).toEqual([[-.5, .5]]));
+    expect(result.current.waveformErrors["track-1"]).toBeUndefined();
+  });
+
+  it("a track that failed in one sequence builds again after the sequence is reopened", async () => {
+    let fail = true;
+    const base = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((command, args) => command === "aaf_waveform" && args.trackId === "track-1" && fail
+      ? Promise.reject(new Error("Media offline")) : base(command, args));
+    const { result } = renderHook(() => useMultitrackDocument(true));
+    await act(async () => result.current.load());
+    const id = result.current.document!.id;
+    act(() => result.current.setWaveformsOn(id, true));
+    await waitFor(() => expect(result.current.waveformErrors["track-1"]).toMatch(/Media offline/));
+    fail = false;
+    const other = multitrackFixture(); other.id = "other-sequence";
+    mocks.invoke.mockImplementation((command, args) => command === "aaf_open" && args.documentId === "other-sequence" ? Promise.resolve(other)
+      : command === "aaf_open" ? Promise.resolve(multitrackFixture()) : base(command, args));
+    await act(async () => result.current.load("other-sequence"));
+    await act(async () => result.current.load(id));
+    act(() => result.current.setWaveformsOn(result.current.document!.id, true));
+    await waitFor(() => expect(result.current.waveforms["track-1"]).toEqual([[-.5, .5]]));
   });
 
   it("ignores a cancelled import that completes late", async () => {

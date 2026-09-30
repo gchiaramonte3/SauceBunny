@@ -172,6 +172,10 @@ test("98 grouped microphones expand without implicit audition or transcription",
   await expect(region.locator('.cp-multitrack-lane')).toHaveCount(14);
   await expect(region.getByRole("button",{name:"Generate 14 tracks",exact:true})).toBeEnabled();
   const calls=()=>page.evaluate(()=>(window as unknown as { __multitrackCalls: {command:string;args:Record<string,unknown>}[] }).__multitrackCalls);
+  // Opening builds no waveforms: on NEXIS each one reads every file its mic uses.
+  await expect(region.getByRole("button",{name:"Waveforms",exact:true})).toHaveAttribute("aria-pressed","false");
+  expect((await calls()).filter(c=>c.command==="aaf_waveform")).toHaveLength(0);
+  await region.getByRole("button",{name:"Waveforms",exact:true}).click();
   await expect.poll(async()=> (await calls()).filter(c=>c.command==="aaf_waveform").length).toBeGreaterThanOrEqual(14);
   expect((await calls()).filter(c=>c.command==="aaf_waveform").every(c=>Number(String(c.args.trackId).split('-')[1])<=14)).toBe(true);
   const started=Date.now();
@@ -576,7 +580,10 @@ for (const viewport of [{ width: 1100, height: 740 }, { width: 1680, height: 102
     await expect.poll(async () => page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string }[] }).__multitrackCalls.filter((call) => call.command === "aaf_prepare_audio").length)).toBeGreaterThan(0);
     expect(await region.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
     const generation = (await region.locator(".cp-multitrack-generation").boundingBox())!, output = (await region.locator(".cp-multitrack-export").boundingBox())!;
-    expect(Math.abs(generation.y - output.y)).toBeLessThan(1);
+    const tracks = (await region.locator(".cp-multitrack-editor-content").boundingBox())!;
+    // Generate sits flush under the tracks (no empty band), and both footers end on one line.
+    expect(Math.abs(generation.y - tracks.y - tracks.height)).toBeLessThan(1);
+    expect(Math.abs(generation.y + generation.height - output.y - output.height)).toBeLessThan(1);
     for (const button of await region.locator(".cp-multitrack-generate-row button").all()) {
       await button.scrollIntoViewIfNeeded();
       expect(await button.evaluate((element) => { const box = element.getBoundingClientRect(); return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)); })).toBe(true);
@@ -660,11 +667,13 @@ test("Twenty compact tracks, centered transport, additive Solo/Mute and settings
   await expect(region.getByRole("button", { name: "Generate 20 tracks" })).toBeEnabled();
   await region.getByRole("button", { name: "Audio scrub" }).click();
   await expect(region.getByRole("button", { name: "Audio scrub" })).toHaveAttribute("aria-pressed", "false");
-  await region.getByRole("button", { name: "Waveforms", exact: true }).click();
+  // Off until asked, then drawn for every lane, then hidden again.
   await expect(region.locator("canvas.cp-track-wave")).toHaveCount(0);
   await region.getByRole("button", { name: "Waveforms", exact: true }).click();
   await expect(region.locator("canvas.cp-track-wave")).toHaveCount(20);
   await page.screenshot({ path: test.info().outputPath("twenty-track-toolbar.png") });
+  await region.getByRole("button", { name: "Waveforms", exact: true }).click();
+  await expect(region.locator("canvas.cp-track-wave")).toHaveCount(0);
   await region.getByRole("button", { name: "AAF Audio settings", exact: true }).click();
   const settings = page.getByRole("dialog", { name: "AAF Audio settings" }); await expect(settings).toBeVisible();
   await settings.press("Escape"); await expect(settings).toBeHidden();
@@ -729,6 +738,7 @@ test("Person navigation, per-track levels, context regeneration and safe exports
   await page.setViewportSize({ width: 1680, height: 1020 }); await boot(page, 20);
   const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+  await region.getByRole("button", { name: "Waveforms", exact: true }).click();
   await region.getByRole("button", { name: "Generate 20 tracks" }).click();
   await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
   await chooseTranscript(page, region, "Mic 20");
@@ -853,6 +863,7 @@ test("Track gain redraws cached waveforms at every density and zoom without chan
   await page.setViewportSize({ width: 1920, height: 1080 }); await boot(page, 20);
   const region = page.getByRole("region", { name: "AAF Audio", exact: true });
   await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+  await region.getByRole("button", { name: "Waveforms", exact: true }).click();
   const canvases = region.locator("canvas.cp-track-wave"), first = canvases.first();
   await expect(canvases).toHaveCount(20);
   const waveformCalls = () => page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string }[] }).__multitrackCalls.filter(call => call.command === "aaf_waveform").length);
@@ -908,7 +919,9 @@ test("Full workspace stays usable with enlarged text at 1100px", async ({ page }
   await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
   expect(await region.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
   const generation = (await region.locator(".cp-multitrack-generation").boundingBox())!, output = (await region.locator(".cp-multitrack-export").boundingBox())!;
-  expect(Math.abs(generation.y - output.y)).toBeLessThan(1);
+  const tracks = (await region.locator(".cp-multitrack-editor-content").boundingBox())!;
+  expect(Math.abs(generation.y - tracks.y - tracks.height)).toBeLessThan(1);
+  expect(Math.abs(generation.y + generation.height - output.y - output.height)).toBeLessThan(1);
   const label = region.locator(".cp-multitrack-lane-label").first();
   for (const control of await label.locator("input,button").all()) {
     const box = (await control.boundingBox())!, bounds = (await label.boundingBox())!;

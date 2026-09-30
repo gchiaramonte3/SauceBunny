@@ -108,7 +108,6 @@ export function TranscriptEditorPrototype() {
   const dryRun = selected.length ? deleteWords(teWords, edit, keys) : null;
   const current = placed.find((item) => item.programStart <= playhead && playhead < item.programEnd) ?? null;
   const currentKey = current ? placementKey(current) : null;
-  const speaking = [...new Set(placed.filter((item) => !item.muted && item.programStart <= playhead && playhead < item.programEnd).map((item) => item.word.speaker))];
   const has = (column: TeColumn) => dock[column].tabs.length > 0;
   const layout = layoutPanes(box.width, { left: open.left && has("left"), source: open.source && has("source"), right: open.right && has("right") }, sizes, priority);
   const timelineHeight = clampTimeline(timelineWanted ?? Math.min(teTimelineLimits.ideal, Math.round(box.height * 0.3)), box.height);
@@ -509,8 +508,7 @@ export function TranscriptEditorPrototype() {
     <div className="cp-te-lower" style={{ height: timelineHeight }}>
       <TeTransport playing={playback.playing === "record"} onToggle={() => playback.toggle("record")} onStart={() => seek(0)} playhead={playhead} total={total} fps={fps}
         source={sourceAtHead && sourceIndex ? sourceIndex.source : null} sourceBase={sourceAtHead ? sourceOf(sourceAtHead).startTc : "00:00:00:00"}
-        sourceName={sourceAtHead ? sourceOf(sourceAtHead).short : ""}
-        speaking={speaking.map((id) => ({ id, name: nameOf(id), color: colors[id] }))} message={message} />
+        sourceName={sourceAtHead ? sourceOf(sourceAtHead).short : ""} message={message} />
       <TeTimeline speakers={teSpeakers} edit={edit} seams={seams} placed={placed} selection={keys} playhead={playhead} fps={fps} colors={colors}
         solo={solo} mute={mute} onSeek={seek} seam={seam} onSeam={chooseSeam} sourceSpeakers={sourceSpeakers} sourceName={shortName}
         tracks={tracks} onTrack={(id, only) => setTracks((state) => { if (only) return new Set([id]); const next = new Set(state); if (!next.delete(id)) next.add(id); return next; })}

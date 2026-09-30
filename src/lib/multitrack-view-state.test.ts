@@ -8,7 +8,7 @@ it("merges fields written by different owners and drops tracks the import no lon
   saveViewState("doc", { solo: ["a"], mute: ["b", "gone"], levels: { a: 3, gone: -6 } });
   saveViewState("doc", { zoom: 4, density: "large", expanded: ["a"] });
   expect(loadViewState("doc", ["a", "b"])).toEqual({ solo: ["a"], mute: ["b"], levels: { a: 3 }, zoom: 4, density: "large",
-    text: undefined, expanded: ["a"], selected: undefined, waveforms: undefined });
+    text: undefined, expanded: ["a"], selected: undefined, showWaveforms: undefined });
   expect(loadViewState("other", ["a"])).toBeNull();
 });
 
@@ -21,6 +21,13 @@ it("keeps only the most recently used sequences", () => {
 });
 
 it("ignores malformed values rather than restoring them", () => {
-  localStorage.setItem(VIEW_STATE_KEY, JSON.stringify({ doc: { solo: "a", zoom: 3, density: "huge", levels: { a: "loud" }, waveforms: "yes" } }));
-  expect(loadViewState("doc", ["a"])).toMatchObject({ solo: undefined, zoom: undefined, density: undefined, levels: {}, waveforms: undefined });
+  localStorage.setItem(VIEW_STATE_KEY, JSON.stringify({ doc: { solo: "a", zoom: 3, density: "huge", levels: { a: "loud" }, showWaveforms: "yes" } }));
+  expect(loadViewState("doc", ["a"])).toMatchObject({ solo: undefined, zoom: undefined, density: undefined, levels: {}, showWaveforms: undefined });
+});
+
+it("does not read the old auto-saved waveforms flag as a choice to build them", () => {
+  localStorage.setItem(VIEW_STATE_KEY, JSON.stringify({ doc: { waveforms: true } }));
+  expect(loadViewState("doc", ["a"])?.showWaveforms).toBeUndefined();
+  saveViewState("doc", { showWaveforms: true });
+  expect(loadViewState("doc", ["a"])?.showWaveforms).toBe(true);
 });

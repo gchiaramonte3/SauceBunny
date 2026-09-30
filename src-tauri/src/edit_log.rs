@@ -395,9 +395,9 @@ mod tests {
             edit_rate: EditRate { numerator: 24, denominator: 1 },
             start_timecode_frames: 0,
             sources: vec![EditSource { id: "s".into(), name: "S".into(), document_id: "d".into() }],
-            tracks: vec![EditTrack { id: "t".into(), name: "T".into(), kind: EditTrackKind::Sound, source_tracks: Default::default() }],
+            tracks: vec![EditTrack { id: "t".into(), name: "T".into(), kind: EditTrackKind::Sound, source_tracks: Default::default(), featured: None }],
             segments: frames.iter().enumerate()
-                .map(|(index, frame)| EditSegment::Source { id: format!("seg{index}"), source: "s".into(), in_frame: index as i64 * 1000, out_frame: index as i64 * 1000 + frame })
+                .map(|(index, frame)| EditSegment::Source { id: format!("seg{index}"), source: "s".into(), in_frame: index as i64 * 1000, out_frame: index as i64 * 1000 + frame, tracks: None })
                 .collect(),
             mutes: vec![],
             markers: vec![],

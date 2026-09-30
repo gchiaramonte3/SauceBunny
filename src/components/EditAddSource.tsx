@@ -1,8 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { AafDocumentSummary } from "../bindings/AafDocumentSummary";
 import { formatError } from "../lib/error-format";
+import { sequenceLabels } from "../lib/multitrack";
 
 type Props = { exclude: string[]; onAdd: (document: AafDocument) => void; onError: (message: string) => void };
 
@@ -19,6 +20,7 @@ export function EditAddSource({ exclude, onAdd, onError }: Props) {
     return () => { live = false; };
   }, []);
   const choices = saved.filter((item) => !exclude.includes(item.id));
+  const labels = useMemo(() => sequenceLabels(saved), [saved]);
   return <select className="cp-select cp-te-add-source" aria-label="Add a sequence" value="" disabled={!choices.length}
     title={choices.length ? "Add an AAF Audio sequence to cut from" : "Every AAF Audio sequence is already in this edit"}
     onChange={(event) => {
@@ -26,6 +28,6 @@ export function EditAddSource({ exclude, onAdd, onError }: Props) {
       if (id) invoke<AafDocument>("aaf_open", { documentId: id }).then(onAdd).catch((cause: unknown) => onError(formatError(cause)));
     }}>
     <option value="" disabled>Add sequence…</option>
-    {choices.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+    {choices.map((item) => <option key={item.id} value={item.id}>{labels.get(item.id) ?? item.name}</option>)}
   </select>;
 }

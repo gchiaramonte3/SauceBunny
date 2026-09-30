@@ -272,12 +272,13 @@ pub fn validate_manifest(manifest: &AafManifest) -> Result<(), AppError> {
         for track in &graph.picture_tracks {
             if track.clips.len() > 100_000 || track.name.len() > 1024 { return Err(bad()); }
             for clip in &track.clips {
-                let text = [&clip.name, &clip.master_mob_id, &clip.file_mob_id, &clip.tape_name, &clip.effect];
+                let text = [&clip.name, &clip.master_mob_id, &clip.file_mob_id, &clip.tape_name, &clip.effect, &clip.group_name];
                 if clip.start_frame < 0 || clip.duration_frames <= 0 || clip.start_frame.checked_add(clip.duration_frames).is_none()
                     || !matches!(clip.kind.as_str(), "clip" | "muted")
                     || clip.source_start_frame.is_some_and(|frame| frame < 0)
                     || clip.source_timecode_fps.is_some_and(|fps| !(1..=120).contains(&fps))
                     || text.into_iter().flatten().any(|t| t.len() > 1024)
+                    || clip.angles.as_ref().is_some_and(|angles| angles.len() > 16 || angles.iter().any(|name| name.len() > 1024))
                     || clip.descriptor.as_ref().is_some_and(|d| d.kind.len() > 256
                         || [&d.sample_rate, &d.frame_layout, &d.compression].into_iter().flatten().any(|t| t.len() > 256))
                 { return Err(bad()); }
@@ -460,6 +461,15 @@ pub struct AafPictureClip {
     pub source_drop_frame: Option<bool>,
     #[serde(default)]
     pub group: bool,
+    // A group (multicam) clip's name and its angles, the one that plays first.
+    // Names only: the picture travels as metadata. Absent in documents read
+    // before groups were named, and never written when empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub group_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub angles: Option<Vec<String>>,
     pub effect: Option<String>,
     pub descriptor: Option<AafPictureDescriptor>,
 }
@@ -506,6 +516,15 @@ mod tests {
         let parsed: AafPictureClip = serde_json::from_value(clip.clone()).unwrap();
         assert_eq!(parsed.source_start_frame, Some(86910));
         assert_eq!(serde_json::to_value(&parsed).unwrap(), clip);
+        // A group clip names its angles; a saved document without them still reads.
+        assert!(parsed.angles.is_none() && parsed.group_name.is_none());
+        let mut group = clip.clone();
+        group["group"] = serde_json::json!(true);
+        group["group_name"] = serde_json::json!("MG 3 Kitchen");
+        group["angles"] = serde_json::json!(["CAM A", "CAM B"]);
+        let parsed: AafPictureClip = serde_json::from_value(group.clone()).unwrap();
+        assert_eq!(parsed.angles.as_deref(), Some(&["CAM A".to_string(), "CAM B".to_string()][..]));
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), group);
     }
     #[test]
     fn fractional_rate_mapping_is_rational_not_rounded_fps() {

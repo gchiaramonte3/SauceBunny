@@ -6,14 +6,12 @@ type Props = {
   playing: boolean; onToggle: () => void; onStart: () => void;
   playhead: number; total: number; fps: number;
   /** Source time under the playhead, in seconds from the scene's start timecode. */
-  source: number | null; sourceBase: string; sourceName: string;
-  speaking: { id: string; name: string; color: string }[]; message: string;
+  source: number | null; sourceBase: string; sourceName: string; message: string;
 };
 
 /**
- * Transport and program readout. Audio first: there is no picture here, and
- * the question it answers is "where am I and who is talking", in record
- * time, source time and names. The picture is Phase 3.
+ * Transport and program readout: where am I, in record time and source time.
+ * No names in this bar; the people belong with the tracks and the source.
  */
 export function TeTransport(props: Props) {
   const { fps } = props;
@@ -30,11 +28,6 @@ export function TeTransport(props: Props) {
       <span className="cp-te-readout-label">Source</span>
       {props.sourceName && <span className="cp-te-readout-of">{props.sourceName}</span>}
       <span className="cp-te-readout-tc is-quiet">{props.source == null ? "--:--:--:--" : teTc(props.source, fps, props.sourceBase)}</span>
-    </div>
-    <div className="cp-te-speaking" aria-label="Speaking now">
-      {props.speaking.length === 0 ? <span className="cp-te-speaking-none">Room tone</span>
-        : props.speaking.map((speaker) => <span key={speaker.id} className="cp-te-speaking-name" style={{ "--te-speaker": speaker.color } as React.CSSProperties}>
-          <span className="cp-te-swatch" aria-hidden="true" />{speaker.name}</span>)}
     </div>
     <p className="cp-te-status" role="status" aria-live="polite">{props.message}</p>
   </div>;

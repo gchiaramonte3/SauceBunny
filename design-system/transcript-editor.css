@@ -354,9 +354,6 @@
 .cp-te-readout-tc { font-size: var(--text-lg); font-weight: var(--weight-semibold); color: var(--fg-1); }
 .cp-te-readout-tc.is-quiet { color: var(--fg-3); }
 .cp-te-readout-of { font-size: var(--text-sm); color: var(--fg-4); }
-.cp-te-speaking { display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
-.cp-te-speaking-name { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-md); color: var(--fg-1); white-space: nowrap; }
-.cp-te-speaking-none { font-size: var(--text-md); color: var(--fg-4); }
 .cp-te-status { flex: 1; min-width: 0; text-align: right; font-size: var(--text-base); color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Timeline ────────────────────────────────────────────────────────── */
@@ -408,8 +405,7 @@
   white-space: nowrap;
   pointer-events: none;
 }
-.cp-te-tl-marked { position: absolute; top: 0; bottom: 0; pointer-events: none; background: color-mix(in srgb, var(--marker) 30%, transparent); border-left: 1px solid var(--marker); border-right: 1px solid var(--marker); }
-.cp-te-tl-marker { position: absolute; bottom: 2px; width: 8px; height: 10px; margin-left: -4px; background: var(--marker); clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%); }
+.cp-te-tl-marker { position: absolute; bottom: 2px; width: 8px; height: 10px; margin-left: -4px; background: var(--novella-violet); clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%); }
 .cp-te-tl-seam-mark {
   position: absolute;
   top: 0;
@@ -521,7 +517,7 @@
    its grid lines still make it exactly as wide as the lanes. */
 .cp-te-tl-overlay { position: absolute; inset: 0; grid-column: 2; grid-row: 1 / span var(--te-rows, 2); z-index: 4; overflow: hidden; pointer-events: none; }
 /* In to out on the selected tracks only, as Avid highlights it. */
-.cp-te-tl-marked-lane { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; background: color-mix(in srgb, var(--marker) 22%, transparent); box-shadow: inset 1px 0 0 var(--marker), inset -1px 0 0 var(--marker); }
+.cp-te-tl-marked-lane { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; background: var(--marker-region); box-shadow: inset 1px 0 0 var(--marker), inset -1px 0 0 var(--marker); }
 /* A gap: empty time on every track. */
 .cp-te-tl-gap { position: absolute; top: 22px; bottom: 0; background: repeating-linear-gradient(135deg, var(--line-1) 0 1px, transparent 1px 6px); box-shadow: inset 1px 0 0 var(--line-2), inset -1px 0 0 var(--line-2); }
 /* Dead space under review: removing is filled, kept is outlined only. */

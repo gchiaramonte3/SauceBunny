@@ -1,0 +1,58 @@
+/* The in/out mark, one shape everywhere (DESIGN.md, "The in/out mark"): a
+   stem with one chevron wing at the waist, pointing away from the marked
+   region, drawn from --mark-wing-l / --mark-wing-r so it is the same glyph
+   as IconMarkIn / IconMarkOut.
+
+   Clip's track draws it over film (.cp-track-selection, .cp-track-mark in
+   transport.css, with a backdrop filter only film needs) and the reader draws
+   it on its pins (.cp-reader-pin.in/.out in shell.css). These are the plain
+   versions for a ruler, used by AAF Audio and String Outs, which used to draw
+   a violet band with 1px sides and no wing, and nothing at all for a lone In
+   or Out. Same 2px stem, 4x6 wing and dark hairline as Clip's.
+
+   The parent positions them; each needs a positioned ancestor, and one that
+   clips (the rulers do) hides a wing only when its mark is off screen. */
+
+/* Both marks: the region, closed, with a stem and an outward wing each side. */
+.cp-mark-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  background: var(--marker-region);
+  border-top: 1px solid var(--marker-edge);
+  border-bottom: 1px solid var(--marker-edge);
+  border-left: 2px solid var(--marker);
+  border-right: 2px solid var(--marker);
+  pointer-events: none;
+}
+.cp-mark-range::before,
+.cp-mark-range::after,
+.cp-mark::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 6px;
+  transform: translateY(-50%);
+  background: var(--marker);
+  pointer-events: none;
+}
+.cp-mark-range::before,
+.cp-mark-range::after { filter: drop-shadow(0 0 0.5px rgba(0,0,0,0.9)); }
+.cp-mark-range::before { right: calc(100% + 2px); clip-path: var(--mark-wing-l); }
+.cp-mark-range::after  { left:  calc(100% + 2px); clip-path: var(--mark-wing-r); }
+
+/* One mark on its own: a stem, its wing pointing where the range will not grow. */
+.cp-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--marker);
+  filter: drop-shadow(0 0 0.6px rgba(0,0,0,0.85));
+  pointer-events: none;
+}
+.cp-mark.in::before  { right: 100%; clip-path: var(--mark-wing-l); }
+.cp-mark.out::before { left:  100%; clip-path: var(--mark-wing-r); }

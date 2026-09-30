@@ -1,21 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { editTc } from "../lib/edit-document";
 import type { Timeline, PlacedWord, Seam, TimelineLane } from "../lib/edit-model";
-import { isGap, placementKey, programDuration, segmentLength, segmentStarts, trackPhrases } from "../lib/edit-model";
-import { multitrackTextLayout } from "../lib/multitrack-text-layout";
+import { isGap, phraseLabels, placementKey, programDuration, segmentLength, segmentStarts } from "../lib/edit-model";
 import { EditDeadLayer } from "./EditDeadLayer";
 import { EditDeadSpaceBar, type EditDeadPreset, type EditDeadReview } from "./EditDeadSpaceBar";
 import { EditTimelineTools, type EditTimelineAudio, type EditTimelineView } from "./EditTimelineTools";
+import { EditPatchRow } from "./EditPatchRow";
 import { EditPictureRow } from "./EditPictureRow";
+import type { EditRowsView } from "./EditSourceTimeline";
+import { EditTimelineEmpty } from "./EditTimelineEmpty";
 import { EditTimelineRow } from "./EditTimelineRow";
 import { EditTimelineRuler } from "./EditTimelineRuler";
 
-type ToolProps = Omit<React.ComponentProps<typeof EditTimelineTools>, "allText" | "onAllText" | "view" | "onView" | "audio" | "onAudio" | "zoom" | "onZoom">;
+type ToolProps = Omit<React.ComponentProps<typeof EditTimelineTools>, "allText" | "onAllText" | "view" | "onView" | "measuring" | "audio" | "onAudio" | "zoom" | "onZoom">;
 
 type Props = {
   speakers: TimelineLane[]; edit: Timeline; seams: Seam[]; placed: PlacedWord[]; selection: Set<string>;
   playhead: number; fps: number; recordStart: number; colors: Record<string, string>; solo: Set<string>; mute: Set<string>;
-  onSeek: (program: number) => void; onSolo: (speaker: string) => void; onMute: (speaker: string) => void;
+  onSeek: (program: number) => void; onSolo: (speaker: string) => void; onMute: (speaker: string) => void; onUntrack?: (speaker: string) => void;
   seam: number | null; onSeam: (segment: number) => void;
   /** Which speakers each source has a mic for: a lane with no mic in a source shows filler there. */
   sourceSpeakers: Record<string, string[]>; sourceName: (id: string) => string;
@@ -27,6 +29,13 @@ type Props = {
   /** Avid's track selectors: on tracks take Lift and show the marked region. */
   tracks: Set<string>; onTrack: (speaker: string, only: boolean) => void;
   dead: EditDeadReview | null; onDeadSkip: (index: number) => void; onDeadPreset: (preset: EditDeadPreset) => void; onDeadApply: () => void; onDeadCancel: () => void;
+  /** View ▸ Waveforms lives above: turning it on is what builds them. */
+  waveforms: boolean; onWaveforms: (on: boolean) => void; measuring: boolean;
+  /** Cut a whole source in as the first clip of an empty string out. */
+  onAddWhole?: (source: string) => void;
+  /** Over the track headers: the Source/Record switch. */ corner?: React.ReactNode;
+  /** The Source view's own rows (the sequence's mics), drawn in place of one row per speaker; `speakers` then names them for T. */ rows?: (view: EditRowsView) => React.ReactNode;
+  /** Record view: the patch panel, everyone who can be put on a track and doing it. */ patch?: React.ComponentProps<typeof EditTimelineRow>["patch"];
 };
 
 const describe = (seam: Seam, fps: number, recordStart: number) => `${seam.kind === "cut" ? "Cut" : seam.kind === "through" ? "Through edit" : seam.kind === "gap" ? "Gap" : "Jump"} at ${editTc(seam.at, fps, recordStart)}`
@@ -50,7 +59,9 @@ export function EditTimeline(props: Props) {
   const { speakers, edit, placed, selection, playhead, fps, colors, solo, mute, seams, zoom } = props;
   const { marks, snap, follow } = props.tools;
   const [pan, setPan] = useState(0);
-  const [view, setView] = useState<EditTimelineView>({ waveforms: true, speakerColours: true, height: "medium" });
+  const [look, setLook] = useState<Omit<EditTimelineView, "waveforms">>({ speakerColours: true, height: "medium" });
+  const view: EditTimelineView = { ...look, waveforms: props.waveforms };
+  const setView = ({ waveforms, ...next }: EditTimelineView) => { setLook(next); if (waveforms !== props.waveforms) props.onWaveforms(waveforms); };
   const [audio, setAudio] = useState<EditTimelineAudio>({ crossfade: 2, roomTone: false });
   const [text, setText] = useState<Set<string>>(new Set());
   const [width, setWidth] = useState(800);
@@ -75,17 +86,7 @@ export function EditTimeline(props: Props) {
   useEffect(() => { if (follow && zoom > 1 && (playhead < start || playhead > start + span)) setPan(playhead); }, [follow, zoom, playhead, start, span]);
   const mutes = useMemo(() => Object.fromEntries(speakers.flatMap((s) => Object.keys(props.sourceSpeakers).map((source) => [`${source}:${s.id}`,
     edit.mutes.filter((m) => m.track === s.id && m.source === source).map((m): [number, number] => [m.srcIn, m.srcOut])]))), [edit.mutes, speakers, props.sourceSpeakers]);
-  // AAF Audio's layout, except that a column holding a single phrase shows the
-  // phrase itself rather than "1 passage": the words are the point of T.
-  const words = useMemo(() => Object.fromEntries(speakers.filter((s) => text.has(s.id)).map((s) => {
-    const lines = trackPhrases(placed, s.id);
-    return [s.id, multitrackTextLayout(lines, start, span, width).map((cue) => {
-      const line = cue.summary && cue.text === "1 passage" ? lines.find((item) => item.text === cue.title.split("\n")[1]) : undefined;
-      if (!line) return cue;
-      const from = Math.max(start, line.startFrame), to = Math.min(start + span, line.endFrame);
-      return { ...cue, summary: false, text: line.text, style: { left: `${((from - start) / span) * 100}%`, width: `${((to - from) / span) * 100}%` } };
-    })];
-  })),
+  const words = useMemo(() => Object.fromEntries(speakers.filter((s) => text.has(s.id)).map((s) => [s.id, phraseLabels(placed, s.id, start, span, width)])),
     [speakers, text, placed, start, span, width]);
   const held = useRef(false);
   const chosen = placed.filter((item) => selection.has(placementKey(item)));
@@ -120,19 +121,21 @@ export function EditTimeline(props: Props) {
   const fade = audio.crossfade / fps;
   return <section className={`cp-te-timeline is-${view.height}${view.speakerColours ? " is-speaker" : ""}`} aria-label="Edit timeline">
     <EditTimelineTools {...props.tools} zoom={zoom} onZoom={(direction) => props.onZoom(direction === 0 ? 1 : Math.max(1, Math.min(32, direction > 0 ? zoom * 2 : zoom / 2)))}
-      view={view} onView={setView} audio={audio} onAudio={setAudio}
+      view={view} onView={setView} measuring={props.measuring} audio={audio} onAudio={setAudio}
       allText={speakers.every((s) => text.has(s.id))} onAllText={() => setText(speakers.every((s) => text.has(s.id)) ? new Set() : new Set(speakers.map((s) => s.id)))} />
     {props.dead && <EditDeadSpaceBar review={props.dead} onPreset={props.onDeadPreset} onApply={props.onDeadApply} onCancel={props.onDeadCancel} />}
-    <div className="cp-te-tl-grid" style={{ "--te-rows": speakers.length + 1 + (props.pictureOf && edit.segments.some((segment) => !isGap(segment) && props.pictureOf?.(segment.source).length) ? 1 : 0) } as React.CSSProperties}>
-      <div className="cp-te-tl-corner" aria-hidden="true" />
-      <EditTimelineRuler rulerRef={ruler} fps={fps} recordStart={props.recordStart} start={start} span={span} x={x} w={w} marked={marked} markers={props.markers}
+    <div className="cp-te-tl-grid" style={{ "--te-rows": speakers.length + (props.patch ? 2 : 1) + (props.pictureOf && edit.segments.some((segment) => !isGap(segment) && props.pictureOf?.(segment.source).length) ? 1 : 0) } as React.CSSProperties}>
+      <div className="cp-te-tl-corner">{props.corner}</div>
+      <EditTimelineRuler rulerRef={ruler} fps={fps} recordStart={props.recordStart} start={start} span={span} x={x} w={w} width={width} marks={marks} markers={props.markers}
         seams={seams} seam={props.seam} describe={(cut) => describe(cut, fps, props.recordStart)} onSeam={(cut) => { props.onSeek(cut.at); props.onSeam(cut.index); }} scrub={scrub} />
       {props.pictureOf && <EditPictureRow edit={edit} starts={starts} start={start} span={span} x={x} w={w} pictureOf={props.pictureOf} />}
-      {speakers.map((speaker) => <EditTimelineRow key={speaker.id} speaker={speaker} color={colors[speaker.id]} soloed={solo.has(speaker.id)} quiet={solo.size > 0 && !solo.has(speaker.id)}
+      {props.rows ? props.rows({ start, span, width, x, w, scrub, waveforms: view.waveforms, text, onText: toggleText }) : speakers.map((speaker) => <EditTimelineRow key={speaker.id} speaker={speaker} color={colors[speaker.id]} soloed={solo.has(speaker.id)} quiet={solo.size > 0 && !solo.has(speaker.id)}
         muted={mute.has(speaker.id)} shown={text.has(speaker.id)} cues={words[speaker.id] ?? []} selected={props.tracks.has(speaker.id)}
-        onTrack={props.onTrack} onSolo={props.onSolo} onMute={props.onMute} onText={toggleText}
+        onTrack={props.onTrack} onSolo={props.onSolo} onMute={props.onMute} onText={toggleText} onUntrack={props.onUntrack}
         edit={edit} starts={starts} start={start} span={span} x={x} w={w} sourceSpeakers={props.sourceSpeakers} sourceName={props.sourceName}
-        waveforms={view.waveforms} peaksOf={props.peaksOf} durationOf={props.durationOf} mutes={mutes} marked={marked} seams={seams} scrub={scrub} />)}
+        waveforms={view.waveforms} peaksOf={props.peaksOf} durationOf={props.durationOf} mutes={mutes} marked={marked} seams={seams} scrub={scrub} patch={props.patch} />)}
+      {!props.rows && props.patch && <EditPatchRow people={props.patch.people} next={speakers.length} onPatch={props.patch.onPatch} />}
+      {edit.segments.length === 0 && <EditTimelineEmpty sources={Object.keys(props.sourceSpeakers)} sourceName={props.sourceName} durationOf={props.durationOf} onAddWhole={props.onAddWhole} />}
       <div className="cp-te-tl-overlay" aria-hidden="true">
         {edit.segments.map((segment, index) => isGap(segment) && <span key={segment.id} className="cp-te-tl-gap" style={{ left: x(starts[index]), width: w(segmentLength(segment)) }} />)}
         {band && <span className="cp-te-tl-band" style={{ left: x(band[0]), width: w(band[1] - band[0]) }} />}

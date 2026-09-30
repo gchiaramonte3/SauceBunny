@@ -6,11 +6,10 @@ import { useMultitrackAudition } from "../hooks/use-multitrack-audition";
 import { useMultitrackTranscription } from "../hooks/use-multitrack-transcription";
 import { useMultitrackKeyboard } from "../hooks/use-multitrack-keyboard";
 import { useMultitrackDetail } from "../hooks/use-multitrack-detail";
-import { sequenceDurationTimecode, sequenceFps, sequenceRate, sequenceTimecode, trackOwner } from "../lib/multitrack";
+import { sequenceFps, sequenceRate, sequenceTimecode, trackOwner } from "../lib/multitrack";
 import { GenerateButton } from "./GenerateButton";
-import { IconPause, IconPlay, IconSkipBack, IconRewind, IconFastForward } from "./Icons";
-import { VolumeControl } from "./VolumeControl";
 import { MultitrackTimeline } from "./MultitrackTimeline";
+import { MultitrackTransport } from "./MultitrackTransport";
 import { MultitrackTranscript } from "./MultitrackTranscript";
 import { MultitrackCast } from "./MultitrackCast";
 import { MultitrackSettings } from "./MultitrackSettings";
@@ -32,9 +31,13 @@ type Props = {
   aiModelId?: string | null;
   resolvingMedia?: boolean;
   onVisibleTracks?: (ids: string[]) => void;
+  /** Reports whether Waveforms is on; the document hook builds nothing until it is. */
+  onWaveforms?: (documentId: string, on: boolean) => void;
+  /** The tracks whose waveforms are being built right now. */
+  waveformsBuilding?: string[];
   openRequest?: { id: string; tick: number; frame?: number; trackId?: string } | null;
 };
-export function MultitrackWorkspace({ document, active, waveforms, waveformErrors, labelStatus, onRename, onTranscript, onRetryLabels, onRetryWaveform, onOpenMedia, onOpenSettings, onJobState, settingsOpen, onCloseSettings, aiModelId, openRequest, onVisibleTracks, resolvingMedia }: Props) {
+export function MultitrackWorkspace({ document, active, waveforms, waveformErrors, labelStatus, onRename, onTranscript, onRetryLabels, onRetryWaveform, onOpenMedia, onOpenSettings, onJobState, settingsOpen, onCloseSettings, aiModelId, openRequest, onVisibleTracks, onWaveforms, waveformsBuilding, resolvingMedia }: Props) {
   const [saved] = useState(() => loadViewState(document.id, document.manifest.tracks.map(track => track.id)));
   const [selected, setSelected] = useState(() => new Set(saved?.selected ?? document.manifest.tracks.filter(track => !alternativeLane(document, track.id)).map((track) => track.id)));
   const [expanded, setExpanded] = useState(() => new Set(saved?.expanded ?? []));
@@ -53,8 +56,12 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
   const eligible = document.manifest.tracks.map(track => track.id).filter(id => laneSelectable(document, id));
   const groupOf = (id: string) => document.manifest.tracks.map(track => track.id).filter(child => laneMetadata(document, child)?.parent_track_id === id && laneSelectable(document, child));
   const chosen = [...selected].filter(id => laneReady(document, id));
-  const [showWaveforms, setShowWaveforms] = useState(saved?.waveforms ?? true);
-  useEffect(() => { saveViewState(document.id, { selected: [...selected], expanded: [...expanded], waveforms: showWaveforms }); }, [document.id, selected, expanded, showWaveforms]);
+  // Off until the user asks: drawing a mic means reading every file it uses.
+  const [showWaveforms, setShowWaveforms] = useState(saved?.showWaveforms ?? false);
+  useEffect(() => { saveViewState(document.id, { selected: [...selected], expanded: [...expanded], showWaveforms }); }, [document.id, selected, expanded, showWaveforms]);
+  // Reports "off" on the way out too, so a sequence closed with Waveforms on
+  // is not still wanted when it is next opened without them.
+  useEffect(() => { onWaveforms?.(document.id, showWaveforms); return () => onWaveforms?.(document.id, false); }, [document.id, showWaveforms, onWaveforms]);
   const saveTimelineView = useCallback((view: { zoom: number; density: string; text: string[] }) => saveViewState(document.id, view), [document.id]);
   const [timecodeEntry, setTimecodeEntry] = useState<string | null>(null);
   const closeTimecode = useCallback(() => setTimecodeEntry(null), []);
@@ -113,25 +120,8 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
     const next = new Set(prior); if (next.has(id)) next.delete(id); else next.add(id); return next;
   });
   const cannotGenerate = !chosen.length || !transcription.ready || relinking;
-  const transport = <div className="cp-multitrack-transport" aria-label="AAF Audio playback controls">
-    <div className="cp-multitrack-toolbar-options">
-      <button className="btn btn-ghost" aria-pressed={audio.scrubbing} title="Hear short audio excerpts while scrubbing" onClick={() => audio.setScrubbing(!audio.scrubbing)}>Audio scrub</button>
-      <button className="btn btn-ghost" aria-pressed={showWaveforms} onClick={() => setShowWaveforms(!showWaveforms)}>Waveforms</button>
-    </div>
-    <div className="cp-multitrack-transport-center">
-      <button className="cp-tc cp-multitrack-tc" aria-label="Current timecode" aria-haspopup="dialog" title="Current timecode · Type 0-9, Enter to seek" disabled={!sequenceRate(document.manifest)} onClick={(event) => { event.currentTarget.focus(); setTimecodeEntry(""); }}>{sequenceTimecode(document.manifest, audio.frame)}</button>
-      <div className="cp-multitrack-transport-buttons">
-      <button className="cp-transport-btn" aria-label="Go to sequence start" onClick={() => seek(0)}><IconSkipBack /></button>
-      <button className="cp-transport-btn" aria-label="Rewind tracks" title="Rewind (J)" onClick={() => audio.shuttle(-1)}><IconRewind /></button>
-      <button className="cp-transport-btn play" aria-label={audio.playing || audio.busy ? "Pause audition" : "Play tracks"} onClick={audio.toggle}>{audio.playing || audio.busy ? <IconPause /> : <IconPlay />}</button>
-      <button className="cp-transport-btn" aria-label="Fast-forward tracks" title="Fast-forward (L)" onClick={() => audio.shuttle(1)}><IconFastForward /></button>
-      </div>
-    </div>
-    <div className="cp-multitrack-toolbar-end">
-      <div className="cp-multitrack-trt" aria-label="Total runtime" title="Total runtime of the loaded sequence"><span>TRT</span><span>{sequenceDurationTimecode(document.manifest)}</span></div>
-      <div className="cp-multitrack-audition-status"><span className="cp-multitrack-note" role="status">{audio.busy ? "Preparing audio…" : audio.rate && audio.rate !== 1 ? `${audio.rate}×` : audio.solo.size ? `${audio.solo.size} soloed` : "All mics"}</span>
-      <VolumeControl volume={audio.volume} muted={audio.muted} onVolumeChange={audio.setVolume} onMutedChange={audio.setMuted} /></div></div>
-  </div>;
+  const transport = <MultitrackTransport document={document} audio={audio} markRange={markRange} waveforms={showWaveforms} onWaveforms={setShowWaveforms}
+    onSeek={seek} onTimecode={() => setTimecodeEntry("")} />;
   return <div ref={workspace} className="cp-multitrack-workspace" style={{ "--multitrack-transcript-width": `${Math.min(pane.width, paneMax)}px` } as CSSProperties}>
     <div className="cp-multitrack-editor">
       <div className="cp-multitrack-editor-content">
@@ -140,8 +130,8 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
       <MultitrackCast document={document} active={active} onRename={onRename} editTrack={castTrack} onCloseEdit={() => setCastTrack(null)} />
       <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={waveformErrors} onRetryWaveform={onRetryWaveform} selected={selected} onSelect={toggleTrack} onRename={onRename} onOwnerMenu={setCastTrack} onView={onView} detail={{ ...view, peaks: detail }}
         solo={audio.solo} muted={audio.mute} onSolo={audio.toggleSolo} onMute={audio.toggleMute} levels={audio.levels} onLevel={audio.setTrackLevel} onTrackMenu={(id, x, y) => setTrackMenu({ id, x, y })} frame={audio.frame} onSeek={seek} onScrub={audio.scrub}
-        onScrubEnd={(frame, resume) => { void audio.seek(frame, undefined, resume); }} playing={audio.playing} showWaveforms={showWaveforms} transport={transport}
-        expanded={expanded} onExpand={expandGroup} initialView={saved ?? undefined} onViewState={saveTimelineView} markRange={markRange} />
+        onScrubEnd={(frame, resume) => { void audio.seek(frame, undefined, resume); }} playing={audio.playing} showWaveforms={showWaveforms} waveformsBuilding={waveformsBuilding} transport={transport}
+        expanded={expanded} onExpand={expandGroup} initialView={saved ?? undefined} onViewState={saveTimelineView} marks={marks} />
       {audio.error && <p className="cp-multitrack-error" role="alert">{audio.error}</p>}
       </div>
       <div className="cp-multitrack-generation">

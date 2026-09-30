@@ -28,7 +28,20 @@ A macOS desktop app for **clipping sections out of online videos** (YouTube, Vim
   SQLite (`edit_log.rs`, `app_data_dir()/timelines.sqlite`) and mirrored as
   JSON to `~/Documents/Sauce Bunny/Edits/`. Playback is `src/lib/edit-audio.ts`
   on one AudioContext; export goes through `edit_export.rs` to the AAF
-  sidecar's `write-edit`. See [TRANSCRIPT-EDITOR-PLAN.md](TRANSCRIPT-EDITOR-PLAN.md)
+  sidecar's `write-edit`. Open string outs are tabs over one editor
+  (`EditPage`, no keep-alive). Every mic in a source is a person (a lane);
+  record tracks are PATCHED lanes (`EditTrack.featured`), top-down, none in a
+  new string out, and a clip names the lanes it plays (`EditSegment.tracks`),
+  so a bite of one person is filler on the other tracks. See [TRANSCRIPT-EDITOR-PLAN.md](TRANSCRIPT-EDITOR-PLAN.md)
+  ("Group angles"). The source side (chosen sequence, person tab, marks,
+  source track selectors, groups, source playback) lives in one hook,
+  `use-edit-source-side`, read by both the source pane (`EditSourceHost`) and
+  the timeline's Source view (`EditSourceTimeline` rows inside the same
+  `EditTimeline`, switched from its corner), as Avid's source monitor feeds
+  both the monitor and the timeline. The tabs are AAF Audio's
+  `MultitrackTranscriptTabs`; the ordering rules are in
+  `src/lib/edit-source-view.ts`. Both text panes draw a page at a time
+  (`EditWindowedParagraphs`)
 
 What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Everything runs on your machine.
 
@@ -200,9 +213,33 @@ Completed waveforms and the audition clock survive unrelated resolution updates.
 The overview loader outlives re-renders and cancels a build only when that
 track's own media changes or it leaves view: checkpoints arrive faster than an
 hour-long linked overview can be read, and restarting on every one meant no
-build ever finished. Overview builds run one at a time on their own cancellable
+build ever finished. Overview builds run two at a time on their own cancellable
 gate, never on the two playback permits, and zoomed detail reads a finished
 overview rather than starting a full build per scroll.
+
+Nothing builds an overview until the user asks (September 28, 2026). A linked
+overview reads every file its mic uses, one ffmpeg per 60-second window per
+clip; measured on NEXIS that was ~115 s a track, one track at a time, about
+three hours for a 99-mic sequence. So AAF Audio's Waveforms toggle gates the
+build as well as the drawing and starts off (`showWaveforms` in the saved view
+state; the older `waveforms` field recorded the old default, not a choice, and
+is ignored). String Outs reads words without one: `aaf_speech` with `build`
+false places each cue's words by length and reports `measured: false` with no
+audible spans, and View ▸ Waveforms there builds lane by lane. Remove Dead
+Space stays disabled until every mic is measured, because an unmeasured mic's
+empty audible spans would read as silence. While a build runs it waits
+whenever audition or transcription holds a preparation permit.
+
+A linked overview is built clip by clip (September 29, 2026): one ffmpeg per
+clip streams mono s24le to a pipe (`process::run_streaming`, raw stdout), and
+`Peaks` folds each sample into its 256-sample bucket by sequence position,
+exactly as the per-minute loop did, so existing `peaks-v2` caches stay valid.
+Where the per-minute loop started 223 ffmpegs for a 3h39m track on NEXIS
+(~515 ms each, nearly all open-and-seek), a four-clip track starts four.
+Waiting for audition is now backpressure: the build stops reading, the
+shell plugin's one-slot channel fills, and ffmpeg blocks on its pipe. Embedded
+essence still goes through the exact extractor a minute at a time. The
+frontend and the native gate both allow two builds at once.
 
 `linked_probe.rs` batches bounded `mxf-info` header inspection in the existing
 pyaaf2 sidecar. Fingerprinted header caches provide a local identity index for

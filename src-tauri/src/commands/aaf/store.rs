@@ -277,12 +277,49 @@ pub fn list(root: &Path) -> Result<Vec<AafDocumentSummary>, AppError> {
     Ok(results)
 }
 
+/// The sequences to offer: one per AAF sequence, however many times it was
+/// imported. Earlier readers matched a re-import to its document less
+/// reliably than `reopen` does now, so a shelf could hold fourteen copies of
+/// one sequence, most without the transcripts. Every copy stays on disk (a
+/// string out may point at any of them); the one offered is the one `reopen`
+/// would pick: the most transcribed tracks, then the newest.
+pub fn shelf(root: &Path) -> Result<Vec<AafDocumentSummary>, AppError> {
+    let mut best: std::collections::BTreeMap<(String, String, String, i64), (AafDocumentSummary, u64)> = Default::default();
+    for (summary, identity) in list_with_identity(root)? {
+        let rank = (u64::from(summary.transcribed_tracks) << 48) | summary.modified_ms.unwrap_or(0).min((1 << 48) - 1);
+        let key = (summary.source_path.clone(), identity.0, summary.name.clone(), identity.1);
+        if best.get(&key).is_none_or(|(_, kept)| rank > *kept) { best.insert(key, (summary, rank)); }
+    }
+    let mut results: Vec<_> = best.into_values().map(|(summary, _)| summary).collect();
+    results.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.source_path.cmp(&b.source_path)));
+    Ok(results)
+}
+
+/// What makes two documents the same sequence of one file: the source
+/// fingerprint and the sequence's length (with its name and path).
+type SequenceIdentity = (String, i64);
+
+fn list_with_identity(root: &Path) -> Result<Vec<(AafDocumentSummary, SequenceIdentity)>, AppError> {
+    let mut results = Vec::new();
+    for entry in std::fs::read_dir(root)? {
+        let path = entry?.path();
+        if path.extension().is_none_or(|ext| ext != "json") { continue; }
+        let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue; };
+        if let Ok(found) = summarize_with_identity(root, id, &path) { results.push(found); }
+    }
+    Ok(results)
+}
+
 fn summarize(root: &Path, id: &str, path: &Path) -> Result<AafDocumentSummary, AppError> {
+    summarize_with_identity(root, id, path).map(|(summary, _)| summary)
+}
+
+fn summarize_with_identity(root: &Path, id: &str, path: &Path) -> Result<(AafDocumentSummary, SequenceIdentity), AppError> {
     // A listing needs names and counts, not every cue of every sequence:
     // counting the arrays without building them keeps a shelf of large
     // multi-mic documents from costing gigabytes each time it refreshes.
     #[derive(serde::Deserialize)]
-    struct Manifest { name: String, tracks: Vec<serde::de::IgnoredAny> }
+    struct Manifest { name: String, tracks: Vec<serde::de::IgnoredAny>, #[serde(default)] source_fingerprint: String, #[serde(default)] duration_frames: i64 }
     #[derive(serde::Deserialize)]
     struct Summary { schema_version: u32, id: String, source_path: String, manifest: Manifest, transcripts: Vec<serde::de::IgnoredAny> }
     let document: Summary = read_json(&document_path(root, id)?)?;
@@ -290,10 +327,11 @@ fn summarize(root: &Path, id: &str, path: &Path) -> Result<AafDocumentSummary, A
         return Err(AppError::invalid("This multitrack document was saved by an unsupported version. Update Sauce Bunny."));
     }
     if document.id != id { return Err(AppError::invalid("AAF Audio document identity does not match its filename")); }
-    Ok(AafDocumentSummary { id: document.id, name: document.manifest.name,
+    let identity = (document.manifest.source_fingerprint, document.manifest.duration_frames);
+    Ok((AafDocumentSummary { id: document.id, name: document.manifest.name,
         track_count: document.manifest.tracks.len() as u32,
         transcribed_tracks: document.transcripts.len() as u32, source_path: document.source_path,
-        modified_ms: Some(modified_ms(&std::fs::metadata(path)?)) })
+        modified_ms: Some(modified_ms(&std::fs::metadata(path)?)) }, identity))
 }
 
 pub fn source_ready(document: &AafDocument) -> Result<(), AppError> {
@@ -566,6 +604,30 @@ mod tests {
         fresh.manifest.source_fingerprint = "e".repeat(64);
         assert_eq!(import(&root, fresh).unwrap().id, "d".repeat(64));
         assert_eq!(list(&root).unwrap().len(), 3);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_shelf_offers_one_copy_of_each_sequence_the_one_with_its_transcripts() {
+        let root = std::env::temp_dir().join(format!("aaf-shelf-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        // Three imports of one sequence, as older readers left them; only the middle one was transcribed.
+        let transcript = AafTrackTranscript { track_id: "10".into(), start_frame: 0, duration_frames: 24,
+            engine: AafEngine::Parakeet, model_id: "test".into(), status: AafTranscriptStatus::Review, sample_rate: 16000,
+            cues: vec![], timing_issues: vec![], warnings: vec![], gaps: None };
+        for (id, transcribed) in [("c", false), ("d", true), ("e", false)] {
+            let mut copy = fixture(); copy.id = id.repeat(64);
+            if transcribed { copy.transcripts = vec![transcript.clone()]; }
+            create(&root, &copy).unwrap();
+        }
+        // Another sequence of the same file, and the same name from another file, are not copies.
+        let mut other = fixture(); other.id = "f".repeat(64); other.manifest.duration_frames = 480; create(&root, &other).unwrap();
+        let mut elsewhere = fixture(); elsewhere.id = "9".repeat(64); elsewhere.source_path = "/tmp/other.aaf".into(); create(&root, &elsewhere).unwrap();
+        let offered: Vec<String> = shelf(&root).unwrap().into_iter().map(|item| item.id[..1].to_string()).collect();
+        assert_eq!(offered.len(), 3, "{offered:?}");
+        assert!(offered.contains(&"d".to_string()) && offered.contains(&"f".to_string()) && offered.contains(&"9".to_string()));
+        // Every copy is still on disk and still listed for reopen.
+        assert_eq!(list(&root).unwrap().len(), 5);
         std::fs::remove_dir_all(root).unwrap();
     }
 

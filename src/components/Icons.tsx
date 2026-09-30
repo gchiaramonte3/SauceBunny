@@ -525,6 +525,21 @@ export const IconSearch = (p: IconProps) => (
     <path d="m16.2 16.2 4.8 4.8" />
   </Icon>
 );
+// Magnifier with a minus and a plus in the lens: timeline zoom, as in an NLE.
+export const IconZoomOut = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m16.2 16.2 4.8 4.8" />
+    <path d="M8 11h6" />
+  </Icon>
+);
+export const IconZoomIn = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m16.2 16.2 4.8 4.8" />
+    <path d="M8 11h6M11 8v6" />
+  </Icon>
+);
 // Plain closed folder — Library collection cards without a poster.
 export const IconFolder = (p: IconProps) => (
   <Icon {...p}>

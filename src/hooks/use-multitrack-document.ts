@@ -10,10 +10,15 @@ import type { AafTrackLabel } from "../bindings/AafTrackLabel";
 import type { AafSequenceChoice } from "../bindings/AafSequenceChoice";
 import type { AafProgress } from "../bindings/AafProgress";
 import { alternativeLane, laneReady, mediaRevision } from "../lib/multitrack-graph";
-import { formatError } from "../lib/error-format";
+import { formatError, isAppError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
 import { mergeTrackTranscript } from "../lib/multitrack";
 import { LAST_AAF_DOCUMENT, pickResume, recallLast, rememberLast } from "../lib/last-open";
+
+/** Overview builds at once; the native gate (peaks.rs BUILD) allows the same. */
+const WAVEFORM_BUILDS = 2;
+/** One track's overview at one media revision. */
+const waveformSlot = (entry: { id: string; key: string }) => `${entry.id}\n${entry.key}`;
 
 export function useMultitrackDocument(active: boolean) {
   const [document, setDocument] = useState<AafDocument | null>(null);
@@ -33,6 +38,13 @@ export function useMultitrackDocument(active: boolean) {
   const [labelStatus, setLabelStatus] = useState("");
   const [waveforms, setWaveforms] = useState<Record<string, number[][]>>({});
   const [waveformErrors, setWaveformErrors] = useState<Record<string, string>>({});
+  // Which document the user has turned Waveforms on for. Keyed by id rather
+  // than a boolean so opening another sequence cannot inherit the choice for
+  // the render it takes the workspace to report its own.
+  const [waveformsFor, setWaveformsFor] = useState<string | null>(null);
+  const setWaveformsOn = useCallback((documentId: string, on: boolean) =>
+    setWaveformsFor(prior => on ? documentId : prior === documentId ? null : prior), []);
+  const [waveformsBuilding, setWaveformsBuilding] = useState<string[]>([]);
   const current = useRef(document); current.current = document;
   const importJob = useRef<string | null>(null);
   const revision = useRef(0);
@@ -189,65 +201,78 @@ export function useMultitrackDocument(active: boolean) {
   }, [documentId, reconcile]);
   const mediaKey = document ? JSON.stringify(document.manifest.tracks.map(track => mediaRevision(document, track.id))) : "";
   const requested = visible.join("|");
+  // Two builds at a time, the same as the native gate (peaks.rs BUILD). Builds
+  // and failures are keyed by track AND media revision: tracks whose clips
+  // look alike (an embedded AAF's often do) share a revision string, and keyed
+  // by revision alone one build or one failure stood in for all of them.
+  const loader = useRef<{ failed: Set<string>; building: Map<string, { id: string; jobId: string }> }>({ failed: new Set(), building: new Map() });
   const waveformCache = useRef<Record<string, number[][]>>({});
   const waveformKeys = useRef<Record<string, string>>({});
-  useEffect(() => { waveformCache.current = {}; waveformKeys.current = {}; setWaveforms({}); setWaveformErrors({}); }, [documentId]);
+  // Failures are forgotten with the document too: one remembered after its
+  // error was cleared would leave the lane "queued" for ever, with no Retry.
+  useEffect(() => { waveformCache.current = {}; waveformKeys.current = {}; loader.current.failed.clear(); setWaveforms({}); setWaveformErrors({}); }, [documentId]);
   useEffect(() => {
     const snapshot = current.current;
     if (!snapshot) return;
     for (const id of Object.keys(waveformCache.current)) {
       if (waveformKeys.current[id] !== mediaRevision(snapshot, id)) {
         delete waveformCache.current[id]; delete waveformKeys.current[id];
+        for (const slot of loader.current.failed) if (slot.startsWith(`${id}\n`)) loader.current.failed.delete(slot);
         setWaveforms(prior => { const next = { ...prior }; delete next[id]; return next; });
         setWaveformErrors(prior => { const next = { ...prior }; delete next[id]; return next; });
       }
     }
   }, [mediaKey]);
+  // Nothing is built until the user turns Waveforms on. A track's overview
+  // reads every source it uses, and measured on NEXIS that was ~115 s a track,
+  // one at a time: three hours for a 99-mic sequence nobody asked to draw.
   // One loader that outlives re-renders. A relink saves a checkpoint every few
   // seconds, and an overview build of an hour-long track on NEXIS takes longer
   // than that; if every checkpoint restarted the loop, no build would finish.
-  // A build is cancelled only when ITS track's media changes or leaves view.
-  const wanted = active && !loading && document ? document.manifest.tracks
+  // A build is cancelled only when ITS track's media changes or leaves view,
+  // or Waveforms is turned off.
+  const wanted = active && !loading && document && waveformsFor === document.id ? document.manifest.tracks
     .filter(track => laneReady(document, track.id) && (requested ? visible.includes(track.id) : !alternativeLane(document, track.id)))
     .map(track => ({ documentId: document.id, id: track.id, key: mediaRevision(document, track.id) })) : [];
-  const wantedKey = wanted.map(entry => entry.key).join("\n");
+  const wantedKey = wanted.map(waveformSlot).join("\n");
   const wantedRef = useRef(wanted); wantedRef.current = wanted;
-  const loader = useRef<{ running: boolean; failed: Set<string> }>({ running: false, failed: new Set() });
-  const waveformJob = useRef<string | null>(null), waveformJobKey = useRef<string | null>(null);
   const pumpWaveforms = useCallback(() => {
     const state = loader.current;
-    if (state.running) return;
-    state.running = true;
-    const stillWanted = (key: string) => wantedRef.current.some(entry => entry.key === key);
-    void (async () => {
-      try {
-        for (;;) {
-          const next = wantedRef.current.find(entry => waveformKeys.current[entry.id] !== entry.key && !state.failed.has(entry.key));
-          if (!next || !mounted.current) break;
-          const jobId = newJobId(); waveformJob.current = jobId; waveformJobKey.current = next.key;
-          try {
-            const waveform = await invoke<AafWaveform>("aaf_waveform", { documentId: next.documentId, trackId: next.id, jobId });
-            if (stillWanted(next.key)) {
-              waveformCache.current[next.id] = waveform.peaks; waveformKeys.current[next.id] = next.key;
-              setWaveforms(prior => ({ ...prior, [next.id]: waveform.peaks }));
-            }
-          } catch (cause) {
-            if (stillWanted(next.key)) { state.failed.add(next.key); setWaveformErrors(prior => ({ ...prior, [next.id]: formatError(cause) })); }
-          } finally { waveformJob.current = null; waveformJobKey.current = null; }
+    const stillWanted = (slot: string) => wantedRef.current.some(entry => waveformSlot(entry) === slot);
+    const publish = () => { if (mounted.current) setWaveformsBuilding([...state.building.values()].map(job => job.id)); };
+    // Held before the invoke, where a change of view and unmounting can cancel it.
+    const setBuildingJob = (jobId: string, next: { id: string; key: string }) => { state.building.set(waveformSlot(next), { id: next.id, jobId }); publish(); };
+    while (mounted.current && state.building.size < WAVEFORM_BUILDS) {
+      const next = wantedRef.current.find(entry => waveformKeys.current[entry.id] !== entry.key && !state.failed.has(waveformSlot(entry)) && !state.building.has(waveformSlot(entry)));
+      if (!next) break;
+      const jobId = newJobId(); setBuildingJob(jobId, next);
+      void (async () => {
+        try {
+          const waveform = await invoke<AafWaveform>("aaf_waveform", { documentId: next.documentId, trackId: next.id, jobId });
+          if (stillWanted(waveformSlot(next))) {
+            waveformCache.current[next.id] = waveform.peaks; waveformKeys.current[next.id] = next.key;
+            setWaveforms(prior => ({ ...prior, [next.id]: waveform.peaks }));
+          }
+        } catch (cause) {
+          // A build stopped because Waveforms went off (or the lane left view)
+          // did not fail: if it is wanted again by the time it stops, the
+          // re-pump below starts it afresh.
+          const stopped = isAppError(cause) && cause.kind === "Cancelled";
+          if (!stopped && stillWanted(waveformSlot(next))) { state.failed.add(waveformSlot(next)); setWaveformErrors(prior => ({ ...prior, [next.id]: formatError(cause) })); }
+        } finally {
+          // A request that arrived while this one ran must not be stranded.
+          state.building.delete(waveformSlot(next)); publish(); pumpWaveforms();
         }
-      } finally {
-        state.running = false;
-        // A request that arrived after the last lookup must not be stranded.
-        if (mounted.current && wantedRef.current.some(entry => waveformKeys.current[entry.id] !== entry.key && !state.failed.has(entry.key))) pumpWaveforms();
-      }
-    })();
+      })();
+    }
   }, []);
   useEffect(() => {
-    const jobId = waveformJob.current, key = waveformJobKey.current;
-    if (jobId && !wantedRef.current.some(entry => entry.key === key)) void invoke("cancel_job", { jobId }).catch(() => {});
+    for (const [slot, job] of loader.current.building) {
+      if (!wantedRef.current.some(entry => waveformSlot(entry) === slot)) void invoke("cancel_job", { jobId: job.jobId }).catch(() => {});
+    }
     pumpWaveforms();
   }, [wantedKey, pumpWaveforms]);
-  useEffect(() => () => { const jobId = waveformJob.current; if (jobId) void invoke("cancel_job", { jobId }).catch(() => {}); }, []);
+  useEffect(() => () => { for (const job of loader.current.building.values()) void invoke("cancel_job", { jobId: job.jobId }).catch(() => {}); }, []);
 
   const persistLabels = useCallback((documentId: string, labels: AafTrackLabel[]) => {
     setLabelStatus("Saving labels…");
@@ -275,8 +300,8 @@ export function useMultitrackDocument(active: boolean) {
   const retryLabels = useCallback(() => { const doc = current.current; if (doc) { setError(null); persistLabels(doc.id, doc.labels); } }, [persistLabels]);
   /** Forget a track's failed waveform build and ask for it again. */
   const retryWaveform = useCallback((trackId: string) => {
-    const key = wantedRef.current.find(entry => entry.id === trackId)?.key;
-    if (key) loader.current.failed.delete(key);
+    const entry = wantedRef.current.find(item => item.id === trackId);
+    if (entry) loader.current.failed.delete(waveformSlot(entry));
     setWaveformErrors(prior => { const next = { ...prior }; delete next[trackId]; return next; });
     pumpWaveforms();
   }, [pumpWaveforms]);
@@ -285,6 +310,6 @@ export function useMultitrackDocument(active: boolean) {
     if (!before) return;
     const next = mergeTrackTranscript(before, transcript); current.current = next; setDocument(next);
   }, []);
-  return { document, saved, resuming, loading, resolving, mediaProgress, stopResolution, error, labelStatus, waveforms, waveformErrors, load, cancelImport, rename, retryLabels, retryWaveform, acceptTranscript, showTracks,
+  return { document, saved, resuming, loading, resolving, mediaProgress, stopResolution, error, labelStatus, waveforms, waveformErrors, setWaveformsOn, waveformsBuilding, load, cancelImport, rename, retryLabels, retryWaveform, acceptTranscript, showTracks,
     sequenceChoices, chooseSequence: (id: string) => { if (sequenceChoices) void load(undefined, sequenceChoices.path, id); }, cancelChoice: () => setSequenceChoices(null) };
 }

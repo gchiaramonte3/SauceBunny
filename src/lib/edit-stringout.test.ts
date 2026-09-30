@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AafCue } from "../bindings/AafCue";
-import { multitrackFixture, multitrackTranscript } from "../test/multitrack-fixture";
-import { bitesFor, stringoutFor, stringoutsFor } from "./edit-stringout";
+import { multitrackFixture, multitrackGroupFixture, multitrackTranscript } from "../test/multitrack-fixture";
+import { editFromSequence, giveTracks } from "./edit-new";
+import { bitesFor, layoutEditBites, stringoutFor, stringoutsFor } from "./edit-stringout";
 
 const cue = (id: string, from: number, to: number, text: string): AafCue => ({ id, start_sample: from * 16_000, end_sample: to * 16_000, text, boundary_review: false });
 
@@ -26,16 +27,31 @@ describe("rules-based string-outs", () => {
     const edit = stringoutFor(scene(), "Alex")!;
     const fps = 24000 / 1001;
     expect(edit.segments).toEqual([
-      { kind: "source", id: "bite-0", source: "s1", in_frame: Math.floor(9.5 * fps), out_frame: Math.ceil(16 * fps) },
+      { kind: "source", id: "bite-0", source: "s1", in_frame: Math.floor(9.5 * fps), out_frame: Math.ceil(16 * fps), tracks: ["alex"] },
       { kind: "gap", id: "gap-1", frames: 24 },
-      { kind: "source", id: "bite-1", source: "s1", in_frame: Math.floor(59.5 * fps), out_frame: Math.ceil(65 * fps) },
+      { kind: "source", id: "bite-1", source: "s1", in_frame: Math.floor(59.5 * fps), out_frame: Math.ceil(65 * fps), tracks: ["alex"] },
     ]);
+    // A new sequence of chunks: Alex on A1 and nobody else on a track.
+    expect(edit.tracks.filter((track) => track.featured !== false).map((track) => track.name)).toEqual(["Alex"]);
     const first = Math.ceil(16 * fps) - Math.floor(9.5 * fps);
     expect(edit.markers.map((marker) => [marker.frame, marker.name, marker.comment, marker.color])).toEqual([
       [0, "Alex", "I moved here in May. It was a lot.", "red"],
       [first + 24, "Alex", "Then Rosa called.", "red"],
     ]);
     expect(edit.title).toBe("SO_Interview_Alex");
+  });
+
+  it("patches only the people it has bites of, a group angle included, top-down in the order they speak", () => {
+    const document = multitrackGroupFixture();
+    document.transcripts = [{ ...multitrackTranscript("track-2"), cues: [cue("b1", 20, 25, "Sam talks here.")] }];
+    // Sam's mic is an alternate in Alex's group: his string out has Sam on A1 and nobody else.
+    const edit = stringoutFor(document, "Sam mic")!;
+    expect(edit.tracks.map((track) => [track.name, track.featured])).toEqual([["Sam mic", true], ["Alex", false], ["Room", false]]);
+    // Asked for the room and then Alex: the room on A1, Alex on A2, each bite on its own person's track.
+    const base = giveTracks(editFromSequence(document, "x", false), ["alex", "sam-mic"]);
+    const asked = layoutEditBites(base, [{ source: "s1", track: "room", from: 1, to: 3, text: "Room tone" }, { source: "s1", track: "alex", from: 10, to: 12, text: "Hi" }], "Room", { s1: 1000 });
+    expect(asked.tracks.filter((track) => track.featured !== false).map((track) => track.id)).toEqual(["room", "alex"]);
+    expect(asked.segments.flatMap((segment) => segment.kind === "source" ? [segment.tracks] : [])).toEqual([["room"], ["alex"]]);
   });
 
   it("never plays a frame twice when handles overlap", () => {

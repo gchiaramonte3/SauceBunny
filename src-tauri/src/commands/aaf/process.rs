@@ -192,5 +192,80 @@ async fn run_inner(app: &AppHandle, job: &str, stage: &str, name: &str, args: Ve
     }
 }
 
+/// A child whose stdout is data rather than a report: every chunk goes to
+/// `on_chunk` as it arrives instead of being collected. Used for an overview
+/// build, which reads a whole clip in one ffmpeg instead of one per minute.
+///
+/// Reading stops while audition or transcription is preparing audio. The
+/// shell plugin's channel holds one chunk, so ffmpeg then blocks on a full
+/// pipe and its network reads pause with it; nothing is dropped. The limit is
+/// on silence, not on length: a stream that delivers nothing for five
+/// minutes is a stalled mount, however long the clip.
+pub async fn run_streaming(app: &AppHandle, job: &str, stage: &str, name: &str, args: Vec<String>,
+    mut on_chunk: impl FnMut(&[u8]) -> Result<(), AppError>) -> Result<ProcessResult, AppError>
+{
+    let started = std::time::Instant::now();
+    super::diagnostics::log(app, job, "info", stage, &format!("Streaming {name}"));
+    let result = stream_inner(app, job, stage, name, args, &mut on_chunk).await;
+    let (level, message) = match &result {
+        Ok(output) if output.code == Some(0) => ("ok", format!("{name} completed")),
+        Ok(output) => ("err", format!("{name} exit {:?}: {}", output.code, output.stderr.trim())),
+        Err(AppError::Cancelled) => ("warn", format!("{name} stopped")),
+        Err(error) => ("err", format!("{name}: {error}")),
+    };
+    super::diagnostics::log(app, job, level, stage, &format!("{message} · {} ms", started.elapsed().as_millis()));
+    result
+}
+
+const STREAM_STALL: Duration = Duration::from_secs(5 * 60);
+
+async fn stream_inner(app: &AppHandle, job: &str, stage: &str, name: &str, args: Vec<String>,
+    on_chunk: &mut impl FnMut(&[u8]) -> Result<(), AppError>) -> Result<ProcessResult, AppError>
+{
+    check_cancelled(app, job)?;
+    let command = app.shell().sidecar(name).map_err(|_| AppError::sidecar_missing(name))?;
+    let (mut rx, child) = command.args(args).env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin").set_raw_out(true)
+        .spawn().map_err(|e| AppError::internal(format!("Cannot start {name}: {e}")))?;
+    let registry = app.state::<JobRegistry>();
+    let key = JobRegistry::stage_key(job, stage);
+    registry.insert(key.clone(), child);
+    let stop = |registry: &JobRegistry| { if let Some(child) = registry.take(&key) { let _ = child.kill(); } };
+    if registry.is_cancelled(job) { stop(&registry); return Err(AppError::Cancelled); }
+    let mut result = ProcessResult { code: None, stdout: String::new(), stderr: String::new() };
+    loop {
+        if let Err(error) = super::audio::yield_to_foreground(app, job).await { stop(&registry); return Err(error); }
+        let event = match tokio::time::timeout(STREAM_STALL, rx.recv()).await {
+            Ok(event) => event,
+            Err(_) => { stop(&registry); return Err(AppError::internal(format!("{name} delivered nothing for {} minutes", STREAM_STALL.as_secs() / 60))); }
+        };
+        match event {
+            Some(CommandEvent::Stdout(bytes)) => {
+                if let Err(error) = on_chunk(&bytes) { stop(&registry); return Err(error); }
+            }
+            Some(CommandEvent::Stderr(bytes)) => {
+                result.stderr.push_str(&String::from_utf8_lossy(&bytes));
+                if result.stderr.len() > 65_536 {
+                    let mut start = result.stderr.len() - 32_768;
+                    while !result.stderr.is_char_boundary(start) { start += 1; }
+                    result.stderr.drain(..start);
+                }
+            }
+            Some(CommandEvent::Terminated(payload)) => {
+                registry.take(&key);
+                check_cancelled(app, job)?;
+                result.code = payload.code;
+                if payload.signal.is_some() {
+                    return Err(AppError::SidecarFailed { name: name.into(), exit_code: payload.code,
+                        tail: "Worker terminated before producing a complete result".into() });
+                }
+                return Ok(result);
+            }
+            Some(CommandEvent::Error(error)) => { stop(&registry); check_cancelled(app, job)?; return Err(AppError::internal(format!("{name}: {error}"))); }
+            None => { stop(&registry); check_cancelled(app, job)?; return Err(AppError::internal(format!("{name} closed without an exit status"))); }
+            _ => {}
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct MxfEvent { path: String, phase: String, elapsed_ms: Option<u64>, tracks: Option<usize>, error: Option<String> }

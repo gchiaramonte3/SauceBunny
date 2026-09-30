@@ -1,10 +1,47 @@
-import { useCallback, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useDismiss } from "../hooks/use-dismiss";
 import { IconRefresh, IconVolume, IconVolumeMuted } from "./Icons";
 import { formatTrackGain, parseTrackGain, trackDbToGain, trackGainToDb, TRACK_GAIN_MAX_DB, TRACK_GAIN_OFF } from "../lib/multitrack-gain";
 
 const ticks = [36, 12, 0, -24, -48, TRACK_GAIN_OFF];
+/** WebKit reports one mouse-wheel notch as 40 px: one notch, one dB. */
+const NOTCH_PX = 40;
+/** A burst of scrolling this quiet counts as over. */
+const SETTLE_MS = 150;
+
+/**
+ * Scrolling over the open fader nudges it, 1 dB per notch like the arrow keys.
+ * A trackpad sends dozens of small deltas with momentum, so distance is added
+ * up and spent a notch at a time; a burst too short to reach a notch still
+ * moves one step, so a slow single click of the wheel is never ignored.
+ * The listener is not passive: React's onWheel is, and without preventDefault
+ * the track list behind the popover scrolls while the gain changes.
+ */
+function useWheelSteps(target: RefObject<HTMLElement | null>, active: boolean, onStep: (direction: 1 | -1) => void) {
+  const step = useRef(onStep); step.current = onStep;
+  useEffect(() => {
+    // The popover mounts in the same commit that opens it, so it is here now.
+    const element = target.current;
+    if (!active || !element) return;
+    let travel = 0, stepped = false, timer = 0;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      // A sideways swipe on a trackpad carries a little vertical noise; only
+      // a mostly vertical movement is a turn of the fader.
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      const pixels = event.deltaMode === 1 ? event.deltaY * NOTCH_PX : event.deltaMode === 2 ? event.deltaY * NOTCH_PX * 6 : event.deltaY;
+      if (!pixels) return;
+      travel += pixels;
+      // Scrolling up (content moving down) is louder, as on a fader.
+      while (Math.abs(travel) >= NOTCH_PX) { step.current(travel < 0 ? 1 : -1); travel -= Math.sign(travel) * NOTCH_PX; stepped = true; }
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { if (!stepped && travel) step.current(travel < 0 ? 1 : -1); travel = 0; stepped = false; }, SETTLE_MS);
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => { element.removeEventListener("wheel", onWheel); window.clearTimeout(timer); };
+  }, [active, target]);
+}
 
 /** Track gain is audition-only. The popup escapes the scrolling lane mask. */
 export function MultitrackLevel({ owner, value, onChange }: { owner: string; value: number; onChange: (value: number) => void }) {
@@ -31,6 +68,16 @@ export function MultitrackLevel({ owner, value, onChange }: { owner: string; val
     event.preventDefault(); event.stopPropagation(); writeDraft(null); onChange(trackDbToGain(next));
   };
   useDismiss(panel, close, open);
+  // Several notches can land before the parent re-renders with the new value,
+  // so each step builds on the last one sent rather than on a stale prop.
+  const sent = useRef(db); sent.current = db;
+  useWheelSteps(panel, open, (direction) => {
+    // A level being typed wins: the wheel does not throw it away.
+    if (pending.current !== null) return;
+    const next = Math.max(TRACK_GAIN_OFF, Math.min(TRACK_GAIN_MAX_DB, sent.current + direction));
+    if (next === sent.current) return;
+    sent.current = next; writeDraft(null); onChange(trackDbToGain(next));
+  });
   useLayoutEffect(() => {
     if (!open) return;
     const place = () => {

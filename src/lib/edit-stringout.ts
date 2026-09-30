@@ -2,7 +2,7 @@ import type { AafDocument } from "../bindings/AafDocument";
 import type { EditDocument } from "../bindings/EditDocument";
 import type { EditMarker } from "../bindings/EditMarker";
 import type { EditSegment } from "../bindings/EditSegment";
-import { addSource, editFromSequence } from "./edit-new";
+import { addSource, editFromSequence, giveTracks } from "./edit-new";
 
 /**
  * Rules-based string-outs (plan Phase 7, step 2): one edit per person, their
@@ -84,11 +84,13 @@ export function layoutBites(document: AafDocument, title: string, bites: LaneBit
     const start = inFrame >= lastIn ? Math.max(inFrame, last) : inFrame;
     if (outFrame <= start) return;
     if (segments.length && rules.gapFrames > 0) { segments.push({ kind: "gap", id: `gap-${index}`, frames: rules.gapFrames }); at += rules.gapFrames; }
-    segments.push({ kind: "source", id: `bite-${index}`, source, in_frame: start, out_frame: outFrame });
+    // A bite is that person's mic, on their track; the other tracks are filler under it.
+    segments.push({ kind: "source", id: `bite-${index}`, source, in_frame: start, out_frame: outFrame, tracks: [person.id] });
     markers.push({ id: `bite-${index}`, frame: at, track: person.id, name: person.name, comment: snippet(bite.text), color: COLORS[frame.tracks.indexOf(person) % COLORS.length] });
     at += outFrame - start; last = outFrame; lastIn = inFrame;
   });
-  return segments.length ? { ...frame, segments, markers } : null;
+  // Whoever has a bite is patched, top-down in the order they first speak, a group angle included.
+  return segments.length ? { ...giveTracks(frame, bites.map((bite) => bite.lane)), segments, markers } : null;
 }
 
 /** A string-out for one person (an edit lane, by name), or null when they say nothing that qualifies. */
@@ -132,6 +134,11 @@ export type EditBite = { source: string; track: string; from: number; to: number
  * exports exactly as the one it came from. Handles, filler and a marker per
  * bite as the per-person string outs have. `lengths` bounds each source in
  * seconds, so a tail handle never runs past the end of the media.
+ *
+ * It is a new sequence of chunks, patched from nothing: only the people it
+ * cites get record tracks, top-down in the order they first speak (Harry on
+ * A1, Jane on A2, nobody else), and each bite plays on its own person's
+ * track, the others filler under it.
  */
 export function layoutEditBites(base: EditDocument, bites: EditBite[], title: string, lengths: Record<string, number>, rules: StringoutRules = stringoutDefaults): EditDocument {
   const rate = base.edit_rate, fps = rate.numerator / rate.denominator;
@@ -148,11 +155,13 @@ export function layoutEditBites(base: EditDocument, bites: EditBite[], title: st
     const start = previous && inFrame >= previous.inFrame ? Math.max(inFrame, previous.outFrame) : inFrame;
     if (outFrame <= start) return;
     if (segments.length && rules.gapFrames > 0) { segments.push({ kind: "gap", id: `gap-${index}`, frames: rules.gapFrames }); at += rules.gapFrames; }
-    segments.push({ kind: "source", id: `bite-${index}`, source: bite.source, in_frame: start, out_frame: outFrame });
     const lane = base.tracks[person];
+    segments.push({ kind: "source", id: `bite-${index}`, source: bite.source, in_frame: start, out_frame: outFrame, ...(lane ? { tracks: [lane.id] } : {}) });
     markers.push({ id: `bite-${index}`, frame: at, track: lane?.id ?? null, name: lane?.name ?? "Bite", comment: snippet(bite.text), color: COLORS[Math.max(0, person) % COLORS.length] });
     at += outFrame - start;
     last.set(bite.source, { inFrame, outFrame });
   });
-  return { ...base, title: title.trim() || base.title, segments, mutes: [], markers };
+  const unpatched = { ...base, tracks: base.tracks.map((lane) => ({ ...lane, featured: false })) };
+  return { ...giveTracks(unpatched, bites.filter((bite) => segments.some((segment) => segment.kind === "source" && segment.tracks?.includes(bite.track))).map((bite) => bite.track)),
+    title: title.trim() || base.title, segments, mutes: [], markers };
 }

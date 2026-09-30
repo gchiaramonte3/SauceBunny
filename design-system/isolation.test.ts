@@ -79,6 +79,9 @@ const allowedProduction = new Set([
   // The V1 picture lane: named blocks from manifest metadata and pure timecode
   // formatting. No video element, decode, IPC or persistence.
   "src/components/MultitrackPictureLane",
+  // Controlled zoom buttons and slider, and the In/Out ruler marks: props in,
+  // elements out, nothing else imported.
+  "src/components/MultitrackZoom", "src/components/RulerMarks",
 ]);
 const pureHelpers = [...allowedProduction].flatMap(path => [".tsx", ".ts"].map(extension => resolve(root, path + extension)).filter(existsSync));
 

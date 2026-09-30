@@ -36,7 +36,7 @@ export function MultitrackExamples() {
   return <div className="cp-ds-stack">
     <p className="cp-ds-fixture-caption">Multitrack · Generated waveforms, not a recording. Solo and seek update this fixture only.</p>
     <div className="cp-multitrack-toolbar-options"><button className="cp-tc" aria-label="Go to multitrack timecode" onClick={(event) => { event.currentTarget.focus(); setTimecodeOpen(true); }}>{sequenceTimecode(document.manifest, frame)}</button>
-      <span className="cp-multitrack-trt">TRT {sequenceDurationTimecode(document.manifest)}</span></div>
+      <div className="cp-tc cp-multitrack-readout" role="group" aria-label="Total runtime"><span>TRT</span>{sequenceDurationTimecode(document.manifest)}</div></div>
     {timecodeOpen && <MultitrackTimecodeDialog manifest={document.manifest} initialDigits="" onClose={closeTimecode} onSeek={setFrame} />}
     <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={{}} selected={selected} solo={solo} frame={frame} levels={levels} onLevel={(id, value) => setLevels((prior) => ({ ...prior, [id]: value }))}
       onSelect={(id) => setSelected((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; })}

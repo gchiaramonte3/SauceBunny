@@ -12,6 +12,9 @@ from reader import value, clean_name, append_warning, timecode_segment, round_sa
 # and a partial picture lane, never the audio import.
 MAX_PICTURE_CLIPS = 100000
 MAX_PICTURE_STEPS = 1000000
+# A multicam group names at most this many angles; a sixty-camera group still
+# reads, it just lists the first sixteen.
+MAX_ANGLES = 16
 
 
 class Budget(Exception):
@@ -94,17 +97,44 @@ def component_at(sequence, position, steps):
     return None
 
 
+def angle_name(seg, steps):
+    """What one angle of a group is called: the first clip name down its
+    chain (a camera's master clip), without following it any further."""
+    for _ in range(16):
+        steps.take()
+        if isinstance(seg, aaf2.components.Sequence):
+            seg = next((c for c in seg.components if not isinstance(c, aaf2.components.Filler)), None)
+        elif isinstance(seg, aaf2.components.OperationGroup):
+            seg = next(iter(value(seg, 'InputSegments') or []), None)
+        elif isinstance(seg, aaf2.components.Selector):
+            seg = value(seg, 'Selected')
+        elif isinstance(seg, aaf2.components.SourceClip):
+            mob, slot = seg.mob, seg.slot
+            if mob is None:
+                return None
+            name = clean_name(mob.name, '')
+            if isinstance(mob, aaf2.mobs.MasterMob) or name or slot is None:
+                return name or None
+            seg = slot.segment
+        else:
+            return None
+    return None
+
+
 def resolve(seg, rate, steps):
     """Follow one record-side component down its source chain to the tape.
 
     Records the first MasterMob (the clip), the file SourceMob with its
     descriptor, and the deepest non-file SourceMob (the tape or import mob)
-    with the source timecode at the clip's in point.
+    with the source timecode at the clip's in point. For a group (a multicam
+    clip) it also records the group's name and what each angle is called,
+    the selected one first: names only, so the picture still travels as
+    metadata and nothing is opened.
     """
     clip = {'kind': 'clip', 'name': None, 'master_mob_id': None, 'file_mob_id': None, 'tape_name': None,
             'source_start_frame': None, 'source_timecode_fps': None, 'source_drop_frame': None,
-            'group': False, 'effect': None, 'descriptor': None}
-    position, visited = Fraction(0), set()
+            'group': False, 'group_name': None, 'angles': [], 'effect': None, 'descriptor': None}
+    position, visited, composition = Fraction(0), set(), None
     for _ in range(MAX_DEPTH * 4):
         steps.take()
         if isinstance(seg, aaf2.components.Selector):
@@ -116,6 +146,11 @@ def resolve(seg, rate, steps):
                 # Name the muted clip after what it hides.
                 seg = alternates[0]
                 continue
+            if not clip['group']:
+                # The outermost group is the one an editor switches in Avid.
+                options = [value(seg, 'Selected'), *(value(seg, 'Alternates') or [])]
+                clip['group_name'] = composition
+                clip['angles'] = [name for name in (angle_name(o, steps) for o in options[:MAX_ANGLES] if o is not None) if name]
             clip['group'] = True
             seg = value(seg, 'Selected')
             continue
@@ -149,6 +184,7 @@ def resolve(seg, rate, steps):
                 clip['name'] = clean_name(mob.name, '') or clip['name']
         elif isinstance(mob, aaf2.mobs.CompositionMob):
             clip['name'] = clip['name'] or clean_name(mob.name, '') or None
+            composition = clean_name(mob.name, '') or composition
         elif isinstance(mob, aaf2.mobs.SourceMob):
             summary = descriptor_summary(value(mob, 'EssenceDescription'), slot.slot_id)
             if summary is not None:
@@ -164,7 +200,7 @@ def resolve(seg, rate, steps):
                     clip.update(source_start_frame=frame, source_timecode_fps=int(tc.fps), source_drop_frame=bool(tc.drop))
         seg = slot.segment
     if clip['kind'] == 'muted':
-        clip['group'] = False
+        clip['group'], clip['group_name'], clip['angles'] = False, None, []
     return clip
 
 

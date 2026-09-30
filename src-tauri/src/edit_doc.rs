@@ -51,6 +51,19 @@ pub struct EditTrack {
     pub name: String,
     pub kind: EditTrackKind,
     pub source_tracks: std::collections::BTreeMap<String, String>,
+    /// Whether this person is patched to a record track. `false`: listed, so
+    /// their words can be found and cut in, but on no track, so they neither
+    /// play nor export. `true`: patched, on the next track down (tracks are
+    /// numbered top-down in the order they appear here). Absent: patched, as
+    /// every person was in string outs made before patching, so those open
+    /// exactly as they were saved. A new string out patches nobody until
+    /// someone's words are cut in, the way an Avid sequence starts with no
+    /// tracks. `featured != Some(false)` is the on-track rule on both sides
+    /// of the invoke. (The name predates patching: it first meant only a
+    /// group angle given a track, and renaming it would orphan saved edits.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub featured: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
@@ -72,6 +85,14 @@ pub enum EditSegment {
         in_frame: i64,
         #[ts(type = "number")]
         out_frame: i64,
+        /// The lanes this clip plays on: a bite of one person, or an insert
+        /// with some source mics turned off. Every other record track is
+        /// filler for the clip, as it is in Avid when a track was not
+        /// selected. Absent: every patched lane plays (whole-sequence cuts,
+        /// and every clip made before clips named their tracks).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        tracks: Option<Vec<String>>,
     },
     Gap {
         id: String,
@@ -160,9 +181,15 @@ impl EditDocument {
         let mut total: i64 = 0;
         for segment in &self.segments {
             match segment {
-                EditSegment::Source { source, in_frame, out_frame, .. } => {
+                EditSegment::Source { source, in_frame, out_frame, tracks, .. } => {
                     if !source_ids.contains(source.as_str()) {
                         return bad("a segment refers to a source the string out does not have");
+                    }
+                    if let Some(lanes) = tracks {
+                        let unique: std::collections::HashSet<&str> = lanes.iter().map(String::as_str).collect();
+                        if unique.len() != lanes.len() || lanes.iter().any(|lane| !track_ids.contains(lane.as_str())) {
+                            return bad("a clip names a track the string out does not have");
+                        }
                     }
                     if *in_frame < 0 || out_frame <= in_frame || *out_frame > MAX_FRAMES {
                         return bad("a segment's frames are out of range");
@@ -206,12 +233,12 @@ mod tests {
             edit_rate: EditRate { numerator: 24000, denominator: 1001 },
             start_timecode_frames: 86_400,
             sources: vec![EditSource { id: "s1".into(), name: "MG 3 Kitchen".into(), document_id: "doc-1".into() }],
-            tracks: vec![EditTrack { id: "rosa".into(), name: "Rosa".into(), kind: EditTrackKind::Sound,
+            tracks: vec![EditTrack { id: "rosa".into(), name: "Rosa".into(), kind: EditTrackKind::Sound, featured: None,
                 source_tracks: [("s1".to_string(), "track-3".to_string())].into() }],
             segments: vec![
-                EditSegment::Source { id: "a".into(), source: "s1".into(), in_frame: 0, out_frame: 100 },
+                EditSegment::Source { id: "a".into(), source: "s1".into(), in_frame: 0, out_frame: 100, tracks: None },
                 EditSegment::Gap { id: "g".into(), frames: 24 },
-                EditSegment::Source { id: "b".into(), source: "s1".into(), in_frame: 200, out_frame: 260 },
+                EditSegment::Source { id: "b".into(), source: "s1".into(), in_frame: 200, out_frame: 260, tracks: Some(vec!["rosa".into()]) },
             ],
             mutes: vec![EditMute { source: "s1".into(), track: "rosa".into(), in_frame: 10, out_frame: 20 }],
             markers: vec![EditMarker { id: "m".into(), frame: 30, track: None, name: "Rosa".into(), comment: "bite".into(), color: "Red".into() }],
@@ -231,6 +258,11 @@ mod tests {
         assert_eq!(json["segments"][1]["kind"], "gap");
         assert_eq!(json["segments"][0]["kind"], "source");
         assert_eq!(json["tracks"][0]["kind"], "sound");
+        // A clip names its tracks only when it has some; older clips read as every track.
+        assert!(json["segments"][0].get("tracks").is_none());
+        assert_eq!(json["segments"][2]["tracks"], serde_json::json!(["rosa"]));
+        let back: EditDocument = serde_json::from_value(json).unwrap_or_else(|_| sample());
+        assert_eq!(back, sample());
     }
 
     #[test]
@@ -239,11 +271,18 @@ mod tests {
         newer.schema_version = EDIT_SCHEMA_VERSION + 1;
         assert!(newer.validate().is_err());
         let mut empty_segment = sample();
-        empty_segment.segments[0] = EditSegment::Source { id: "a".into(), source: "s1".into(), in_frame: 50, out_frame: 50 };
+        empty_segment.segments[0] = EditSegment::Source { id: "a".into(), source: "s1".into(), in_frame: 50, out_frame: 50, tracks: None };
         assert!(empty_segment.validate().is_err());
         let mut unknown_source = sample();
-        unknown_source.segments[0] = EditSegment::Source { id: "a".into(), source: "nope".into(), in_frame: 0, out_frame: 5 };
+        unknown_source.segments[0] = EditSegment::Source { id: "a".into(), source: "nope".into(), in_frame: 0, out_frame: 5, tracks: None };
         assert!(unknown_source.validate().is_err());
+        // A clip's tracks name lanes of this string out, each once.
+        let mut unknown_lane = sample();
+        unknown_lane.segments[0] = EditSegment::Source { id: "a".into(), source: "s1".into(), in_frame: 0, out_frame: 5, tracks: Some(vec!["nobody".into()]) };
+        assert!(unknown_lane.validate().is_err());
+        let mut twice = sample();
+        twice.segments[0] = EditSegment::Source { id: "a".into(), source: "s1".into(), in_frame: 0, out_frame: 5, tracks: Some(vec!["rosa".into(), "rosa".into()]) };
+        assert!(twice.validate().is_err());
         let mut bad_mute = sample();
         bad_mute.mutes[0].track = "nobody".into();
         assert!(bad_mute.validate().is_err());

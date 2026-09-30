@@ -298,11 +298,14 @@ class GraphTests(unittest.TestCase):
         path=self.root/'picture-group.aaf'; grouped_fixture(path,alternatives=0); add_picture_track(path,wrap=group)
         clip=self.read(path)['graph']['picture_tracks'][0]['clips'][1]
         self.assertEqual((clip['kind'],clip['group'],clip['name'],clip['tape_name']),('clip',True,'Interview B','TAPE B'))
+        # Every angle is named, the one that plays first; the group has no mob of its own here.
+        self.assertEqual((clip['group_name'],clip['angles']),(None,['Interview B','Interview A']))
         path=self.root/'picture-muted.aaf'; grouped_fixture(path,alternatives=0)
         add_picture_track(path,wrap=lambda file,clip_b,clip_a: mute(file,clip_b,'picture'))
         data=self.read(path)
         clip=data['graph']['picture_tracks'][0]['clips'][1]
         self.assertEqual((clip['kind'],clip['group'],clip['name'],clip['start_frame']),('muted',False,'Interview B',23))
+        self.assertEqual((clip['group_name'],clip['angles']),(None,[]))
         self.assertEqual(len(data['tracks']),1)
 
     def test_picture_clip_count_is_bounded_without_failing_audio(self):

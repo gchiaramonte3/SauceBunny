@@ -2,11 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import type { EditExportResult } from "../bindings/EditExportResult";
 
 /**
- * How a group clip is written. "C" keeps the whole group with the chosen angle,
- * so the editor can still switch angles in Media Composer; "B" writes only the
- * clip that plays. The plan's Phase 0 Mac test decides the default.
+ * How a group clip is written. "V" (the default) keeps picture groups whole,
+ * so camera angles still switch in Media Composer, while each person's audio
+ * is their own mic, the clip that plays. "C" keeps every group, audio too;
+ * "B" writes only the clip that plays everywhere.
  */
-export type EditExportApproach = "B" | "C";
+export type EditExportApproach = "V" | "C" | "B";
 
 /**
  * Write the edit's saved head as a new AAF (aaf-sidecar/writer.py). The

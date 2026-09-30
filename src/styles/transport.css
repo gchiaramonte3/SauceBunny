@@ -330,16 +330,18 @@
      marker violet for the same pixels: a 14% tint over BRIGHTENED film is the
      one combination in which the violet cannot be seen. Dimming to 0.45 and
      roughly doubling the tint inverts that — the selection is now the darker,
-     more saturated stretch of the strip, which is also what every NLE does. */
-  background: rgba(var(--marker-rgb), 0.32);
+     more saturated stretch of the strip, which is also what every NLE does.
+     Since 2026-09-29 the tint is the grey --marker-region and the marks are
+     white, so the dimming is what carries the span. */
+  background: var(--marker-region);
   backdrop-filter: brightness(0.45) saturate(1.15);
   -webkit-backdrop-filter: brightness(0.45) saturate(1.15);
   /* Closed, for the same reason as the queued band below: coloured sides
      with nothing across the top and bottom reads as a cropped band. The
      top and bottom are lighter than the sides here because the sides are
      where the marks themselves are. */
-  border-top: 1px solid color-mix(in srgb, var(--marker) 70%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--marker) 70%, transparent);
+  border-top: 1px solid var(--marker-edge);
+  border-bottom: 1px solid var(--marker-edge);
   border-left: 2px solid var(--marker);
   border-right: 2px solid var(--marker);
   /* Kept, but halved: these were edge-lighting a band that used to be

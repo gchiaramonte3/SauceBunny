@@ -1,4 +1,5 @@
 import type { AafDocument } from "../bindings/AafDocument";
+import type { AafDocumentSummary } from "../bindings/AafDocumentSummary";
 import type { AafManifest } from "../bindings/AafManifest";
 import type { AafTrackTranscript } from "../bindings/AafTrackTranscript";
 import { fpsToRateKey, framesToTc, RATE_TABLE, tcToFrames } from "./marker-time";
@@ -22,10 +23,11 @@ export function sequenceTimecode(manifest: AafManifest, relativeFrame: number): 
   return framesToTc(frame, rate, manifest.drop_frame);
 }
 
-/** Duration is a frame count, never the sequence's source-timecode offset. */
-export function sequenceDurationTimecode(manifest: AafManifest): string {
+/** Duration is a frame count, never the sequence's source-timecode offset.
+ * The whole sequence (TRT) by default, or any span, such as in to out. */
+export function sequenceDurationTimecode(manifest: AafManifest, frames = manifest.duration_frames): string {
   const rate = sequenceRate(manifest);
-  return rate ? framesToTc(manifest.duration_frames, rate, manifest.drop_frame) : `${manifest.duration_frames} frames`;
+  return rate ? framesToTc(frames, rate, manifest.drop_frame) : `${frames} frames`;
 }
 
 /** Clip-style right-aligned digit entry, resolved against the AAF's source TC.
@@ -124,4 +126,22 @@ export function exportMultitrack(document: AafDocument, format: "csv" | "txt"): 
   return [transcriptMetadata(document), "Mic owners are labels, not verified speakers. ASR timing is unverified.", "", ...rows.map((cue) =>
     `${sequenceTimecode(document.manifest, cue.startFrame)} - ${sequenceTimecode(document.manifest, cue.endFrame)}  ${cue.owner} (${audioTrackLabel(document, cue.trackId)})\n${cue.text}\n`), ...(untimed.length ? ["Untimed text (timing needs review)", ""] : []), ...untimed.map((cue) =>
     `Timing needs review  ${cue.owner} (${audioTrackLabel(document, cue.trackId)})\n${cue.text}\n${cue.reason} Reported: ${cue.reported_timing}\n`)].join("\n");
+}
+
+/**
+ * What a sequence picker shows for each saved sequence: its name, and where
+ * two share a name (Avid exports are often all "Sequence.Exported.01") the
+ * file it came from too, then when it was saved if even that is shared.
+ */
+export function sequenceLabels(items: AafDocumentSummary[]): Map<string, string> {
+  const tally = (label: (item: AafDocumentSummary) => string) => {
+    const counts = new Map<string, number>();
+    for (const item of items) counts.set(label(item), (counts.get(label(item)) ?? 0) + 1);
+    return counts;
+  };
+  const names = tally((item) => item.name);
+  const withFile = (item: AafDocumentSummary) => (names.get(item.name) ?? 0) > 1 ? `${item.name} · ${item.source_path.split("/").pop() || item.source_path}` : item.name;
+  const files = tally(withFile);
+  const when = (ms: number) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return new Map(items.map((item) => [item.id, (files.get(withFile(item)) ?? 0) > 1 && item.modified_ms ? `${withFile(item)} · ${when(item.modified_ms)}` : withFile(item)]));
 }
