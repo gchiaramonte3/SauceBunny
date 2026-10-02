@@ -55,6 +55,21 @@ function unload(h: ReturnType<typeof harness>) {
 }
 
 describe("restore", () => {
+  it("re-bases late frame-rate metadata without saving the stale frame snapshot", () => {
+    setSourceMarks(KEY, { inFrames: 108000, outFrames: 108060 });
+    const h = renderHook(({ fps }: { fps: number }) => {
+      const [inFrames, setInFrames] = useState<number | null>(null);
+      const [outFrames, setOutFrames] = useState<number | null>(null);
+      useSourceMarks({ reviewSourceKey: KEY, fps, durationFrames: 300000,
+        inFrames, outFrames, setInFrames, setOutFrames });
+      return { inFrames, outFrames };
+    }, { initialProps: { fps: 30 } });
+    h.rerender({ fps: 30000 / 1001 });
+    expect(h.result.current).toEqual({ inFrames: 107892, outFrames: 107952 });
+    expect(marksFor(KEY).inFrames).toBe(107892);
+    h.unmount();
+    expect(marksFor(KEY, 30000 / 1001).inFrames).toBe(107892);
+  });
   it("restores stored marks when the source loads", () => {
     setSourceMarks(KEY, { inFrames: 100, outFrames: 200 });
     const h = harness(KEY);

@@ -1,5 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { framesToTc, tcToFrames, tcToSeconds, hmsToSeconds, secondsToClock, secondsToHms, tcDigitsToFrames, tcDigitsToDisplay, isCompleteTc, isValidTc } from "./timecode";
+import { framesToTc, tcToFrames, tcToSeconds, hmsToSeconds, secondsToClock, secondsToHms, tcDigitsToFrames, tcDigitsToDisplay, isCompleteTc, isValidTc, secondsToFrames, secondsToTc } from "./timecode";
+
+describe("source frame timecode", () => {
+  it.each([24, 25, 30, 50, 60, 24000 / 1001, 30000 / 1001, 60000 / 1001])("round-trips exact and microsecond PTS at %s fps without drift", fps => {
+    for (const frame of [0, 1, 23, 59, 583, 1333, 3495, 19000, 215999]) {
+      const pts = Math.round(frame / fps * 1e6) / 1e6;
+      expect(secondsToFrames(pts, fps)).toBe(frame);
+      expect(secondsToTc(pts, fps)).toBe(framesToTc(frame, fps));
+      expect(tcToSeconds(secondsToTc(pts, fps), fps)).toBeCloseTo(frame / fps, 9);
+      expect(secondsToFrames(frame / fps + 0.9 / fps, fps)).toBe(frame);
+    }
+  });
+  it("does not count 59.94 as 60 frames each elapsed second", () => {
+    expect(secondsToTc(58.308250, 60000 / 1001)).toBe("00:00:58:15");
+    expect(secondsToTc(3603.6, 60000 / 1001)).toBe("01:00:00:00");
+    expect(secondsToTc(1.001, 24000 / 1001)).toBe("00:00:01:00");
+  });
+});
 
 // Frames↔timecode math drives the playhead, marks, exports, and the
 // transcript click-to-seek (whose floor-rounding produced the r85

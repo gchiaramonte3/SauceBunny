@@ -55,7 +55,7 @@ import {
   rangeToPost, type MarkRange,
 } from "../lib/review-range";
 import {
-  RATE_TABLE, DEFAULT_MARKER_SETTINGS, tcToFrames, FRAME_RATE_KEYS, fpsToRateKey,
+  RATE_TABLE, DEFAULT_MARKER_SETTINGS, tcToFrames, retimeStartTc, FRAME_RATE_KEYS, fpsToRateKey,
   type FrameRateKey, type MarkerExportSettings,
 } from "../lib/marker-time";
 import { newJobId } from "../lib/job-id";
@@ -1745,6 +1745,13 @@ function MarkerSettingsRow({
     setTcDraft(v);
     if (tcToFrames(v, settings.frameRate, settings.dropFrame) !== null) onChange({ sequenceStartTc: v });
   };
+  // A rate or drop-frame change can make the stored Start TC unrepresentable;
+  // move it with the change so the export never falls back to 00:00:00:00.
+  const retime = (frameRate: FrameRateKey, dropFrame: boolean) => {
+    const sequenceStartTc = retimeStartTc(settings.sequenceStartTc, settings.frameRate, frameRate, dropFrame && RATE_TABLE[frameRate].dropAllowed);
+    setTcDraft(sequenceStartTc);
+    onChange({ frameRate, dropFrame, sequenceStartTc });
+  };
   return (
     <div className="cp-review-export-settings">
       <label className="cp-review-export-field">
@@ -1752,7 +1759,7 @@ function MarkerSettingsRow({
         <select
           className="cp-select sm cp-review-export-select"
           value={settings.frameRate}
-          onChange={(e) => onChange({ frameRate: e.target.value as FrameRateKey })}
+          onChange={(e) => retime(e.target.value as FrameRateKey, settings.dropFrame)}
         >
           {FRAME_RATE_KEYS.map((k) => <option key={k} value={k}>{k} fps</option>)}
         </select>
@@ -1774,7 +1781,7 @@ function MarkerSettingsRow({
           type="checkbox"
           checked={settings.dropFrame}
           disabled={!dropAllowed}
-          onChange={(e) => onChange({ dropFrame: e.target.checked })}
+          onChange={(e) => retime(settings.frameRate, e.target.checked)}
         />
         <span>Drop-frame{dropAllowed ? "" : " (29.97 / 59.94 only)"}</span>
       </label>

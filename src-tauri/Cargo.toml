@@ -1,6 +1,6 @@
 [package]
 name = "sauce-bunny"
-version = "0.5.0"
+version = "0.6.0"
 description = "Sauce Bunny — local-first transcription + diarization"
 authors = ["Sauce Bunny contributors"]
 edition = "2021"
@@ -122,6 +122,14 @@ base64 = "0.22"
 # `#[cfg(test)]`-gated, so the runtime binary carries no ts-rs code.
 # Run `cargo test` to refresh `src/bindings/*.ts`.
 ts-rs = "10"
+# Transcript Editor undo log (edit_log.rs): every state of every edit, as a
+# tree, in one SQLite file in app_data_dir(). `bundled` compiles SQLite in, so
+# nothing depends on the system library. MIT.
+rusqlite = { version = "0.32", features = ["bundled"] }
+# The log stores each step as an RFC 6902 patch from its parent, with a whole
+# document every 100 steps, so 100,000 steps cost tens of MB, not hundreds.
+# MIT OR Apache-2.0.
+json-patch = "3"
 # r100: P2P co-review ("watch party") — commands/session.rs. iroh gives us
 # QUIC dialed by endpoint public key (hole-punching, E2E encryption) with
 # n0 public discovery + relays as connect-assist; iroh-tickets mints the

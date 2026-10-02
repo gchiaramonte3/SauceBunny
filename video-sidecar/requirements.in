@@ -1,0 +1,6 @@
+# Build inputs. Compile to a hash-locked, macOS arm64 requirements file before
+# installation. No inference HTTP server is started by Sauce Bunny.
+mlx-vlm==0.7.1
+usearch==2.26.2
+av==16.1.0
+pyinstaller==6.22.3

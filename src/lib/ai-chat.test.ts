@@ -182,6 +182,8 @@ describe("the request and its failures", () => {
     const body = JSON.parse(calls[0].init.body as string);
     expect(body.stream).toBe(true);
     expect(body.messages).toEqual(MSGS);
+    // A thinking model would spend the answer budget reasoning, which is never read.
+    expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
   });
 
   it("defaults to a low temperature, and lets a caller override it", async () => {

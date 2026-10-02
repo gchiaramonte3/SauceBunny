@@ -8,6 +8,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke, convertFileSrc: (path: string) 
 const sources: Array<{ start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = [];
 let context: FakeContext;
 class FakeContext {
+  onstatechange: (() => void) | null = null;
   gains: Array<{ gain: { value: number; setValueCurveAtTime: ReturnType<typeof vi.fn> }; connect: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = [];
   currentTime = 0; state = "running"; destination = {}; resume = vi.fn().mockResolvedValue(undefined); close = vi.fn().mockResolvedValue(undefined);
   constructor() { context = this; }
@@ -23,6 +24,46 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe("one-clock PCM audition", () => {
+  it("resumes WebKit's interrupted output before starting cached audio", async () => {
+    const changed = vi.fn(), player = new MultitrackAudio("doc", 24, 240, ["a"], changed);
+    await player.warm(0); context.state = "interrupted";
+    context.resume.mockImplementation(async () => { context.state = "running"; });
+    await player.seek(0, 1);
+    expect(context.resume).toHaveBeenCalledTimes(1);
+    expect(sources.length).toBeGreaterThan(0);
+    expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ rate: 1, error: null });
+    player.close();
+  });
+  it("does not report playing when the audio output cannot resume", async () => {
+    const changed = vi.fn(), player = new MultitrackAudio("doc", 24, 240, ["a"], changed);
+    await player.warm(0); context.state = "interrupted";
+    await player.seek(0, 1);
+    expect(sources).toHaveLength(0);
+    expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ rate: 0, busy: false, error: expect.stringMatching(/audio output/i) });
+    player.close();
+  });
+  it("parks playback on output interruption and resumes only on a new Play", async () => {
+    const changed = vi.fn(), player = new MultitrackAudio("doc", 24, 240, ["a"], changed);
+    await player.seek(24, 1); context.currentTime = 1;
+    context.state = "interrupted"; context.onstatechange?.();
+    expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ rate: 0, busy: false, error: expect.stringMatching(/interrupted/) });
+    expect(sources[0].stop).toHaveBeenCalled();
+    const parked = changed.mock.calls.at(-1)![0].frame;
+    context.state = "running"; context.onstatechange?.();
+    expect(changed.mock.calls.at(-1)![0].rate).toBe(0);
+    await player.seek(parked, 1);
+    expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ rate: 1, error: null });
+    player.close(); expect(context.onstatechange).toBeNull();
+  });
+  it("rejects an output interruption during cold audio preparation", async () => {
+    context = new FakeContext();
+    const changed = vi.fn(), player = new MultitrackAudio("doc", 24, 240, ["a"], changed);
+    context.decodeAudioData.mockImplementation(async () => { context.state = "interrupted"; return { duration: 5 }; });
+    await player.seek(0, 1);
+    expect(sources).toHaveLength(0);
+    expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ rate: 0, busy: false, error: expect.stringMatching(/interrupted/) });
+    player.close();
+  });
   it.each([24, 24000 / 1001])("warms boundary look-ahead for 20 microphones at %s fps without sounding them", async (fps) => {
     const ids = Array.from({ length: 20 }, (_, index) => String(index)), boundary = Math.ceil(5 * fps);
     const changed = vi.fn(), player = new MultitrackAudio("doc", fps, boundary * 4, ids, changed);

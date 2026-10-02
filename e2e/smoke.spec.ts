@@ -109,9 +109,9 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   // primary button, no panel/bar chrome.
   await page.keyboard.press("Meta+2");
   await expect(page.locator(".cp-view-library")).toBeVisible();
-  await expect(page.getByText("Add a folder to build your library.")).toBeVisible();
-  await expect(page.locator(".cp-lib-browse-zero").getByRole("button", { name: "Add folder" })).toBeVisible();
-  await expect(page.getByRole("tree", { name: "Library folders" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add to Library", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New in-app folder…", exact: true })).toBeVisible();
+  await expect(page.getByRole("tree", { name: "Library folders" })).toBeVisible();
   await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Meta+1");
@@ -443,7 +443,7 @@ test("library browser: tree + grid render, selection shows detail, list toggle s
   // by the container class they happened to sit in, so moving them again is a
   // design change rather than a test failure.
   const panel = page.locator(".cp-lib-tree");
-  await expect(panel.getByRole("button", { name: "Add folder" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Add to Library" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Rescan library" })).toBeVisible();
   // Main pane: "All" flattens every item across the tree into the poster wall.
   const grid = page.getByRole("list", { name: "Files" });
@@ -750,7 +750,7 @@ test("timeline: helper row holds its space; queued range renders with status cla
   // The row RESERVES its space. It used to be removed outright, so setting a
   // mark collapsed it and shoved everything below up the screen. Measure the
   // element under it before and after: that position is the actual contract.
-  const below = page.locator(".cp-logs").first();
+  const below = page.locator(".cp-logs:visible");
   const beforeY = (await below.boundingBox())?.y ?? -1;
   expect(beforeY, "needed a reference element below the hint").toBeGreaterThan(0);
 

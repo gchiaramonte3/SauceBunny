@@ -8,8 +8,11 @@ import {
 } from "../lib/stream-keep";
 import { loadJson, saveJson } from "../lib/storage";
 
-/** Standing per-machine preference. Default ON: the guest already consented at
- *  the moment it matters, because the Watch button names the write. */
+/** Standing per-machine preference for AUTOMATIC copies (Settings ▸ General ▸
+ *  Co-review calls ▸ "Save a copy while watching"). Stored default is ON, but
+ *  nothing starts a copy on its own unless "Save automatically" is also on.
+ *  It never overrides an explicit request: a click on the player's "Save a
+ *  copy" chip passes `watching.explicit` and always saves. */
 const PREF_KEY = "saucebunny.streamKeep";
 
 /**
@@ -32,7 +35,7 @@ export function useStreamKeep({
   watching, onHandOff, log,
 }: {
   /** The peer stream on screen, or null when not watching one. */
-  watching: { blake3: string; name: string; total: number } | null;
+  watching: { blake3: string; name: string; total: number; explicit?: boolean } | null;
   /** Called once, when the copy has landed and is the file on screen. */
   onHandOff: (path: string, name: string) => void;
   log?: (level: "ok" | "info" | "err", msg: string) => void;
@@ -85,7 +88,9 @@ export function useStreamKeep({
     if (handedRef.current !== watching.blake3) handedRef.current = null;
     dispatch((at) => ({
       t: "watch", blake3: watching.blake3, total: watching.total,
-      relayed: relayedRef.current, enabled: enabledRef.current, at,
+      // An explicit "Save a copy" click is its own consent: the standing
+      // preference only governs copies nobody asked for this time.
+      relayed: relayedRef.current, enabled: watching.explicit === true || enabledRef.current, at,
     }));
     // `enabled` is a dep so flipping the setting mid-watch re-decides rather
     // than waiting for the next source: turning it off should stop the copy

@@ -1086,3 +1086,125 @@ client receives.
 
 `review-writer-contract` now records this. Deleting its `setStatus` entry is
 the acceptance test for whenever the verdict UI gets built.
+
+### String Outs (needs a transcribed AAF Audio sequence and Media Composer)
+
+Nothing below can be checked by the browser suite: it needs real linked
+media, WKWebView's audio, and Avid.
+
+1. ⌘7 opens String Outs. A first visit shows the welcome; **New string out…**
+   from a transcribed sequence with "Start with the whole sequence" on: the text shows every person, coloured by lane.
+2. Press Space. Audio plays from the linked MXFs; delete a sentence and play
+   across the cut: no click at the join (10 ms crossfade). Delete a line with
+   someone talking over it: the prompt appears and nothing below moves until
+   you choose **Close up for everyone**.
+3. ⌘Z / ⇧⌘Z step through the History panel (⌘Y). Quit and reopen: the edit
+   and its whole history come back, and `~/Documents/Sauce Bunny/Edits/`
+   holds a readable JSON copy.
+4. Mark In/Out (I/O), Lift (Z) leaves a gap, Extract (X) closes it. Remove
+   dead space: the review lists spans, Apply removes them.
+5. **Export AAF** (**Keep picture groups**, now the default), import into
+   Media Composer: the sequence relinks to the original master clips, V1 is
+   the group clip and still switches angles (right-click V1 ▸ the group's
+   angles, or the multicam keys), each A track plays one person's own mic,
+   markers import from the `- Avid markers.txt` beside it, gaps are filler.
+   On HEAT 2 the export notes that one angle (the slow-motion camera, a
+   Motion Control) was left out of the group: V1 still switches between the
+   others. Repeat with **Keep all groups** and **Clip that plays**. This is
+   the Phase 0 question: record which ones Avid accepts.
+6. **One per person** on a transcribed sequence: one edit per person,
+   each bite with a marker naming them; export one and check it in Avid.
+7. Quit with a string out open and relaunch: ⌘7 reopens it, with no welcome.
+   Do the same in AAF Audio with a sequence open: it reopens that sequence.
+8. Ask (left column): pick a local model, then Claude with a key added in
+   Settings → AI APIs; AI Summary must keep its own choice. Ask "pull every
+   line from @Rosa about the move": the answer cites lines (click one), and
+   **Make new string out** creates one without changing the current one.
+   Drag the prompt's top edge taller; quit and relaunch, and the
+   conversation is still there.
+9. Select one track (A1), mark In/Out over a line where A2 talks, press Z:
+   A1's clip shows a gap, A2 is untouched. Press X instead: it asks first.
+   Export and check the gap is filler on A1 in Media Composer.
+10. **Waveforms on demand (needs the 99-mic AAF on NEXIS).** Open it in AAF
+    Audio and watch Activity Monitor: no `ffmpeg` starts, and the Pipeline log
+    shows no `decode-linked-audio` until **Waveforms** is pressed. Press it:
+    two lanes say "Preparing waveform…", the rest "Waveform queued", and
+    the log shows one `decode-linked-audio` per clip, not one per minute.
+    Note the time per track against the ~115 s measured before. Press
+    Play while it builds: audition should not stall the way it did (each
+    5-second window took 1.5-2.3 s to prepare). Press Waveforms again: the
+    build stops and the log says "Stopped", not anything about transcripts.
+11. Open a string out of that sequence with no waveforms built: every
+    person's words appear within seconds. Remove dead space is greyed out
+    and its tooltip points at View ▸ Waveforms. Turn that on: lanes fill in
+    one by one, and the tool enables once every mic is measured.
+12. **Tabs.** Open two string outs: each gets a tab above the editor, and
+    switching tabs switches the string out. Close one with its × and another
+    by focusing the tab strip and pressing Delete: the neighbour to the right
+    opens (or the left one at the end), and the string outs are still in the
+    list. Quit and relaunch: the same tabs come back. Let Ask retitle one
+    (build a string out, then **Replace this one**): its tab follows. Start
+    an **Export AAF**, switch to another tab and back: the export finished
+    (or is still showing Stop) and its result message appears.
+13. **A group angle, end to end (needs HEAT 2 and Media Composer on the
+    NEXIS).** New string out from HEAT 2 with the whole sequence off. The
+    timeline shows 21 tracks, but the source pane has everyone's words,
+    ALAYSHA's included (her mic is an angle in A1's group). In Ask, "make a
+    string out of everything @ALAYSHA says about the fire" and **Make new
+    string out**: it opens in a new tab, with ALAYSHA on A22 and a marker on
+    each bite. Play: you hear her mic, not AIDAN's.
+14. **Export AAF** from that tab with **Keep picture groups**, import it
+    into Media Composer on the NEXIS seat: every track relinks with no
+    offline media, A22 plays ALAYSHA, Match Frame on A22 opens her master
+    clip (260/261/262-61-ALAYSHA-0731_01), V1 is the group and switches
+    between the cameras (all but the slow-motion one, which the export note
+    names), the record timecode starts at 01:00:00:00, and Markers ▸ Import
+    of the `- Avid markers.txt` puts her markers on A22. Then **Clip that
+    plays** (V1 is one camera, no switching) and **Keep all groups** (every
+    A track is a group too). Record all three; they settle Phase 0.
+15. In the source pane, select a line of someone who is not on a track and
+    press Append: the message says they now have a track, they appear as a
+    new A-number, and they play. The × on their header takes them off again
+    (their words leave the cut text), and ⌘Z brings them back.
+16. **Source and Record (AFF BANK 1, 20 mics).** Open it from AAF Audio with
+    **Open in String Outs**. The source pane says "Reading each microphone's
+    words… n of 20" until the words arrive, then opens on the first person's
+    tab; the tabs are AAF Audio's (All voices, a tab per person, "N more").
+    All voices reads by turn, each sentence whole. In the timeline corner
+    choose **Source** (or ⇧T): the timeline shows the sequence, 20 mic rows
+    with their own clips and the sequence's timecode, V1 above them; the tool
+    row is unchanged, with its record-only tools greyed. Select a line in
+    ISABELLA's tab: the same In to Out appears on the source ruler. Press V:
+    it lands in the record. Press I, move, press O in the source pane and
+    Append: the marked time goes in even with no words (room tone). Turn a
+    mic's selector off and Append a stretch nobody selected words in: that
+    person is filler in the new clip only, and the earlier clips still play
+    them. On HEAT 2 the tracks with alternates have a disclosure; open it
+    and the angles sit under their track behind a ↳, off by default.
+17a. **Patching (Avid's record tracks).** A new string out from AFF BANK 1
+    with the whole sequence off has no record tracks, only "A1 Patch
+    someone…". Cut in a line of ISABELLA's from her tab with every other mic
+    off: she lands on A1, nobody else gets a track. In a record header,
+    choose NATHANIEL in the menu: he takes that track and ISABELLA moves
+    down; ⌘Z puts it back. × takes someone off and the tracks close up.
+    Nobody's colour or source tab moves while you do this. Export with Keep
+    picture groups and import into Media Composer: the tracks are in the
+    same top-down order, and a one-person bite is filler on the other
+    tracks.
+17. **Ask by person.** "Find every line where @ISABELLA or @NATHANIEL says
+    they're tired, exhausted or that something is hard, and build a string
+    out" on Qwen3.8 27B. The status names whose transcripts it reads and how
+    many lines. Expect it to find 19:58:57:12 (Isabella, "Yeah that's hard"),
+    19:52:32:13 and 20:18:12:01 (Nathaniel). The build is titled after the
+    two of them, and has two tracks: ISABELLA on A1 and NATHANIEL on A2 (or
+    the other way, whoever speaks first), each bite on its own person's
+    track. Click a cited line that is not in the string out: it opens
+    selected in that person's tab in the source, and V cuts it in.
+18. **Layout at 1100×700 and at a large window.** AAF Audio: TRT sits beside
+    the timecode, an I/O box appears when In or Out is set, zoom is a
+    slider, and the scroll wheel over an open gain fader moves it 1 dB a
+    notch without scrolling the tracks. String Outs: Play leads the tool
+    row, undo and redo sit side by side, and names in track headers are
+    whole. In and Out are white with a grey span between them, drawn with
+    the chevron mark, in Clip, AAF Audio, String Outs and the Transcripts
+    player. The transport row names no one: who is talking is not in it.

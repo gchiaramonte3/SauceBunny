@@ -2,6 +2,19 @@
 
 const pad = (n: number, w = 2) => n.toString().padStart(w, "0");
 
+/** Media-time conversion uses the actual rate (60000/1001, not 60).
+ * Only the numbering of HH:MM:SS:FF uses the nominal integer rate. */
+export function frameRate(fps: number): number {
+  return Number.isFinite(fps) ? Math.max(1, fps) : 1;
+}
+
+/** PTS is serialized to microseconds by the decoder/proxy. Allow half a
+ * microsecond of rounding at an exact frame boundary, not a whole-frame snap. */
+export function secondsToFrames(seconds: number, fps: number): number {
+  if (!Number.isFinite(seconds)) return 0;
+  return Math.max(0, Math.floor((seconds + 0.00000051) * frameRate(fps)));
+}
+
 export function framesToTc(frames: number, fps: number): string {
   // `Math.max(0, Math.floor(x))` LOOKS like a clamp and is not one for
   // non-finite input: floor(NaN) is NaN and max(0, NaN) is NaN, so the whole
@@ -44,12 +57,11 @@ export function tcToFrames(tc: string, fps: number): number | null {
 export function tcToSeconds(tc: string, fps: number): number | null {
   const f = tcToFrames(tc, fps);
   if (f == null) return null;
-  return f / Math.max(1, fps);
+  return f / frameRate(fps);
 }
 
 export function secondsToTc(seconds: number, fps: number): string {
-  const r = Math.max(1, Math.round(fps));
-  return framesToTc(Math.floor(seconds * r), fps);
+  return framesToTc(secondsToFrames(seconds, fps), fps);
 }
 
 export function durationToTc(durationSec: number | null, fps: number): string {

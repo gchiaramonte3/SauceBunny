@@ -1,0 +1,89 @@
+import { teTc } from "./transcript-editor-fixture";
+import { placementKey, type TeGhost, type TeParagraph as Paragraph, type TePlacedWord, type TeSpeaker } from "./transcript-editor-model";
+
+export type TeSeamInfo = { kind: "cut" | "through" | "jump" | "gap"; seconds: number | null };
+
+type Props = {
+  paragraph: Paragraph; speaker: TeSpeaker; color: string; fps: number;
+  /** Shown when this paragraph comes from a different source than the one before it. */
+  sourceLabel: string | null;
+  /** Index in program order of this paragraph's first word. */
+  offset: number; range: [number, number] | null; caret: number | null; caretAfter: boolean; current: string | null;
+  seams: Record<number, TeSeamInfo>; seam: number | null; onSeam: (index: number) => void;
+  /** Removed lines that belong between two segments, when removed lines are shown. */
+  ghosts: (after: number, upTo: number) => TeGhost[]; onRestore: (ghost: TeGhost) => void; nameOf: (id: string) => string;
+  corrections: Record<string, string>; editing: string | null; onCorrect: (id: string, text: string | null) => void;
+  onMove: (direction: -1 | 1) => void; first: boolean; last: boolean;
+};
+
+const dots = (gap: number) => gap >= 1.5 ? "•••" : gap >= 0.8 ? "••" : gap >= 0.35 ? "•" : "";
+const quote = (ghost: TeGhost) => ghost.words.map((word) => word.text).join(" ");
+
+/**
+ * One speaker's run of words. Words are plain spans, not a contenteditable:
+ * the edit model owns the text and the spans only draw it. What a cut took
+ * out stays in place, struck through, until you restore it or hide removed
+ * lines; with them hidden, a ¦ still marks where the cut is.
+ */
+export function TeParagraph(props: Props) {
+  const { paragraph, speaker, color, fps, offset, range, caret, current } = props;
+  const start = paragraph.words[0].programStart;
+  const caretMark = <span className="cp-te-caret" aria-hidden="true" />;
+  const mark = (index: number) => {
+    const info = props.seams[index];
+    if (!info || info.kind === "through") return null;
+    const label = info.kind === "gap" ? "Gap" : info.kind === "jump" ? "Jump" : `Cut, ${(info.seconds ?? 0).toFixed(2)} s removed`;
+    return <button type="button" className={`cp-te-cutmark${props.seam === index ? " is-selected" : ""}`} aria-label={label} title={label}
+      onClick={() => props.onSeam(index)}>¦</button>;
+  };
+  const between = (previous: TePlacedWord | null, item: TePlacedWord) => {
+    // A cut at the top of the paragraph: its removed lines are drawn above it by the document.
+    if (!previous) return paragraph.cutBefore && !props.ghosts(item.segment - 1, item.segment).length ? mark(item.segment) : null;
+    if (previous.segment !== item.segment) {
+      const ghosts = props.ghosts(previous.segment, item.segment);
+      if (ghosts.length) return ghosts.map((ghost) => <span key={ghost.id} className="cp-te-ghost" style={{ "--te-speaker": color } as React.CSSProperties}>
+        {ghost.speaker !== paragraph.speaker && <span className="cp-te-ghost-who">{props.nameOf(ghost.speaker)}:</span>}
+        <span className="cp-te-ghost-text" title="Restore">{quote(ghost)}</span>
+        <button type="button" className="cp-te-restore" aria-label={`Restore “${quote(ghost)}”`} title="Restore this line" onClick={() => props.onRestore(ghost)}>↺</button>{" "}
+      </span>);
+      return mark(item.segment);
+    }
+    const gap = item.programStart - previous.programEnd;
+    return dots(gap) ? <span className="cp-te-pause" title={`${gap.toFixed(1)} s pause`}>{dots(gap)} </span> : null;
+  };
+  return <section className="cp-te-para" style={{ "--te-speaker": color } as React.CSSProperties} aria-label={`${speaker.name}, ${teTc(start, fps)}`}>
+    <header className="cp-te-para-head">
+      <span className="cp-te-swatch" aria-hidden="true" />
+      <span className="cp-te-para-name">{speaker.name}</span>
+      <span className="cp-te-para-tc">{teTc(start, fps)}</span>
+      {props.sourceLabel && <span className="cp-te-para-source" title="Comes from this source">{props.sourceLabel}</span>}
+      <span className="cp-te-para-moves">
+        <button type="button" className="cp-te-para-move" disabled={props.first} aria-label={`Move ${speaker.name}'s paragraph up`} title="Move up (⌥↑)" onClick={() => props.onMove(-1)}>↑</button>
+        <button type="button" className="cp-te-para-move" disabled={props.last} aria-label={`Move ${speaker.name}'s paragraph down`} title="Move down (⌥↓)" onClick={() => props.onMove(1)}>↓</button>
+      </span>
+    </header>
+    <p className="cp-te-para-text">
+      {paragraph.words.map((item, position) => {
+        const index = offset + position;
+        const selected = range != null && index >= range[0] && index <= range[1];
+        const text = props.corrections[item.word.id] ?? item.word.text;
+        const className = `cp-te-word${selected ? " is-selected" : ""}${selected && index < range![1] ? " is-joined" : ""}${current === placementKey(item) ? " is-current" : ""}${item.muted ? " is-lifted" : ""}${props.corrections[item.word.id] ? " is-corrected" : ""}`;
+        return <span key={placementKey(item)}>
+          {between(position ? paragraph.words[position - 1] : null, item)}
+          {caret === index && !props.caretAfter && caretMark}
+          {props.editing === item.word.id
+            ? <input className="cp-te-correct" autoFocus defaultValue={text} style={{ width: `${Math.max(4, text.length + 2)}ch` }} aria-label={`Correct the text of "${item.word.text}"`}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Enter") props.onCorrect(item.word.id, event.currentTarget.value.trim() || null);
+                if (event.key === "Escape") props.onCorrect(item.word.id, props.corrections[item.word.id] ?? null);
+              }}
+              onBlur={(event) => props.onCorrect(item.word.id, event.currentTarget.value.trim() || null)} />
+            : <span className={className} data-index={index} title={item.muted ? `Removed from ${speaker.name}'s track only` : undefined}>{text}</span>}
+          {caret === index + 1 && props.caretAfter && caretMark}{" "}
+        </span>;
+      })}
+      {props.last && caret === offset + paragraph.words.length && !props.caretAfter && caretMark}
+    </p>
+  </section>;
+}

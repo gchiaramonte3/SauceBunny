@@ -322,6 +322,7 @@ export const catalogEntries: CatalogEntry[] = [
       { path: "src/components/NdiInputPanel.tsx", note: "Gear-launched source settings dialog, separate from the persistent Preview stage and notes rail." },
       { path: "src/components/TranscriptReader.tsx", note: "Reader split-pane controls." },
       { path: "src/components/MultitrackTimeline.tsx", note: "Controlled source-timecode lanes, selection, naming, solo and zoom; the fixture has generated peaks and no native jobs or playback." },
+      { path: "src/components/MultitrackTimecodeDialog.tsx", note: "Clip-style numeric HUD with Enter-only seek, focus ownership and AAF timebase; catalog changes only its local fixture frame." },
       { path: "src/styles/multitrack.css", note: "Token-based timeline and reading pane, using existing command and typography families." },
       { path: "src/styles/resize.css", note: "Resize behavior is not ordinary button styling." },
     ],
@@ -342,6 +343,7 @@ export const catalogEntries: CatalogEntry[] = [
     proposed: "Keep the toast behavior and document separate feedback recipes for transient confirmation, actionable error, empty guidance, progress and persistent stale media. Show honest note-delivery states and retain the last valid picture during a stall.",
     sources: [
       { path: "src/components/CanvasToast.tsx", note: "Explicit dismissal and remaining-time accounting." },
+      { path: "src/components/ModelDownloadProgress.tsx", note: "Shared neutral download rail; fixed determinate and unknown-size fixture props only." },
       { path: "src/components/NdiInputPanel.tsx", note: "Connection, missing runtime, stale source and recovery feedback." },
       { path: "src/components/ReviewPanel.tsx", note: "Note delivery, composer and source-specific guidance." },
       { path: "src/components/LogsPanel.tsx", note: "Longer-lived job feedback and technical detail." },

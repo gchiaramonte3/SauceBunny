@@ -23,7 +23,7 @@ import type { TaggedPath } from "../bindings/TaggedPath";
  * except the thing that was asked for.
  */
 export function FolderTagMenu({
-  path, anchor, onClose, onChanged, onRemove,
+  path, anchor, onClose, onChanged, onRemove, onFavorite, isFavorite,
 }: {
   path: string;
   anchor: { x: number; y: number };
@@ -35,6 +35,8 @@ export function FolderTagMenu({
    *  folder itself is never touched on disk, which is why this is worded as
    *  leaving rather than deleting. */
   onRemove?: () => void;
+  onFavorite?: () => void;
+  isFavorite?: boolean;
 }) {
   const [tags, setTags] = useState<FinderTag[]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -122,6 +124,7 @@ export function FolderTagMenu({
           Remove from library
         </button>
       )}
+      {onFavorite && <button type="button" role="menuitem" className="cp-lib-menu-item" onClick={() => { onFavorite(); onClose(); }}>{isFavorite ? "Remove from Favorites" : "Add to Favorites"}</button>}
     </div>,
     document.body,
   );

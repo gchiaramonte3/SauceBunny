@@ -26,6 +26,9 @@ import { buildRecentIndex, transcriptArt } from "../lib/transcript-source-resolv
 import type { RecentSource } from "../lib/recent-sources";
 import { WEB_POSTERS_CHANGED_EVENT } from "../lib/web-poster-store";
 import { subscribeHidden } from "../lib/library-hidden";
+import { useMultitrackLibrary } from "../hooks/use-multitrack-library";
+import { MultitrackLibraryRows, matchingMultitrackEntries } from "./MultitrackLibraryRows";
+import { MultitrackTranscript } from "./MultitrackTranscript";
 
 /**
  * The Transcripts reader — a reading-first workspace OUTSIDE the Clip editor
@@ -82,9 +85,12 @@ type Props = {
   /** The embedded <TranscriptViewer>, fed by App. Rendered only once a
    *  transcript is selected. */
   children: ReactNode;
+  onOpenMultitrack?: (id: string, frame?: number, trackId?: string) => void;
 };
 
-export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, recents, stage, stageAvailable, stageExpanded, stageFloating, onExpandStage, docTab, onDocTab, analysis, onRenameTranscript, onMoveTranscript, onImportTranscript, onGoToClip, children }: Props) {
+export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, recents, stage, stageAvailable: fileStageAvailable, stageExpanded, stageFloating, onExpandStage, docTab, onDocTab, analysis, onRenameTranscript, onMoveTranscript, onImportTranscript, onGoToClip, children, onOpenMultitrack }: Props) {
+  const multitrack = useMultitrackLibrary(visible);
+  const stageAvailable = fileStageAvailable && !multitrack.selected;
   const [list, setList] = useState<LibraryTranscript[]>([]);
   const [tick, setTick] = useState(0);
   const [rowMenu, setRowMenu] = useState<RowMenuTarget | null>(null);
@@ -250,6 +256,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
     () => organizeTranscripts(list, { query: needle, sort, speakersOnly, analyzedOnly }),
     [list, needle, sort, speakersOnly, analyzedOnly],
   );
+  const multitrackShown = analyzedOnly ? 0 : matchingMultitrackEntries(multitrack.entries, query).length;
   // Projects the scan found no transcripts in still belong on the shelf - see
   // withEmptyProjects. `projects` is the reconciled list, so this is every
   // project folder on disk, not only the ones that happen to hold something.
@@ -447,9 +454,9 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
           {/* "3 of 105" while narrowed — a bare count hides what was filtered
               out, which is the Library status bar's rule too. */}
           <span className="cp-reader-count">
-            {organized.shown === organized.total
-              ? organized.total
-              : `${organized.shown} of ${organized.total}`}
+            {organized.shown === organized.total && multitrackShown === multitrack.entries.length
+              ? organized.total + multitrack.entries.length
+              : `${organized.shown + multitrackShown} of ${organized.total + multitrack.entries.length}`}
           </span>
           {/* The SAME control the Library and the shelves mount, down to the
               class, so "make a container here" looks and behaves identically
@@ -510,7 +517,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
         {/* Search, sort and the two chips are hidden when the list is empty.
             Filtering nothing is chrome that cannot do anything, and on a fresh
             install it was the bulk of what this pane showed. */}
-        {organized.total > 0 && <div className="cp-reader-tools">
+        {(organized.total + multitrack.entries.length) > 0 && <div className="cp-reader-tools">
           <input
             className="cp-reader-search"
             type="search"
@@ -532,7 +539,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
             <option value="size">Largest</option>
           </select>
         </div>}
-        {organized.total > 0 && <div className="cp-reader-chips">
+        {(organized.total + multitrack.entries.length) > 0 && <div className="cp-reader-chips">
           {/* The two badges the rows already wear, as filters. Nothing else is
               worth a chip: every transcript has a date and a format. */}
           <button
@@ -565,7 +572,9 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
               }}
             />
           )}
-          {groups.map((g) => (
+          {multitrack.error && <p className="cp-multitrack-note" role="alert">{multitrack.error}</p>}
+          {!analyzedOnly && <MultitrackLibraryRows entries={multitrack.entries} selected={multitrack.selected} query={query} onOpen={multitrack.select} />}
+          {groups.filter(g => g.folder !== "Multitrack" || g.items.length > 0 || multitrack.entries.length === 0).map((g) => (
             <section key={g.folder || "root"} className="cp-reader-group">
               <ReaderProjectHeader
                 label={projectFor(projects, g.folder)?.title || g.label}
@@ -609,6 +618,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                       return;
                     }
                     pick.clear();
+                    multitrack.select(null);
                     onOpenTranscript(t.entry);
                   }}
                   onContextMenu={(e) => { e.preventDefault(); e.currentTarget.focus(); setRowMenu({ entry: t.entry, title: t.title, x: e.clientX, y: e.clientY }); }}
@@ -628,7 +638,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
               ))}
             </section>
           ))}
-          {list.length === 0 && groups.length === 0 && (
+          {list.length === 0 && groups.length === 0 && multitrack.entries.length === 0 && (
             <div className="cp-reader-empty">
               <p>No transcripts yet.</p>
               {/* Two buttons, because there are two ways to get one and the
@@ -649,7 +659,11 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
         </div>
       </aside>
       <main className="cp-reader-main" aria-label="Transcript">
-        {activePath ? (
+        {multitrack.selected ? <div className="cp-multitrack-reader">
+          <header className="cp-multitrack-reader-head"><span>{multitrack.entries.find(item => item.id === multitrack.selected)?.title}</span>
+            {onOpenMultitrack && <button className="btn btn-ghost" onClick={() => onOpenMultitrack(multitrack.selected!)}>Open timeline</button>}</header>
+          {multitrack.document ? <MultitrackTranscript key={multitrack.document.id} document={multitrack.document} frame={-1} solo={new Set()} initialAll active={visible} onSeek={(frame, trackId) => onOpenMultitrack?.(multitrack.selected!, frame, trackId)} /> : <p role="status">{multitrack.error || "Opening saved transcript…"}</p>}
+        </div> : activePath ? (
           <>
             <div className="cp-reader-tabs" role="tablist" aria-label="Transcript view">
               <button

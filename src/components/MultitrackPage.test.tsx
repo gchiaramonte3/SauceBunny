@@ -12,7 +12,7 @@ beforeEach(() => vi.clearAllMocks());
 it("prevents replacing the source while transcription owns a job and unlocks after Stop", () => {
   render(<MultitrackPage active />);
   const imported = screen.getByRole("button", { name: "Import AAF…" }) as HTMLButtonElement;
-  const saved = screen.getByRole("combobox", { name: "Open saved multitrack" }) as HTMLSelectElement;
+  const saved = screen.getByRole("combobox", { name: "Open saved AAF" }) as HTMLSelectElement;
   fireEvent.click(screen.getByRole("button", { name: "Start test job" }));
   expect(imported.disabled).toBe(true); expect(saved.disabled).toBe(true);
   fireEvent.click(imported); expect(mocks.load).not.toHaveBeenCalled();

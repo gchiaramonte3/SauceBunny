@@ -1,3 +1,4 @@
+import { frameRate } from "../lib/timecode";
 // useCoReview — the P2P co-review session (r100 transport, r101 live review)
 // + theater mode, extracted whole from App.tsx following the use-panel-bus /
 // use-web-playback shape: one cohesive subsystem out of the God-component,
@@ -1038,7 +1039,7 @@ export function useCoReview({
 
         const now = Date.now();
         coClockRef.current.sample(m.atMs, now);
-        const r = Math.max(1, Math.round(coFpsRef.current));
+        const r = frameRate(coFpsRef.current);
         // Translate the presenter's wall clock into ours before extrapolating.
         // Differencing raw Date.now() across two Macs made an ordinary clock
         // offset look like permanent drift and re-seeked every heartbeat.
@@ -1593,7 +1594,7 @@ export function useCoReview({
     let lastSentAt = 0;
     const tick = () => {
       const now = Date.now();
-      const r = Math.max(1, Math.round(coFpsRef.current));
+      const r = frameRate(coFpsRef.current);
       const pos = getPlayheadFrames() / r;
       if (shouldSendPresence(lastSentPos, pos, lastSentAt, now)) {
         lastSentPos = pos;
@@ -2094,7 +2095,7 @@ export function useCoReview({
   const keepOfferedCopy = useCallback(() => {
     const c = keepCandidateRef.current;
     if (!c) return;
-    setKeepTarget(c);
+    setKeepTarget({ ...c, explicit: true });
     slog("info", `Saving a copy of "${c.name}" while you watch.`);
   }, [slog]);
 
@@ -2144,7 +2145,7 @@ export function useCoReview({
    * which is the whole thing Tier A exists to prevent.
    */
   const [keepTarget, setKeepTarget] = useState<
-    { blake3: string; name: string; total: number; fingerprint: string | null } | null
+    { blake3: string; name: string; total: number; fingerprint: string | null; explicit?: boolean } | null
   >(null);
   keepTargetRef.current = keepTarget;
 

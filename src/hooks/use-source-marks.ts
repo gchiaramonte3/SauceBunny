@@ -35,30 +35,35 @@ import { marksFor, setSourceMarks } from "../lib/source-marks";
  */
 export function useSourceMarks(deps: {
   reviewSourceKey: string | null;
+  fps?: number;
   durationFrames: number;
   inFrames: number | null;
   outFrames: number | null;
   setInFrames: (v: number | null) => void;
   setOutFrames: (v: number | null) => void;
 }): void {
-  const { reviewSourceKey, durationFrames, inFrames, outFrames, setInFrames, setOutFrames } = deps;
+  const { reviewSourceKey, fps, durationFrames, inFrames, outFrames, setInFrames, setOutFrames } = deps;
 
   const latchRef = useRef<string | null>(null);
+  const restoringRef = useRef<{ inFrames: number | null; outFrames: number | null } | null>(null);
+  // A late metadata rate must restore in the new frame clock before saving.
+  const latchKey = JSON.stringify([reviewSourceKey, fps]);
 
   useEffect(() => {
     if (!reviewSourceKey) {
       latchRef.current = null;
+      restoringRef.current = null;
       return;
     }
     if (
-      latchRef.current === reviewSourceKey ||
-      latchRef.current === `restoring:${reviewSourceKey}`
+      latchRef.current === latchKey ||
+      latchRef.current === `restoring:${latchKey}`
     ) return;
-    const stored = marksFor(reviewSourceKey);
+    const stored = marksFor(reviewSourceKey, fps);
     if (stored.inFrames === null && stored.outFrames === null) {
       // Nothing to restore; saves may proceed at once. (Writing a double-null
       // to an absent row is a no-op in the store, so this cannot erase.)
-      latchRef.current = reviewSourceKey;
+      latchRef.current = latchKey;
       return;
     }
     // Clamp to THIS source: a stored mark can outlive a re-encode that made
@@ -67,24 +72,26 @@ export function useSourceMarks(deps: {
     const inF = stored.inFrames !== null ? Math.min(stored.inFrames, max) : null;
     const outF = stored.outFrames !== null ? Math.min(stored.outFrames, max) : null;
     if (inF !== null && outF !== null && outF <= inF) {
-      latchRef.current = reviewSourceKey;
+      latchRef.current = latchKey;
       return;
     }
     setInFrames(inF);
     setOutFrames(outF);
-    latchRef.current = `restoring:${reviewSourceKey}`;
-  }, [reviewSourceKey, durationFrames, setInFrames, setOutFrames]);
+    restoringRef.current = { inFrames: inF, outFrames: outF };
+    latchRef.current = `restoring:${latchKey}`;
+  }, [reviewSourceKey, fps, latchKey, durationFrames, setInFrames, setOutFrames]);
 
   useEffect(() => {
     if (!reviewSourceKey) return;
-    if (latchRef.current === `restoring:${reviewSourceKey}`) {
+    if (latchRef.current === `restoring:${latchKey}`) {
       // The restored state has not landed in this closure yet.
-      if (inFrames === null && outFrames === null) return;
-      latchRef.current = reviewSourceKey;
+      if (inFrames !== restoringRef.current?.inFrames || outFrames !== restoringRef.current?.outFrames) return;
+      restoringRef.current = null;
+      latchRef.current = latchKey;
     }
-    if (latchRef.current !== reviewSourceKey) return;
-    setSourceMarks(reviewSourceKey, { inFrames, outFrames });
-  }, [reviewSourceKey, inFrames, outFrames]);
+    if (latchRef.current !== latchKey) return;
+    setSourceMarks(reviewSourceKey, { inFrames, outFrames, ...(fps === undefined ? {} : { frameRate: fps }) });
+  }, [reviewSourceKey, fps, latchKey, inFrames, outFrames]);
 
   useEffect(() => {
     // The restore clamps against the duration known AT RESTORE TIME, and a

@@ -14,7 +14,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
  * whole `AppError` system exists so failures come back as values instead.
  *
  * The surface is genuinely clean today: 211 `.unwrap()`s and 37 `.expect()`s
- * in the tree, and every one of them is test code except the two allowed
+ * in the tree, and every one of them is test code except the one allowed
  * below. This test is what keeps the next one from being the first real one.
  *
  * TWO MEASUREMENTS OF THIS WERE WRONG BEFORE THIS FILE EXISTED, both in the
@@ -94,17 +94,13 @@ function inlineTestSpans(s: string): Array<[number, number]> {
 const PANIC = /\.unwrap\(\)|\.expect\(|(?<![a-z_])panic!\(|unreachable!\(|todo!\(/g;
 
 /**
- * The two that are allowed, each for a stated reason. Adding to this list is
+ * The one that is allowed, for a stated reason. Adding to this list is
  * the deliberate act; a new panic anywhere else fails.
  */
 const ALLOWED: Array<{ file: string; why: string }> = [
   {
     file: "src/lib.rs",
     why: "tauri::Builder::build's own boilerplate. It panics at startup before any window exists, so there is no UI to report into and nothing to poison.",
-  },
-  {
-    file: "src/stream_proxy.rs",
-    why: "Header::from_bytes on a CORS value that came out of a PARSED request header and passed cors_origin_for's allowlist, so it is a valid header value by construction.",
   },
 ];
 
@@ -194,7 +190,7 @@ describe("production Rust cannot panic", () => {
     }
   });
 
-  it("has no panic outside the two allowed sites", () => {
+  it("has no panic outside the allowed site", () => {
     const allowedFiles = new Set(ALLOWED.map((a) => a.file));
     const offenders = productionPanics().filter((h) => !allowedFiles.has(h.file));
     expect(
@@ -213,6 +209,6 @@ describe("production Rust cannot panic", () => {
         `${a.file} is allowlisted but has no panic site - drop the entry`,
       ).toBe(true);
     }
-    expect(hits.length, "the allowlist should cover exactly the known sites").toBe(2);
+    expect(hits.length, "the allowlist should cover exactly the known sites").toBe(1);
   });
 });

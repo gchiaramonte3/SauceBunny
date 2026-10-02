@@ -1,3 +1,4 @@
+import { frameRate } from "../lib/timecode";
 import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
@@ -387,7 +388,7 @@ export function useFetchSource(p: FetchSourceProps) {
       // IFrame reported (subtle rounding, or the IFrame hadn't measured yet).
       // Re-clamp any marks the user already set so they stay in-range.
       if (m.duration && m.duration > 0) {
-        const r = Math.max(1, Math.round(m.fps ?? fallbackFps));
+        const r = frameRate(m.fps ?? fallbackFps);
         const maxF = Math.max(0, Math.floor(m.duration * r) - 1);
         setInFrames((prev)  => prev == null ? prev : Math.min(prev, maxF));
         setOutFrames((prev) => prev == null ? prev : Math.min(prev, maxF));

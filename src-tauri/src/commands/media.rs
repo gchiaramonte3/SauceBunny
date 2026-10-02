@@ -819,6 +819,22 @@ async fn spawn_audio_clip(
         let ff_out = match ff.args(ff_args).spawn() {
             Ok((mut rx, child)) => {
                 app_for.state::<JobRegistry>().insert(job_for.clone(), child);
+                // Re-check AFTER registering. Between phase 1's child leaving
+                // the registry and this insert there was nothing for Stop to
+                // kill; `cancel_job` flags before it sweeps, so a Stop in that
+                // gap is visible here (same shape as run_diarizer).
+                if app_for.state::<JobRegistry>().is_cancelled(&job_for) {
+                    if let Some(c) = app_for.state::<JobRegistry>().take(&job_for) {
+                        let _ = c.kill();
+                    }
+                    let _ = std::fs::remove_file(&raw_path);
+                    let _ = std::fs::remove_file(&output_for);
+                    emit_clip_done(
+                        &app_for, &job_for, false, None, None,
+                        Some("Cancelled".into()),
+                    );
+                    return;
+                }
                 let mut code: Option<i32> = None;
                 let mut stderr = String::new();
                 while let Some(event) = rx.recv().await {

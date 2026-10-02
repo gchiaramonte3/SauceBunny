@@ -371,6 +371,22 @@ mod tests {
         if count < 0 { Err(io::Error::last_os_error()) } else { Ok(count as usize) }
     }
 
+    /// EOF on a pipe once every reference to its write end is closed. Darwin
+    /// can release a right that was received and closed (or attached to a
+    /// failed sendmsg) a moment after the call returns, so wait briefly; a
+    /// real leak never reaches EOF and still fails.
+    fn wait_eof(reader: &OwnedFd, what: &str) {
+        let deadline = std::time::Instant::now() + Duration::from_millis(500);
+        loop {
+            match read_byte(reader) {
+                Ok(count) => { assert_eq!(count, 0); return; }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock && std::time::Instant::now() < deadline =>
+                    std::thread::sleep(Duration::from_millis(5)),
+                Err(error) => panic!("{what}: {error}"),
+            }
+        }
+    }
+
     #[test]
     fn wire_round_trips_exact_layout_and_all_reasons() {
         let wire = status(Op::Started, Reason::None);
@@ -491,8 +507,8 @@ mod tests {
             assert_eq!(read_byte(&reader).unwrap_err().kind(), io::ErrorKind::WouldBlock);
             assert_eq!(control.try_receive().unwrap_err().kind(), io::ErrorKind::InvalidData);
             // EOF proves all rights were received and closed. A 16-fd receive
-            // buffer leaks undisclosed Darwin rights and fails this assertion.
-            assert_eq!(read_byte(&reader).unwrap(), 0);
+            // buffer leaks undisclosed Darwin rights and never reaches it.
+            wait_eof(&reader, &format!("write end still referenced after rejecting {count} rights"));
         }
     }
 
@@ -526,8 +542,10 @@ mod tests {
         let (reader, writer) = pipe().unwrap();
         assert!(tokio::time::timeout(Duration::from_millis(10), control.send_start(0, 1, 1, writer.as_fd())).await.is_err());
         drop(writer);
-        // No reference was enqueued by the cancelled Start.
-        assert_eq!(read_byte(&reader).unwrap(), 0);
+        // No reference was enqueued by the cancelled Start. Darwin can release
+        // the right attached to the failed sendmsg a moment after it returns,
+        // so wait briefly for EOF; a real leak never reaches it.
+        wait_eof(&reader, "write end still referenced after cancellation");
         nonblocking(child.as_raw_fd()).unwrap();
         let mut received = [0u8; SIZE];
         for _ in 0..queued {

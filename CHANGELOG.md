@@ -5,11 +5,300 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-29
+
 ### Added
+- **Record tracks are patched, not a row per person.** A new string out
+  starts with no tracks, as an Avid sequence does; people go on A1, A2… as
+  their words are cut in, top-down. A string out Ask builds (or One per
+  person) is a new sequence of chunks: only the people it cites get tracks,
+  in the order they first speak (ask for Harry and Jane: Harry on A1, Jane
+  on A2, nothing else), and each bite plays on its own person's track with
+  the others filler under it. Each record track's header is a **patch
+  panel**: choose who plays on it, × to take them off, and the empty track
+  below patches the next person. Colours and the source tabs stay put when
+  someone is patched. String outs made before this open unchanged.
+- **Source and Record in String Outs' timeline**, as Avid's Toggle
+  Source/Record in Timeline: **Source | Record** in the timeline's corner, or
+  ⇧T. Source shows the loaded sequence itself: every mic as a track with its
+  own clips and waveform, V1 above them, the sequence's own timecode, and a
+  group's alternate mics under a disclosure the way AAF Audio lays them out.
+  Each mic has a source track selector (main tracks on, alternates off):
+  Insert brings the mics that are on, plus whoever said the selected words,
+  and a mic that is off is filler in that clip only. Selecting text marks the source there
+  too, and I and O mark it directly, so a stretch with no words (room tone)
+  can be cut in. The tool row is the same in both views; the edits that
+  change the string out rest while Source shows.
+- String Outs' source pane reads **one person at a time**, with the same tabs
+  AAF Audio's transcript uses (All voices, a tab per person, "N more" when
+  they do not fit). It opens on the first person who speaks. All voices now
+  keeps each thing a person said whole and alternates by turn: twenty lavs
+  that all hear the room used to interleave word by word.
+- **Keep picture groups** is the new export default: V1 stays the multigroup,
+  so camera angles still switch in Media Composer, and each person's audio
+  track is their own mic. A group clip on V1 shows how many angles it has,
+  and its tooltip names them. A camera angle that cannot be cut (a
+  slow-motion one) is left out of that bite's group with a note, instead of
+  stopping the export. **Keep all groups** and **Clip that plays** are the
+  other two choices.
+- **Ask @someone** reads that person's own transcript, in lines that end
+  where each of their sentences ends, and the status says whose transcripts
+  it is reading and how many lines. A long transcript is read in parts and
+  answered from what the parts found. Clicking a cited line that is not in
+  the string out opens it selected in the source, ready to Insert.
+- **Open in String Outs** in AAF Audio opens the sequence in String Outs
+  with its words in the source pane and an empty record to build the cut in,
+  as Avid starts one. Asked again, it opens the same string out.
+- The sequence lists (AAF Audio's saved sequences, String Outs' Start from and
+  Add sequence) show each sequence once. Re-importing one AAF used to leave a
+  copy per import, most without transcripts, so one sequence could appear
+  fourteen times; the copy offered is the one with the transcripts. Where two
+  different sequences share a name, the file name tells them apart.
+- String Outs works with grouped AAFs. Every mic in a multigroup is a
+  person in String Outs, so Ask and the source pane can find what someone
+  said even when their mic is an angle inside a group (78 of the 99 people in
+  one production AAF). A person like that has no track of their own until
+  their words are cut in, by Insert or Append, by Ask building a string out
+  or by One per person. Then they play on a new track, and on export that
+  track is their group with their angle selected (**Keep groups**) or their
+  own master clip (**Clip that plays**). Either way it relinks to the
+  original media and is checked frame by frame before it is saved. A × on
+  that track header takes them off it again. Media Composer takes 64 audio
+  tracks, and an export that would need more says so rather than failing.
+- String Outs opens each string out in a tab above the editor, the way
+  sequences open in a timeline. A string out Ask builds opens in a new tab
+  next to the one you asked in. Closing a tab (its ×, or Delete on the tab
+  strip) never deletes the string out, and the open tabs come back after a
+  relaunch. An export keeps going when you switch tabs, and says how it went
+  when you come back.
+- String Outs has a left column with **Ask**, **Inspector** and **History**.
+  Ask answers questions about the transcripts, citing the lines it used,
+  with the model you pick in the panel (downloaded local models, or Claude
+  and ChatGPT with your own key); the choice applies to String Outs only.
+  Asking it to build a string out makes a new one, so the one you are in
+  is untouched unless you choose to replace it. Conversations stay with
+  each string out.
+- A range lifted off a track in String Outs now shows as a gap in that
+  track's clip, the way it lands in the exported AAF, and Extract asks
+  before taking words from a track that is not selected.
+- Opening an AAF on NEXIS (or any network share) is faster. The AAF is
+  copied to the local cache in one sequential read before it is parsed,
+  instead of being read in thousands of 4 KB pieces over the network, twice.
+  A waveform build no longer re-checks every microphone file twice per
+  minute of audio, and each MXF's ffprobe result is kept, so a relink or
+  re-import does not probe the same files again.
+- String Outs fixes: a new string out starts at 01:00:00:00 in the
+  sequence's own timecode (it read 00:59:56:10 at 23.976, and drop-frame is
+  now counted right), and an empty one takes its first sequence's frame rate.
+  Markers move with the words under them. Adding a selection that crosses a
+  cut to another string out keeps the cut words out. ⌫ at the caret deletes
+  the word before it on the first press. A dead-space review closes when the
+  cut changes under it, Ask marks a proposal applied only when it landed, and
+  hiding the side panel no longer stops an answer. A step whose readable copy
+  in Documents could not be written is still kept.
+- AAF Audio and String Outs reopen what you had open, including after a
+  relaunch. Their welcome panels show only until you have imported an AAF or
+  made a string out.
+- **String Outs** (nav rail, ⌘7): cut AAF Audio sequences by their
+  words. Deleting text closes the time on every track, but words spoken over
+  someone else are silenced on their own track and the rest is left for you to
+  decide. Removed lines stay visible and restorable; Avid-style track
+  selectors, In/Out, Lift, Extract, Mark Clip, markers and a dead-space
+  review work on a magnetic timeline with gaps. Every change is kept in a
+  branching undo history on disk, with a History panel.
+- The edit plays straight from the linked microphone media, with a short
+  crossfade at every join.
+- **Export AAF** writes the edit as a new sequence for Media Composer (the
+  original AAFs are never changed), checks every frame of what it wrote
+  before saving it, and writes a markers text file beside it.
+- **String-outs:** one edit per person from a transcribed sequence (their
+  bites in scene order, with handles, filler between and a marker on each),
+  or add selected words to any other edit by hand, or ask for one in words
+  ("two minutes, open with Rosa") and accept or discard the proposed bites.
+
+### Changed
+- String Outs draws a long transcript a page at a time. A real 20-mic,
+  3h39m sequence (146,018 words) used to build a million-element page and
+  freeze the window for minutes on opening, and cutting it in whole crashed
+  it; it now opens in under a second.
+- String Outs' tool row no longer lists who is talking: names crowded the
+  controls.
+- A thinking model (Qwen3.8 27B) answers Ask instead of spending its whole
+  reply thinking and returning "No answer.": thinking is turned off for Ask.
+- Waveforms are no longer built on their own. Opening an AAF used to start
+  reading every microphone's media to draw it, one mic at a time; on NEXIS a
+  99-mic sequence measured about two minutes a mic, three hours in all, with
+  ffmpeg running the whole time and audition slowed. AAF Audio's Waveforms
+  button now starts off, builds only when turned on, and stops the build
+  when turned off. Lanes waiting their turn say
+  "Waveform queued" rather than all claiming to be preparing.
+- Building a waveform reads each clip in one pass. It used to start ffmpeg
+  for every minute of every clip (223 times for a 3h39m track, ~0.5 s each
+  on NEXIS whatever the audio); now it starts one per clip and streams, and
+  two tracks build at once. Waveforms come out identical, so ones already
+  built are kept. A track whose waveform failed no longer stops other tracks
+  with the same clips from building.
+- String Outs shows every mic's words as soon as the transcripts are read,
+  instead of waiting for every waveform first. Until a mic's waveform exists
+  its words are placed by length, and Remove Dead Space waits for View ▸
+  Waveforms, which builds them mic by mic, because a mic nobody measured is
+  not a silent one.
+- A waveform build now steps aside while audition or transcription is
+  preparing audio, and a stopped operation in the Pipeline log only mentions
+  transcripts when it was a transcription.
+- AAF Audio's transport: TRT sits right beside the timecode in the same box,
+  and marking In or Out adds an I/O box with the marked duration on the other
+  side. The "N soloed" / "All mics" readout is gone; the S buttons already
+  say it. Zoom is a slider between a magnifier-minus and a magnifier-plus,
+  with Fit beside it. Scrolling over an open gain fader changes it 1 dB a
+  notch (a trackpad's small movements add up rather than each counting), and
+  the track list behind it no longer scrolls.
+- In and Out look the same everywhere. AAF Audio's and String Outs' rulers
+  drew a flat violet band with no chevrons, and nothing at all when only In or
+  only Out was set; they now draw Clip's mark, the stem with a wing that
+  matches the Mark In and Mark Out buttons, alone or as a closed range.
+- In and Out are white, and the span between them is grey instead of violet,
+  in Clip, AAF Audio, String Outs and the Transcripts player. String Outs'
+  markers (M) stay violet: they are locators, not a range.
+- String Outs layout: Play and the Record/Source readouts now lead the
+  timeline's tool row instead of taking a line of their own, undo and redo sit
+  side by side (they had been stacked, sharing a class with the History panel),
+  and track headers widen to fit each person's name, up to 280px, where every
+  name used to be cut to one letter. A string out with nothing cut in says so
+  over its lanes and offers **Add all of** each sequence in one undoable step.
+  The String Outs icon is now clips laid on a track, so it no longer looks
+  like AAF Audio's.
+- AAF Audio layout: the linked-media box lines up with the sequence title and
+  leaves room above Save Mic Owners as Cast, and the Generate bar sits right
+  under the tracks instead of above an empty band the height of the
+  transcript pane's export controls.
+- String Outs' ruler spaces its timecodes to fit: zoomed out on a long cut
+  they step up to minutes and hours instead of printing on top of each other.
+  A source with no transcripts, and a cut with no words, say so and point at
+  AAF Audio instead of showing an empty pane.
+- Tab strips no longer scroll sideways, so a Mac that always shows scrollbars
+  no longer draws one under them. The AAF Audio person tabs show the people
+  that fit and put the rest behind an **N more** menu; the chosen person is
+  always on the strip.
+- AAF Audio's transcript details (where results are saved, failures, and each
+  track's engine and range) moved from the Get Info disclosure to an info (i)
+  button beside the track count, which opens them in a dialog.
+- Renaming a mic owner no longer switches the transcript pane to a different
+  person.
+- Export AAF defaults to **Clip that plays**. **Keep groups** cannot write a
+  bite whose picture has a speed change (Motion Control) or a transition in
+  it, which is common on a group's picture track, and when it stops for that
+  reason it now says to choose Clip that plays instead. The export reads the
+  AAF from the same local copy import made, and takes picture from V1 when V1
+  has any, rather than from whichever picture track came first.
+- Ask understands `@` names as they are typed, so `@Dev` finds Dev P when he
+  is the only Dev, and it can answer with every line (`"all"`) or build from
+  the lines it just cited without listing them again.
+- Exporting a string out whose title or marker text is longer than Media
+  Composer allows now trims it instead of failing, and a marker on the very
+  end of the cut lands on its last frame.
+- The Multitrack page is now called **AAF Audio** in the app (nav rail, ⌘K,
+  settings, diagnostics and Library labels). Saved sequences, the
+  `Transcripts/Multitrack` folder, shortcuts and stored preferences are
+  unchanged.
+
+### Added
+- AAF Audio: Select all now includes alternative microphones inside collapsed
+  groups. Option-click a group's checkbox to set that mic and all of its
+  alternatives together; Option-click a group's disclosure triangle to open or
+  close every group.
+- AAF Audio remembers each sequence's mix and view: solo, mute and per-mic
+  gain, zoom, track size, text overlays, open groups, checked mics and the
+  waveform toggle come back when the sequence is reopened (the 50 most recently
+  used sequences are kept).
+- AAF Audio can transcribe part of a sequence. Mark in and out with I and O
+  (G clears, Q and W go to the marks, as in Clip); the marked span shows on the
+  ruler and Generate offers "Marked range". A range run is spliced into the
+  track's saved transcript: cues outside the range are kept and only the range
+  is replaced, where before any run replaced the whole transcript.
+- Retry buttons for a waveform that failed to build and for mic labels that
+  failed to save.
+- AAF Audio shows link status above the timeline ("412 of 495 media files
+  linked · 60 offline") with Relink folder…, Refresh and Details, so relinking
+  no longer means opening Settings. It hides once everything is linked.
+- When several files match one source, AAF Audio now lists every verified
+  copy in Linked media with "Use this copy", instead of leaving the source
+  offline and asking you to browse for it.
+
+### Fixed
+- String Outs' source pane no longer says a sequence has no transcripts while
+  its words are still being read; it says how many mics it has read.
+- A string out Ask builds for mentioned people is named after them ("ISABELLA
+  and NATHANIEL, from Ask"); it was always called "From Ask".
+- An AAF exported from Media Composer 23.12 with a marker on the timecode
+  track no longer fails to import as "could not be read safely".
+- AAF Audio transcription no longer throws away a whole run when the engine
+  returns a cue whose text contains a blank line; the text stays with its cue.
+- A stray file in the AAF Audio folder (an iCloud "copy 2", a Finder duplicate,
+  a half-synced file) no longer empties Saved sequences or blocks every import.
+- Transcribing two separate ranges of a track no longer marks the frames
+  between them as transcribed; the track status and Transcript info say which
+  part is missing.
+- Saving a transcript no longer holds up every other job's Stop while the whole
+  AAF Audio document is re-read and written.
+- AAF bins with more than 64 sequences can be opened; record timecode wrapped
+  in a sequence is read, and an extra timecode track no longer fails the
+  import; very heavily cut multi-mic sequences are no longer refused as too
+  large.
+- Two relinks (the media strip and Settings) can no longer clear each other's
+  busy state, which had let playback and Generate resume mid-relink.
+- Changing the marker export frame rate no longer leaves an invalid Start TC
+  that silently exported every marker an hour early.
+- Copying a large file in the Library no longer freezes the app; deleting a
+  project folder no longer removes hidden files before refusing; a case-only
+  rename can no longer overwrite a different file on a case-sensitive volume.
+- Stop between two steps of an audio clip export or a caption retry now stops
+  it, instead of the job finishing and reporting success.
+- Sidecars that iCloud stripped of their execute bit now include Deno and the
+  AAF reader in the repair sweep.
+- Clicking "Save a copy" in a co-review call now saves even when "Save a copy
+  while watching" is off; that setting only governs automatic copies.
+- Speaker renames made in the popped-out panel now survive a file move or a
+  re-transcription, like renames made in the main window.
+- Chapters and speaker names no longer split between the two ways macOS can
+  spell an accented filename.
+- Stopping or failing a batch transcription no longer leaves a listener
+  behind for every item; a Library folder removed mid-scan stays removed.
+
+## [0.5.1] - 2026-09-22
+
+### Added
+- Library Projects organize references to local media, web links, transcripts
+  and saved Multitrack sequences in nested in-app folders. Favorites, smart
+  rules, keyboard/pointer filing and scoped undo/redo persist without moving
+  originals. Explicit relinking and rename continuity retain item identities;
+  failed or conflicting writes do not replace saved organization. The disk
+  browser exposes all scanned files in pages, loads deeper folders on demand,
+  and provides a full move-destination picker. Home remains unchanged.
+- Multitrack exports now keep source audio lanes in Avid markers (A1, A2, etc.)
+  instead of V1, including person-only exports and simultaneous microphones.
+  New AAF imports preserve physical track numbers; older imports use the lane
+  numbers already shown. Entire transcript honors the selected format: Avid
+  markers, CSV, plain text, SRT captions, or PDF through the native print dialog.
+  SRT uses sequence-relative timing and combines simultaneous voices; text,
+  CSV and PDF retain passages needing timing review.
+- Multitrack transcript tabs keep a compact, fixed dropdown beside the scrolling
+  names. An optional Search with AI checkbox searches original passages by
+  meaning through the shared local model runtime, with cancellable, bounded
+  sections, original seek timing and ordinary text search preserved.
+- Multitrack transcription keeps a steady track-count label and forward-only
+  progress across audio chunks, without alternating worker-phase text or
+  wrapping the loading label inside the Generate bar. The action is compact
+  and right-aligned, with separation from the settings and Stop beside it.
 - Multitrack audition levels use the existing speaker icon and a vertical dB
   fader with an editable readout, attenuation, silence, and boost up to +36 dB.
   Signed values with an optional dB suffix replace the selected readout; Reset
   restores 0 dB. Gain changes affect live audition only, not AAF media or ASR.
+  Track waveforms now grow or shrink with that gain, reusing cached peaks at
+  every zoom and lane size. Silence leaves the centre line; boosted peaks stay
+  inside the lane. Master monitoring volume and Solo/Mute retain their behavior.
+  The gain popover takes roughly half the previous space while retaining readable
+  labels, the editable dB value, and keyboard/pointer controls.
 - In-development Multitrack workspace reads embedded-audio AAF sequences into
   aligned microphone lanes with Clip-style canvas waveforms, additive Solo/Mute,
   editable cast labels, source timecode, and local Whisper/Parakeet transcription.

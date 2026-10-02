@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AiChapters } from "./AiChapters";
 import { saveChapters } from "../lib/chapters";
 
@@ -40,6 +40,14 @@ afterEach(cleanup);
 const rows = () => document.querySelectorAll(".cp-ai-chapter-row").length;
 
 describe("AI chapters", () => {
+  it("refreshes mounted chapters after external edits for the same source only", () => {
+    mount();
+    act(() => saveChapters("other-source", [{ time: 1, title: "Unrelated" }]));
+    expect(rows()).toBe(3);
+    act(() => saveChapters(SOURCE, [...CHAPTERS, { time: 400.000001, title: "Shot 8", origin: "generated" }]));
+    expect(rows()).toBe(4);
+    expect(screen.getByText("Shot 8")).toBeTruthy();
+  });
   it("lists the chapters, expanded, by default", () => {
     mount();
     expect(rows()).toBe(3);

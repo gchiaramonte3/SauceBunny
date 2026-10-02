@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { frameRate, secondsToFrames } from "./timecode";
 
 /**
  * Playhead subscription store — the ONE place the live playhead lives.
@@ -22,8 +23,8 @@ import { useSyncExternalStore } from "react";
  *
  * Canonical unit: integer FRAMES at the source fps — exactly the quantization
  * the old `playheadFrames` state used (`Math.floor(seconds × fps)` on the way
- * in). Seconds consumers derive `frames / max(1, round(fps))`, the same
- * formula App always used, so the transcript highlight, on-video captions,
+ * in). Seconds consumers derive `frames / fps` using the actual source rate,
+ * never its rounded timecode base, so the transcript highlight, on-video captions,
  * timecode, and scrubber all stay in sync by construction (the r88
  * single-clock model — the store is a fan-out of that one clock, never a
  * second clock).
@@ -132,7 +133,7 @@ export function setPlayheadFrames(frames: number): void {
  *  the 24-vs-30 fps split (the 0.8x post-seek slide) shipped: one conversion,
  *  one place. */
 export function playheadSecondsToFrames(seconds: number, fps: number): number {
-  return Math.floor(seconds * Math.max(1, Math.round(fps)));
+  return secondsToFrames(seconds, fps);
 }
 
 /** Subscribe to playhead changes. Returns the unsubscribe function. */
@@ -141,10 +142,9 @@ export function subscribePlayhead(listener: Listener): () => void {
   return () => listeners.delete(listener);
 }
 
-/** The `frames → seconds` conversion every seconds-consumer uses (same
- *  rounding App has always applied, so all derived clocks agree). */
+/** The `frames → seconds` conversion every seconds-consumer uses. */
 export function playheadFramesToSeconds(frames: number, fps: number): number {
-  return frames / Math.max(1, Math.round(fps));
+  return frames / frameRate(fps);
 }
 
 /** Live playhead in frames — re-renders the caller on every tick. */

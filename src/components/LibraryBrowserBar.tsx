@@ -1,10 +1,13 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { formatError } from "../lib/error-format";
 import { IconGrid, IconList, IconPanelLeft, IconPlus, IconSearch } from "./Icons";
 import type { LibraryCrumb, LibrarySortDir, LibrarySortKey } from "../lib/library";
 
 export type LibraryViewMode = "grid" | "list";
 
 type Props = {
+  tools?: ReactNode;
   /**
    * The folder a drag is hovering, or null.
    *
@@ -75,6 +78,7 @@ type Props = {
    * one entry and sees no chooser at all - the behaviour it had before.
    */
   newFolderTargets?: readonly { path: string; label: string }[];
+  askNewFolderDestination?: boolean;
 };
 
 /**
@@ -87,7 +91,7 @@ type Props = {
  */
 export function LibraryBrowserBar({
   chain, onCrumb, location, dateLabel, searchLabel, sizeLabel, query, onQuery, sort, dir, view, onPrefs, treeOpen, onShowTree, dropOver,
-  onNewFolder, newFolderLabel, newFolderTargets,
+  onNewFolder, newFolderLabel, newFolderTargets, askNewFolderDestination = false, tools,
 }: Props) {
   const last = chain ? chain.length - 1 : -1;
   const [naming, setNaming] = useState(false);
@@ -100,12 +104,13 @@ export function LibraryBrowserBar({
   // The chosen destination, only ever asked about when there is more than one.
   const targets = newFolderTargets ?? [];
   const [dest, setDest] = useState<string>("");
-  const chosen = dest || targets[0]?.path || "";
+  const chosen = dest || (!askNewFolderDestination ? targets[0]?.path : "") || "";
 
   const closeNaming = () => { setNaming(false); setName(""); setErr(null); setBusy(false); setDest(""); };
   const submitName = async () => {
     const trimmed = name.trim();
     if (!trimmed || busy) return;
+    if (askNewFolderDestination && !chosen) { setErr("Choose where to create the folder."); return; }
     setBusy(true);
     setErr(null);
     // The caller returns a message to REFUSE - a duplicate name is the
@@ -113,9 +118,11 @@ export function LibraryBrowserBar({
     // shelf was missing: its create swallowed every error, so a refused name
     // and a broken command looked identical, and both looked like nothing
     // happening.
-    const refusal = await onNewFolder?.(trimmed, chosen);
-    if (typeof refusal === "string" && refusal) { setErr(refusal); setBusy(false); return; }
-    closeNaming();
+    try {
+      const refusal = await onNewFolder?.(trimmed, chosen);
+      if (typeof refusal === "string" && refusal) { setErr(refusal); setBusy(false); return; }
+      closeNaming();
+    } catch (cause) { setErr(formatError(cause)); setBusy(false); }
   };
   return (
     <div className="cp-lib-bar">
@@ -157,11 +164,21 @@ export function LibraryBrowserBar({
       </nav>
 
       <div className="cp-lib-bar-controls">
+        {tools}
         {onNewFolder && (naming ? (
           <form
             className="cp-newfolder-form"
             onSubmit={(e) => { e.preventDefault(); void submitName(); }}
           >
+            {(askNewFolderDestination || targets.length > 1) && <>
+              <select className="cp-select" aria-label="New folder destination" value={chosen} disabled={busy} onChange={(event) => setDest(event.target.value)}><option value="">Choose destination…</option>{dest && !targets.some((t) => t.path === dest) && <option value={dest}>{dest}</option>}{targets.map((target) => <option key={target.path} value={target.path}>{target.label}</option>)}</select>
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={async () => {
+                setBusy(true);
+                try { const path = await open({ directory: true, multiple: false, title: "Create folder inside…" }); if (typeof path === "string") setDest(path); }
+                catch (cause) { setErr(formatError(cause)); }
+                finally { setBusy(false); }
+              }}>Browse…</button>
+            </>}
             <input
               ref={inputRef}
               type="text"
@@ -172,7 +189,7 @@ export function LibraryBrowserBar({
               spellCheck={false}
               disabled={busy}
               onChange={(e) => { setName(e.target.value); setErr(null); }}
-              onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); closeNaming(); } }}
+              onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.preventDefault(); closeNaming(); } }}
             />
             <button type="submit" className="btn cp-tx-iconbtn" disabled={busy || !name.trim()}>Create</button>
             <button type="button" className="btn btn-ghost cp-tx-iconbtn" onClick={closeNaming} disabled={busy}>Cancel</button>

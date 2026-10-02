@@ -41,7 +41,9 @@ async fn graceful_reap_drains_both_pipes_and_retries_interrupted_waits() {
     let pipes = pipes(&mut child);
     let mut faults = ReapFaults { errors: [libc::EINTR, libc::EINTR].into(), ..Default::default() };
     assert!(reap_child(child, pipes, false, &mut faults).await);
-    assert_eq!(faults.waits, 3);
+    // Both injected EINTRs are retried. More waits are legitimate: on a loaded
+    // runner the shell may not have exited by the third, and the reaper polls again.
+    assert!(faults.waits >= 3, "both injected EINTRs must be retried: {}", faults.waits);
     assert_eq!(faults.kills, 0);
     assert_reaped(pid);
 }

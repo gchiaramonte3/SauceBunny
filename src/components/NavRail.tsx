@@ -2,6 +2,7 @@ import { IconHome, IconStack, IconScissors, IconSettings, IconCoReview, IconTran
 import type { AppView } from "../App";
 import logoUrl from "../assets/saucebunny.svg";
 import { IconMultitrack } from "./IconMultitrack";
+import { IconStringOut } from "./IconStringOut";
 
 /**
  * Persistent left navigation rail — the app-shell switch between the
@@ -27,13 +28,14 @@ type Props = {
   coreviewShortcut?: string;
   readerShortcut?: string;
   multitrackShortcut?: string;
+  editorShortcut?: string;
   /** A co-review session is live — lights the badge dot on the Review item. */
   sessionActive: boolean;
   /** People connected to the live session — surfaced in the item's title. */
   sessionPeers?: number;
 };
 
-export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libraryShortcut, clipShortcut, coreviewShortcut, readerShortcut, multitrackShortcut, sessionActive, sessionPeers }: Props) {
+export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libraryShortcut, clipShortcut, coreviewShortcut, readerShortcut, multitrackShortcut, editorShortcut, sessionActive, sessionPeers }: Props) {
   return (
     <nav className="cp-nav" aria-label="Primary">
       {/* Brand mark — a non-interactive logo, NOT a second Home button. The
@@ -109,12 +111,23 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libr
         type="button"
         className={"cp-nav-item" + (active === "multitrack" ? " active" : "")}
         onClick={() => onNavigate("multitrack")}
-        title={multitrackShortcut ? `Multitrack (${multitrackShortcut})` : "Multitrack"}
-        aria-label="Multitrack"
+        title={multitrackShortcut ? `AAF Audio (${multitrackShortcut})` : "AAF Audio"}
+        aria-label="AAF Audio"
         aria-current={active === "multitrack" ? "page" : undefined}
       >
         <IconMultitrack />
-        <span className="cp-nav-label">Multitrack</span>
+        <span className="cp-nav-label">AAF Audio</span>
+      </button>
+      <button
+        type="button"
+        className={"cp-nav-item" + (active === "editor" ? " active" : "")}
+        onClick={() => onNavigate("editor")}
+        title={editorShortcut ? `String Outs (${editorShortcut})` : "String Outs"}
+        aria-label="String Outs"
+        aria-current={active === "editor" ? "page" : undefined}
+      >
+        <IconStringOut />
+        <span className="cp-nav-label">String Outs</span>
       </button>
       <div className="cp-nav-spacer" />
       <button

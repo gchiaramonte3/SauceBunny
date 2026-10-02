@@ -1,5 +1,6 @@
 import { loadJson, saveJson } from "./storage";
 import { pathKey } from "./repath";
+import { frameRate } from "./timecode";
 
 /**
  * In and out marks, remembered per source.
@@ -23,7 +24,7 @@ import { pathKey } from "./repath";
 
 const KEY = "saucebunny.sourceMarks";
 
-export type SourceMarks = { inFrames: number | null; outFrames: number | null };
+export type SourceMarks = { inFrames: number | null; outFrames: number | null; frameRate?: number };
 
 /** A frame index that could plausibly have come from this app. */
 function validFrame(v: unknown): v is number {
@@ -45,16 +46,22 @@ export function loadSourceMarks(): Record<string, SourceMarks> {
     // export would then refuse.
     if (i === null && o === null) continue;
     if (i !== null && o !== null && o <= i) continue;
-    out[k] = { inFrames: i, outFrames: o };
+    out[k] = { inFrames: i, outFrames: o,
+      ...(typeof rec.frameRate === "number" && Number.isFinite(rec.frameRate) && rec.frameRate > 0 ? { frameRate: rec.frameRate } : {}) };
   }
   return out;
 }
 
 /** The marks for one source, or nulls when it has none. */
-export function marksFor(source: string | null | undefined): SourceMarks {
+export function marksFor(source: string | null | undefined, fps?: number): SourceMarks {
   if (!source) return { inFrames: null, outFrames: null };
   const map = loadSourceMarks();
-  return map[pathKey(source)] ?? { inFrames: null, outFrames: null };
+  const saved = map[pathKey(source)];
+  if (!saved) return { inFrames: null, outFrames: null };
+  if (fps === undefined) return saved;
+  const rate = frameRate(fps), previousRate = saved.frameRate ?? Math.max(1, Math.round(fps));
+  const convert = (value: number | null) => value === null ? null : Math.round(value / previousRate * rate);
+  return { inFrames: convert(saved.inFrames), outFrames: convert(saved.outFrames), frameRate: rate };
 }
 
 /**

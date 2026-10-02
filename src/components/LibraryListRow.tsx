@@ -46,6 +46,7 @@ type Props = {
   deleteLabel?: string;
   /** "Move to folder…" — the drag's keyboard-reachable twin. */
   onMove?: () => void;
+  onAddToProject?: () => void;
   /** Finder tags: the passive edge stripe and the menu's colour row. */
   tags?: readonly FinderTag[];
   onToggleTagColor?: (index: TagColorIndex) => void;
@@ -68,7 +69,7 @@ type Props = {
  */
 export function LibraryListRow({
   onTranscribe, transcribeLabel,
-  item, selected, onSelect, onContextSelect, onRename, onDelete, onRemove, deleteLabel, onMove, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  item, selected, onSelect, onContextSelect, onRename, onDelete, onRemove, deleteLabel, onMove, onAddToProject, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   tags, onToggleTagColor, onClearTagColors, columns, customText, customColumns, onEditCustom,
 }: Props) {
   const tagDescription = tagSummary(tags ?? []);
@@ -193,6 +194,7 @@ export function LibraryListRow({
           onRemove={onRemove}
           deleteLabel={deleteLabel}
           onMove={onMove}
+          onAddToProject={onAddToProject}
           tags={tags}
           onToggleTagColor={onToggleTagColor}
           onClearTagColors={onClearTagColors}

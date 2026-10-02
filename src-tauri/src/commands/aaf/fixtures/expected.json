@@ -1,0 +1,32 @@
+{
+  "legacy": [
+    {
+      "aligned": true,
+      "material_track_id": 2,
+      "mob_id": "urn:smpte:umid:060a2b34.01010105.01010d00.1323735d.52947134.ee23735d.00529471.34ee2301",
+      "slot_id": 2
+    }
+  ],
+  "op1a": [
+    {
+      "aligned": true,
+      "material_track_id": 3,
+      "mob_id": "urn:smpte:umid:060a2b34.01010105.01010d00.13cad18c.52947134.d8cad18c.00529471.34d8ca01",
+      "slot_id": 3
+    },
+    {
+      "aligned": true,
+      "material_track_id": 4,
+      "mob_id": "urn:smpte:umid:060a2b34.01010105.01010d00.13cad18c.52947134.d8cad18c.00529471.34d8ca01",
+      "slot_id": 4
+    }
+  ],
+  "opatom": [
+    {
+      "aligned": true,
+      "material_track_id": 2,
+      "mob_id": "urn:smpte:umid:060a2b34.01010105.01010d00.1323735d.52947134.ee23735d.00529471.34ee2301",
+      "slot_id": 2
+    }
+  ]
+}

@@ -24,6 +24,8 @@ function snap(): PanelSnapshot {
     canRegenerate: true,
     hasSource: true,
     aiModelId: "qwen3-4b-instruct",
+    aiVideoPath: null,
+    aiForegroundBusy: false,
     aiStyle: { format: "bullets", length: "standard" },
     chapterSourceKey: "src-key",
     durationSec: 90,

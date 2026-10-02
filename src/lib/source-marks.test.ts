@@ -9,6 +9,16 @@ beforeEach(() => localStorage.clear());
 afterEach(() => localStorage.clear());
 
 describe("source marks", () => {
+  it("converts legacy nominal marks once and preserves source-rate marks on reopen", () => {
+    const fps = 60000 / 1001;
+    setSourceMarks(SRC, { inFrames: 216000, outFrames: 216060 });
+    const restored = marksFor(SRC, fps);
+    expect(restored).toEqual({ inFrames: 215784, outFrames: 215844, frameRate: fps });
+    expect(Math.abs(restored.inFrames! / fps - 3600)).toBeLessThan(0.5 / fps);
+    setSourceMarks(SRC, restored);
+    expect(marksFor(SRC, fps)).toEqual(restored);
+    expect(marksFor(SRC, fps)).toEqual(restored);
+  });
   it("round-trips a range", () => {
     setSourceMarks(SRC, { inFrames: 250, outFrames: 500 });
     expect(marksFor(SRC)).toEqual({ inFrames: 250, outFrames: 500 });

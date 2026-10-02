@@ -237,3 +237,25 @@ describe("the Regenerate confirm consults provenance", () => {
     expect(src, "generated chapters are not stamped").toMatch(/origin: "generated"/);
   });
 });
+
+describe("chapters key is NFC", () => {
+  // macOS hands back a DECOMPOSED filename; a key typed or pasted elsewhere is
+  // COMPOSED. Both spellings of one file must name one list.
+  const composed = "/Users/me/café.mov";
+  const decomposed = "/Users/me/café.mov";
+  beforeEach(() => localStorage.clear());
+
+  it("reads a list saved under the other spelling", () => {
+    expect(composed).not.toBe(decomposed);
+    saveChapters(decomposed, [{ time: 0, title: "Intro" }]);
+    expect(loadChapters(composed)).toEqual([{ time: 0, title: "Intro" }]);
+  });
+
+  it("still reads a legacy list stored under the raw decomposed key, and migrates it on save", () => {
+    localStorage.setItem("saucebunny.chapters." + decomposed, JSON.stringify([{ time: 5, title: "Old" }]));
+    expect(loadChapters(decomposed)).toEqual([{ time: 5, title: "Old" }]);
+    saveChapters(decomposed, [{ time: 5, title: "Old" }, { time: 9, title: "New" }]);
+    expect(localStorage.getItem("saucebunny.chapters." + decomposed)).toBeNull();
+    expect(loadChapters(composed)).toHaveLength(2);
+  });
+});

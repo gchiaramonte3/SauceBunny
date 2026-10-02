@@ -11,6 +11,12 @@ mod stream_proxy;
 mod stream_failure;
 mod acquisition_gate;
 mod premiere_bridge;
+// Transcript Editor: the edit document and its on-disk undo log.
+mod edit_doc;
+mod edit_export;
+mod edit_log;
+// Per-mic speech analysis from the waveform overview (Transcript Editor).
+mod speech;
 pub use error::AppError;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -191,8 +197,10 @@ pub fn run() {
         .manage(commands::JobRegistry::default())
         .manage(commands::recording::Recorder::default())
         .manage(commands::LlmServer::default())
+        .manage(commands::VideoIntelligenceState::default())
         .manage(commands::SessionManager::default())
         .manage(commands::PendingReviewLink::default())
+        .manage(commands::EditStore::default())
         .invoke_handler(tauri::generate_handler![
             #[cfg(feature = "obs-audio-acceptance")]
             commands::obs::audio_acceptance::obs_audio_acceptance_start,
@@ -242,9 +250,15 @@ pub fn run() {
             commands::list_audio_input_devices,
             commands::generate_transcript,
             commands::aaf_import,
+            commands::aaf_sequences,
+            commands::aaf_diagnostics,
+            commands::aaf_clear_diagnostics,
+            commands::aaf_resolve_media,
             commands::aaf_open,
             commands::aaf_list,
             commands::aaf_save_labels,
+            commands::aaf_save_shoot_date,
+            commands::aaf_read_recording_dates,
             commands::aaf_prepare_audio,
             commands::aaf_waveform,
             commands::aaf_transcribe_track,
@@ -254,6 +268,10 @@ pub fn run() {
             commands::start_llm_server,
             commands::stop_llm_server,
             commands::llm_server_status,
+            commands::video_intelligence_run,
+            commands::load_analysis_corrections,
+            commands::save_analysis_correction,
+            commands::video_set_foreground_busy,
             commands::set_api_key,
             commands::delete_api_key,
             commands::has_api_key,
@@ -266,6 +284,17 @@ pub fn run() {
             commands::take_pending_review_link,
             commands::review_code,
             commands::session_kick,
+            commands::aaf_speech,
+            commands::aaf_export_edit,
+            commands::edit_list,
+            commands::edit_create,
+            commands::edit_head,
+            commands::edit_commit,
+            commands::edit_undo,
+            commands::edit_redo,
+            commands::edit_jump,
+            commands::edit_pin,
+            commands::edit_history,
             commands::create_review_grant,
             commands::list_review_grants,
             commands::revoke_review_grant,
@@ -291,6 +320,9 @@ pub fn run() {
             commands::rename_transcript_folder,
             commands::delete_transcript_folder,
             commands::copy_library_file,
+            commands::library_organization_load,
+            commands::library_organization_save,
+            commands::library_reference_status,
             commands::move_library_file,
             commands::move_transcript_to_folder,
             commands::save_transcript_analysis,
@@ -312,6 +344,8 @@ pub fn run() {
             commands::set_clear_cache_on_quit,
             commands::enforce_media_cache_cap,
             commands::write_text_to_path,
+            commands::print_transcript,
+            commands::export_transcript_pdf,
             commands::write_raw_to_path,
             commands::screen_capture_access,
             commands::list_share_sources,
@@ -373,6 +407,9 @@ pub fn run() {
             commands::session_cancel_fetch,
         ])
         .setup(|app| {
+            // Native menus, panels and subsequent windows must not inherit a
+            // light system appearance while the web content is always dark.
+            app.set_theme(Some(tauri::Theme::Dark));
             // Spell-check: WebKit reads a user default, not an HTML attribute.
             // Set once, before the webview asks. See enable_spellcheck_once.
             #[cfg(target_os = "macos")]

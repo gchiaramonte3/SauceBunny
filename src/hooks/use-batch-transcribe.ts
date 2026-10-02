@@ -100,42 +100,46 @@ export function useBatchTranscribe(
           // its own copy of the model. This module's own header has always
           // said "ONE AT A TIME"; this is what makes that true.
           const done = await watchJob(jobId);
-          /* RE-CHECK AFTER THE AWAIT. `watchJob` is a real listen() round trip
-             to Rust, so Stop can land inside it - and the check above already
-             happened. Without this the spawn goes ahead anyway, and the result
-             is worse than a late stop: cancel_job on an id that has not been
-             spawned yet finds nothing in the JobRegistry to kill, but it DOES
-             set the sticky cancelled flag first (system.rs mark_cancelled).
-             So the file runs a complete ffmpeg pass and a whole whisper
-             transcription, to completion, while the UI says the batch was
-             cancelled - which is exactly the failure CLAUDE.md's rule about
-             awaits between starting work and holding its handle exists to
-             prevent. */
-          if (stateRef.current.cancelled) {
-            apply(markItem(stateRef.current, idx, "skipped"));
-            break;
-          }
-          await invoke<string>("transcribe_local_file", {
-            args: {
-              input_path: item.path,
-              output_dir: settings.outDir,
-              // Name the transcript after the FILE, not after the export form's
-              // filename box — in a batch that box would put the same name on
-              // every one and each would overwrite the last.
-              filename: sanitizeFilename(item.name.replace(/\.[^.]+$/, "")) || "transcript",
-              model_id: settings.modelId,
-              job_id: jobId,
-              detect_speakers: settings.detectSpeakers,
-              expected_speakers: settings.expectedSpeakers > 0 ? settings.expectedSpeakers : null,
-              engine: settings.engine,
-              language: settings.language,
-              speed: settings.speed,
-              duration_seconds: null,
-            },
-          });
-          // The pipeline itself, not the spawn. Cancelling emits a failed
-          // done, so Stop settles this rather than stranding the loop.
+          // Everything after the listener exists releases it on every exit: a
+          // Stop re-check that breaks, a spawn that rejects, or a failed done.
+          // Only the success path used to, so each failed or cancelled file
+          // left one transcript-done listener attached for the app's lifetime.
           try {
+            /* RE-CHECK AFTER THE AWAIT. `watchJob` is a real listen() round trip
+               to Rust, so Stop can land inside it - and the check above already
+               happened. Without this the spawn goes ahead anyway, and the result
+               is worse than a late stop: cancel_job on an id that has not been
+               spawned yet finds nothing in the JobRegistry to kill, but it DOES
+               set the sticky cancelled flag first (system.rs mark_cancelled).
+               So the file runs a complete ffmpeg pass and a whole whisper
+               transcription, to completion, while the UI says the batch was
+               cancelled - which is exactly the failure CLAUDE.md's rule about
+               awaits between starting work and holding its handle exists to
+               prevent. */
+            if (stateRef.current.cancelled) {
+              apply(markItem(stateRef.current, idx, "skipped"));
+              break;
+            }
+            await invoke<string>("transcribe_local_file", {
+              args: {
+                input_path: item.path,
+                output_dir: settings.outDir,
+                // Name the transcript after the FILE, not after the export form's
+                // filename box — in a batch that box would put the same name on
+                // every one and each would overwrite the last.
+                filename: sanitizeFilename(item.name.replace(/\.[^.]+$/, "")) || "transcript",
+                model_id: settings.modelId,
+                job_id: jobId,
+                detect_speakers: settings.detectSpeakers,
+                expected_speakers: settings.expectedSpeakers > 0 ? settings.expectedSpeakers : null,
+                engine: settings.engine,
+                language: settings.language,
+                speed: settings.speed,
+                duration_seconds: null,
+              },
+            });
+            // The pipeline itself, not the spawn. Cancelling emits a failed
+            // done, so Stop settles this rather than stranding the loop.
             await done.finished;
           } finally {
             done.stop();
@@ -167,5 +171,5 @@ export function useBatchTranscribe(
 
   const clear = useCallback(() => apply(EMPTY_BATCH), [apply]);
 
-  return { state, progress: batchProgress(state), start, cancel, clear, busy: runningRef.current };
+  return { state, progress: batchProgress(state), start, cancel, clear };
 }

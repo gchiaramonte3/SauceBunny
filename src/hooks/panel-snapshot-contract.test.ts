@@ -42,6 +42,8 @@ const BASE: PanelSnapshot = {
   canRegenerate: false,
   hasSource: false,
   aiModelId: "qwen",
+  aiVideoPath: null,
+  aiForegroundBusy: false,
   aiStyle: { format: "bullets", length: "standard" },
   chapterSourceKey: null,
   durationSec: null,
@@ -115,6 +117,11 @@ describe("panel snapshot publish gate", () => {
  * main window sees nothing wrong.
  */
 describe("coercePanelSnapshot", () => {
+  it("does not expose an old local video while a live program input is active", () => {
+    expect(coercePanelSnapshot({ ...BASE, aiVideoPath: "/old.mp4", programInputActive: true }).aiVideoPath).toBeNull();
+    expect(coercePanelSnapshot({ ...BASE, aiVideoPath: 123 }).aiVideoPath).toBeNull();
+    expect(coercePanelSnapshot({ ...BASE, aiVideoPath: "/current.mp4" }).aiVideoPath).toBe("/current.mp4");
+  });
   it("passes a current snapshot through unchanged", () => {
     const full = { ...BASE, fps: 25, aiModelId: "claude" };
     expect(coercePanelSnapshot(full)).toEqual(full);

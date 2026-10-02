@@ -1385,9 +1385,20 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
                             },
                         );
                         app_for.state::<JobRegistry>().insert(job_for.clone(), child2);
-                        rx = rx2;
-                        attempt = 2;
-                        continue;
+                        // Re-check AFTER registering: a Stop between the first
+                        // child terminating and this insert swept an empty
+                        // slot. `cancel_job` flags before it sweeps, so it is
+                        // visible here (same shape as run_diarizer).
+                        if app_for.state::<JobRegistry>().is_cancelled(&job_for) {
+                            if let Some(c) = app_for.state::<JobRegistry>().take(&job_for) {
+                                let _ = c.kill();
+                            }
+                            signalled = true;
+                        } else {
+                            rx = rx2;
+                            attempt = 2;
+                            continue;
+                        }
                     }
                 }
             }

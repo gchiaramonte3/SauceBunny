@@ -99,6 +99,7 @@ type Props = {
   deleteLabel?: string;
   /** File this item into a folder; surfaces as a menu item. */
   onMove?: () => void;
+  onAddToProject?: () => void;
 };
 
 /**
@@ -120,7 +121,7 @@ type Props = {
  */
 export function LibraryCard({
   onTranscribe, transcribeLabel,
-  title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, onDelete, onRemove, deleteLabel, onMove, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, onDelete, onRemove, deleteLabel, onMove, onAddToProject, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   onSelect, onContextSelect, onRename, selected, selectionPath, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const tagDescription = tagSummary(tags ?? []);
@@ -334,6 +335,7 @@ export function LibraryCard({
           onRemove={onRemove}
           deleteLabel={deleteLabel}
           onMove={onMove}
+          onAddToProject={onAddToProject}
           tags={tags}
           onToggleTagColor={onToggleTagColor}
           onClearTagColors={onClearTagColors}

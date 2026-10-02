@@ -15,6 +15,7 @@
  */
 
 import { pathKey, samePath } from "./repath";
+import { libraryOrganization } from "./library-organization-store";
 
 const STORAGE_KEY = "saucebunny.transcriptHistory";
 const MAX_ENTRIES = 50;
@@ -230,6 +231,7 @@ export function renameSourcePath(oldPath: string, newPath: string, newTitle?: st
 /** Re-point a history entry to a moved/renamed transcript file (new srtPath,
  *  optional new title). Source keys are left intact. No-op if none match. */
 export function renameEntryPath(oldPath: string, newPath: string, newTitle?: string): void {
+  void libraryOrganization.repath(oldPath, newPath);
   const entries = safeRead();
   let changed = false;
   for (const e of entries) {

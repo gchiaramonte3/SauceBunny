@@ -24,6 +24,12 @@ type Props = {
   onCollapse: () => void;
   /** The shared, cached, concurrency-capped thumbnail loader (root art). */
   addFolder: () => Promise<void>;
+  onAddMenu?: (element: HTMLElement) => void;
+  projectSidebar?: React.ReactNode;
+  projectSelected?: boolean;
+  onFavoriteDisk?: (path: string) => void;
+  favoritePaths?: string[];
+  onLoadFolder?: (path: string) => void;
   rescanAll: () => void;
   scanning: boolean;
   /** Drop a ROOT from the library. Subfolders are not library entries, so
@@ -103,7 +109,7 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
       // made those two rows collide, and React is then free to reuse the wrong
       // DOM node for the wrong folder.
       key: `${rootIdx}:${node.path}`, path: node.path, chain, depth, name: node.name,
-      hasChildren: node.folders.length > 0, deeper: node.deeper, expanded: isExp,
+      hasChildren: node.folders.length > 0 || node.deeper, deeper: node.deeper, expanded: isExp,
       // Roots carry small folder art (first video's poster, BFS) — the
       // Spotify library-row read. Subfolders stay text rows.
       artPath: depth === 0 ? (libraryPosterPaths(node, 1)[0] ?? null) : undefined,
@@ -132,6 +138,7 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
 export function LibraryTree({
   trees, selection, onSelect, kind, onKind, onCollapse,
   addFolder, rescanAll, scanning, removeRoot, shelf, onSelectShelf, dropOver,
+  onAddMenu, projectSidebar, projectSelected, onFavoriteDisk, favoritePaths = [], onLoadFolder,
 }: Props) {
   /* Roots open by default; ancestors of the current selection are revealed
      when the selection CHANGES. Persisted, because a deep library otherwise
@@ -215,12 +222,14 @@ export function LibraryTree({
   }, [selKey, shelf, rows]);
   const active = rows.some((r) => r.key === activeKey) ? activeKey : "all";
 
-  const toggle = (key: string) =>
+  const toggle = (key: string) => {
+    if (!expanded.has(key) && rows.some((r) => r.path === key && r.deeper)) onLoadFolder?.(key);
     setExpanded((prev) => {
       const n = new Set(prev);
       if (n.has(key)) n.delete(key); else n.add(key);
       return n;
     });
+  };
 
   const focusRow = (key: string) => { setActiveKey(key); rowRefs.current.get(key)?.focus(); };
 
@@ -324,9 +333,9 @@ export function LibraryTree({
         <button
           type="button"
           className="cp-lib-tree-act"
-          title="Add folder"
-          aria-label="Add folder"
-          onClick={() => void addFolder()}
+          title="Add to Library"
+          aria-label="Add to Library"
+          onClick={(event) => onAddMenu ? onAddMenu(event.currentTarget) : void addFolder()}
         >
           <IconPlus size={14} />
         </button>
@@ -363,9 +372,12 @@ export function LibraryTree({
           </button>
         ))}
       </div>
-      <div className="cp-lib-tree-scroll" role="tree" aria-label="Library folders" onKeyDown={onKeyDown}>
+      <div className="cp-lib-tree-scroll">
+        {projectSidebar}
+        <h3 className="cp-project-section-title">Folders on Disk</h3>
+        <div role="tree" aria-label="Library folders" onKeyDown={onKeyDown}>
         {rows.map((row) => {
-          const isSel = row.shelf ? shelf === row.shelf : ((row.path ?? "all") === selKey && shelf === null);
+          const isSel = !projectSelected && (row.shelf ? shelf === row.shelf : ((row.path ?? "all") === selKey && shelf === null));
           return (
             <button
               key={row.key}
@@ -392,7 +404,7 @@ export function LibraryTree({
                  unscannedDepthNote, which LibraryView prints for the tree as
                  a whole. */
               title={row.deeper
-                ? `${row.name} goes deeper than this view scans. Add it as a library root to see inside.`
+                ? `Open ${row.name} to load its contents.`
                 : undefined}
               onClick={() => {
                 setActiveKey(row.key);
@@ -444,6 +456,7 @@ export function LibraryTree({
             </button>
           );
         })}
+        </div>
       </div>
       <div
         className={"cp-lib-tree-resize cp-resize-handle vertical" + (resizing ? " dragging" : "")}
@@ -461,6 +474,8 @@ export function LibraryTree({
           anchor={{ x: menu.x, y: menu.y }}
           onClose={() => setMenu(null)}
           onChanged={() => finderTags.refresh()}
+          onFavorite={onFavoriteDisk ? () => onFavoriteDisk(menu.path) : undefined}
+          isFavorite={favoritePaths.includes(menu.path)}
           // Roots only: a subfolder is part of a root's scan, not a library
           // entry of its own, so "remove" there would have nothing to remove.
           onRemove={menu.isRoot ? () => removeRoot(menu.path) : undefined}

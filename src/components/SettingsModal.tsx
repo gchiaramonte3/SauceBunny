@@ -11,6 +11,7 @@ import { IconChevronDown, IconDiscord, IconHeart, IconLink, IconReveal, IconSpar
 import { loadJson, saveJson } from "../lib/storage";
 import { DEVICE_CHOICE_KEY } from "../lib/media-devices";
 import { AvSettingsPane } from "./AvSettingsPane";
+import { ModelDownloadProgress } from "./ModelDownloadProgress";
 import { ColorSwatches } from "./ColorSwatches";
 import { KeybindingEditor } from "./KeybindingEditor";
 import { loadKeybindings, KEYBINDINGS_STORAGE_KEY, type KeybindingOverrides } from "../lib/keybindings";
@@ -48,11 +49,12 @@ import { SAUCE_BUNNY } from "../lib/open-source";
 import { getVersion } from "@tauri-apps/api/app";
 import { countHiddenNotices, restoreHiddenNotices } from "../lib/hidden-notices";
 import { EXPECTED_BACKEND_BUILD_ID } from "../lib/build-id";
+import { VideoIntelligenceSettings } from "./VideoIntelligenceSettings";
 import { newJobId } from "../lib/job-id";
 import { DEFAULT_STUN_URL } from "../lib/ice-servers";
 import { clearHidden as clearHiddenLibrary, hiddenCount as hiddenLibraryCount } from "../lib/library-hidden";
 
-type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "ai-apis" | "integrations" | "commands" | "about" | "credits";
+type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "video-intelligence" | "ai-apis" | "integrations" | "commands" | "about" | "credits";
 
 export type Defaults = {
   folder: string | null;
@@ -250,6 +252,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "youtube",       label: "Web sources" },
   { id: "transcription", label: "Transcription" },
   { id: "ai-summary",    label: "AI Summary" },
+  { id: "video-intelligence", label: "Video Intelligence" },
   { id: "ai-apis",       label: "AI APIs" },
   { id: "integrations",  label: "Integrations" },
   { id: "commands",      label: "Shortcuts" },
@@ -1495,30 +1498,7 @@ export function SettingsModal(props: Props) {
                               {isActive && m.downloaded && <span className="badge selected">In use</span>}
                               <ModelInfoPopover id={m.id} />
                             </div>
-                            {progress && (
-                              <div className="cp-model-progress">
-                                {/* A real progressbar, not a painted div. The
-                                    percentage was in the DOM as text but nothing
-                                    exposed it as a VALUE, so a screen reader user
-                                    watching a multi-gigabyte model download had no
-                                    way to ask whether it was moving or hung.
-                                    Queryable on focus rather than announced on
-                                    every tick: announcing each percent of a 2 GB
-                                    download is a firehose, not a status. */}
-                                <div
-                                  className="bar"
-                                  role="progressbar"
-                                  aria-label={`Downloading ${m.name}`}
-                                  aria-valuemin={0}
-                                  aria-valuemax={100}
-                                  aria-valuenow={Math.round(progress.percent)}
-                                ><span style={{ width: `${progress.percent}%` }} /></div>
-                                <span className="meta">
-                                  {progress.percent.toFixed(0)}%
-                                  {progress.total > 0 && ` · ${formatMB(progress.done)} / ${formatMB(progress.total)}`}
-                                </span>
-                              </div>
-                            )}
+                            {isDownloading && <ModelDownloadProgress name={m.name} done={progress?.done} total={progress?.total} />}
                           </div>
                           <div className="cp-model-actions">
                             {!m.downloaded && (
@@ -1589,6 +1569,7 @@ export function SettingsModal(props: Props) {
                           {parakeetReady && <span className="badge installed">Installed</span>}
                           {parakeetActive && <span className="badge selected">In use</span>}
                         </div>
+                        {parakeetBusy && <ModelDownloadProgress name="Parakeet TDT v3" />}
                       </div>
                       <div className="cp-model-actions">
                         {parakeetReady === null ? (
@@ -1821,9 +1802,7 @@ export function SettingsModal(props: Props) {
                         <button className="btn btn-ghost" onClick={onCancelDiarizerPrepare}>
                           Cancel download
                         </button>
-                        <span className="cp-diar-status">
-                          Downloading speaker models…
-                        </span>
+                        <ModelDownloadProgress name="speaker models" />
                       </>
                     ) : diarizerReady ? (
                       <>
@@ -1863,13 +1842,12 @@ export function SettingsModal(props: Props) {
               </section>
             )}
 
+            {tab === "video-intelligence" && <VideoIntelligenceSettings />}
             {tab === "ai-summary" && (
               <section>
                 <h3 className="cp-pane-title">AI Summary</h3>
                 <p className="cp-pane-sub">
-                  Summarize and chat with transcripts using a local AI model. Runs entirely on
-                  your Mac via llama.cpp (Metal); nothing leaves the machine.
-                  Pick the model that fits your Mac's memory.
+                  Summarize and chat with transcripts. Processed on your Mac.
                 </p>
 
                 <CollapsibleSection id="ai-model" label="Model" open={sectionOpen("ai-model")} onToggle={() => toggleSection("ai-model")}>
@@ -1889,22 +1867,7 @@ export function SettingsModal(props: Props) {
                               {isSel && m.downloaded && <span className="badge selected">Default</span>}
                             </div>
                             <div className="cp-model-blurb">{m.blurb}</div>
-                            {prog && (
-                              <div className="cp-model-progress">
-                                <div
-                                  className="bar"
-                                  role="progressbar"
-                                  aria-label={`Downloading ${m.name}`}
-                                  aria-valuemin={0}
-                                  aria-valuemax={100}
-                                  aria-valuenow={Math.round(prog.percent)}
-                                ><span style={{ width: `${prog.percent}%` }} /></div>
-                                <span className="meta">
-                                  {prog.percent.toFixed(0)}%
-                                  {prog.total > 0 && ` · ${formatMB(prog.done)} / ${formatMB(prog.total)}`}
-                                </span>
-                              </div>
-                            )}
+                            {downloadingId === m.id && <ModelDownloadProgress name={m.name} done={prog?.done} total={prog?.total} />}
                           </div>
                           <div className="cp-model-actions">
                             {!m.downloaded ? (

@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadClipQueue, saveClipQueue } from "./storage";
 import { isQueuedClip } from "../types";
+import { queueFrameRate } from "./queue-ranges";
 
 /**
  * The queue was the least protected object in the app: plain component state,
@@ -21,6 +22,16 @@ const row = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => localStorage.clear());
 
 describe("clip queue persistence", () => {
+  it("retains both legacy elapsed ranges and new source-frame ranges across saving", () => {
+    const fps = 60000 / 1001;
+    saveClipQueue([row({ fps, inFrames: 216000, outFrames: 216060 }),
+      row({ id: "new", fps, frameClock: "source", inFrames: 216000, outFrames: 216060 })]);
+    const [legacy, current] = loadClipQueue(isQueuedClip);
+    expect(legacy.inFrames / queueFrameRate(legacy)).toBe(3600);
+    expect(current.inFrames / queueFrameRate(current)).toBeCloseTo(3603.6, 9);
+    saveClipQueue([legacy, current]);
+    expect(loadClipQueue(isQueuedClip)).toEqual([legacy, current]);
+  });
   it("brings back the row that was mid-export when the app went away", () => {
     // Only "queued" used to persist, so quitting during an export dropped the
     // row being exported: everything else in the queue survived and the range

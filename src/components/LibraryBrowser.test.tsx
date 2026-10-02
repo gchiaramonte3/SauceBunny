@@ -20,12 +20,13 @@ const props: Parameters<typeof LibraryBrowser>[0] = {
   onOpenWebUrl: vi.fn(), rescanAll: vi.fn(), requestThumb: async () => null,
   invalidateThumb: vi.fn(), posterVersions: {}, bumpPoster: vi.fn(), resetPoster: vi.fn(),
   selection: null, selectionTick: 0, onOpenLocalPath: vi.fn(), onOpenTranscriptHistory: vi.fn(),
+  onOpenMultitrack: vi.fn(), transcriptLibrary: "",
 };
 
 describe("Review's Library history handoff", () => {
   it("opens session history even when no media folders have been added", () => {
     const { rerender } = render(<LibraryBrowser {...props} roots={[]} />);
-    expect(screen.getByText("Add a folder to build your library.")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Files" })).toBeTruthy();
     rerender(<LibraryBrowser {...props} roots={[]} sessionsRequestTick={1} />);
     expect(screen.getByRole("region", { name: "Session history" })).toBeTruthy();
   });

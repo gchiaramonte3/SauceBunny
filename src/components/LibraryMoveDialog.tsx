@@ -1,131 +1,67 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useModalFocus } from "../hooks/use-modal-focus";
-import { IconAlert } from "./Icons";
+import { formatError } from "../lib/error-format";
+import { newFolderPath } from "../lib/library-folder";
 import type { LibraryFolder } from "../types";
 
-/**
- * File one or more library files into a folder, without a pointer.
- *
- * THE DRAG'S TWIN. Dragging a card onto a folder is the fast way; this is the
- * way that exists at all for anyone not using a mouse. That rule is the
- * project's, not an invention here - `e2e/transcript-drag.spec.ts` states it
- * outright about the same gesture on the transcript picker: "the drag is an
- * addition to a menu item, never the only route". The Library shipped the drag
- * first and this second, which is the wrong order, and this closes it.
- *
- * The menu item it hangs off already existed: `LibraryCardMenu` has rendered
- * "Move to folder…" behind an `onMove` prop the whole time, and the Library
- * was the one pane that never passed it.
- *
- * Modelled on FrameMoveDialog down to the class names, because it is the same
- * act on the same kind of thing - so it needed no new styles.
- *
- * Destinations are the CURRENT folder's subfolders: exactly the set the drag
- * can reach, so the two routes cannot offer different answers.
- */
-export function LibraryMoveDialog({ paths, folders, onMove, onCreateFolder, onClose }: {
-  /** Absolute paths being filed. More than one when a selection is moved. */
-  paths: readonly string[];
-  /** Subfolders of the folder now open - the drag's drop targets. */
-  folders: readonly LibraryFolder[];
-  onMove: (dest: string, paths: readonly string[]) => void;
-  /** Make a subfolder here and file these into it. Resolves to a refusal, or
-   *  null when it worked. Absent = no route, so the field is not offered. */
-  onCreateFolder?: (name: string, paths: readonly string[]) => Promise<string | null>;
-  onClose: () => void;
+/** Select a destination before moving originals. One-level reads plus Browse
+ * reach deep and unregistered folders without adding persistent Library roots. */
+export function LibraryMoveDialog({ paths, folders, initialPath, onMove, onClose }: {
+  paths: readonly string[]; folders: readonly LibraryFolder[]; initialPath?: string;
+  onMove: (dest: string, paths: readonly string[]) => Promise<string | null>; onClose: () => void;
 }) {
-  // aria-modal claims everything outside is inert, so focus has to be trapped
-  // and restored - the house hook does both.
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(true, dialogRef);
-  const [busy, setBusy] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [refusal, setRefusal] = useState<string | null>(null);
-
-  const makeAndMove = async () => {
-    if (!onCreateFolder || busy) return;
-    setBusy(true);
-    setRefusal(null);
-    const why = await onCreateFolder(newName, paths);
-    if (why) { setRefusal(why); setBusy(false); return; }
-    onClose();
+  const ref = useRef<HTMLDivElement>(null);
+  useModalFocus(true, ref);
+  const [destination, setDestination] = useState(initialPath ?? "");
+  const [children, setChildren] = useState<LibraryFolder[]>([]);
+  const [busy, setBusy] = useState(false), [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null), [newName, setNewName] = useState("");
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let current = true; setChildren([]);
+    if (!destination) { setLoading(false); return; }
+    setLoading(true);
+    void invoke<LibraryFolder>("scan_library_folder", { path: destination, maxDepth: 1 }).then((tree) => {
+      if (current) setChildren(tree.folders);
+    }).catch((cause) => { if (current) setError(formatError(cause)); }).finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [destination, tick]);
+  const browse = async () => {
+    setBusy(true); setError(null);
+    try { const path = await open({ directory: true, multiple: false, title: "Move originals into…" }); if (typeof path === "string") setDestination(path); }
+    catch (cause) { setError(formatError(cause)); }
+    finally { setBusy(false); }
   };
-
-  const go = (dest: string) => {
-    setBusy(true);
-    onMove(dest, paths);
-    onClose();
+  const move = async (create = false) => {
+    if (busy || !destination) return;
+    setBusy(true); setError(null);
+    try {
+      let target = destination;
+      if (create) {
+        const folder = newFolderPath(destination, newName);
+        if ("error" in folder) throw new Error(folder.error);
+        await invoke("ensure_dir_exists", { path: folder.path }); target = folder.path;
+      }
+      const refusal = await onMove(target, paths);
+      if (refusal) { setError(refusal); setTick((value) => value + 1); }
+      else onClose();
+    } catch (cause) { setError(formatError(cause)); }
+    finally { setBusy(false); }
   };
-
-  const title = paths.length === 1
-    ? `Move “${paths[0].split("/").pop() ?? paths[0]}”`
-    : `Move ${paths.length} files`;
-
-  return createPortal(
-    <div className="cp-rowmenu-scrim modal" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      {/* tabIndex={-1} so the trap has somewhere to put focus on open; without
-          it the first Tab escapes the scrim. */}
-      <div ref={dialogRef} tabIndex={-1} className="cp-rowmenu-dialog" role="dialog" aria-modal="true" aria-label="Move to folder">
-        <h4 className="cp-rowmenu-title">{title}</h4>
-        {folders.length === 0 && !onCreateFolder ? (
-          // Only when there is genuinely no route. With onCreateFolder wired,
-          // the field below IS the answer, and this used to name a control that
-          // lived on a different surface behind this modal - an instruction you
-          // could not follow without cancelling first.
-          <p className="cp-rowmenu-warn">
-            <IconAlert size={13} />
-            This folder has no subfolders yet. Make one with “New folder” first.
-          </p>
-        ) : folders.length === 0 ? null : (
-          <div className="cp-rowmenu-folders">
-            {folders.map((f) => (
-              <button
-                key={f.path}
-                className="cp-rowmenu-folder"
-                onClick={() => go(f.path)}
-                disabled={busy}
-              >
-                {f.name}
-              </button>
-            ))}
-          </div>
-        )}
-        {onCreateFolder && (
-          <div className="cp-rowmenu-newfolder">
-            <label className="cp-rowmenu-newfolder-label" htmlFor="cp-move-newfolder">
-              {folders.length === 0 ? "Make a folder for them" : "Or make a new one"}
-            </label>
-            <div className="cp-rowmenu-newfolder-row">
-              <input
-                id="cp-move-newfolder"
-                className="cp-rowmenu-input"
-                value={newName}
-                placeholder="Folder name"
-                disabled={busy}
-                onChange={(e) => { setNewName(e.target.value); setRefusal(null); }}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void makeAndMove(); } }}
-              />
-              <button
-                className="btn cp-tx-iconbtn"
-                onClick={() => void makeAndMove()}
-                disabled={busy || !newName.trim()}
-              >
-                Create and move
-              </button>
-            </div>
-            {refusal && <p className="cp-rowmenu-warn"><IconAlert size={13} />{refusal}</p>}
-          </div>
-        )}
-        <p className="cp-rowmenu-warn">
-          <IconAlert size={13} />
-          This moves the {paths.length === 1 ? "file" : "files"} on disk.
-        </p>
-        <div className="cp-rowmenu-actions">
-          <button className="btn btn-ghost cp-tx-iconbtn" onClick={onClose} disabled={busy}>Cancel</button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
+  return createPortal(<div className="cp-rowmenu-scrim modal" onPointerDown={(event) => { if (!busy && event.target === event.currentTarget) onClose(); }} onKeyDown={(event) => { if (event.key === "Escape" && !busy) { event.stopPropagation(); onClose(); } }}>
+    <div ref={ref} tabIndex={-1} className="cp-rowmenu-dialog cp-project-dialog" role="dialog" aria-modal="true" aria-label="Move to folder">
+      <h4 className="cp-rowmenu-title">Move {paths.length === 1 ? paths[0].split("/").pop() : paths.length + " files"} on disk</h4>
+      <p className="cp-project-help">This moves originals, not project references. Choose the destination, then confirm Move.</p>
+      <label>Library root<select className="cp-select" aria-label="Destination root" value={folders.some((f) => f.path === destination) ? destination : ""} disabled={busy} onChange={(event) => { setDestination(event.target.value); setError(null); }}><option value="">Choose a root…</option>{folders.map((folder) => <option key={folder.path} value={folder.path}>{folder.path}</option>)}</select></label>
+      <div className="cp-project-inline"><button className="btn btn-ghost" disabled={busy} onClick={() => void browse()}>Browse any folder…</button><button className="btn btn-ghost" disabled={busy || !destination || destination === "/"} onClick={() => { setDestination(destination.slice(0, destination.lastIndexOf("/")) || "/"); setError(null); }}>Up one folder</button></div>
+      <p className="cp-project-destination">{destination || "No destination selected"}</p>
+      <div className="cp-project-catalog" aria-label="Destination subfolders">{children.map((folder) => <button key={folder.path} className="cp-rowmenu-folder" disabled={busy} onClick={() => { setDestination(folder.path); setError(null); }}>{folder.name}</button>)}{loading && <p role="status">Loading folders…</p>}</div>
+      {error && <p className="cp-project-error" role="alert">{error}<button className="btn btn-ghost" disabled={busy || loading} onClick={() => { setError(null); setTick((value) => value + 1); }}>Refresh folders</button></p>}
+      <label>New subfolder (optional)<input className="cp-rowmenu-input" aria-label="Folder name" value={newName} disabled={busy} onChange={(event) => setNewName(event.target.value)} /></label>
+      <div className="cp-rowmenu-actions"><button className="btn btn-ghost" disabled={busy} onClick={onClose}>Cancel</button><button className="btn btn-ghost" disabled={busy || !destination || !newName.trim()} onClick={() => void move(true)}>Create and move</button><button className="btn" disabled={busy || !destination} onClick={() => void move()}>{busy ? "Moving…" : "Move here"}</button></div>
+    </div>
+  </div>, document.body);
 }

@@ -2,6 +2,10 @@
 /* Sauce Bunny — editorial source-acquisition utility (Ella tokens). */
 @import './tokens.css';
 
+/* App chrome is always dark, including native form controls and scrollbars.
+   Paint colors alone do not set WebKit's system-control appearance. */
+:root { color-scheme: only dark; }
+
 * {
   box-sizing: border-box;
   /* Global tabular numerics — since the whole app is now Nunito Sans
@@ -80,13 +84,16 @@ body {
      all. */
   --accent: var(--fg-1);
   --accent-rgb: 245, 245, 245;
-  /* Selection-marker color used for timeline ranges, mark in/out lines,
-     and the running-queue-item pulse. Was orange (var(--warning)) — too close
-     to a "warning" semantic and clashed with the green accent on focus.
-     Now uses the brand violet from the user's palette: signals
-     "selected/active" without competing with the success-green CTAs. */
-  --marker: var(--novella-violet);
-  --marker-rgb: 109, 82, 237;
+  /* In and Out. The marks (stem and chevron wing) are white and the span
+     between them is grey (owner direction, 2026-09-29), the same neutral
+     language as focus and selection: emphasis is brightness, not hue. It was
+     orange, then the brand violet; violet stays on String Outs' markers (M),
+     which are locators, not a range.
+     --marker-region shades the span; --marker-edge closes its top and bottom,
+     quieter than the stems so the marks still read as the edges. */
+  --marker: var(--fg-0);
+  --marker-region: color-mix(in srgb, var(--fg-0) 16%, transparent);
+  --marker-edge: color-mix(in srgb, var(--fg-0) 40%, transparent);
   /* The mark's chevron wing, as a clip-path. Every in/out marker is a stem
      plus ONE of these at the waist, pointing away from the marked region:
      -l off an in mark, -r off an out mark. Traced from the drawn glyph the
@@ -293,4 +300,3 @@ button:focus-visible, input:focus-visible,
   max-width: 280px;
 }
 .cp-pane-empty p { margin: 0; }
-

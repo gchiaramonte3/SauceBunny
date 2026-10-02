@@ -1,0 +1,3 @@
+# Build-only tools. Universal macOS wheels; never loaded by the shipped worker.
+meson==1.8.4 --hash=sha256:2d71499af23ea06abe1bb7ea16843973f53b47b1ce89810c32ec154e6c1dc1db
+ninja==1.13.0 --hash=sha256:fa2a8bfc62e31b08f83127d1613d10821775a0eb334197154c4d6067b7068ff1

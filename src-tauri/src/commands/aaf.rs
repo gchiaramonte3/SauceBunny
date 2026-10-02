@@ -1,8 +1,16 @@
 //! Local, read-only AAF import and microphone-track transcription.
 //! Existing Clip/Review playback and global transcription commands are untouched.
 mod audio;
+mod diagnostics;
+pub use diagnostics::*;
 mod pcm;
 mod peaks;
+mod linked;
+mod linked_paths;
+mod linked_probe;
+mod linked_audio;
+mod local_read;
+mod mxf_header;
 pub mod model;
 mod process;
 mod store;
@@ -10,10 +18,11 @@ mod transcribe;
 
 use crate::{commands::JobRegistry, AppError};
 use model::*;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Emitter};
 
 #[tauri::command]
-pub async fn aaf_import(app: AppHandle, path: String, job_id: String) -> Result<AafDocument, AppError> {
+pub async fn aaf_import(app: AppHandle, path: String, job_id: String, sequence_id: Option<String>) -> Result<AafDocument, AppError> {
+    diagnostics::operation(&app, &job_id, "import", &diagnostics::describe_path(std::path::Path::new(&path)), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let source = std::fs::canonicalize(path)?;
     if source.extension().is_none_or(|extension| !extension.to_string_lossy().eq_ignore_ascii_case("aaf")) {
@@ -22,76 +31,252 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String) -> Result<
     let metadata = std::fs::metadata(&source)?;
     if !metadata.is_file() { return Err(AppError::invalid("Choose an AAF file, not a folder")); }
     process::progress(&app, &job_id, None, "inspecting", 0, 0);
-    let result = process::run(&app, &job_id, "inspect", "saucebunny-aaf",
-        vec!["inspect".into(), "--input".into(), source.to_string_lossy().into_owned()]).await?;
+    let local = local_read::for_parser(&app, &job_id, &source).await?;
+    let mut args = vec!["inspect".into(), "--graph".into(), "--input".into(), local.to_string_lossy().into_owned()];
+    if let Some(sequence) = sequence_id { args.extend(["--sequence".into(), sequence]); }
+    let result = process::run(&app, &job_id, "inspect", "saucebunny-aaf", args).await?;
     result.require_success("saucebunny-aaf")?;
     let manifest: AafManifest = serde_json::from_str(&result.stdout)
         .map_err(|e| AppError::invalid(format!("AAF reader returned an invalid manifest: {e}")))?;
     validate_manifest(&manifest)?;
+    let root = store::root(&app)?;
     let labels = manifest.tracks.iter().map(|track| AafTrackLabel {
         track_id: track.id.clone(), owner_name: if track.name.trim().is_empty() { format!("Track {}", track.id) } else { track.name.clone() },
-        cast_member_id: None, color: None,
+        cast_member_id: None, color: None, gender: None, marker_color: None,
     }).collect();
     let id = blake3::hash(crate::stream_proxy::mint_token()?.as_bytes()).to_hex().to_string();
-    let document = AafDocument { schema_version: SCHEMA_VERSION, id,
+    let document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, id,
         source_path: source.to_string_lossy().into_owned(), source_size: metadata.len(),
         source_modified_ms: store::modified_ms(&metadata), manifest, labels, transcripts: Vec::new() };
     store::source_ready(&document)?;
-    let root = store::root(&app)?;
-    app.state::<JobRegistry>().while_active(&job_id, || store::create(&root, &document))?;
+    // Reopen an unchanged document (including all committed transcripts) or
+    // commit the offline timeline before any linked-media I/O begins.
+    let registry = app.state::<JobRegistry>();
+    let document = store::import_gated(&root, document, &|commit| registry.while_active(&job_id, commit))?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document.id);
+    diagnostics::log(&app, &job_id, "ok", "saved", &format!("Timeline saved: {} · {} lanes · {} committed transcripts", document.manifest.name, document.manifest.tracks.len(), document.transcripts.len()));
     Ok(document)
+    }).await
+}
+
+#[tauri::command]
+pub async fn aaf_sequences(app: AppHandle, path: String, job_id: String) -> Result<Vec<AafSequenceChoice>, AppError> {
+    diagnostics::operation(&app, &job_id, "sequences", &diagnostics::describe_path(std::path::Path::new(&path)), async {
+    let _job = process::JobGuard::begin(&app, &job_id)?;
+    let local = local_read::for_parser(&app, &job_id, &std::fs::canonicalize(&path)?).await?;
+    let result = process::run(&app, &job_id, "sequences", "saucebunny-aaf", vec!["sequences".into(), "--input".into(), local.to_string_lossy().into_owned()]).await?;
+    result.require_success("saucebunny-aaf")?;
+    Ok(serde_json::from_str(&result.stdout)?)
+    }).await
+}
+
+#[tauri::command]
+pub async fn aaf_resolve_media(app: AppHandle, document_id: String, source_id: Option<String>, path: Option<String>, job_id: String) -> Result<AafDocument, AppError> {
+    diagnostics::operation(&app, &job_id, "relink", &format!("Document {document_id} · source {} · {}", source_id.as_deref().unwrap_or("all"), path.as_deref().unwrap_or("refresh known paths")), async {
+    let _job = process::JobGuard::begin(&app, &job_id)?;
+    let _resolution = process::ResolutionGuard::begin(&document_id)?;
+    let root = store::root(&app)?;
+    let mut document = store::load(&root, &document_id)?;
+    let mut revision = store::cache_key(&document, "all", "relink");
+    store::source_ready(&document)?;
+    if document.manifest.schema_version < SCHEMA_VERSION {
+        if let Some(graph) = &document.manifest.graph {
+            let local = local_read::for_parser(&app, &job_id, std::path::Path::new(&document.source_path)).await?;
+            let result = process::run(&app, &job_id, "refresh-aaf-graph", "saucebunny-aaf", vec![
+                "inspect".into(), "--graph".into(), "--input".into(), local.to_string_lossy().into_owned(),
+                "--sequence".into(), graph.sequence_id.clone(), "--expected-fingerprint".into(), document.manifest.source_fingerprint.clone()]).await?;
+            result.require_success("saucebunny-aaf")?;
+            store::upgrade_graph(&mut document, serde_json::from_str(&result.stdout)?)?;
+        }
+    }
+    let mut checkpoint = document.clone();
+    linked::resolve(&app, &mut document, source_id.as_deref(), path.as_deref().map(std::path::Path::new), &job_id, |graph| {
+        checkpoint.manifest.graph = Some(graph.clone());
+        store::source_ready(&checkpoint)?;
+        // Merge graph-only changes into the latest document. Concurrent label
+        // edits/transcription commits survive; a competing relink is rejected.
+        let registry = app.state::<JobRegistry>();
+        let saved = store::save_graph_gated(&root, &checkpoint, &revision, &|commit| registry.while_active(&job_id, commit))?;
+        revision = store::cache_key(&saved, "all", "relink");
+        let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+        Ok(())
+    }).await?;
+    store::load(&root, &document_id)
+    }).await
 }
 
 #[tauri::command]
 pub async fn aaf_open(app: AppHandle, document_id: String) -> Result<AafDocument, AppError> {
-    store::load(&store::root(&app)?, &document_id)
+    diagnostics::operation(&app, &diagnostics::new_id(), "open", &format!("Open saved document {document_id}"), async {
+        store::load(&store::root(&app)?, &document_id)
+    }).await
 }
 
 #[tauri::command]
 pub async fn aaf_list(app: AppHandle) -> Result<Vec<AafDocumentSummary>, AppError> {
-    store::list(&store::root(&app)?)
+    store::shelf(&store::root(&app)?)
 }
 
 #[tauri::command]
 pub async fn aaf_save_labels(app: AppHandle, document_id: String, labels: Vec<AafTrackLabel>) -> Result<AafDocument, AppError> {
-    store::labels(&store::root(&app)?, &document_id, labels)
+    let document = store::labels(&store::root(&app)?, &document_id, labels)?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+    Ok(document)
+}
+
+#[tauri::command]
+pub async fn aaf_save_shoot_date(app: AppHandle, document_id: String, shoot_date: Option<String>) -> Result<AafDocument, AppError> {
+    let document = store::metadata(&store::root(&app)?, &document_id, shoot_date, None)?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+    Ok(document)
+}
+
+#[tauri::command]
+pub async fn aaf_read_recording_dates(app: AppHandle, document_id: String, job_id: String) -> Result<AafDocument, AppError> {
+    diagnostics::operation(&app, &job_id, "dates", &format!("Read recording dates · document {document_id}"), async {
+    let _job = process::JobGuard::begin(&app, &job_id)?;
+    let root = store::root(&app)?;
+    let document = store::load(&root, &document_id)?;
+    store::source_ready(&document)?;
+    let local = local_read::for_parser(&app, &job_id, std::path::Path::new(&document.source_path)).await?;
+    let mut args = vec!["inspect".into(), "--input".into(), local.to_string_lossy().into_owned()];
+    if let Some(graph) = &document.manifest.graph { args.extend(["--graph".into(), "--sequence".into(), graph.sequence_id.clone()]); }
+    let result = process::run(&app, &job_id, "inspect", "saucebunny-aaf", args).await?;
+    result.require_success("saucebunny-aaf")?;
+    let manifest: AafManifest = serde_json::from_str(&result.stdout)?;
+    validate_manifest(&manifest)?;
+    store::source_ready(&document)?;
+    if manifest.source_fingerprint != document.manifest.source_fingerprint { return Err(AppError::invalid("The AAF changed. Import it again.")); }
+    let registry = app.state::<JobRegistry>();
+    let document = store::metadata_gated(&root, &document_id, None, Some(manifest.recording_dates.unwrap_or_default()), &|commit| registry.while_active(&job_id, commit))?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+    Ok(document)
+    }).await
 }
 
 #[tauri::command]
 pub async fn aaf_prepare_audio(app: AppHandle, document_id: String, track_id: String,
     start_frame: i64, duration_frames: i64, job_id: String) -> Result<AafAudioAsset, AppError>
 {
+    diagnostics::operation(&app, &job_id, "audio", &format!("Prepare document {document_id} · track {track_id} · frames {start_frame} + {duration_frames}"), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let document = store::load(&store::root(&app)?, &document_id)?;
     audio::prepare(&app, &document, &track_id, start_frame, duration_frames, &job_id).await
+    }).await
 }
 
 #[tauri::command]
 pub async fn aaf_waveform(app: AppHandle, document_id: String, track_id: String, job_id: String,
     start_frame: Option<i64>, duration_frames: Option<i64>) -> Result<AafWaveform, AppError> {
+    diagnostics::operation(&app, &job_id, "waveform", &format!("Waveform · document {document_id} · track {track_id}"), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let document = store::load(&store::root(&app)?, &document_id)?;
     match (start_frame, duration_frames) {
-        (None, None) => peaks::waveform(&app, &document, &track_id, 0, document.manifest.duration_frames, &job_id).await,
+        (None, None) => peaks::waveform(&app, &document, &track_id, 0, document.manifest.duration_frames, true, &job_id).await,
         (Some(start), Some(duration)) => {
             if start < 0 || duration <= 0 || start.checked_add(duration).is_none_or(|end| end > document.manifest.duration_frames) {
                 return Err(AppError::invalid("Waveform interval is outside the sequence"));
             }
-            peaks::waveform(&app, &document, &track_id, start, duration, &job_id).await
+            peaks::waveform(&app, &document, &track_id, start, duration, false, &job_id).await
         },
         _ => Err(AppError::invalid("Waveform detail requires both a start and duration")),
     }
+    }).await
 }
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn aaf_transcribe_track(app: AppHandle, document_id: String, track_id: String,
     start_frame: i64, duration_frames: i64, engine: AafEngine, model_id: String,
-    language: String, fast: bool, job_id: String) -> Result<AafTrackTranscript, AppError>
+    language: String, fast: bool, speech_only: Option<bool>, job_id: String) -> Result<AafTrackTranscript, AppError>
 {
+    diagnostics::operation(&app, &job_id, "transcribe", &format!("Transcribe document {document_id} · track {track_id} · model {model_id} · frames {start_frame} + {duration_frames} · fast {fast} · speech filter {}", speech_only.unwrap_or(false)), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let document = store::load(&store::root(&app)?, &document_id)?;
-    transcribe::transcribe(&app, &document, &track_id, start_frame, duration_frames, engine, &model_id, &language, fast, &job_id).await
+    super::video_intelligence::yield_video_background(&app);
+    transcribe::transcribe(&app, &document, &track_id, start_frame, duration_frames, engine, &model_id, &language, fast, speech_only.unwrap_or(false), &job_id).await
+    }).await
+}
+
+/// Speech analysis for one track: where its mic is open, loud moments no word
+/// covers, and word boundaries inside its saved transcript's cues. Reads the
+/// waveform overview; never decodes again. With `build` false a track whose
+/// overview does not exist yet gets its words placed by length alone
+/// (`measured: false`) rather than an hours-long build nobody asked for.
+#[tauri::command]
+pub async fn aaf_speech(app: AppHandle, document_id: String, track_id: String, build: bool, job_id: String) -> Result<crate::speech::AafSpeech, AppError> {
+    diagnostics::operation(&app, &job_id, "speech", &format!("Speech analysis · document {document_id} · track {track_id} · build {build}"), async {
+    let _job = process::JobGuard::begin(&app, &job_id)?;
+    let document = store::load(&store::root(&app)?, &document_id)?;
+    let cues: Vec<crate::speech::CueInput> = document.transcripts.iter().filter(|transcript| transcript.track_id == track_id)
+        .flat_map(|transcript| transcript.cues.iter())
+        .map(|cue| crate::speech::CueInput { id: &cue.id, start_sample: cue.start_sample, end_sample: cue.end_sample, text: &cue.text })
+        .collect();
+    store::track(&document, &track_id)?;
+    let path = peaks::overview_path(&app, &document, &track_id)?;
+    if build { peaks::waveform(&app, &document, &track_id, 0, document.manifest.duration_frames, true, &job_id).await?; }
+    else if !path.is_file() { return Ok(crate::speech::unmeasured(&track_id, &cues)); }
+    let read = tauri::async_runtime::spawn_blocking(move || peaks::read_base(&path)).await
+        .map_err(|e| AppError::internal(e.to_string()))?;
+    match read {
+        Ok((pairs, hz, bucket)) => Ok(crate::speech::analyse(&track_id, &pairs, hz, bucket, &cues)),
+        // A damaged cache is only worth an error when a build was asked for.
+        Err(_) if !build => Ok(crate::speech::unmeasured(&track_id, &cues)),
+        Err(error) => Err(error),
+    }
+    }).await
+}
+
+/// Write an edit's head as a new AAF for Media Composer (`write-edit`, the
+/// sidecar's one writing command). The sidecar re-reads what it wrote and
+/// compares every frame before publishing, and never overwrites a file.
+#[tauri::command]
+pub async fn aaf_export_edit(app: AppHandle, edit_id: String, output_path: String, approach: String, job_id: String) -> Result<crate::edit_export::EditExportResult, AppError> {
+    diagnostics::operation(&app, &job_id, "export-edit", &format!("Export edit {edit_id} · {}", diagnostics::describe_path(std::path::Path::new(&output_path))), async {
+    let _job = process::JobGuard::begin(&app, &job_id)?;
+    let document = crate::commands::edits::head_document(&app, &edit_id)?;
+    let root = store::root(&app)?;
+    let mut sources = Vec::new();
+    for source in &document.sources {
+        let aaf = store::load(&root, &source.document_id)?;
+        store::source_ready(&aaf)?;
+        let graph = aaf.manifest.graph.as_ref().ok_or_else(|| AppError::invalid(format!(
+            "{} was imported before sequences could be written back. Import its AAF again, then export.", aaf.manifest.name)))?;
+        // The writer reads the source AAF the way import does: from a verified
+        // local copy with the original's fingerprint, not sector by sector
+        // over NEXIS, where a large AAF could run into the stage limit.
+        let local = local_read::for_parser(&app, &job_id, std::path::Path::new(&aaf.source_path)).await?;
+        // V1 when it has picture, else the first track that does: the same
+        // track String Outs draws, so the export carries the picture shown.
+        let picture = graph.picture_tracks.iter().find(|track| track.physical_track_number == Some(1) && !track.clips.is_empty())
+            .or_else(|| graph.picture_tracks.iter().find(|track| !track.clips.is_empty()));
+        // Group angles, so a person who is an alternate can have a track of
+        // their own that plays their mic (edit_export::build_request). Owners
+        // as String Outs names people: the mic owner label, else the track name.
+        let owner = |id: &str| aaf.labels.iter().find(|label| label.track_id == id).map(|label| label.owner_name.trim().to_string())
+            .filter(|name| !name.is_empty())
+            .or_else(|| aaf.manifest.tracks.iter().find(|track| track.id == id).map(|track| track.name.trim().to_string()))
+            .unwrap_or_else(|| id.to_string());
+        let lanes: Vec<crate::edit_export::GroupLane> = graph.lanes.iter().map(|lane| (lane.track_id.as_str(), lane.parent_track_id.as_deref(),
+            lane.branch_id.as_deref(), owner(&lane.track_id))).collect();
+        let alternates = crate::edit_export::alternates_of(&lanes);
+        sources.push(crate::edit_export::ExportSource { id: source.id.clone(), aaf_path: local.to_string_lossy().into_owned(),
+            sequence_id: graph.sequence_id.clone(), picture_slot: picture.map(|track| track.slot_id), alternates });
+    }
+    let request = crate::edit_export::build_request(&document, &sources, &approach, &output_path)?;
+    let cache = app.path().app_cache_dir().map_err(|e| AppError::internal(format!("app_cache_dir: {e}")))?;
+    let scratch = crate::commands::scratch_dir(&cache);
+    std::fs::create_dir_all(&scratch)?;
+    let request_path = scratch.join(format!("write-edit-{job_id}.json"));
+    std::fs::write(&request_path, serde_json::to_vec(&request)?)?;
+    process::progress(&app, &job_id, None, "writing", 0, 0);
+    let result = process::run(&app, &job_id, "write-edit", "saucebunny-aaf",
+        vec!["write-edit".into(), "--request".into(), request_path.to_string_lossy().into_owned()]).await;
+    let _ = std::fs::remove_file(&request_path);
+    let result = result?;
+    result.require_success("saucebunny-aaf")?;
+    Ok(serde_json::from_str(&result.stdout)?)
+    }).await
 }
 
 #[cfg(test)]
@@ -107,7 +292,7 @@ mod native_reader_tests {
         let manifest: AafManifest = serde_json::from_slice(&result.stdout).unwrap();
         validate_manifest(&manifest).unwrap();
         let metadata = std::fs::metadata(&source).unwrap();
-        store::source_ready(&AafDocument { schema_version: 1, id: "f".repeat(64), source_path: source.clone(),
+        store::source_ready(&AafDocument { schema_version: 1, shoot_date_override: None, id: "f".repeat(64), source_path: source.clone(),
             source_size: metadata.len(), source_modified_ms: store::modified_ms(&metadata),
             manifest: manifest.clone(), labels: Vec::new(), transcripts: Vec::new() }).unwrap();
         let track = manifest.tracks.first().expect("test must inspect at least one track");

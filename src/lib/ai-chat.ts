@@ -49,6 +49,12 @@ export async function streamChat(
       // task, not of the server. It is generous by design: it exists to stop a
       // runaway, not to trim a good answer.
       max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+      // No thinking. A hybrid model (Qwen3.8 27B's template has an
+      // enable_thinking switch) reasons first and streams that as
+      // reasoning_content, which nothing here reads: on a long transcript the
+      // reasoning used the whole answer budget and Ask showed "No answer."
+      // after five minutes. Templates without the switch ignore it.
+      chat_template_kwargs: { enable_thinking: false },
     }),
     signal,
   });

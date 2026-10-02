@@ -47,6 +47,10 @@ Collections/
   collections.json         web-source collections (virtual, keyed by URL)
 Frames/
   <source>_<timecode>.jpg  grabbed stills; the FILENAME is the only index
+Edits/
+  <slug>-<id8>.json        Transcript Editor edits: the CURRENT state of each,
+                           rewritten atomically on every step. A readable copy;
+                           the history lives in app_data_dir() (below)
 ```
 
 `~/Movies/Sauce Bunny/` is the default export folder. The app writes finished
@@ -59,6 +63,25 @@ clips there and never reads them back; it is output, not a store.
 `clear-media-cache-on-quit` — a zero-byte marker file that is the *pref* for
 clear-on-quit, deliberately a file because it is read at shutdown after the
 webview and its `localStorage` are already gone.
+
+`timelines.sqlite` (+ `-wal`, `-shm`) is the Transcript Editor's undo log:
+every state of every edit, as a tree, so undone branches survive and history
+survives a quit (`src-tauri/src/edit_log.rs`). Each state is an RFC 6902 patch
+from its parent, with the whole document every 100 steps. It is here and not
+in Documents because a live SQLite file's side files are exactly what iCloud
+eviction breaks; the readable copy in `Documents/Sauce Bunny/Edits/` is the
+part a person backs up. Schema-versioned: a newer log is refused, not
+rewritten. This IS the user's work, unlike the rest of this folder, so the
+Edits copy exists to keep that true when app data is wiped.
+
+Two optional fields carry the record side's patching (2026-09-30), both
+absent in every string out saved before, which therefore opens exactly as it
+was: a lane's `featured` says whether that person is patched to a record
+track (`false`: listed, on no track; `true` or absent: patched, numbered
+top-down in lane order), and a source clip's `tracks` names the lanes it
+plays on (absent: every patched lane). Neither needed a schema bump, since
+an older build reading a newer file ignores neither in a way that loses
+work: it would play a one-person clip on every track, not drop it.
 
 ### `app_cache_dir()` — three named directories
 
@@ -88,6 +111,38 @@ move file by file and shed the prefix the directory now carries; loose scratch
 files at the root are left for the sweep's legacy arm, because some may be in
 flight from the previous run and all of them regenerate.
 
+### Multitrack documents and library projection (September 21, 2026)
+
+AAF reader manifests remain schema 1. Durable AAF documents now use schema 2;
+schema-1 documents load without losing labels or completed/empty transcripts,
+and migrate on the next atomic save. Future versions remain read-only/refused.
+The native document is authoritative: the Transcripts `Multitrack` section is
+a `kind: "multitrack"` projection of its ID and source filename, not an SRT
+alias or a second copy of cue data. Native change events are sent only after
+successful writes, and library reopening reconciles from disk. Historical
+duplicates remain separate, with disambiguated names. An unchanged source path
+and fingerprint reopen the most complete existing document, then the newest
+when completeness ties; no old result is merged or removed.
+
+`manifest.recording_dates` stores source IDs, ISO dates, and provenance
+(`bwf-origination-date` or `explicit-recording-date`). Missing legacy metadata
+can be inspected lazily. Finder timestamps and AAF composition creation dates
+are not recording dates. `shoot_date_override` is separate: absent means source
+metadata, an empty string explicitly clears the displayed date. Mixed dates
+are retained. Date, label, import and transcript writes share the document
+writer lock and always start from the latest saved document.
+
+Cast files use schema 2 and retain the existing merge/save and future-version
+guards. Members optionally carry manually entered `gender` and `markerColor`.
+Document labels carry snapshot `gender`/`marker_color` values, not live links.
+Changing a saved cast does not rewrite prior documents. Avid output uses each
+cue's original physical audio lane and label's marker color, including Pink.
+
+TXT/PDF output is generated from the latest committed document after Save As.
+PDF uses script-disabled, navigation-restricted WebKit printing to a private
+staging file, checks the PDF header, then atomically writes the chosen path.
+Print is a separate user-confirmed workflow. Neither export changes the AAF.
+
 ### Keychain — the only secrets
 
 Service `saucebunny`, accounts: `anthropic`, `openai` (cloud-AI API keys) and
@@ -97,15 +152,21 @@ key never enters the webview. Guarded by `secret-persistence-contract.test.ts`.
 A legacy TURN password found in `localStorage` is migrated into the Keychain
 and the `localStorage` copy blanked (`App.tsx:296`).
 
-### `localStorage` — 55 literal keys plus five key families
+### `localStorage` — literal keys and source-scoped families
 
 All namespaced `saucebunny.`, guarded by `storage-keys-contract.test.ts`
 (nine grandfathered `cp-` keys remain). `migrate-storage.ts` copies any
 surviving `clippull.*` key across and sweeps the retired `saucebunny.clips.*`.
 
 Key families (dynamic suffix): `speakerNames.<srtPath>`, `ai.model.<provider>`,
-`chapters.<key>`, `noticeDismissed.<path>`, `timingFixDismissed.<path>`, and
+`chapters.<key>`, `cutMarkers.<sourceKey>`, `noticeDismissed.<path>`, `timingFixDismissed.<path>`, and
 the legacy `review.<sourceKey>` docs that `reviews.migrated` records as swept.
+
+Cut markers (September 21) are explicitly adopted, source-relative shot changes,
+stored separately from editorial chapters. They can be re-adopted from detection
+evidence, but share chapters' WebView storage/eviction limitation. Writes verify
+read-back and notify the timeline only on success; no chapter migration or
+automatic deletion is performed.
 
 Not all of these are preferences. Sorted by what losing them would cost:
 
@@ -115,7 +176,11 @@ Not all of these are preferences. Sorted by what losing them would cost:
 - **Identity**: `installId`, `review.author`, `review.authorColor`.
 - **Genuine preference**: layout, widths, open/closed, `keybindings.v1`,
   `playbackRate`, `streamRungPref`, `streamKeep`, `mediaDevices`, the
-  `*Dismissed*` flags, `welcomed`, `onboarding`.
+  `*Dismissed*` flags, `welcomed`, `onboarding`, and String Outs' open tabs,
+  last open string out and Ask model (`stringOuts.tabs`, `editor.lastEdit`,
+  `stringOuts.model`), and the string out Open in String Outs made for each
+  AAF Audio sequence (`stringOuts.forSequence`, so asking again reuses it). A tab only names a string out; closing one, or losing
+  the key, never touches the edit, which lives in `timelines.sqlite`.
 - **Cache**: `panelSnapshot` (the panel's synchronous boot seed),
   `lastUpdateCheck`, `ytdlpVersion`, `diarizerModelsReady`.
 

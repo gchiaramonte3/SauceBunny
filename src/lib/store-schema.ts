@@ -36,7 +36,7 @@ export const STORE_SCHEMA_VERSION = 1;
  * all the existing tolerant-parse paths and none of them should change
  * behaviour. Only a number strictly greater than ours locks a store.
  */
-export function futureVersionIn(text: unknown): number | null {
+export function futureVersionIn(text: unknown, supportedVersion = STORE_SCHEMA_VERSION): number | null {
   if (typeof text !== "string" || !text) return null;
   let parsed: unknown;
   try {
@@ -47,7 +47,7 @@ export function futureVersionIn(text: unknown): number | null {
   if (!parsed || typeof parsed !== "object") return null;
   const v = (parsed as { version?: unknown }).version;
   if (typeof v !== "number" || !Number.isFinite(v)) return null;
-  return v > STORE_SCHEMA_VERSION ? v : null;
+  return v > supportedVersion ? v : null;
 }
 
 export type FutureStoreVersion = {
@@ -83,18 +83,18 @@ export function onFutureStoreVersion(cb: (p: FutureStoreVersion) => void): () =>
 }
 
 /** The sentence the user sees. Also the value stores keep as their lock. */
-export function futureVersionMessage(label: string, found: number): string {
+export function futureVersionMessage(label: string, found: number, supportedVersion = STORE_SCHEMA_VERSION): string {
   return (
     `Your ${label} file was written by a newer Sauce Bunny (format ${found}, ` +
-    `this one reads ${STORE_SCHEMA_VERSION}). Nothing will be saved to it, so ` +
+    `this one reads ${supportedVersion}). Nothing will be saved to it, so ` +
     `the newer copy stays intact. Update Sauce Bunny to edit ${label} again.`
   );
 }
 
 /** Announce a locked store. Stores call this once, when they lock. */
-export function reportFutureVersion(label: string, found: number): void {
+export function reportFutureVersion(label: string, found: number, supportedVersion = STORE_SCHEMA_VERSION): void {
   if (raised.has(label)) return;
-  const message = futureVersionMessage(label, found);
+  const message = futureVersionMessage(label, found, supportedVersion);
   const p = { label, found, message };
   raised.set(label, p);
   console.warn(`store-schema: ${message}`);

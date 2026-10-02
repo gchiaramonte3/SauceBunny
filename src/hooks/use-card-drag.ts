@@ -74,6 +74,9 @@ export function useCardDrag({
   }, []);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
+    // A cancelled/reparented drag may produce no click at all. Its guard
+    // must never consume the first click of a new, independent gesture.
+    swallowClickRef.current = false;
     if (e.button !== 0) return;
     const card = e.target instanceof Element ? e.target.closest(itemSelector) : null;
     if (!card) return; // Open space: the band's press, not ours.

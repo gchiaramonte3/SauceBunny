@@ -126,7 +126,7 @@ export type CommandDeps = {
    * not accept the argument. `settings-pointer-contract`'s sibling below
    * (keybindings vs commands) is what keeps the two in step now.
    */
-  onNavigateView: (view: "home" | "library" | "clip" | "coreview" | "reader" | "multitrack") => void;
+  onNavigateView: (view: "home" | "library" | "clip" | "coreview" | "reader" | "multitrack" | "editor") => void;
   /** Opens the ⌘/ shortcut cheat-sheet (ShortcutSheet). */
   onShowShortcuts: () => void;
   // ── scoped undo/redo (lib/undo.ts) ──
@@ -319,11 +319,16 @@ export function buildCommands(d: CommandDeps): Command[] {
       keywords: ["transcript", "transcripts", "reader", "read", "srt", "text", "nav"],
       disabled: d.activeView === "reader",
       run: () => d.onNavigateView("reader") },
-    { id: "view.multitrack", label: "Go to Multitrack", group: "View",
+    { id: "view.multitrack", label: "Go to AAF Audio", group: "View",
       hotkey: "⌘6", description: "Read AAF tracks and transcribe each microphone",
       keywords: ["aaf", "avid", "audio", "tracks", "transcribe", "nav"],
       disabled: d.activeView === "multitrack",
       run: () => d.onNavigateView("multitrack") },
+    { id: "view.editor", label: "Go to String Outs", group: "View",
+      hotkey: "⌘7", description: "Cut AAF Audio sequences by their words, make string outs and export an AAF",
+      keywords: ["edit", "editor", "stringout", "string-out", "cut", "aaf", "avid", "export", "nav"],
+      disabled: d.activeView === "editor",
+      run: () => d.onNavigateView("editor") },
     { id: "view.captions", label: d.captionsOn ? "Hide captions" : "Show captions",
       group: "View", disabled: !d.hasSource,
       run: () => d.setCaptionsOn((p) => !p) },

@@ -5,6 +5,7 @@ import { assetUrl } from "../lib/asset-url";
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle, SeekResult } from "./player-handle";
 import { confirmDecodedFrame } from "../lib/confirm-decoded-frame";
+import { nativeSeekTarget } from "../lib/native-seek-target";
 import { contiguousBufferAhead, contiguousRange, observeDecodedFrame, observedRequiredAudio, type DecodedObservation } from "../lib/presentation-readiness";
 
 type Props = {
@@ -128,7 +129,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     confirmedFrameRef.current = null;
     if (!el) return Promise.resolve({ requestedSeconds: target, presentedSeconds: target, status: "unavailable" });
     onTimeUpdateRef.current?.(target);
-    try { el.currentTime = target; }
+    try { el.currentTime = nativeSeekTarget(target, el.duration); }
     catch { return Promise.resolve({ requestedSeconds: target, presentedSeconds: el.currentTime || 0, status: "unavailable" }); }
 
     return new Promise<SeekResult>((resolve) => {

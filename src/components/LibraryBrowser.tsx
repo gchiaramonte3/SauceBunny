@@ -1,9 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
-import { newFolderPath } from "../lib/library-folder";
+import { diskFolderTargets, mergeFolderBranches, newFolderPath } from "../lib/library-folder";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { LibraryTree } from "./LibraryTree";
+import { LibraryProjectSidebar } from "./LibraryProjectSidebar";
+import { LibraryProjectPane } from "./LibraryProjectPane";
+import { LibraryProjectFolderDialog } from "./LibraryProjectFolderDialog";
+import { LibraryProjectItemsDialog } from "./LibraryProjectItemsDialog";
+import { LibraryOrganizationMenu } from "./LibraryOrganizationMenu";
+import { libraryOrganization } from "../lib/library-organization-store";
+import { addFolderAssets, type LibraryAsset, type ProjectFolder } from "../lib/library-organization";
+import { libraryAsset } from "../lib/library-project-catalog";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
+import { LibraryVideoSearch } from "./LibraryVideoSearch";
 import { LibraryMoveDialog } from "./LibraryMoveDialog";
 import { useCardDrag } from "../hooks/use-card-drag";
 import { LibraryBrowserPane } from "./LibraryBrowserPane";
@@ -74,9 +83,13 @@ type Props = {
   /** Increment to open Library's existing session history from Review. */
   sessionsRequestTick?: number;
   onOpenLocalPath: (path: string) => void;
+  onOpenVideoMoment?: (path: string, seconds: number) => void;
+  onVideoSettings?: () => void;
   /** "Review this clip": open the source and land in Review. */
   onReviewLocalPath?: (path: string) => void;
   onOpenTranscriptHistory: (entry: TranscriptHistoryEntry) => void;
+  onOpenMultitrack: (id: string) => void;
+  transcriptLibrary: string;
   /** Transcribe a set of files in the background. Absent in contexts with no
    *  transcription settings resolved (the panel window). */
   onBatchTranscribe?: (files: { path: string; name: string }[]) => void;
@@ -106,10 +119,11 @@ const BROWSE_CAP = 300;
 export function LibraryBrowser({
   roots, scans, scanning, addFolder, removeRoot, onOpenWebUrl, rescanAll, requestThumb, invalidateThumb,
   posterVersions, bumpPoster, resetPoster, selection, selectionTick, sessionsRequestTick = 0,
-  onOpenLocalPath, onReviewLocalPath, onOpenTranscriptHistory,
+  onOpenLocalPath, onReviewLocalPath, onOpenTranscriptHistory, onOpenMultitrack, transcriptLibrary, onOpenVideoMoment, onVideoSettings,
   onBatchTranscribe, batchLine, onBatchCancel,
 }: Props) {
   const [selected, setSelected] = useState<LibraryCrumb[] | null>(selection);
+  const [videoSearchOpen, setVideoSearchOpen] = useState(false);
   /** The cached-web shelf replaces the file pane when chosen. Separate state
    *  rather than a third value of `selected`, because every folder verb below
    *  is typed against a crumb chain and would need widening for a view that
@@ -138,6 +152,20 @@ export function LibraryBrowser({
   const [quickLook, setQuickLook] = useState<LibraryItem | null>(null);
   const [pickerPath, setPickerPath] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(true);
+  const organization = useSyncExternalStore(libraryOrganization.subscribe, libraryOrganization.getSnapshot);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [editingProject, setEditingProject] = useState<ProjectFolder | null>(null);
+  const [filingAssets, setFilingAssets] = useState<LibraryAsset[] | null>(null);
+  const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
+  const [page, setPage] = useState(0);
+  const [projectDrop, setProjectDrop] = useState<string | null>(null);
+  useEffect(() => { void libraryOrganization.ensure(); }, []);
+  const selectProject = (id: string) => { setProjectId(id); setShelf(null); setDetailItem(null); setSel(EMPTY_SELECTION); };
+  const newProject = (parentId: string | null, smart = false) => setEditingProject({ id: crypto.randomUUID(), name: "", parentId, assetIds: [], rule: smart ? { query: "", kind: "all", tag: "", status: "any" } : null });
+  const favoriteDisk = (path: string) => { void libraryOrganization.edit("change favorite", (data) => {
+    const old = data.favorites.find((f) => f.kind === "disk" && pathKey(f.target) === pathKey(path));
+    return { ...data, favorites: old ? data.favorites.filter((f) => f.id !== old.id) : [...data.favorites, { id: crypto.randomUUID(), kind: "disk", target: path, name: path.split("/").pop() || path }] };
+  }); };
 
   useEffect(() => { saveJson(BROWSER_KEY, prefs); }, [prefs]);
   const patchPrefs = useCallback((p: Partial<BrowserPrefs>) => setPrefs((prev) => ({ ...prev, ...p })), []);
@@ -168,6 +196,8 @@ export function LibraryBrowser({
   // Handoff from Home: apply the requested selection and reset the scoped view.
   useEffect(() => {
     setSelected(selection);
+    setProjectId(null);
+    setShelf(null);
     setDetailItem(null);
     setSel(EMPTY_SELECTION);
     setQuery("");
@@ -179,6 +209,7 @@ export function LibraryBrowser({
   useEffect(() => {
     if (!sessionsRequestTick) return;
     setShelf("sessions");
+    setProjectId(null);
     setDetailItem(null);
     setSel(EMPTY_SELECTION);
     setQuery("");
@@ -192,28 +223,51 @@ export function LibraryBrowser({
     return () => window.clearTimeout(id);
   }, [query]);
 
-  const trees = useMemo<LibraryFolder[]>(
+  const scannedTrees = useMemo<LibraryFolder[]>(
     () => roots
       .map((r) => scans[r])
       .filter((s): s is Extract<RootScan, { status: "ok" }> => s?.status === "ok")
       .map((s) => s.tree),
     [roots, scans],
   );
+  const [branches, setBranches] = useState<Map<string, LibraryFolder>>(new Map());
+  const [folderLoading, setFolderLoading] = useState<Set<string>>(new Set());
+  const [folderErrors, setFolderErrors] = useState<Map<string, string>>(new Map());
+  const folderRequests = useRef(new Set<string>()), scanGeneration = useRef(scans);
+  scanGeneration.current = scans;
+  useEffect(() => { setBranches(new Map()); setFolderErrors(new Map()); setFolderLoading(new Set()); folderRequests.current.clear(); }, [scans]);
+  const loadFolder = useCallback(async (path: string) => {
+    const key = pathKey(path), generation = scans;
+    if (folderRequests.current.has(key)) return;
+    folderRequests.current.add(key); setFolderLoading((old) => new Set(old).add(key));
+    setFolderErrors((old) => { const next = new Map(old); next.delete(key); return next; });
+    try {
+      const branch = await invoke<LibraryFolder>("scan_library_folder", { path, maxDepth: 1 });
+      if (scanGeneration.current === generation) setBranches((old) => new Map(old).set(key, branch));
+    } catch (cause) {
+      if (scanGeneration.current === generation) setFolderErrors((old) => new Map(old).set(key, `${path}: ${formatError(cause)}`));
+    } finally {
+      if (scanGeneration.current === generation) { folderRequests.current.delete(key); setFolderLoading((old) => { const next = new Set(old); next.delete(key); return next; }); }
+    }
+  }, [scans]);
+  const trees = useMemo(() => {
+    const merged = mergeFolderBranches(scannedTrees, branches);
+    const selectedRoot = selected?.[0]?.path;
+    const extra = selectedRoot && !findLibraryFolder(merged, selectedRoot) ? branches.get(pathKey(selectedRoot)) : null;
+    return extra ? [...merged, ...mergeFolderBranches([extra], branches)] : merged;
+  }, [scannedTrees, branches, selected]);
   /**
    * Make a folder inside the folder being browsed.
    *
-   * OFFERED ONLY INSIDE A FOLDER, and that is the honest behaviour rather
-   * than a limitation: "All" is a union of every library root, so there is
-   * no single directory a new folder would belong to and no way to ask
-   * without inventing one. Pick a root or a folder first and the control
-   * appears.
+   * At All, the control requires an explicit destination. Inside a folder,
+   * the current location is the default. Neither creates a Library root.
    *
    * ensure_dir_exists already existed and is the whole backend need - this
    * creates an empty directory and nothing else. It is emphatically NOT the
-   * move gesture, which would relocate real footage and has no undo.
+   * move gesture, which relocates original footage.
    */
-  const createLibraryFolder = useCallback(async (name: string): Promise<string | null> => {
-    const target = newFolderPath(selected?.[selected.length - 1]?.path ?? "", name);
+  const createLibraryFolder = useCallback(async (name: string, destination: string): Promise<string | null> => {
+    const target = newFolderPath(destination || selected?.[selected.length - 1]?.path || "", name);
     if ("error" in target) return target.error;
     try {
       await invoke("ensure_dir_exists", { path: target.path });
@@ -245,12 +299,15 @@ export function LibraryBrowser({
       : ".cp-lib-lrow:not(.cp-lib-lrow-folder)",
     // Three shapes, one contract: the grid's folder tile, the list's folder
     // row, and any tree row that names a real directory.
-    targetSelector: ".cp-lib-foldercard, .cp-lib-lrow-folder, .cp-lib-tree-row[data-drop], .cp-lib-bcrumbs button[data-drop]",
+    targetSelector: ".cp-lib-foldercard, .cp-lib-lrow-folder, .cp-lib-tree-row[data-drop], .cp-lib-bcrumbs button[data-drop], [data-drop^='project:']",
     targetAttr: "data-drop",
     // Finder's rule, and the one the batch verbs already use: a file inside
     // the selection drags the whole selection, one outside it drags itself.
     pathsFor: (path) => (sel.selected.has(path) ? selectedPaths : [path]),
-    onDrop: (dest, paths, { copy }) => { void moveToFolder(dest, paths, { copy }); },
+    onDrop: (dest, paths, { copy }) => {
+      if (dest.startsWith("project:")) void libraryOrganization.edit("add folder references", (data) => addFolderAssets(data, dest.slice(8), paths.map((path) => libraryAsset("file", path))));
+      else void moveToFolder(dest, paths, { copy });
+    },
   });
 
   /**
@@ -320,7 +377,7 @@ export function LibraryBrowser({
      * ONE entry for the whole batch: dragging nine files onto a folder is one
      * act, and nine separate undos would be nine cmd+Zs for it.
      */
-    if (done.length === 0) return;
+    if (done.length === 0) return failures.length ? failures.join(" · ") : null;
     const label = done.length === 1
       ? `move ${done[0].from.split("/").pop() ?? "file"}`
       : `move ${done.length} files`;
@@ -350,34 +407,8 @@ export function LibraryBrowser({
       undo: () => { void shuttle(done, true); },
       redo: () => { void shuttle(done, false); },
     });
+    return failures.length ? `${moved} moved. ${failures.join(" · ")}` : null;
   }, [rescanAll]);
-
-  /**
-   * Make a subfolder and file the selection into it, in one gesture.
-   *
-   * The move dialog used to say "This folder has no subfolders yet. Make one
-   * with New folder first" and then offer no way to do that: you had to cancel,
-   * find the bar, make the folder, re-select the files and start again. A
-   * dialog that names the thing you need and cannot give it to you is a dead
-   * end wearing an instruction's clothes.
-   *
-   * Both halves live HERE rather than in the dialog so the destination path is
-   * computed once, by the same rule the bar uses.
-   */
-  const createFolderAndMove = useCallback(async (
-    name: string,
-    paths: readonly string[],
-  ): Promise<string | null> => {
-    const target = newFolderPath(selected?.[selected.length - 1]?.path ?? "", name);
-    if ("error" in target) return target.error;
-    try {
-      await invoke("ensure_dir_exists", { path: target.path });
-    } catch (e) {
-      return formatError(e);
-    }
-    await moveToFolder(target.path, paths, { copy: false });
-    return null;
-  }, [selected, moveToFolder]);
 
   /**
    * Move a file to the Finder Trash.
@@ -448,18 +479,13 @@ export function LibraryBrowser({
     [trees, selected],
   );
 
-  // Self-heal a stale selection (root removed / renamed / errored), waiting out
-  // in-flight scans so a rescan doesn't bounce a valid selection to "All".
+  // Missing/offline locations stay selected, with an explicit failure and
+  // retry. Do not silently replace a favorite with unrelated "All" media.
   useEffect(() => {
     if (!selected) return;
-    const rootPath = selected[0]?.path ?? "";
-    const rootScan = scans[rootPath];
-    if (!rootScan || rootScan.status === "loading") {
-      if (!roots.includes(rootPath)) setSelected(null);
-      return;
-    }
-    if (rootScan.status === "error" || !findLibraryFolder(trees, selected[selected.length - 1].path)) setSelected(null);
-  }, [selected, scans, roots, trees]);
+    const path = selected[selected.length - 1].path;
+    if ((!selectedNode || selectedNode.deeper) && !folderErrors.has(pathKey(path)) && !folderLoading.has(pathKey(path))) void loadFolder(path);
+  }, [selected, selectedNode, folderErrors, folderLoading, loadFolder]);
 
   // Drop the detail selection if its file vanished from the trees (rescan/remove).
   const allPaths = useMemo(() => {
@@ -552,7 +578,9 @@ export function LibraryBrowser({
     return cancel;
   }, [over, folders]);
 
-  const shown = useMemo(() => items.slice(0, BROWSE_CAP), [items]);
+  useEffect(() => { setPage(0); }, [selected, needle, prefs.sort, prefs.dir, prefs.kind]);
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(items.length / BROWSE_CAP) - 1));
+  const shown = useMemo(() => items.slice(currentPage * BROWSE_CAP, (currentPage + 1) * BROWSE_CAP), [items, currentPage]);
   // THE PATHS THE PANE ACTUALLY DREW, not every path it knows about.
   //
   // This was fed from the uncapped `items`, so in a folder of 400 files ⌘A
@@ -571,6 +599,10 @@ export function LibraryBrowser({
   // batch action from ever running over something the user cannot see.
   useEffect(() => { setSel((cur) => pruneSelection(cur, itemPaths)); }, [itemPaths]);
   const selectedPaths = useMemo(() => selectedInOrder(sel, itemPaths), [sel, itemPaths]);
+  const videoScopePaths = useMemo(() => {
+    const chosen = new Set(selectedPaths);
+    return items.filter((item) => item.kind === "video" && (chosen.size ? chosen.has(item.path) : selected !== null)).map((item) => item.path);
+  }, [items, selectedPaths, selected]);
   // Real Finder tags for what is listed. A colour set here lands on the file's
   // own xattr, so it shows in Finder too, and folders already tagged in Finder
   // arrive wearing their colour.
@@ -592,7 +624,6 @@ export function LibraryBrowser({
   // with a "showing N of M" note (searchLibrary in lib/library.ts); this is the
   // same answer, in the constitution's spirit — a cap and an honest count, not
   // a virtualization dependency.
-  const overflow = items.length - shown.length;
   // Finder's status bar. Counts the whole filtered set, not the capped slice,
   // so the number answers "how much is in here" rather than "how much did we
   // draw".
@@ -610,24 +641,12 @@ export function LibraryBrowser({
 
   // No folders means no file pane yet, but review history does not depend on
   // a scanned folder. A request from Review must still reach that shelf.
-  if (roots.length === 0 && shelf === null) {
-    return (
-      <main className="cp-lib-browse" aria-label="Library">
-        <div className="cp-lib-browse-zero">
-          <p>Add a folder to build your library.</p>
-          <button type="button" className="btn btn-primary" onClick={() => void addFolder()}>
-            Add folder
-          </button>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main
       className="cp-lib-browse"
       aria-label="Library"
       onKeyDown={(e) => {
+        if (projectId) return;
         // ⌘A selects every file ON SCREEN — the filtered, sorted list, not the
         // whole library. Selecting things the user has filtered away is how a
         // batch action ends up touching files they cannot see.
@@ -675,21 +694,28 @@ export function LibraryBrowser({
         <LibraryTree
           trees={trees}
           selection={selected}
-          onSelect={(chain) => { setSelected(chain); setDetailItem(null); setShelf(null); }}
+          onSelect={(chain) => { setSelected(chain); setDetailItem(null); setShelf(null); setProjectId(null); }}
           kind={prefs.kind}
           onKind={(kind) => patchPrefs({ kind })}
           onCollapse={() => setTreeOpen(false)}
           addFolder={addFolder}
+          onAddMenu={(element) => { const rect = element.getBoundingClientRect(); setAddMenu({ x: rect.left, y: rect.bottom }); }}
+          projectSelected={!!projectId}
+          projectSidebar={<LibraryProjectSidebar data={organization.data} selected={projectId} onSelect={selectProject} onDisk={(path) => { setProjectId(null); setShelf(null); setSelected([{ path, name: path.split("/").pop() || path }]); }} onEdit={setEditingProject} onNew={newProject} busy={!organization.ready || organization.busy} dropOver={cardDrag.drag?.over ?? projectDrop} />}
+          onFavoriteDisk={favoriteDisk}
+          onLoadFolder={(path) => { void loadFolder(path); }}
+          favoritePaths={organization.data.favorites.filter((f) => f.kind === "disk").map((f) => f.target)}
           rescanAll={rescanAll}
           scanning={scanning}
           removeRoot={removeRoot}
           shelf={shelf}
-          onSelectShelf={(next) => { setShelf(next); setDetailItem(null); }}
+          onSelectShelf={(next) => { setShelf(next); setDetailItem(null); setProjectId(null); }}
           dropOver={cardDrag.drag?.over ?? null}
         />
       )}
       <div className="cp-lib-main">
-        {shelf === "sessions" ? (
+        {organization.error && <div className="cp-project-error" role="alert">Project folders: {organization.error}<button className="btn btn-ghost" disabled={organization.busy} onClick={() => void libraryOrganization.load()}>Reload saved folders</button></div>}
+        {projectId ? <LibraryProjectPane data={organization.data} selected={projectId} trees={trees} transcriptLibrary={transcriptLibrary} busy={!organization.ready || organization.busy} treeOpen={treeOpen} onShowTree={() => setTreeOpen(true)} onSelect={selectProject} onEdit={setEditingProject} onNew={newProject} onOpenLocal={onOpenLocalPath} onOpenWeb={onOpenWebUrl} onOpenTranscript={onOpenTranscriptHistory} onOpenMultitrack={onOpenMultitrack} onDropOver={setProjectDrop} /> : shelf === "sessions" ? (
           <ReviewSessionsPane
             treeOpen={treeOpen}
             onShowTree={() => setTreeOpen(true)}
@@ -714,7 +740,11 @@ export function LibraryBrowser({
         ) : (
         <>
         <LibraryBrowserBar
-          onNewFolder={selected ? createLibraryFolder : undefined}
+          tools={onOpenVideoMoment && onVideoSettings ? <button type="button" className="btn btn-ghost" aria-expanded={videoSearchOpen} onClick={() => setVideoSearchOpen(!videoSearchOpen)}>Video Intelligence</button> : undefined}
+          onNewFolder={createLibraryFolder}
+          newFolderLabel="New disk folder"
+          askNewFolderDestination={!selected}
+          newFolderTargets={selected ? [{ path: selected[selected.length - 1].path, label: selected[selected.length - 1].path }] : diskFolderTargets(trees)}
           chain={selected}
           onCrumb={(chain) => { setSelected(chain); setDetailItem(null); }}
           dropOver={cardDrag.drag?.over ?? null}
@@ -727,17 +757,22 @@ export function LibraryBrowser({
           treeOpen={treeOpen}
           onShowTree={() => setTreeOpen(true)}
         />
+        {videoSearchOpen && onOpenVideoMoment && onVideoSettings && <LibraryVideoSearch paths={videoScopePaths}
+          scopeLabel={selectedPaths.length ? `${videoScopePaths.length} selected ${videoScopePaths.length === 1 ? "video" : "videos"}` : selected ? selected[selected.length - 1].name : "Select videos to begin"}
+          onOpenMoment={onOpenVideoMoment} onSettings={onVideoSettings} />}
         {movingPaths && (
           <LibraryMoveDialog
-            onCreateFolder={selected ? createFolderAndMove : undefined}
+            initialPath={selected?.[selected.length - 1].path}
             paths={movingPaths}
             // The SAME destinations the drag offers, so the two routes cannot
             // disagree about where a file can go.
-            folders={folders}
-            onMove={(dest, paths) => { void moveToFolder(dest, paths); }}
+            folders={trees}
+            onMove={moveToFolder}
             onClose={() => setMovingPaths(null)}
           />
         )}
+          {folderLoading.size > 0 && <p className="cp-project-help" role="status">Loading folder contents…</p>}
+          {[...folderErrors].map(([key, message]) => <p className="cp-project-error" role="alert" key={key}>{message}<button className="btn btn-ghost" onClick={() => void loadFolder(key)}>Retry folder</button></p>)}
         <div className="cp-lib-browse-body">
           {/* A refused move has to SAY so. Dropping onto a folder that already
               holds that name fails per file, and a drop that silently moved
@@ -836,6 +871,7 @@ export function LibraryBrowser({
               setMovingPaths(sel.selected.has(path) && sel.selected.size > 1
                 ? selectedPaths : [path]);
             }}
+            onRequestProject={(path) => setFilingAssets((sel.selected.has(path) ? selectedPaths : [path]).map((p) => libraryAsset("file", p)))}
             onMarquee={(paths, mods) => {
               // The band is computed against the selection as it was when the
               // drag STARTED, so sweeping back and forth keeps answering the
@@ -871,12 +907,19 @@ export function LibraryBrowser({
           <div className="cp-lib-statusbar">
             {items.length} item{items.length === 1 ? "" : "s"}
             {totalBytes > 0 ? ` · ${formatBytes(totalBytes)}` : ""}
-            {overflow > 0 ? ` · showing ${shown.length}, ${overflow} more not shown` : ""}
+            {items.length > BROWSE_CAP && <div className="cp-project-pages"><button className="btn btn-ghost" disabled={!currentPage} onClick={() => { setPage(currentPage - 1); closeDetail(); }}>Previous page</button><span>Page {currentPage + 1} of {Math.ceil(items.length / BROWSE_CAP)}</span><button className="btn btn-ghost" disabled={(currentPage + 1) * BROWSE_CAP >= items.length} onClick={() => { setPage(currentPage + 1); closeDetail(); }}>Next page</button></div>}
           </div>
         )}
         </>
         )}
       </div>
+      {addMenu && <LibraryOrganizationMenu anchor={addMenu} onClose={() => setAddMenu(null)} actions={[
+        { label: "New in-app folder…", disabled: !organization.ready || organization.busy, run: () => newProject(null) },
+        { label: "New smart folder…", disabled: !organization.ready || organization.busy, run: () => newProject(null, true) },
+        { label: "Add folder from disk…", run: () => { void addFolder(); } },
+      ]} />}
+      {editingProject && <LibraryProjectFolderDialog key={editingProject.id} folder={editingProject} data={organization.data} onClose={() => setEditingProject(null)} onSaved={selectProject} />}
+      {filingAssets && <LibraryProjectItemsDialog data={organization.data} initialAssets={filingAssets} folderId={null} onClose={() => setFilingAssets(null)} />}
 
       {quickLook && (
         <LibraryQuickLook

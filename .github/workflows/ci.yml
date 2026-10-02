@@ -46,7 +46,11 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      # test_mxf generates real OP-Atom/OP1a fixtures with ffmpeg. The bundled
+      # sidecar is gitignored, so this job has none; the test falls back to PATH.
+      - run: brew install ffmpeg
       - run: npm run test:aaf
+      - run: npm run test:video
       # CLAUDE.md's dependency rule allows permissive and weak copyleft and
       # rules out GPL/AGPL, because strong copyleft would reach the app's own
       # MIT source. That rule was written down and nothing checked it: a
@@ -79,6 +83,9 @@ jobs:
       - run: npm ci
       - run: cargo check
         working-directory: src-tauri
+      # linked.rs generates WAV/MXF fixtures with ffmpeg; the stubs above are
+      # empty, so the test falls back to the one on PATH.
+      - run: brew install ffmpeg
       # Unit tests (proxy parsing, error truncation) + the ts-rs binding
       # exports, which double as a stale-bindings check.
       - run: cargo test --lib
@@ -117,6 +124,10 @@ jobs:
       # Swift and nothing ever ran it.
       - run: swift test
         working-directory: swift-sidecar
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm run test:audio-analysis
 
   ui-smoke:
     name: ui smoke (playwright)

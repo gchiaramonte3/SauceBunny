@@ -63,6 +63,42 @@ That notice file is included both in the helper and in the app's resources.
 The build recipe and pinned build dependencies are in `scripts/build-aaf.sh`
 and `aaf-sidecar/requirements-build.txt`.
 
+## Local video intelligence worker
+
+The separate `saucebunny-video` process contains original MIT code, CPython
+3.12.14, MLX/MLX-VLM, usearch, PyAV and their pinned dependencies. The complete
+build/runtime dependency inventory and supplied notices are packaged under
+`video-runtime/saucebunny-video/_internal/licenses/dependencies/`, including
+Python's incorporated notices and the PyInstaller bootloader exception.
+Downloaded Qwen repositories include their model licenses; their exact
+revisions and artifact hashes are in `video-sidecar/models.json`.
+
+The experimental `video-sidecar/audio_ast.py` adapts
+Transformers' Audio Spectrogram Transformer inference to MLX/NumPy. Its upstream
+copyright and Apache-2.0 notice are retained in the file; the complete license
+is in [`licenses/TRANSFORMERS-APACHE-2.0.txt`](licenses/TRANSFORMERS-APACHE-2.0.txt).
+The adaptation replaces PyTorch model operations and uses pinned local
+safetensors only. The worker dispatches it only with explicitly downloaded,
+verified artifacts. The MIT AST checkpoint is not included in this repository;
+its BSD-3-Clause model metadata, pinned revision and artifact hashes are recorded
+in `video-sidecar/models.json`. See `scripts/music-analysis/README.md` for the
+reference implementation, numerical parity checks and remaining packaging gates.
+
+This worker dynamically links an **LGPL-2.1-or-later-only FFmpeg 8.0.3 build**,
+not the application's separate GPL FFmpeg command-line sidecar. GPL/nonfree
+features and external codec autodetection are disabled. PyAV is compiled from
+pinned source against these libraries; vendor wheel codec libraries and OpenCV
+are excluded from the frozen runtime. Exact unmodified FFmpeg source, license
+and configure log are included under `_internal/licenses/ffmpeg/`.
+
+Rebuild recipes and hash locks are in `scripts/build-video*.sh` and
+`video-sidecar/requirements*.txt`. Dynamic libraries remain replaceable in
+`_internal/av/.dylibs/`; a modified local macOS app copy may need re-signing.
+The app does not forbid reverse engineering of these LGPL components for
+debugging modifications. Redistributors must retain the accompanying source,
+notices and applicable LGPL rights; a subprocess boundary alone does not remove
+license obligations.
+
 ---
 
 ## NDI runtime (proprietary, optional feature)

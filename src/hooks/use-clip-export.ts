@@ -1,3 +1,4 @@
+import { frameRate } from "../lib/timecode";
 import { useCallback, type Dispatch, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AppStatus, ClientLog, ExportOpts, Metadata, RecentClip } from "../types";
@@ -153,7 +154,7 @@ export function useClipExport(p: ClipExportDeps) {
         return;
       }
 
-      const r = Math.max(1, Math.round(fps));
+      const r = frameRate(fps);
       const startSec = inFrames  != null ? inFrames  / r : null;
       const endSec   = outFrames != null ? outFrames / r : null;
       const safe = sanitizeFilename(exportOpts.filename);
