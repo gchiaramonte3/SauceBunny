@@ -8,9 +8,11 @@ and the room, V1 as one group clip). The control inventory was read from
 `src/components/Edit*.tsx`, `src/hooks/use-edit-*.ts` and the AAF Audio
 components.
 
-**Status:** not started. Each phase stands alone and has a way to tell it's
-done. Run them in order; phase 1 changes what Insert means, and later phases'
-tests assume it.
+**Status (2026-10-03):** phases 1, 2, 3 and 5 are built and tested; phase 4
+is below. Each phase's own Status line says what was built, what was not,
+and why. The owner's decisions in the list below are still open and nothing
+that depends on them was built. Each phase stands alone and has a way to
+tell it's done.
 
 **Rules that hold in every phase:**
 - **The bar is locked.** No people, names or speaker chips in the transport or
@@ -44,6 +46,11 @@ answered; everything else in this spec can run as written):
 ---
 
 ## Phase 1: the record side assembles like an editing timeline
+
+**Status:** built (d975dee). Items 1 to 4 as written; 5 (air between bites)
+waits on the owner. Splice points land on frames before anything is
+computed, so an Overwrite cannot drift a frame on save. Escape on a warning
+now only closes it (3a.2, done here).
 
 **What was found.** The record side is a single storyline: each clip spans
 every record track, and only the people it was cut with sound on it (the
@@ -108,6 +115,17 @@ which are bites end to end, and revisit if cutting scenes is ever in scope.
 
 ## Phase 2: marks set, show and clear the same way everywhere
 
+**Status:** built (e18d1b1), with three differences from the text below.
+J steps back one second and repeats while held, K stops and L plays: the
+String Outs engine plays forward at 1x only, so there is no reverse or fast
+shuttle. Item 5 was not changed: AAF Audio's Out includes its own frame, so
+In equal to Out is a real one-frame range there, while String Outs' Out is
+exclusive; each view already follows Avid for its own model. String Outs'
+tool-row tooltips were left alone (the bar is locked); the ruler's × names
+G. Found and fixed on the way: right after String Outs opened, focus sat on
+the view around the editor and every letter key was ignored until something
+inside was clicked.
+
 **What was found.** Neither view has a visible way to clear marks, and the
 two views clear them with different keys:
 
@@ -160,6 +178,12 @@ which AAF Audio has, and "Open in String Outs" drops AAF Audio's marks.
 ---
 
 ## Phase 3: layout and naming corrections
+
+**Status:** built (b78d3f1). 3a.5: Crossfade at cuts now drives playback
+("Off" keeps a 10 ms de-click); Room tone in lifts is untouched until the
+owner decides. 3c.11 needed no change: paragraph moves and the History pin
+already show on keyboard focus. 3c.7's claim was a code comment, now
+corrected. Everything else as written.
 
 ### 3a. Things that do the wrong thing (fix; each gets a break-tested test)
 
@@ -329,6 +353,8 @@ export, whatever its length. The size is the spec's; the time is not.
 ---
 
 ## Phase 5: hand tests in Media Composer
+
+**Status:** written as HAND-TEST.md String Outs steps 19 to 23.
 
 Add to `docs/HAND-TEST.md`, String Outs:
 

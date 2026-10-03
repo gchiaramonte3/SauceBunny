@@ -1208,3 +1208,37 @@ media, WKWebView's audio, and Avid.
     whole. In and Out are white with a grey span between them, drawn with
     the chevron mark, in Clip, AAF Audio, String Outs and the Transcripts
     player. The transport row names no one: who is talking is not in it.
+19. **Cutting like an editing timeline (October 3 spec, phase 1).** In a
+    string out with a few bites, click the timeline to park the playhead
+    in the middle of the second bite, select a line in the source and
+    press V: the line lands at the playhead, the bite splits around it,
+    and the playhead parks after it, so V again builds the cut in order.
+    With Snap on (N) a press inside a word lands in the gap before or
+    after it. Set a record In with I and press V: the In wins over the
+    playhead. Press B with a line selected: it replaces what follows the
+    playhead and the running time does not change. A new string out made
+    from a sequence starts empty.
+20. **Marks, the Avid way (phase 2).** In String Outs on the record side,
+    on the source side, and in AAF Audio: I and O mark, G clears both, D
+    clears In, F clears Out, Q and W go to them. A closed range shows a ×
+    at its Out end; clicking it clears both. Straight after opening String
+    Outs (nothing clicked yet) I and O still work. Mark a range in AAF
+    Audio and click **Open in String Outs**: the source opens with that
+    range marked on its rail and over its words. J steps back a second, K
+    stops, L plays.
+21. **Which side is live, and what the menus do (phase 3).** Click in the
+    source text: the source pane gets a lifted outline and the record's
+    selection steps back; click the timeline and the record lights. With
+    the timeline on Source, Z, X, M and T do nothing (their buttons are
+    off too). View ▸ Audio ▸ Crossfade at cuts: 4 frames sounds softer at
+    a cut than Off. Click a marker on the ruler: the Inspector shows its
+    name, comment and colour; Delete on the marker removes it.
+22. **Tabs in track order.** On a grouped sequence (HEAT 2 or "Sequence
+    with a Group Clip") the person tabs read A1, A1's alternates, A2 and
+    on, left to right, in AAF Audio and in String Outs' source pane, each
+    tab starting with its track. "N more" lists the rest in that order.
+23. **What a Keep picture groups import puts in the bin.** Import a string
+    out exported with **Keep picture groups**. Note whether the bin
+    receives only the sequence, or every master clip and group clip in the
+    show as well (the file carries them all, as the AAF rules require;
+    Media Composer decides what it lists). Report which.

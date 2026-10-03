@@ -8,6 +8,41 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [0.6.0] - 2026-09-29
 
 ### Added
+- **String Outs cuts like an editing timeline.** V splices at the record In
+  mark, else the playhead (with Snap on, in the gap between words), instead
+  of at the text caret, which started at the first word. The playhead parks
+  after the new clip, so V again builds the cut in order. **B overwrites**
+  for the clip's length without moving anything after it, and the source
+  pane has an Overwrite button. The record text's caret follows the
+  playhead. A new string out made from a sequence starts empty.
+- **Avid's marking keys in String Outs and AAF Audio:** G clears both marks,
+  D clears In, F clears Out, Q and W go to them, on either side of String
+  Outs. A marked range on any ruler carries a **Clear marks** ×. String
+  Outs gains J, K and L (J steps back a second), arrow-key frame steps and
+  End. **Open in String Outs** brings AAF Audio's In and Out with it.
+- Markers on String Outs' ruler can be clicked: the Inspector edits the
+  name, comment and colour, and Delete removes it.
+- The side your keys act on (source or record) is outlined, and the other
+  side's selection steps back.
+- **Person tabs read in track order**, A1, A2, A3, with a group's alternate
+  mics right after their own track, in AAF Audio and String Outs. Each tab
+  starts with its track.
+
+### Fixed
+- String Outs ignored every letter key straight after it opened, until
+  something inside it was clicked.
+- With the timeline on Source, Z, X, M, T, A, S and ⌘B still edited the
+  record while their buttons were off. Home and Loop now follow the side
+  shown.
+- Escape on the "Extract anyway?" warning performed a Lift. It now only
+  closes the warning.
+- View ▸ Audio ▸ Crossfade at cuts changed only the drawing; playback now
+  uses it.
+- Source marks set with I and O while the timeline showed Record were not
+  shown anywhere, and an earlier I and O came back when a text selection was
+  cleared. They now show on the source pane's rail and over the words.
+- One name per thing: the record side is Record, silencing is Silence, the
+  toolbar's panel toggle is Source text. Disabled controls say why.
 - **Record tracks are patched, not a row per person.** A new string out
   starts with no tracks, as an Avid sequence does; people go on A1, A2… as
   their words are cut in, top-down. A string out Ask builds (or One per
