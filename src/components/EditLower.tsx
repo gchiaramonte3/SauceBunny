@@ -55,7 +55,7 @@ export function EditLower(props: Props) {
     // audible spans at all, which would read as silence and cut a laugh.
     deadHint: props.measured ? undefined : props.measuring ? "Waiting for every mic's waveform"
       : props.stalled ? "A mic could not be measured. The reason is shown above the editor" : "Turn on View ▸ Waveforms to measure each mic first",
-    onMarkOut: shown ? side.markOut : ws.markOut, onLift: () => ws.takeMarked(false), onExtract: () => ws.takeMarked(true), onMarker: ws.addMarker,
+    onMarkOut: shown ? side.markOut : ws.markOut, onClearMarks: shown ? side.clearMarks : () => ws.setMarks({ in: null, out: null }), onLift: () => ws.takeMarked(false), onExtract: () => ws.takeMarked(true), onMarker: ws.addMarker,
     onSnap: props.onSnap, onFollow: props.onFollow, onLoop: props.onLoop,
     onPrevious: () => previous && ws.chooseSeam(previous.index), onNext: () => next && ws.chooseSeam(next.index) };
   const shared = { fps, colors: props.colors, sourceName: props.sourceName, peaksOf: props.peaksOf, durationOf: props.durationOf, pictureOf: props.pictureOf,

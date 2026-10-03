@@ -9,6 +9,7 @@ type Props = {
   /** The ruler's width in pixels, which decides how many timecodes fit. */
   width: number;
   marks: { in: number | null; out: number | null }; markers: number[]; seams: Seam[]; seam: number | null; describe: (cut: Seam) => string; onSeam: (cut: Seam) => void; scrub: Scrub;
+  onClearMarks?: () => void;
 };
 
 /** Room for one timecode label ("01:00:00:00") and a gap before the next. */
@@ -17,7 +18,7 @@ const TICK_PX = 104;
 const STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200];
 
 /** Record timecode, the In to Out span, markers and edit points you can click. */
-export function EditTimelineRuler({ rulerRef, fps, recordStart, start, span, x, w, width, marks, markers, seams, seam, describe, onSeam, scrub }: Props) {
+export function EditTimelineRuler({ rulerRef, fps, recordStart, start, span, x, w, width, marks, markers, seams, seam, describe, onSeam, scrub, onClearMarks }: Props) {
   // Ticks on whole timecode seconds (at 23.976 not whole seconds of media), as
   // many as fit a timecode apiece: zoomed out on a two-hour cut the steps grow
   // to minutes and hours instead of stacking 68 timecodes on top of each other.
@@ -28,7 +29,7 @@ export function EditTimelineRuler({ rulerRef, fps, recordStart, start, span, x, 
     .filter((t) => t >= start && t <= start + span * 0.94);
   return <div ref={rulerRef} className="cp-te-tl-ruler" {...scrub}>
     {ticks.map((t) => <span key={t} className="cp-te-tl-tick" style={{ left: x(t) }}>{editTc(t, fps, recordStart)}</span>)}
-    <RulerMarks from={marks.in} to={marks.out} x={x} w={w} rangeClass="cp-te-tl-marked" />
+    <RulerMarks from={marks.in} to={marks.out} x={x} w={w} rangeClass="cp-te-tl-marked" onClear={onClearMarks} />
     {markers.filter((t) => t >= start && t <= start + span).map((t) => <span key={t} className="cp-te-tl-marker" style={{ left: x(t) }} title={`Marker at ${editTc(t, fps, recordStart)}`} />)}
     {seams.filter((cut) => cut.at >= start && cut.at <= start + span).map((cut) => <button key={cut.index} type="button"
       className={`cp-te-tl-seam-mark${seam === cut.index ? " is-selected" : ""}${cut.clipped.size ? " is-clipped" : ""}`} style={{ left: x(cut.at) }}

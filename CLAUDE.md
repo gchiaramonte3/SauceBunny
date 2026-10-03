@@ -746,7 +746,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and fifteen rules in this file are checked by a test rather than remembered. If you
+One hundred and sixteen rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -905,6 +905,7 @@ written after finding the rule already broken somewhere.
 | `tablist-overflow-contract` | No `role="tablist"` scrolls sideways. On a Mac that always shows scrollbars (a mouse attached, and most older machines) the AAF Audio person tabs wore a permanent scrollbar; a strip that can grow uses `TabStrip`, which draws the tabs that fit and puts the rest behind "N more". Read from source because headless Chromium draws overlay scrollbars, so no rendered test could see it |
 | `text-decoration-contract` | A `text-decoration` shorthand names only the line. WebKit reads its style and colour parts only from Safari 26.2, and macOS 14 can run Safari 17, where `underline dotted` is dropped whole and the underline vanishes. Style and colour go in their longhands |
 | `mark-shape-contract` | A stem in the marker colour draws the chevron wing: every `border-left`/`-right` or inset side shadow in `var(--marker)` belongs to a class with a `--mark-wing-*` wing, or is one of two named regions that sit under winged marks. AAF Audio's and String Outs' rulers drew a flat violet band with no wing, and nothing at all for a lone In or Out, beside Clip's chevrons; both now draw `RulerMarks` (marks.css). The design catalog's stylesheets are scanned too: they load after production's and win |
+| `mark-keys-contract` | AAF Audio and String Outs bind the same seven marking keys to the same meanings, Avid's: I and O mark, G clears both, D clears In, F clears Out, Q and W go to the marks. They drifted apart in separate files: AAF Audio cleared with G while String Outs used ⌥X and ignored G, and neither had D or F |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:

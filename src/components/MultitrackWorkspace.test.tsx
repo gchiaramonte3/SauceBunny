@@ -195,6 +195,27 @@ it("reopening a sequence restores its zoom, track size, open groups, checked mic
   expect(screen.getByRole("button", { name: "Waveforms" }).getAttribute("aria-pressed")).toBe("true");
   expect(reopened).toHaveBeenLastCalledWith(doc.id, true);
 });
+it("D and F clear one mark each, the × on the marked range clears both, and the marks are reported in seconds", () => {
+  const onMarks = vi.fn();
+  render(<MultitrackWorkspace document={multitrackFixture()} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} onMarks={onMarks} />);
+  const scope = screen.getByRole("combobox", { name: "Transcription range" }) as HTMLSelectElement;
+  fireEvent.keyDown(window, { key: "i" });
+  fireEvent.keyDown(window, { key: "o" });
+  // Out includes its frame: a one-frame range, reported as 0 to one frame in seconds.
+  expect(onMarks).toHaveBeenLastCalledWith({ in: 0, out: expect.closeTo(1 / 24, 3) });
+  fireEvent.click(screen.getByRole("button", { name: "Clear marks" }));
+  expect(scope.value).toBe("all");
+  expect(screen.queryByRole("button", { name: "Clear marks" })).toBeNull();
+  fireEvent.keyDown(window, { key: "i" });
+  fireEvent.keyDown(window, { key: "o" });
+  fireEvent.keyDown(window, { key: "d" });
+  // Only Out is left: still a marked range, and no × without a closed range.
+  expect(scope.value).toBe("marked");
+  expect(screen.queryByRole("button", { name: "Clear marks" })).toBeNull();
+  fireEvent.keyDown(window, { key: "f" });
+  expect(scope.value).toBe("all");
+  expect(onMarks).toHaveBeenLastCalledWith({ in: null, out: null });
+});
 it("I/O marks switch generation to the marked range and G returns it to the whole sequence", () => {
   render(<MultitrackWorkspace document={multitrackFixture()} active waveforms={{}} waveformErrors={{}} labelStatus="" onRename={vi.fn()} onTranscript={vi.fn()} />);
   const scope = screen.getByRole("combobox", { name: "Transcription range" }) as HTMLSelectElement;

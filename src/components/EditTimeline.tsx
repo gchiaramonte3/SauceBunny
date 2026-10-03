@@ -126,7 +126,7 @@ export function EditTimeline(props: Props) {
     {props.dead && <EditDeadSpaceBar review={props.dead} onPreset={props.onDeadPreset} onApply={props.onDeadApply} onCancel={props.onDeadCancel} />}
     <div className="cp-te-tl-grid" style={{ "--te-rows": speakers.length + (props.patch ? 2 : 1) + (props.pictureOf && edit.segments.some((segment) => !isGap(segment) && props.pictureOf?.(segment.source).length) ? 1 : 0) } as React.CSSProperties}>
       <div className="cp-te-tl-corner">{props.corner}</div>
-      <EditTimelineRuler rulerRef={ruler} fps={fps} recordStart={props.recordStart} start={start} span={span} x={x} w={w} width={width} marks={marks} markers={props.markers}
+      <EditTimelineRuler rulerRef={ruler} fps={fps} recordStart={props.recordStart} start={start} span={span} x={x} w={w} width={width} marks={marks} onClearMarks={props.tools.onClearMarks} markers={props.markers}
         seams={seams} seam={props.seam} describe={(cut) => describe(cut, fps, props.recordStart)} onSeam={(cut) => { props.onSeek(cut.at); props.onSeam(cut.index); }} scrub={scrub} />
       {props.pictureOf && <EditPictureRow edit={edit} starts={starts} start={start} span={span} x={x} w={w} pictureOf={props.pictureOf} />}
       {props.rows ? props.rows({ start, span, width, x, w, scrub, waveforms: view.waveforms, text, onText: toggleText }) : speakers.map((speaker) => <EditTimelineRow key={speaker.id} speaker={speaker} color={colors[speaker.id]} soloed={solo.has(speaker.id)} quiet={solo.size > 0 && !solo.has(speaker.id)}

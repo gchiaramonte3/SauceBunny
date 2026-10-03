@@ -48,7 +48,11 @@ export function useEditKeys(root: RefObject<HTMLElement | null>, active: boolean
     if (!active) return;
     const listener = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
-      if (target !== document.body && !root.current?.contains(target)) return;
+      // Focus on the editor, on <body>, or on the view around it (the app
+      // focuses the view when String Outs opens, and a click on the timeline,
+      // which takes no focus itself, leaves it there) is the editor's.
+      const editor = root.current;
+      if (target !== document.body && !(editor && (editor.contains(target) || target.contains(editor)))) return;
       if (target.closest("input, textarea, select, [contenteditable=true], [role=alertdialog], [role=dialog]")) return;
       const run = latest.current, key = event.key.toLowerCase();
       const on: EditKeySide = target.closest("[data-source-id]") ? "pane" : "timeline";

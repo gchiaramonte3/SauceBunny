@@ -3,7 +3,7 @@ import type { EditHead } from "../bindings/EditHead";
 import type { EditHistory } from "../bindings/EditHistory";
 import { useEditEditorKeys } from "../hooks/use-edit-editor-keys";
 import { useEditPlayback } from "../hooks/use-edit-playback";
-import { useEditSourceSide } from "../hooks/use-edit-source-side";
+import { useEditSourceSide, type EditSourceMarks } from "../hooks/use-edit-source-side";
 import type { EditChange } from "../hooks/use-edit-session";
 import type { EditSourceData } from "../hooks/use-edit-sources";
 import { useEditWorkspace } from "../hooks/use-edit-workspace";
@@ -31,6 +31,8 @@ type Props = {
   commit: (label: string, change: (open: OpenEdit) => EditChange, group?: string | null) => Promise<boolean>;
   undo: () => void; redo: () => void; jump: (state: number) => void; pin: (state: number, name: string | null) => void; onClose: () => void; addSource: React.ReactNode;
   onOpenEdit: (id: string) => void; onSettings: () => void; appLocalModelId: string | null | undefined;
+  /** AAF Audio's In and Out, carried by "Open in String Outs" into the source made from that sequence. */
+  sourceMarks?: EditSourceMarks | null;
 };
 
 /** Well-separated hues from the transcript palette, in lane order. */
@@ -38,7 +40,7 @@ const HUES = [0, 2, 5, 8, 10, 4, 11, 1, 6, 9, 3, 7];
 const toggled = (set: Set<string>, item: string) => { const next = new Set(set); if (!next.delete(item)) next.add(item); return next; };
 
 /** The Transcript Editor on one open edit: source, record, history and timeline. */
-export function EditEditor({ editId, head, open, history, data, active, waveforms, onWaveforms, commit, undo, redo, jump, pin, onClose, addSource, onOpenEdit, onSettings, appLocalModelId }: Props) {
+export function EditEditor({ editId, head, open, history, data, active, waveforms, onWaveforms, commit, undo, redo, jump, pin, onClose, addSource, onOpenEdit, onSettings, appLocalModelId, sourceMarks }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const document = open.document, fps = rateOf(document.edit_rate), recordStart = document.start_timecode_frames;
   // Everyone, for Ask and the source pane; the people on a track (all but a
@@ -65,7 +67,7 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
   const sourceTc = (source: string, seconds: number) => editTc(seconds, fps, infos.find((info) => info.id === source)?.startFrames ?? 0);
   const nameOf = (id: string) => people.find((lane) => lane.id === id)?.name ?? id, sourceName = (id: string) => document.sources.find((source) => source.id === id)?.name ?? "Gap";
   const ws = useEditWorkspace({ open, words: trackWords, everyone: data.words, lanes, sourceLanes, durations: data.durations, audible: data.audible, playhead, seek, commit, nameOf, tc, documents: data.documents, snap, fps });
-  const side = useEditSourceSide({ document: head.document, sources: infos, documents: data.documents, words: data.words, colors, fps, active });
+  const side = useEditSourceSide({ document: head.document, sources: infos, documents: data.documents, words: data.words, colors, fps, active, request: sourceMarks });
   /** Insert, Append or Overwrite what the source has marked, text or In to Out, with the mics its track selectors allow. */
   const placeFromSource = (how: "insert" | "append" | "overwrite") => {
     const take = side.take(); if (!take) return;

@@ -159,6 +159,57 @@ test("Insert splices at the record playhead, as Avid's V does, and Overwrite (B)
   await expect(total).toHaveText(before!);
 });
 
+test("marks clear the Avid way on both sides: G, D and F, and the × on the marked range", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.locator(".cp-te-doc")).toContainText("Then Rosa called me.");
+  const ruler = page.locator(".cp-te-tl-ruler"), box = (await ruler.boundingBox())!;
+  const range = ruler.locator(".cp-te-tl-marked");
+  const record = page.locator(".cp-te-transport .cp-te-readout-tc").first();
+  // Park the playhead, and wait for it to land before marking there.
+  const park = async (fraction: number) => {
+    const before = await record.textContent();
+    await page.mouse.click(box.x + box.width * fraction, box.y + box.height / 2);
+    await expect(record).not.toHaveText(before!);
+  };
+  // Straight after opening, focus is on the view around the editor: the keys still reach it.
+  await park(0.03); await page.keyboard.press("i"); await park(0.05); await page.keyboard.press("o");
+  await expect(range).toHaveCount(1);
+  await page.keyboard.press("g");
+  await expect(range).toHaveCount(0);
+  // D clears In alone, so no closed range and no ×; F then clears Out.
+  await park(0.03); await page.keyboard.press("i"); await park(0.05); await page.keyboard.press("o");
+  await page.keyboard.press("d");
+  await expect(range).toHaveCount(0);
+  await expect(ruler.locator(".cp-mark.out")).toHaveCount(1);
+  await page.keyboard.press("f");
+  await expect(ruler.locator(".cp-mark")).toHaveCount(0);
+  // The × on a closed range clears both, with its key in the tooltip.
+  await park(0.03); await page.keyboard.press("i"); await park(0.05); await page.keyboard.press("o");
+  const clear = page.getByRole("button", { name: "Clear marks" });
+  await expect(clear).toHaveAttribute("title", "Clear marks (G)");
+  await clear.click();
+  await expect(range).toHaveCount(0);
+  // Q goes to In; J steps back a second (the engine plays forward only).
+  await park(0.03); await page.keyboard.press("i"); await park(0.05);
+  await page.keyboard.press("q");
+  const atIn = await record.textContent();
+  await page.keyboard.press("j");
+  await expect(record).not.toHaveText(atIn!);
+  // On the source side, G clears the text that marks it.
+  await page.getByRole("radio", { name: "Source" }).click();
+  const source = page.locator(".cp-te-src-body");
+  await source.locator("[data-src-index]", { hasText: "Then" }).first().click();
+  await source.locator("[data-src-index]", { hasText: "me." }).first().click({ modifiers: ["Shift"] });
+  await expect(range).toHaveCount(1);
+  await page.keyboard.press("g");
+  await expect(range).toHaveCount(0);
+  await expect(source.locator(".cp-te-src-word.is-selected")).toHaveCount(0);
+});
+
 test("a group angle has no track until their words are cut in, then plays on one of their own", async ({ page }) => {
   await boot(page, true);
   await page.getByRole("button", { name: "New string out…" }).first().click();

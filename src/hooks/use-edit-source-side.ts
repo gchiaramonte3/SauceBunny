@@ -16,9 +16,14 @@ export type EditMarks = { in: number | null; out: number | null };
  */
 export type EditSourceTake = { source: string; words: TimelineWord[]; from: number; to: number; lanes: string[] };
 
+/** Marks to open with, from AAF Audio's "Open in String Outs": seconds into that sequence. */
+export type EditSourceMarks = { documentId: string; in: number | null; out: number | null; tick: number };
+
 type Options = {
   document: EditDocument; sources: EditSourceInfo[]; documents: Map<string, AafDocument>;
   words: TimelineWord[]; colors: Record<string, string>; fps: number; active: boolean;
+  /** Marks AAF Audio carried over; applied once per tick, to the source made from that sequence. */
+  request?: EditSourceMarks | null;
 };
 
 const NO_MARKS: EditMarks = { in: null, out: null };
@@ -35,7 +40,7 @@ const NO_MARKS: EditMarks = { in: null, out: null };
  * record track if they have none yet; anyone else is not in the clip at all
  * (filler on their track).
  */
-export function useEditSourceSide({ document, sources, documents, words, colors, fps, active }: Options) {
+export function useEditSourceSide({ document, sources, documents, words, colors, fps, active, request }: Options) {
   const [mode, setMode] = useState<"source" | "record">("record");
   const [chosen, setChosen] = useState<string | null>(null);
   const [tabs, setTabs] = useState<Record<string, string>>({});
@@ -86,6 +91,20 @@ export function useEditSourceSide({ document, sources, documents, words, colors,
 
   // The last thing marked wins: selecting text replaces an earlier I or O,
   // and clearing the text clears them too, so nothing marked before returns.
+  // AAF Audio's In and Out arrive with "Open in String Outs": that source, marked, parked on In.
+  const applied = useRef(0);
+  useEffect(() => {
+    const into = request && document.sources.find((item) => item.document_id === request.documentId);
+    if (!request || !into || applied.current === request.tick) return;
+    applied.current = request.tick;
+    setChosen(into.id);
+    setRanges((state) => Object.fromEntries(Object.entries(state).filter(([key]) => !key.startsWith(`${into.id}\n`))));
+    setExplicit((state) => ({ ...state, [into.id]: { in: request.in, out: request.out } }));
+    if (request.in == null) return;
+    if (into.id === source?.id) void playback.seek(Math.round(request.in * fps), false); else pendingSeek.current = request.in;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- applied once per tick; the source and engine are read as they are then
+  }, [request, document.sources]);
+
   const setRange = (next: [number, number] | null) => {
     setRanges((state) => ({ ...state, [rangeKey]: next }));
     if (source) setExplicit((state) => ({ ...state, [source.id]: NO_MARKS }));

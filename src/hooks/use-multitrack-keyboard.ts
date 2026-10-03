@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 type Controls = { frame: number; pause: () => void; toggle: () => void; shuttle: (direction: 1 | -1) => void; seek: (frame: number, track?: string, play?: boolean) => Promise<void> };
-/** Clip's marking keys: I and O mark, G clears, Q and W go to the marks. */
-export type MarkKeys = { markIn: () => void; markOut: () => void; clear: () => void; gotoIn: () => void; gotoOut: () => void };
+/** Avid's marking keys, as Clip and String Outs have them: I and O mark, G clears both, D clears In, F clears Out, Q and W go to the marks. */
+export type MarkKeys = { markIn: () => void; markOut: () => void; clear: () => void; clearIn: () => void; clearOut: () => void; gotoIn: () => void; gotoOut: () => void };
 export function useMultitrackKeyboard(active: boolean, controls: Controls, onTimecode?: (digit: string) => void, marks?: MarkKeys) {
   const latest = useRef({ ...controls, onTimecode, marks }); latest.current = { ...controls, onTimecode, marks };
   useEffect(() => {
@@ -16,9 +16,9 @@ export function useMultitrackKeyboard(active: boolean, controls: Controls, onTim
       else if (key === "k") { kHeld = true; current.pause(); }
       else if (key === "j" || key === "l") { const direction = key === "j" ? -1 : 1; if (kHeld) void current.seek(current.frame + direction, undefined, false); else if (!event.repeat) current.shuttle(direction); }
       else if (key === " " && !event.repeat) current.toggle();
-      else if (current.marks && (key === "i" || key === "o" || key === "g" || key === "q" || key === "w")) {
-        const { markIn, markOut, clear, gotoIn, gotoOut } = current.marks;
-        ({ i: markIn, o: markOut, g: clear, q: gotoIn, w: gotoOut } as Record<string, () => void>)[key]();
+      else if (current.marks && "iogdfqw".includes(key) && key.length === 1) {
+        const { markIn, markOut, clear, clearIn, clearOut, gotoIn, gotoOut } = current.marks;
+        ({ i: markIn, o: markOut, g: clear, d: clearIn, f: clearOut, q: gotoIn, w: gotoOut } as Record<string, () => void>)[key]();
       }
       else if ((key === "arrowleft" || key === "arrowright") && !(target instanceof HTMLElement && target.closest('[role="slider"]'))) void current.seek(current.frame + (key === "arrowleft" ? -1 : 1) * (event.shiftKey ? 10 : 1), undefined, false);
       else return;

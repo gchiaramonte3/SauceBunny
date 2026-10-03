@@ -13,6 +13,8 @@ type Props = {
   /** The last thing the editor did ("Lifted 2.40 s."), announced politely. */
   status?: string;
   marks: { in: number | null; out: number | null };
+  /** Clear both marks (G), drawn as a × on the ruler's marked range rather than in this row. */
+  onClearMarks?: () => void;
   canMark: boolean; snap: boolean; follow: boolean; loop: boolean; finding: boolean;
   /** Why dead space cannot be found yet, or undefined when it can. */
   deadHint?: string;

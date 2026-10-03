@@ -13,6 +13,7 @@ import { EditWorkspace } from "./EditWorkspace";
 import { IconPlus } from "./Icons";
 import { IconStringOut } from "./IconStringOut";
 import { TabStrip } from "./TabStrip";
+import type { EditSourceMarks } from "../hooks/use-edit-source-side";
 
 /** The string outs open as tabs, in the order they were opened. */
 const TABS_KEY = "saucebunny.stringOuts.tabs";
@@ -27,7 +28,7 @@ const loadTabs = (): string[] => {
 type Props = {
   active: boolean; aiModelId?: string | null; onOpenSettings: (tab: "ai-apis") => void;
   /** AAF Audio asked to open this sequence here. */
-  openRequest?: { documentId: string; tick: number } | null;
+  openRequest?: { documentId: string; tick: number; marks?: { in: number | null; out: number | null } | null } | null;
 };
 
 /**
@@ -79,11 +80,14 @@ export function EditPage({ active, aiModelId, onOpenSettings, openRequest }: Pro
   // an empty record to build the cut in. Asked again, it opens the same one.
   const handled = useRef(0);
   const [opening, setOpening] = useState<string | null>(null);
+  // The In and Out that came with it, for the string out's source side.
+  const [carried, setCarried] = useState<EditSourceMarks | null>(null);
   useEffect(() => {
     if (!active || !openRequest || handled.current === openRequest.tick) return;
     handled.current = openRequest.tick;
-    const { documentId } = openRequest;
+    const { documentId, marks } = openRequest;
     setOpening(null);
+    setCarried(marks ? { documentId, ...marks, tick: openRequest.tick } : null);
     void (async () => {
       try {
         const made = loadJson<Record<string, string>>(FOR_SEQUENCE_KEY, {});
@@ -121,7 +125,7 @@ export function EditPage({ active, aiModelId, onOpenSettings, openRequest }: Pro
     </div>}
     <div id={PANEL_ID} className="cp-te-tab-panel" role={tabs.length ? "tabpanel" : undefined} aria-label={editId && !creating ? titleOf(editId) : undefined}>
     {creating ? <EditNewPanel onOpen={open} onCancel={() => setCreating(false)} appLocalModelId={aiModelId} />
-      : editId ? <EditWorkspace key={editId} editId={editId} active={active} onClose={() => open(null)} onOpenEdit={open} onTitle={retitle}
+      : editId ? <EditWorkspace key={editId} editId={editId} active={active} onClose={() => open(null)} onOpenEdit={open} onTitle={retitle} sourceMarks={carried}
         onSettings={() => onOpenSettings("ai-apis")} appLocalModelId={aiModelId} />
       : edits === null ? null
       : hasEdits ? <EditList edits={edits} onOpen={open} />

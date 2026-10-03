@@ -30,9 +30,9 @@ export function MultitrackTransport({ document, audio, markRange, waveforms, onW
         <div className="cp-tc cp-multitrack-readout" role="group" aria-label="Total runtime" title="Total runtime of the loaded sequence"><span>TRT</span>{sequenceDurationTimecode(document.manifest)}</div>
       </div>
       <div className="cp-multitrack-transport-buttons">
-      <button className="cp-transport-btn" aria-label="Go to sequence start" onClick={() => onSeek(0)}><IconSkipBack /></button>
+      <button className="cp-transport-btn" aria-label="Go to sequence start" title="Go to sequence start" onClick={() => onSeek(0)}><IconSkipBack /></button>
       <button className="cp-transport-btn" aria-label="Rewind tracks" title="Rewind (J)" onClick={() => audio.shuttle(-1)}><IconRewind /></button>
-      <button className="cp-transport-btn play" aria-label={audio.playing || audio.busy ? "Pause audition" : "Play tracks"} onClick={audio.toggle}>{audio.playing || audio.busy ? <IconPause /> : <IconPlay />}</button>
+      <button className="cp-transport-btn play" aria-label={audio.playing || audio.busy ? "Pause audition" : "Play tracks"} title={audio.playing || audio.busy ? "Pause audition (Space)" : "Play tracks (Space)"} onClick={audio.toggle}>{audio.playing || audio.busy ? <IconPause /> : <IconPlay />}</button>
       <button className="cp-transport-btn" aria-label="Fast-forward tracks" title="Fast-forward (L)" onClick={() => audio.shuttle(1)}><IconFastForward /></button>
       </div>
     </div>
