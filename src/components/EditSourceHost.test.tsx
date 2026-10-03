@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { EditDocument } from "../bindings/EditDocument";
-import { useEditSourceSide, type EditSourceTake } from "../hooks/use-edit-source-side";
+import { useEditSourceSide, type EditSourceMarks, type EditSourceTake } from "../hooks/use-edit-source-side";
 import type { TimelineWord } from "../lib/edit-model";
 import { EditSourceHost } from "./EditSourceHost";
 
@@ -24,9 +24,9 @@ const word = (track: string, cue: string, start: number, text: string): Timeline
   ({ id: `s1:${track}:${cue}:${start}`, source: "s1", track, cue, text, start, end: start + 0.3 });
 const words = [word("rosa", "r1", 1, "I"), word("dev", "d1", 1.2, "Yeah"), word("rosa", "r1", 1.4, "was"), word("rosa", "r1", 1.8, "tired")];
 
-function Host({ list = words, reading = null, onTake = vi.fn() }: { list?: TimelineWord[]; reading?: { done: number; total: number } | null; onTake?: (take: EditSourceTake | null, atEnd: boolean) => void }) {
+function Host({ list = words, reading = null, onTake = vi.fn(), request = null }: { list?: TimelineWord[]; reading?: { done: number; total: number } | null; onTake?: (take: EditSourceTake | null, atEnd: boolean) => void; request?: EditSourceMarks | null }) {
   const side = useEditSourceSide({ document: edit, sources: [{ id: "s1", short: "Kitchen", duration: 10, startFrames: 86400 }], documents: new Map(),
-    words: list, colors: { rosa: "#f00", dev: "#0f0" }, fps: 24, active: true });
+    words: list, colors: { rosa: "#f00", dev: "#0f0" }, fps: 24, active: true, request });
   return <EditSourceHost side={side} lanes={lanes} colors={{ rosa: "#f00", dev: "#0f0" }} fps={24} used={new Set()} reading={reading}
     text={{ family: "sans", size: 13, leading: "normal" }} onText={() => undefined} onPlace={(how) => onTake(side.take(), how === "append")} />;
 }
@@ -74,4 +74,14 @@ it("says the words are still being read instead of claiming there are none", () 
   opening.unmount();
   render(<Host list={[]} />);
   expect(screen.getByText(/No transcripts in Kitchen yet/)).toBeTruthy();
+});
+
+it("AAF Audio's In and Out arrive marked: on the source's rail, and on the words between them", () => {
+  render(<Host request={{ documentId: "d1", in: 1, out: 2, tick: 1 }} />);
+  expect(document.querySelectorAll(".cp-te-source-host .cp-te-scrub .cp-mark-range")).toHaveLength(1);
+  const marked = [...document.querySelectorAll(".cp-te-src-word.is-marked")].map((element) => element.textContent);
+  // "tired" runs past Out (1.8 to 2.1 s), so it is not inside the marks.
+  expect(marked).toEqual(["I", "was"]);
+  // Marks set by I and O make the source ready to cut in.
+  expect((screen.getByRole("button", { name: /^Insert/ }) as HTMLButtonElement).disabled).toBe(false);
 });

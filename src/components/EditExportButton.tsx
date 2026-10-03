@@ -94,7 +94,7 @@ export function EditExportButton({ editId, title, disabled, onDone }: Props) {
     </select>
     {busy
       ? <button type="button" className="btn btn-ghost cp-te-btn" onClick={stop} title="Stop the export">Stop</button>
-      : <button type="button" className="btn btn-ghost cp-te-btn" disabled={disabled} onClick={() => void run()} title="Export an AAF for Media Composer">
+      : <button type="button" className="btn btn-ghost cp-te-btn" disabled={disabled} onClick={() => void run()} title={disabled ? "Cut something in first" : "Export an AAF for Media Composer"}>
         <IconDownload size={13} />Export AAF</button>}
   </div>;
 }

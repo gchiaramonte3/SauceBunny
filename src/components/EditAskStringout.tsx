@@ -31,13 +31,13 @@ export function EditAskStringout({ documentId, onOpen, appLocalModelId }: Props)
   const seconds = proposal ? proposal.bites.reduce((sum, bite) => sum + bite.to - bite.from, 0) : 0;
   return <div className="cp-te-ask-stringout">
     <form className="cp-te-picker-ask" onSubmit={(event) => { event.preventDefault(); void ai.ask(documentId, request); }}>
-      <label className="cp-te-set-label">Ask for a string-out
+      <label className="cp-te-set-label">Ask for a string out
         <input className="cp-input" value={request} onChange={(event) => setRequest(event.target.value)} placeholder="Two minutes on the move, open with Rosa" /></label>
       {ai.busy ? <button type="button" className="btn btn-ghost" onClick={ai.stop}>Stop</button>
         : <button type="submit" className="btn btn-ghost" disabled={!request.trim()}>Ask</button>}
     </form>
     {(ai.message || error) && <p className="cp-te-pane-note" role="status">{error ?? ai.message}</p>}
-    {proposal && proposal.bites.length > 0 && <section className="cp-te-proposal" aria-label="Proposed string-out">
+    {proposal && proposal.bites.length > 0 && <section className="cp-te-proposal" aria-label="Proposed string out">
       <h3 className="cp-te-picker-head">{proposal.title} · {proposal.bites.length} bites · {clock(seconds)}</h3>
       <ol className="cp-te-proposal-list">{proposal.bites.map((bite, index) => <li key={`${bite.lane}-${bite.from}-${index}`}>
         <span className="cp-te-proposal-who">{proposal.names[bite.lane] ?? bite.lane}</span>

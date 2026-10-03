@@ -123,7 +123,7 @@ export function EditTranscript(props: Props) {
         props.onSelect({ anchor: first, focus: first + props.paragraphs[paragraph].words.length - 1, collapsed: false }, false);
       }
     }}>
-    <p id="cp-te-doc-help" className="cp-visually-hidden">Arrows move by word. Double-click a line, triple-click a paragraph. Delete cuts all tracks; Shift-Delete one speaker. Option-drag scrubs. Option-Up/Down moves a paragraph. Return corrects a word.</p>
+    <p id="cp-te-doc-help" className="cp-visually-hidden">Arrows move by word. Double-click a line, triple-click a paragraph. Delete cuts all tracks; Shift-Delete one speaker. Option-drag scrubs. Option-Up/Down moves a paragraph. Words are corrected in AAF Audio's transcript.</p>
     <EditWindowedParagraphs root={root} sizes={sizes}
       keep={[playing, selection.anchor, selection.focus].map((index) => paragraphHolding(firsts, index))}
       render={(index) => {

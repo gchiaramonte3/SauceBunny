@@ -21,6 +21,7 @@ import { EditSendTo } from "./EditSendTo";
 import { EditSidePanel, type EditSideTab } from "./EditSidePanel";
 import { EditSourceHost } from "./EditSourceHost";
 import type { EditTextStyle } from "./EditTextSettings";
+import type { EditTimelineAudio } from "./EditTimelineTools";
 import { EditToolbar } from "./EditToolbar";
 import { EditTranscript } from "./EditTranscript";
 
@@ -55,13 +56,14 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
     startFrames: data.documents.get(source.id)?.manifest.start_frame ?? 0 })), [document.sources, data]);
   const [showSource, setShowSource] = useState(true), [showSide, setShowSide] = useState(true), [sideTab, setSideTab] = useState<EditSideTab>("ask"), [showRemoved, setShowRemoved] = useState(true);
   const [zoom, setZoom] = useState(1), [snap, setSnap] = useState(true), [follow, setFollow] = useState(true), [loop, setLoop] = useState(false);
+  const [audio, setAudio] = useState<EditTimelineAudio>({ crossfade: 2, roomTone: false }), [inSource, setInSource] = useState(false);
   const [text, setText] = useState<Record<"source" | "edit", EditTextStyle>>({ source: { family: "sans", size: 13, leading: "normal" }, edit: { family: "sans", size: 15, leading: "normal" } });
   const [solo, setSolo] = useState<Set<string>>(new Set()), [mute, setMute] = useState<Set<string>>(new Set());
   const sourceFrames = useMemo(() => Object.fromEntries(Object.entries(data.durations).map(([id, seconds]) => [id, Math.round(seconds * fps)])), [data.durations, fps]);
   // Only people with a track can be soloed: one who loses theirs takes their solo with them.
   const soloed = useMemo(() => new Set([...solo].filter((id) => heard.has(id))), [solo, heard]);
   const audible = lanes.filter((lane) => (soloed.size ? soloed.has(lane.id) : !mute.has(lane.id))).map((lane) => lane.id);
-  const playback = useEditPlayback({ document: head.document, audible, active, sourceFrames });
+  const playback = useEditPlayback({ document: head.document, audible, active, sourceFrames, joinFade: audio.crossfade / fps });
   const playhead = playback.frame / fps, seek = (seconds: number) => void playback.seek(Math.max(0, Math.round(seconds * fps)));
   const tc = (seconds: number) => editTc(seconds, fps, recordStart);
   const sourceTc = (source: string, seconds: number) => editTc(seconds, fps, infos.find((info) => info.id === source)?.startFrames ?? 0);
@@ -111,11 +113,13 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
           where={(line) => `${sourceName(line.source)} · ${nameOf(line.track)} · ${sourceTc(line.source, line.from)}`} sourceTc={sourceTc}
           onJump={jumpTo} onOpenEdit={onOpenEdit} onSettings={onSettings} appLocalModelId={appLocalModelId} />
       </div>
-      {showSource && <div className="cp-te-pane cp-te-pane-source">
+      {/* The side Space, I, O and the marks act on is lifted, as Avid lights the active monitor. */}
+      {showSource && <div className={`cp-te-pane cp-te-pane-source${inSource || side.mode === "source" ? " is-active" : " is-idle"}`}
+        onFocus={() => setInSource(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setInSource(false); }}>
         <EditSourceHost side={side} lanes={people} colors={colors} fps={fps} used={used} reading={data.read}
           text={text.source} onText={(style) => setText((state) => ({ ...state, source: style }))} onPlace={placeFromSource} />
       </div>}
-      <div className="cp-te-pane cp-te-pane-record">
+      <div className={`cp-te-pane cp-te-pane-record${showSource && (inSource || side.mode === "source") ? " is-idle" : " is-active"}`}>
         <EditRecordPane playhead={playhead} total={ws.total} tc={tc(playhead)} totalTc={tc(ws.total)} marks={ws.seams.map((item) => item.at)}
           onScrub={seek} onScrubStart={playback.pause} onScrubEnd={() => undefined} text={text.edit} onText={(style) => setText((state) => ({ ...state, edit: style }))}>
           {data.loading && !ws.placed.length ? <p className="cp-te-doc-empty" role="status">Reading each microphone's words…</p>
@@ -133,11 +137,11 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
         </EditRecordPane>
       </div>
     </div>
-    <EditLower ws={ws} side={side} people={people} solo={soloed} mute={mute} onSolo={(id) => setSolo((state) => toggled(state, id))} onMute={(id) => setMute((state) => toggled(state, id))} onUntrack={ws.untrack} lanes={lanes} colors={colors} fps={fps} recordStart={recordStart} playhead={playhead} playing={playback.playing} busy={playback.busy}
+    <EditLower ws={ws} side={side} people={people} solo={soloed} mute={mute} onSolo={(id) => setSolo((state) => toggled(state, id))} onMute={(id) => setMute((state) => toggled(state, id))} onUntrack={ws.untrack} onMarker={(id) => { ws.setMarker(id); const at = ws.markers.find((item) => item.id === id)?.at; if (at != null) seek(at); setShowSide(true); setSideTab("inspector"); }} lanes={lanes} colors={colors} fps={fps} recordStart={recordStart} playhead={playhead} playing={playback.playing} busy={playback.busy}
       onToggle={() => void playback.toggle()} onSeek={seek} onScrubStart={playback.pause} onScrubEnd={() => undefined}
       tc={tc} sourceTc={sourceTc} sourceName={sourceName}
       sourceLanes={sourceLanes} peaksOf={(source, lane) => data.peaks.get(`${source}:${lane}`)} durationOf={(source) => data.durations[source] ?? 0} pictureOf={pictureOf}
       waveforms={waveforms} onWaveforms={onWaveforms} measured={data.measured} measuring={data.measuring} stalled={waveforms && !data.loading && !data.measuring && !data.measured}
-      zoom={zoom} onZoom={setZoom} snap={snap} onSnap={() => setSnap((value) => !value)} follow={follow} onFollow={() => setFollow((value) => !value)} loop={loop} onLoop={() => setLoop((value) => !value)} />
+      audio={audio} onAudio={setAudio} zoom={zoom} onZoom={setZoom} snap={snap} onSnap={() => setSnap((value) => !value)} follow={follow} onFollow={() => setFollow((value) => !value)} loop={loop} onLoop={() => setLoop((value) => !value)} />
   </div>;
 }

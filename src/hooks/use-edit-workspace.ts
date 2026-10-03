@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { EditDeadPreset, EditDeadReview } from "../components/EditDeadSpaceBar";
 import { editDeadPresets } from "../components/EditDeadSpaceBar";
 import type { EditSelection } from "../components/EditTranscript";
-import { rippleMarkers, type OpenEdit } from "../lib/edit-document";
+import { rippleMarkers, type OpenEdit, type TimelineMarker } from "../lib/edit-document";
 import type { AafDocument } from "../bindings/AafDocument";
 import { giveTracks, patchAt, unpatch } from "../lib/edit-new";
 import { alternativeLane } from "../lib/multitrack-graph";
@@ -53,6 +53,8 @@ export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, du
   /** An Extract that would take words from a track that is not selected, waiting for a choice. */
   const [extractGuard, setExtractGuard] = useState<{ who: string[]; count: number } | null>(null);
   const [seam, setSeam] = useState<number | null>(null);
+  /** The marker clicked on the ruler, for the Inspector to edit and Delete to remove. */
+  const [marker, setMarker] = useState<string | null>(null);
   const [message, setMessage] = useState("");
 
   const cutKey = useMemo(() => JSON.stringify(edit.segments), [edit.segments]);
@@ -98,7 +100,7 @@ export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, du
   };
   const lift = (ids: Set<string>, chosen: typeof selected) => {
     const restoring = chosen.every((item) => item.muted);
-    void change(restoring ? "Restore on Track" : `Remove from ${names(chosen.map((item) => item.word.track))}'s Track`,
+    void change(`${restoring ? "Unsilence" : "Silence"} ${names(chosen.map((item) => item.word.track))}`,
       (timeline) => restoring ? unmuteWords(words, timeline, ids) : muteWords(words, timeline, ids));
     setMessage(`${restoring ? "Unsilenced" : "Silenced"} ${plural(ids.size, "word")}.`);
   };
@@ -244,12 +246,15 @@ export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, du
   };
   const addMarker = () => void commit("Add Marker", (state) => state.markers.some((m) => Math.abs(m.at - playhead) < 1e-3) ? null
     : { markers: [...state.markers, { id: `m-${Date.now().toString(36)}`, at: playhead, track: null, name: "Marker", comment: "", color: "red" }].sort((a, b) => a.at - b.at) });
+  const updateMarker = (id: string, change: Partial<Pick<TimelineMarker, "name" | "comment" | "color">>, group?: string) =>
+    void commit("Edit Marker", (state) => ({ markers: state.markers.map((item) => item.id === id ? { ...item, ...change } : item) }), group ?? `marker:${id}`);
+  const removeMarker = (id: string) => { setMarker(null); void commit("Delete Marker", (state) => ({ markers: state.markers.filter((item) => item.id !== id) })); };
   const cutHere = () => void change("Add Edit", (timeline) => addEdit(timeline, playhead));
   const setTimeline = (label: string, next: Timeline) => void change(label, () => next);
 
   return {
     edit, markers, placed, paras, seams, ghosts, total, count, range, caret, selected, keys, marks, marked, onTracks, selection, dead, prompt, seam, message, extractGuard, setExtractGuard,
-    setSelection, setMarks, setSeam, setMessage, setPrompt, setDead, names,
+    setSelection, setMarks, setSeam, setMessage, setPrompt, setDead, names, marker: markers.find((item) => item.id === marker) ?? null, setMarker, updateMarker, removeMarker,
     toggleTrack: (id: string, only: boolean) => setTracks((state) => only ? new Set([id]) : toggled(state ?? new Set(lanes.map((lane) => lane.id)), id)),
     skipDead: (index: number) => setDeadHeld((state) => state && { ...state, review: { ...state.review, skip: toggled(state.review.skip, index) } }),
     remove, applyDelete, restore, insert, overwrite: (source: string, sourceWords: TimelineWord[], take?: { from: number; to: number; lanes: string[] }) => place("overwrite", source, sourceWords, take), untrack, patch, addWhole, move, chooseSeam, healCut, takeMarked, findDead, applyDead, addMarker, cutHere, setTimeline,

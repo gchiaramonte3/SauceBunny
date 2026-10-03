@@ -2,7 +2,7 @@ import type { AafDocument } from "../bindings/AafDocument";
 import type { AafPictureClip } from "../bindings/AafPictureClip";
 import type { EditTrack } from "../bindings/EditTrack";
 import type { PlacedWord } from "./edit-model";
-import type { MultitrackPerson } from "./multitrack-person";
+import { micOrder, micTrack, type MultitrackPerson } from "./multitrack-person";
 
 /**
  * How the SOURCE side of String Outs reads one sequence: a tab per person,
@@ -21,16 +21,17 @@ export const ALL_VOICES = "all";
 
 /**
  * The people with a mic in one source, as AAF Audio's transcript tabs take
- * them: in the sequence's own track order when it is known, so the tabs do
+ * them: in track order when the sequence is known (micOrder), so the tabs do
  * not shuffle when someone is patched to a record track.
  */
 export function sourcePeople(tracks: EditTrack[], source: string, colors: Record<string, string>, aaf?: AafDocument): MultitrackPerson[] {
   const people = tracks.flatMap((track) => {
     const mic = track.kind === "sound" ? track.source_tracks[source] : undefined;
-    return mic ? [{ id: track.id, name: track.name, trackIds: [mic], color: colors[track.id] ?? null }] : [];
+    return mic ? [{ id: track.id, name: track.name, trackIds: [mic], color: colors[track.id] ?? null, track: aaf ? micTrack(aaf, mic) ?? undefined : undefined }] : [];
   });
   if (!aaf) return people;
-  const at = (mic: string) => { const index = aaf.manifest.tracks.findIndex((track) => track.id === mic); return index < 0 ? Infinity : index; };
+  // AAF Audio's order: by track number, each group's alternates after its own track.
+  const order = micOrder(aaf), at = (mic: string) => { const index = order.indexOf(mic); return index < 0 ? Infinity : index; };
   return people.sort((a, b) => at(a.trackIds[0]) - at(b.trackIds[0]));
 }
 

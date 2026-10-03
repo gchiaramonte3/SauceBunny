@@ -23,6 +23,8 @@ type Props = {
   range: [number, number] | null; onRange: (range: [number, number] | null) => void; match: string | null;
   /** Something is marked, as text or as In and Out on the source timeline. */
   canInsert: boolean;
+  /** The source's In and Out (seconds), shown on its rail and, when set by I and O, on the words between them. */
+  marks: { in: number | null; out: number | null };
   playhead: number; playing: boolean; onPlay: () => void; onScrub: (seconds: number) => void; onScrubStart: () => void; onScrubEnd: () => void;
   text: EditTextStyle; onText: (style: EditTextStyle) => void; onPlace: (how: "insert" | "append" | "overwrite") => void;
 };
@@ -68,7 +70,7 @@ export function EditSourcePane(props: Props) {
     <div className="cp-te-tools">
       <button type="button" className="cp-icon-btn cp-te-play" aria-label={props.playing ? `Pause ${source.short}` : `Play ${source.short}`}
         title={props.playing ? "Pause the source (Space)" : "Play the source (Space)"} onClick={props.onPlay}>{props.playing ? <IconPause size={14} /> : <IconPlay size={14} />}</button>
-      <EditScrubber label={`${source.short} position`} value={props.playhead} max={source.duration} text={editTc(props.playhead, fps, source.startFrames)}
+      <EditScrubber label={`${source.short} position`} value={props.playhead} max={source.duration} text={editTc(props.playhead, fps, source.startFrames)} range={props.marks}
         onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} />
       <span className="cp-te-tools-tc">{editTc(props.playhead, fps, source.startFrames)}</span>
       <EditTextSettings pane="Source" style={props.text} onChange={props.onText} />
@@ -116,8 +118,9 @@ export function EditSourcePane(props: Props) {
           <p className="cp-te-src-text">{paragraph.words.map((item, position) => {
             const index = first + position;
             const chosen = range != null && index >= range[0] && index <= range[1];
+            const marked = !range && props.marks.in != null && props.marks.out != null && item.word.start >= props.marks.in - 1e-6 && item.word.end <= props.marks.out + 1e-6;
             return <span key={item.word.id}><span data-src-index={index}
-              className={`cp-te-src-word${used.has(item.word.id) ? " is-used" : ""}${chosen ? " is-selected" : ""}${props.match === item.word.id ? " is-match" : ""}${current === item.word.id ? " is-current" : ""}`}>
+              className={`cp-te-src-word${used.has(item.word.id) ? " is-used" : ""}${chosen ? " is-selected" : ""}${marked ? " is-marked" : ""}${props.match === item.word.id ? " is-match" : ""}${current === item.word.id ? " is-current" : ""}`}>
               {props.corrections[item.word.id] ?? item.word.text}</span>{" "}</span>;
           })}</p>
         </div>;

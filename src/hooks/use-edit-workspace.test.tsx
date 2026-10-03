@@ -28,7 +28,7 @@ it("never cuts through overtalk: silences the speaker's own words and asks about
   const index = hook.result.current.placed.findIndex((item) => item.word.id === "anyway");
   select(index, index);
   act(() => hook.result.current.remove(false));
-  expect(commits.map((item) => item.label)).toEqual(["Remove from Rosa's Track"]);
+  expect(commits.map((item) => item.label)).toEqual(["Silence Rosa"]);
   expect(commits[0].change?.timeline?.mutes.map((mute) => mute.track)).toEqual(["rosa"]);
   expect(commits[0].change?.timeline?.segments).toEqual(timeline.segments);
   expect(hook.result.current.prompt?.result.crosstalk.map((item) => item.id)).toEqual(["yeah"]);

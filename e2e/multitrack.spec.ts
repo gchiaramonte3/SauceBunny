@@ -7,10 +7,12 @@ test.use({ browserName: process.env.SAUCE_AUDIO_BROWSER === "webkit" ? "webkit" 
 
 /** Pick a person's transcript whether their tab is drawn or sits behind "N more". */
 async function chooseTranscript(page: Page, region: Locator, name: string) {
-  const tab = region.getByRole("tab", { name, exact: true });
+  // A person's tab leads with their track ("A3 Mic 3"); All voices has none.
+  const label = new RegExp(`^(A\\d+ )?${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+  const tab = region.getByRole("tab", { name: label });
   if (await tab.count()) { await tab.click(); return; }
   await region.getByRole("button", { name: /^\d+ more people$/ }).click();
-  await page.getByRole("menuitemradio", { name, exact: true }).click();
+  await page.getByRole("menuitemradio", { name: label }).click();
 }
 
 async function boot(page: Page, trackCount = 3, audible = false, grouped = false, pendingMedia = false) {
@@ -409,16 +411,16 @@ for (const width of [1100, 1680]) {
     expect(drawn).toBeGreaterThan(1); expect(drawn).toBeLessThan(21);
     expect(await more.textContent()).toBe(`${21 - drawn} more`);
     await more.click();
-    await page.getByRole("menuitemradio", { name: "Mic 20", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: /^A\d+ Mic 20$/ }).click();
     await expect(page.getByRole("menu")).toBeHidden();
-    const chosen = region.getByRole("tab", { name: "Mic 20", exact: true });
+    const chosen = region.getByRole("tab", { name: /^A\d+ Mic 20$/ });
     await expect(chosen).toHaveAttribute("aria-selected", "true"); await expect(chosen).toBeFocused(); await expect(chosen).toBeInViewport();
     await expect(region.getByRole("tabpanel", { name: "Mic 20" })).toBeVisible();
     expect(await fits()).toBe(true);
     await chosen.press("Home");
     await expect(region.getByRole("tab", { name: "All voices" })).toBeFocused();
     await region.getByRole("tab", { name: "All voices" }).press("End");
-    await expect(region.getByRole("tab", { name: "Mic 20", exact: true })).toBeFocused();
+    await expect(region.getByRole("tab", { name: /^A\d+ Mic 20$/ })).toBeFocused();
     await more.focus(); await more.press("Enter");
     await expect(page.getByRole("menu")).toBeVisible();
     await page.keyboard.press("Escape"); await expect(page.getByRole("menu")).toBeHidden(); await expect(more).toBeFocused();
@@ -743,7 +745,7 @@ test("Person navigation, per-track levels, context regeneration and safe exports
   await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
   await chooseTranscript(page, region, "Mic 20");
   await expect(region.getByRole("tabpanel", { name: "Mic 20" })).toBeVisible();
-  await expect(region.getByRole("tab", { name: "Mic 20", exact: true })).toBeInViewport();
+  await expect(region.getByRole("tab", { name: /^A\d+ Mic 20$/ })).toBeInViewport();
   await region.getByRole("button", { name: "Solo Alex mic", exact: true }).click();
   await expect(region.locator(".cp-multitrack-lane.is-unsoloed")).toHaveCount(19);
   expect(await region.locator(".cp-multitrack-lane.is-unsoloed .cp-multitrack-waveform").first().evaluate((element) => getComputedStyle(element).filter)).toBe("grayscale(1)");

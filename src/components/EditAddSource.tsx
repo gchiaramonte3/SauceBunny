@@ -19,10 +19,10 @@ export function EditAddSource({ exclude, onAdd, onError }: Props) {
     invoke<AafDocumentSummary[]>("aaf_list").then((items) => { if (live) setSaved(items); }).catch(() => undefined);
     return () => { live = false; };
   }, []);
-  const choices = saved.filter((item) => !exclude.includes(item.id));
+  const choices = saved.filter((item) => !exclude.includes(item.id)), none = saved.length === 0;
   const labels = useMemo(() => sequenceLabels(saved), [saved]);
   return <select className="cp-select cp-te-add-source" aria-label="Add a sequence" value="" disabled={!choices.length}
-    title={choices.length ? "Add an AAF Audio sequence to cut from" : "Every AAF Audio sequence is already in this edit"}
+    title={choices.length ? "Add an AAF Audio sequence to cut from" : none ? "No AAF Audio sequences yet. Import one in AAF Audio." : "Every AAF Audio sequence is already in this string out"}
     onChange={(event) => {
       const id = event.target.value;
       if (id) invoke<AafDocument>("aaf_open", { documentId: id }).then(onAdd).catch((cause: unknown) => onError(formatError(cause)));

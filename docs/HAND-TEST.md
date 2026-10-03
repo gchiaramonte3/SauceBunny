@@ -1097,12 +1097,12 @@ media, WKWebView's audio, and Avid.
 2. Press Space. Audio plays from the linked MXFs; delete a sentence and play
    across the cut: no click at the join (10 ms crossfade). Delete a line with
    someone talking over it: the prompt appears and nothing below moves until
-   you choose **Close up for everyone**.
+   you choose **Cut for everyone**.
 3. ⌘Z / ⇧⌘Z step through the History panel (⌘Y). Quit and reopen: the edit
    and its whole history come back, and `~/Documents/Sauce Bunny/Edits/`
    holds a readable JSON copy.
 4. Mark In/Out (I/O), Lift (Z) leaves a gap, Extract (X) closes it. Remove
-   dead space: the review lists spans, Apply removes them.
+   dead space: the review lists spans, Remove takes them out.
 5. **Export AAF** (**Keep picture groups**, now the default), import into
    Media Composer: the sequence relinks to the original master clips, V1 is
    the group clip and still switches angles (right-click V1 ▸ the group's

@@ -32,7 +32,7 @@ export function EditModelMenu({ value, appLocalModelId, disabled, onChange, onSe
       }}>
       <optgroup label="On this Mac">
         {local.length ? local.map((model) => <option key={model.id} value={`local:${model.id}`}>{model.name}</option>)
-          : <option value={`local:${localId}`} disabled>No local model downloaded</option>}
+          : <option value={`local:${localId}`} disabled>No local model</option>}
       </optgroup>
       <optgroup label="Cloud, with your key">
         {CLOUDS.map((provider) => <option key={provider} value={`cloud:${provider}`} disabled={!keys[provider]}>

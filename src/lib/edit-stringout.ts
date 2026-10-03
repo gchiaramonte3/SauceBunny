@@ -28,7 +28,7 @@ export type StringoutRules = {
 export const stringoutDefaults: StringoutRules = { head: 0.5, tail: 1, gapFrames: 24, join: 2, minimum: 1 };
 
 /** Media Composer's marker colours, one per person in lane order. */
-const COLORS = ["red", "green", "blue", "cyan", "magenta", "yellow", "white", "black"];
+export const MARKER_COLORS = ["red", "green", "blue", "cyan", "magenta", "yellow", "white", "black"];
 
 export type StringoutBite = { track: string; from: number; to: number; text: string };
 
@@ -86,7 +86,7 @@ export function layoutBites(document: AafDocument, title: string, bites: LaneBit
     if (segments.length && rules.gapFrames > 0) { segments.push({ kind: "gap", id: `gap-${index}`, frames: rules.gapFrames }); at += rules.gapFrames; }
     // A bite is that person's mic, on their track; the other tracks are filler under it.
     segments.push({ kind: "source", id: `bite-${index}`, source, in_frame: start, out_frame: outFrame, tracks: [person.id] });
-    markers.push({ id: `bite-${index}`, frame: at, track: person.id, name: person.name, comment: snippet(bite.text), color: COLORS[frame.tracks.indexOf(person) % COLORS.length] });
+    markers.push({ id: `bite-${index}`, frame: at, track: person.id, name: person.name, comment: snippet(bite.text), color: MARKER_COLORS[frame.tracks.indexOf(person) % MARKER_COLORS.length] });
     at += outFrame - start; last = outFrame; lastIn = inFrame;
   });
   // Whoever has a bite is patched, top-down in the order they first speak, a group angle included.
@@ -157,7 +157,7 @@ export function layoutEditBites(base: EditDocument, bites: EditBite[], title: st
     if (segments.length && rules.gapFrames > 0) { segments.push({ kind: "gap", id: `gap-${index}`, frames: rules.gapFrames }); at += rules.gapFrames; }
     const lane = base.tracks[person];
     segments.push({ kind: "source", id: `bite-${index}`, source: bite.source, in_frame: start, out_frame: outFrame, ...(lane ? { tracks: [lane.id] } : {}) });
-    markers.push({ id: `bite-${index}`, frame: at, track: lane?.id ?? null, name: lane?.name ?? "Bite", comment: snippet(bite.text), color: COLORS[Math.max(0, person) % COLORS.length] });
+    markers.push({ id: `bite-${index}`, frame: at, track: lane?.id ?? null, name: lane?.name ?? "Bite", comment: snippet(bite.text), color: MARKER_COLORS[Math.max(0, person) % MARKER_COLORS.length] });
     at += outFrame - start;
     last.set(bite.source, { inFrame, outFrame });
   });

@@ -1,6 +1,7 @@
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import type { AafDocument } from "../bindings/AafDocument";
 import { multitrackFixture, multitrackTranscript } from "../test/multitrack-fixture";
-import { multitrackAvidMarkers, multitrackExportName, multitrackPeople, multitrackScope } from "./multitrack-person";
+import { micOrder, multitrackAvidMarkers, multitrackExportName, multitrackPeople, multitrackScope } from "./multitrack-person";
 import { multitrackTextLayout } from "./multitrack-text-layout";
 
 it("groups assigned owners without collapsing unassigned mics or different cast identities", () => {
@@ -89,4 +90,30 @@ it("bounds zoomed-out text by viewport cells and preserves precise labels when z
   const detailed = multitrackTextLayout(cues, 0, 240, 800);
   expect(detailed).toHaveLength(5); expect(detailed[0]).toMatchObject({ text: "Passage 0", summary: false, style: { left: "0%", width: `${40 / 240 * 100}%` } });
   expect(multitrackTextLayout(cues, 25000, 100, 800)).toEqual([]);
+});
+
+describe("person tabs in track order", () => {
+  // As the AAF stores a grouped sequence: every main track first (here out of
+  // track order too), then every group alternate after all of them.
+  function grouped(): AafDocument {
+    const doc = multitrackFixture();
+    const clip = doc.manifest.tracks[0].clips[0];
+    const track = (id: string, name: string, number: number) => ({ id, name, warnings: [], physical_track_number: number, clips: [{ ...clip }] });
+    doc.manifest.tracks = [track("b", "BETH", 2), track("a", "ANNA", 1), track("a-alt", "ALT OF A1", 1), track("b-alt", "ALT OF A2", 2)];
+    doc.labels = [];
+    doc.manifest.graph = { sequence_id: "top", sources: [], positions: [], markers: [], picture_tracks: [], path_mappings: [],
+      lanes: [{ track_id: "a-alt", parent_track_id: "a", branch_id: "x", group_name: "G", availability: "ready" }, { track_id: "b-alt", parent_track_id: "b", branch_id: "y", group_name: "G", availability: "ready" }] };
+    return doc;
+  }
+
+  it("reads A1, A1's alternates, then A2, not the order the file stores them", () => {
+    expect(micOrder(grouped())).toEqual(["a", "a-alt", "b", "b-alt"]);
+    expect(multitrackPeople(grouped()).map((person) => `${person.track} ${person.name}`)).toEqual(["A1 ANNA", "A1 ALT OF A1", "A2 BETH", "A2 ALT OF A2"]);
+  });
+
+  it("puts a person with several mics at their lowest track", () => {
+    const doc = grouped();
+    doc.labels = [{ track_id: "b", owner_name: "Same", cast_member_id: null, color: null }, { track_id: "a-alt", owner_name: "Same", cast_member_id: null, color: null }];
+    expect(multitrackPeople(doc).map((person) => person.name)).toEqual(["ANNA", "Same", "ALT OF A2"]);
+  });
 });

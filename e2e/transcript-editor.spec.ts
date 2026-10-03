@@ -138,6 +138,8 @@ test("Insert splices at the record playhead, as Avid's V does, and Overwrite (B)
   await page.getByRole("button", { name: "Create" }).click();
   const record = page.locator(".cp-te-doc");
   await expect(record).toContainText("Then Rosa called me.");
+  // The source's person tabs read left to right in track order, each with its track.
+  await expect(page.getByRole("tablist", { name: "Transcripts by person" }).getByRole("tab")).toHaveText(["All voices", "A1 Alex", "A2 Sam", "A3 Room"]);
   // Park the playhead about 32 s in, after Sam's line (20-24 s) and before Alex's second (40 s), by clicking the timeline.
   const ruler = (await page.locator(".cp-te-tl-ruler").boundingBox())!;
   await page.mouse.click(ruler.x + ruler.width * 0.032, ruler.y + ruler.height / 2);

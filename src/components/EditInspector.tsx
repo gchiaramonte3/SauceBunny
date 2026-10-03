@@ -1,5 +1,6 @@
 import type { useEditWorkspace } from "../hooks/use-edit-workspace";
 import { deleteWords, isGap, type TimelineLane, type TimelineWord } from "../lib/edit-model";
+import { EditMarkerInspector } from "./EditMarkerInspector";
 
 type Props = {
   ws: ReturnType<typeof useEditWorkspace>; words: TimelineWord[]; lanes: TimelineLane[]; colors: Record<string, string>;
@@ -12,7 +13,7 @@ const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.fl
 
 /**
  * Details for whatever is selected, then the state of the whole string out.
- * It explains; every button here also has a key, so closing it loses nothing.
+ * It explains; its word actions also have keys (⌫, ⇧⌫), so closing it loses nothing there.
  */
 export function EditInspector({ ws, words, lanes, colors, tc, sourceName }: Props) {
   const nameOf = (id: string) => lanes.find((lane) => lane.id === id)?.name ?? id;
@@ -42,6 +43,8 @@ export function EditInspector({ ws, words, lanes, colors, tc, sourceName }: Prop
           </div>
         </>}
     </section>
+    {ws.marker && <EditMarkerInspector marker={ws.marker} tc={tc} onChange={(change) => ws.updateMarker(ws.marker!.id, change, `marker:${ws.marker!.id}:${Object.keys(change)[0]}`)}
+      onRemove={() => ws.removeMarker(ws.marker!.id)} onDone={() => ws.setMarker(null)} />}
     {seam && <section className="cp-te-insp-section" aria-labelledby="cp-te-insp-seam">
       <h3 id="cp-te-insp-seam" className="cp-te-insp-title">Edit point</h3>
       <p className="cp-te-insp-lead">{seam.kind === "cut" ? "Cut" : seam.kind === "through" ? "Through edit" : seam.kind === "gap" ? "Gap" : "Jump"} at {tc(seam.at)}</p>

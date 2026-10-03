@@ -4,15 +4,37 @@ import { audioTrackLabel, trackOwner, transcriptRows, sequenceTimecode } from ".
 import { avidMarkerRowsToTxt } from "./markers";
 import { alternativeLane, laneMetadata } from "./multitrack-graph";
 
-export type MultitrackPerson = { id: string; name: string; trackIds: string[]; color: string | null };
+/** `track` is the Avid track of the person's first mic ("A1"; an alternate shows its group's track), shown before their name. */
+export type MultitrackPerson = { id: string; name: string; trackIds: string[]; color: string | null; track?: string };
 
-/** Explicit cast identity wins. Otherwise, equal user-entered owner labels group mics. */
+/**
+ * Every mic in Avid track order, left to right: main tracks by their track
+ * number (the AAF's own order on a tie), each followed at once by its group
+ * alternates. The AAF itself stores every main track first and every
+ * alternate after all of them, which put a group's people at the far end of
+ * the tabs, away from their own track.
+ */
+export function micOrder(document: AafDocument): string[] {
+  const tracks = document.manifest.tracks, number = (index: number) => tracks[index].physical_track_number ?? index + 1;
+  const mains = tracks.map((track, index) => ({ track, index })).filter(({ track }) => !alternativeLane(document, track.id))
+    .sort((a, b) => number(a.index) - number(b.index) || a.index - b.index);
+  const ordered = mains.flatMap(({ track }) => [track.id, ...tracks.filter((child) => laneMetadata(document, child.id)?.parent_track_id === track.id).map((child) => child.id)]);
+  return [...ordered, ...tracks.map((track) => track.id).filter((id) => !ordered.includes(id))];
+}
+
+/** The Avid track a mic sits on, its group's for an alternate; null when the file cannot say. */
+export function micTrack(document: AafDocument, trackId: string): string | null {
+  try { return multitrackAvidTrack(document, trackId); } catch { return null; }
+}
+
+/** Explicit cast identity wins. Otherwise, equal user-entered owner labels group mics. In track order, left to right. */
 export function multitrackPeople(document: AafDocument): MultitrackPerson[] {
   const people = new Map<string, MultitrackPerson>();
-  for (const track of document.manifest.tracks) {
+  const byId = new Map(document.manifest.tracks.map((track) => [track.id, track]));
+  for (const track of micOrder(document).map((id) => byId.get(id)!)) {
     const label = document.labels.find((item) => item.track_id === track.id), name = trackOwner(document, track.id);
     const id = label?.cast_member_id ? `cast:${label.cast_member_id}` : label?.owner_name.trim() ? `owner:${name.normalize("NFC").trim().toLocaleLowerCase()}` : `track:${track.id}`;
-    const person = people.get(id) ?? { id, name, trackIds: [], color: label?.color ?? null };
+    const person = people.get(id) ?? { id, name, trackIds: [], color: label?.color ?? null, track: micTrack(document, track.id) ?? undefined };
     person.trackIds.push(track.id); people.set(id, person);
   }
   return [...people.values()];
