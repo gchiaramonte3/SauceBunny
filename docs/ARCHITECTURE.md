@@ -28,7 +28,9 @@ A macOS desktop app for **clipping sections out of online videos** (YouTube, Vim
   SQLite (`edit_log.rs`, `app_data_dir()/timelines.sqlite`) and mirrored as
   JSON to `~/Documents/Sauce Bunny/Edits/`. Playback is `src/lib/edit-audio.ts`
   on one AudioContext; export goes through `edit_export.rs` to the AAF
-  sidecar's `write-edit`. Open string outs are tabs over one editor
+  sidecar's `write-edit` (or `write-edits` for several string outs from one
+  run), which keeps each grouped source's group clips as a cached pack in
+  `scratch/aaf-packs/`. Open string outs are tabs over one editor
   (`EditPage`, no keep-alive). Every mic in a source is a person (a lane);
   record tracks are PATCHED lanes (`EditTrack.featured`), top-down, none in a
   new string out, and a clip names the lanes it plays (`EditSegment.tracks`),

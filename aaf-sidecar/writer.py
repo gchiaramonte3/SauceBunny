@@ -25,16 +25,31 @@ After writing, the file is re-read with the app's own reader
 with the source frame it was cut from: same source mob, same channel, same
 sample. A file that fails that comparison is never published.
 
+Group packs. A kept group clip is a CompositionMob that can refer to every
+clip in the show (HEAT 2's V1: 176 slots), and the Edit Protocol wants all of
+it in the file, whole, with its original MobIDs, however short the cut. So the
+size is fixed; the time is not. With ``pack_dir`` the closure of the group
+mobs an edit refers to is written once per source into a cached AAF (a pack),
+checked once when it is built, and every later export copies that file, opens
+it ``rw`` and adds only its own sequence and whatever mobs the pack lacks.
+The pack holds exactly the closure of the referenced group mobs, so the output
+is the same set of mobs a full export writes.
+
 Research and measurements behind this: docs/AAF-ASSEMBLY-RESEARCH.md
-("Getting the cut back into Avid") and docs/research/aaf-stringout-spike/.
+("Getting the cut back into Avid"), docs/research/aaf-stringout-spike/ and
+docs/STRING-OUTS-SPEC-2026-10-03.md (phase 4).
 """
 from contextlib import ExitStack
 from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
+import hashlib
 import json
 import math
 import os
+import shutil
+import tempfile
 
 import aaf2
 from aaf2.components import (Filler, OperationGroup, ScopeReference, Selector, Sequence, SourceClip,
@@ -47,7 +62,11 @@ from reader import (MAX_DEPTH, ReaderError, clean_name, fail, fingerprint, media
                     rate_of, value)
 
 SCHEMA_VERSION = 1
+# Bump whenever what the writer puts in a file changes: a group pack names the
+# version that built it, so a pack from another version is never reused.
+WRITER_VERSION = 1
 MAX_REQUEST_BYTES = 64 * 1024 * 1024
+MAX_EDITS = 256
 MAX_TRACKS = 256
 # Media Composer's audio track ceiling, and the reader's, so the self-check
 # can re-read every track that is written.
@@ -250,6 +269,11 @@ def validate(request):
         invalid('output_path must not be one of the source AAFs.')
     spec['output'] = output
     spec['markers_output'] = output.with_name(output.stem + ' - Avid markers.txt') if spec['markers'] else None
+    spec['pack_dir'] = None
+    if request.get('pack_dir') is not None:
+        spec['pack_dir'] = absolute(request['pack_dir'], 'pack_dir')
+        if not spec['pack_dir'].is_dir():
+            invalid('pack_dir must be an existing folder.')
     return spec
 
 
@@ -507,26 +531,58 @@ def append_piece(components, piece, dst, kind):
 
 
 # ---------------------------------------------------------------- mob closure
-def mob_closure(src, dst, mob_ids):
+def mob_closure(src, dst, mob_ids, closed=frozenset()):
     """Copy every mob the new sequence derives from, with its ORIGINAL MobID.
     Never EssenceData. A chain may end outside the file (a tape nobody
-    exported); that is allowed by the Edit Protocol and left as it was."""
-    pending, done, copied = list(mob_ids), set(), 0
+    exported); that is allowed by the Edit Protocol and left as it was.
+
+    `closed`: mobs already in `dst` from a group pack of this same source.
+    The pack holds every mob they refer to, so they are neither copied nor
+    walked. Returns the ids of the mobs copied, in the order they were."""
+    pending, done, copied = list(mob_ids), set(), []
+    # One classdef cache for the whole closure: pyaaf2 otherwise registers
+    # every class of every mob again, mob by mob (23,000 registrations for
+    # HEAT 2's group). Per source, because two sources may define an
+    # extension class differently. Seeded, because pyaaf2 reads the cache as
+    # `classdef_cache or set()` and would replace an empty one.
+    classes = {None}
     while pending:
         mob_id = pending.pop()
         if mob_id in done:
             continue
         done.add(mob_id)
+        if mob_id in closed:
+            continue
         mob = src.content.mobs.get(aaf2.mobid.MobID(mob_id))
         if mob is None:
             continue
         if mob.mob_id not in dst.content.mobs:
-            dst.content.mobs.append(mob.copy(root=dst))
-            copied += 1
+            dst.content.mobs.append(mob.copy(root=dst, classdef_cache=classes))
+            copied.append(mob_id)
         for item, _ in mob.walk_references(topdown=True):
             if isinstance(item, SourceReference) and item.mob_id is not None and item.mob_id.int != 0:
                 pending.append(str(item.mob_id))
     return copied
+
+
+def check_references(file, mobs, sources):
+    """No reference from `mobs` may dangle at a mob that one of the source
+    AAFs holds: the target is in `file`, with the slot referred to. A target
+    no source holds is a chain ending outside the file, which is allowed.
+    Looks targets up rather than indexing every mob of every file."""
+    slots = {}
+    for mob in mobs:
+        for item, _ in mob.walk_references(topdown=True):
+            if not isinstance(item, SourceReference) or item.mob_id is None or item.mob_id.int == 0:
+                continue
+            key = item.mob_id
+            if not any(key in source.content.mobs for source in sources):
+                continue
+            if key not in slots:
+                target = file.content.mobs.get(key)
+                slots[key] = None if target is None else {slot.slot_id for slot in target.slots}
+            if slots[key] is None or item.slot_id not in slots[key]:
+                fail(f'Self-check failed: {key} slot {item.slot_id} was not copied.', 'verify_failed')
 
 
 def add_markers(dst, comp, rate, slot, markers):
@@ -566,8 +622,8 @@ def add_markers(dst, comp, rate, slot, markers):
 
 # ---------------------------------------------------------------- sources
 class Source:
-    def __init__(self, info, file):
-        self.id, self.path, self.file = info['id'], info['path'], file
+    def __init__(self, info, file, identity):
+        self.id, self.path, self.file, self.identity = info['id'], info['path'], file, identity
         try:
             self.sequence = file.content.mobs.get(aaf2.mobid.MobID(info['sequence_id']))
         except (ValueError, TypeError):
@@ -597,65 +653,136 @@ def record_timecode(sequence, rate):
 
 
 # ---------------------------------------------------------------- write
-def build(spec, sources, destination, warnings):
+def compose(spec, sources, dst, warnings):
+    """The new top-level sequence, built in `dst` and not yet attached, with
+    the cloners that know which source mobs it refers to. Shared by the write
+    and by the pack probe, so one piece of code decides both."""
     rate = spec['edit_rate']
-    with aaf2.open(str(destination), 'w') as dst:
-        for source in sources.values():
-            dst.dictionary.update(source.file.dictionary)   # op/param/data defs before any copy
-        comp = dst.create.CompositionMob(spec['name'])
-        comp['UsageCode'].value = 'Usage_TopLevel'
-        fps, drop = record_timecode(next(iter(sources.values())).sequence, rate)
-        tc_slot = comp.create_timeline_slot(rate)
-        tc_slot.segment = dst.create.Timecode(fps=fps, drop=drop, length=spec['length'])
-        tc_slot.segment.start = spec['start_tc']
-        tc_slot['PhysicalTrackNumber'].value = 1
+    for source in sources.values():
+        dst.dictionary.update(source.file.dictionary)       # op/param/data defs before any copy
+    comp = dst.create.CompositionMob(spec['name'])
+    comp['UsageCode'].value = 'Usage_TopLevel'
+    fps, drop = record_timecode(next(iter(sources.values())).sequence, rate)
+    tc_slot = comp.create_timeline_slot(rate)
+    tc_slot.segment = dst.create.Timecode(fps=fps, drop=drop, length=spec['length'])
+    tc_slot.segment.start = spec['start_tc']
+    tc_slot['PhysicalTrackNumber'].value = 1
 
-        cloners = {key: Cloner(dst, rate, spec['approach'], warnings) for key in sources}
-        out = []
-        for index, track in enumerate(spec['tracks']):
-            used = {sources[key].slots[slot].segment.media_kind for key, slot in track['slots'].items()}
-            kind = used.pop() if len(used) == 1 else track['kind']   # keep Legacy* when every source used it
-            slot = comp.create_empty_sequence_slot(rate, media_kind=kind)
-            slot['PhysicalTrackNumber'].value = track['number']
-            out.append({'slot': slot, 'kind': kind, 'parts': [], 'label': ('V' if track['kind'] == 'picture' else 'A') + str(track['number'])})
+    cloners = {key: Cloner(dst, rate, spec['approach'], warnings) for key in sources}
+    out = []
+    for index, track in enumerate(spec['tracks']):
+        used = {sources[key].slots[slot].segment.media_kind for key, slot in track['slots'].items()}
+        kind = used.pop() if len(used) == 1 else track['kind']   # keep Legacy* when every source used it
+        slot = comp.create_empty_sequence_slot(rate, media_kind=kind)
+        slot['PhysicalTrackNumber'].value = track['number']
+        out.append({'slot': slot, 'kind': kind, 'parts': [], 'label': ('V' if track['kind'] == 'picture' else 'A') + str(track['number'])})
 
-        for at, segment in enumerate(spec['segments']):
-            for index, (track, target) in enumerate(zip(spec['tracks'], out)):
-                sequence = target['parts']
-                slot_id = track['slots'].get(segment.get('source'))
-                if segment['kind'] == 'gap' or slot_id is None:
-                    append_piece(sequence, dst.create.Filler(media_kind=target['kind'], length=segment['length']), dst, target['kind'])
-                    continue
-                source_slot = sources[segment['source']].slots[slot_id]
-                prefer = track['choices'].get(segment['source'], frozenset())
-                cursor = 0
-                for first, last in muted_ranges(spec['mutes'].get((at, index), []), segment['length']):
-                    if first > cursor:
-                        piece(spec, cloners, segment, at, target, source_slot, cursor, first, dst, prefer, track['approach'])
-                    append_piece(sequence, dst.create.Filler(media_kind=target['kind'], length=last - first), dst, target['kind'])
-                    cursor = last
-                if cursor < segment['length']:
-                    piece(spec, cloners, segment, at, target, source_slot, cursor, segment['length'], dst, prefer, track['approach'])
-        for target in out:
-            target['slot'].segment['Components'].value = target['parts']
-            target['slot'].segment.length = spec['length']
+    for at, segment in enumerate(spec['segments']):
+        for index, (track, target) in enumerate(zip(spec['tracks'], out)):
+            sequence = target['parts']
+            slot_id = track['slots'].get(segment.get('source'))
+            if segment['kind'] == 'gap' or slot_id is None:
+                append_piece(sequence, dst.create.Filler(media_kind=target['kind'], length=segment['length']), dst, target['kind'])
+                continue
+            source_slot = sources[segment['source']].slots[slot_id]
+            prefer = track['choices'].get(segment['source'], frozenset())
+            cursor = 0
+            for first, last in muted_ranges(spec['mutes'].get((at, index), []), segment['length']):
+                if first > cursor:
+                    piece(spec, cloners, segment, at, target, source_slot, cursor, first, dst, prefer, track['approach'])
+                append_piece(sequence, dst.create.Filler(media_kind=target['kind'], length=last - first), dst, target['kind'])
+                cursor = last
+            if cursor < segment['length']:
+                piece(spec, cloners, segment, at, target, source_slot, cursor, segment['length'], dst, prefer, track['approach'])
+    for target in out:
+        target['slot'].segment['Components'].value = target['parts']
+        target['slot'].segment.length = spec['length']
 
-        for index, target in enumerate(out):
-            markers = [m for m in spec['markers'] if m['track'] == index]
-            if markers:
-                add_markers(dst, comp, rate, target['slot'], markers)
-        dst.content.mobs.append(comp)                        # attach once, fully built
-        copied = sum(mob_closure(sources[key].file, dst, cloner.references) for key, cloner in cloners.items())
+    for index, target in enumerate(out):
+        markers = [m for m in spec['markers'] if m['track'] == index]
+        if markers:
+            add_markers(dst, comp, rate, target['slot'], markers)
+    return SimpleNamespace(comp=comp, out=out, cloners=cloners, fps=fps, drop=drop)
+
+
+def build(spec, sources, destination, warnings, pack=None):
+    """Write the edit to `destination`: from nothing, or on a copy of a group
+    pack, which already holds the closure of the group mobs it refers to."""
+    if pack:
+        shutil.copyfile(pack['path'], destination)
+    with aaf2.open(str(destination), 'rw' if pack else 'w') as dst:
+        closed = frozenset(str(key) for key in dst.content.mobs.references) if pack else frozenset()
+        made = compose(spec, sources, dst, warnings)
+        dst.content.mobs.append(made.comp)                   # attach once, fully built
+        added = []
+        for key, cloner in made.cloners.items():
+            mine = closed if pack and sources[key].identity == pack['identity'] else frozenset()
+            added += mob_closure(sources[key].file, dst, cloner.references, mine)
         # Avid names this DataDef 'Descriptive Metadata' (the AUID pyaaf2 calls
         # 'DescriptiveMetadata'); readers matching by name, graph.py among them,
         # only see markers under Avid's spelling. Last: pyaaf2 looks media kinds
         # up by short name, so nothing may resolve it after this.
         if spec['markers']:
             dst.dictionary.lookup_datadef('DescriptiveMetadata').name = 'Descriptive Metadata'
-        return {'sequence_id': str(comp.mob_id), 'fps': fps, 'drop': drop, 'copied_mobs': copied,
+        # The self-check need not re-walk a pack: it was checked when built.
+        # That holds only while every source is the file the pack came from;
+        # a second source could hold the end of a chain the pack leaves open.
+        narrow = pack is not None and all(source.identity == pack['identity'] for source in sources.values())
+        return {'sequence_id': str(made.comp.mob_id), 'fps': made.fps, 'drop': made.drop,
+                'copied_mobs': len(closed) + len(added), 'walk': [str(made.comp.mob_id), *added] if narrow else None,
                 'tracks': [{'index': i, 'kind': t['kind'], 'physical_track_number': spec['tracks'][i]['number'],
                             'label': o['label'], 'slot_id': o['slot'].slot_id, 'data_def': o['kind']}
-                           for i, (t, o) in enumerate(zip(spec['tracks'], out))]}
+                           for i, (t, o) in enumerate(zip(spec['tracks'], made.out))]}
+
+
+# ---------------------------------------------------------------- group packs
+def referenced_groups(spec, sources):
+    """The group and submaster CompositionMobs the edit will refer to, per
+    source file: the cloner itself, run into a throwaway in-memory file, so
+    the copy code decides rather than a second walk that could disagree."""
+    if all(track['approach'] == 'B' for track in spec['tracks']):
+        return {}                                           # B follows every group to the clip that plays
+    probe = aaf2.open()                                     # in memory, never saved
+    made = compose(spec, sources, probe, [])
+    groups = {}
+    for key, cloner in made.cloners.items():
+        source = sources[key]
+        for mob_id in cloner.references:
+            if isinstance(source.file.content.mobs.get(aaf2.mobid.MobID(mob_id)), aaf2.mobs.CompositionMob):
+                groups.setdefault(source.identity, set()).add(mob_id)
+    return groups
+
+
+def pack_name(identity, group_ids):
+    groups = hashlib.sha256('\n'.join(sorted(group_ids)).encode()).hexdigest()[:16]
+    return f'{identity}-{WRITER_VERSION}-{groups}.aaf'
+
+
+def build_pack(source, group_ids, destination):
+    """The source's dictionary and the whole closure of `group_ids`, checked,
+    then renamed into place: a pack that exists under its name is complete,
+    and a crash leaves only a temporary file nothing ever opens."""
+    fd, name = tempfile.mkstemp(prefix='.pack-', suffix='.partial', dir=destination.parent)
+    os.close(fd)
+    temporary = Path(name)
+    try:
+        with aaf2.open(str(temporary), 'w') as pack:
+            pack.dictionary.update(source.file.dictionary)
+            copied = mob_closure(source.file, pack, group_ids)
+            # Every reference, checked on the graph that is about to be
+            # saved while all of it is still in memory: reading HEAT 2's
+            # 69,000 objects back costs more than writing them did.
+            check_references(pack, pack.content.mobs, [source.file])
+        with aaf2.open(str(temporary), 'r') as pack:
+            # What reached the disk: no essence, and the closure's mobs under
+            # their own MobIDs, read from the index without opening a mob.
+            if any(True for _ in pack.content.essencedata):
+                fail('Self-check failed: a group pack carries essence.', 'verify_failed')
+            if {str(key) for key in pack.content.mobs.references} != set(copied):
+                fail('Self-check failed: a group pack lost a mob on the way to disk.', 'verify_failed')
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def muted_ranges(ranges, length):
@@ -692,7 +819,13 @@ class VerifyTimeline:
         class Bounded(GraphTimeline):
             MAX_EXPANSIONS = budget
             MAX_COMPONENTS = budget
-        return Bounded(file, sequence_id, expand_alternates=False)
+        # The sequence by its MobID, as the reader's scan would find it but
+        # without reading every mob in front of it: an export made on a group
+        # pack holds its new sequence after thousands of the show's mobs.
+        mob = file.content.mobs.get(aaf2.mobid.MobID(sequence_id))
+        top = [mob] if isinstance(mob, aaf2.mobs.CompositionMob) and mob.usage == 'Usage_TopLevel' else []
+        view = SimpleNamespace(content=SimpleNamespace(essencedata=file.content.essencedata, toplevel=lambda: iter(top)))
+        return Bounded(view, sequence_id, expand_alternates=False)
 
 
 def reader_frames(timeline, track, first, last):
@@ -801,31 +934,31 @@ def describe(key):
     return key[0]
 
 
-def verify(spec, sources, destination, built):
-    """Re-read the written file with the app's reader and compare every frame."""
+def verify(spec, sources, destination, built, cache=None):
+    """Re-read the written file with the app's reader and compare every frame.
+    `cache` keeps each source's re-read across the edits of one batch."""
     budget = max(10000, 64 * (len(spec['segments']) + len(spec['mutes'])) + 16)
     rate = spec['edit_rate']
+    cache = {} if cache is None else cache
     with aaf2.open(str(destination), 'r') as out_file:
         if any(True for _ in out_file.content.essencedata):
             fail('Self-check failed: the new AAF carries essence.', 'verify_failed')
-        present = {str(m.mob_id): {s.slot_id for s in m.slots} for m in out_file.content.mobs}
-        known = {}
-        for source in sources.values():
-            for mob in source.file.content.mobs:
-                known.setdefault(str(mob.mob_id), {s.slot_id for s in mob.slots})
-        for mob in out_file.content.mobs:
-            for item, _ in mob.walk_references(topdown=True):
-                if isinstance(item, SourceReference) and item.mob_id is not None and item.mob_id.int != 0:
-                    target = str(item.mob_id)
-                    if target in known and (target not in present or item.slot_id not in present[target]):
-                        fail(f'Self-check failed: {target} slot {item.slot_id} was not copied.', 'verify_failed')
+        # Every mob, or with a group pack only the new sequence and the mobs
+        # added beyond the pack, which was checked once when it was built.
+        walk = out_file.content.mobs if built['walk'] is None else [
+            out_file.content.mobs.get(aaf2.mobid.MobID(mob_id)) for mob_id in built['walk']]
+        check_references(out_file, walk, [source.file for source in sources.values()])
         timeline = VerifyTimeline.open(out_file, built['sequence_id'], budget)
         if (timeline.start, timeline.fps, timeline.drop) != (spec['start_tc'], built['fps'], built['drop']) or timeline.duration != spec['length']:
             fail('Self-check failed: the timecode track or length does not match the edit.', 'verify_failed')
         out_tracks = {t['id']: t for t in timeline.tracks}
-        reads = {key: VerifyTimeline.open(source.file, str(source.sequence.mob_id), budget)
-                 for key, source in sources.items()
-                 if any(key in t['slots'] and t['kind'] == 'sound' for t in spec['tracks'])}
+        reads = {}
+        for key, source in sources.items():
+            if any(key in t['slots'] and t['kind'] == 'sound' for t in spec['tracks']):
+                read = (source.identity, str(source.sequence.mob_id), budget)
+                if read not in cache:
+                    cache[read] = VerifyTimeline.open(source.file, read[1], budget)
+                reads[key] = cache[read]
         out_comp = out_file.content.mobs.get(aaf2.mobid.MobID(built['sequence_id']))
         frames, preferred = 0, {}
         for index, (track, info) in enumerate(zip(spec['tracks'], built['tracks'])):
@@ -876,22 +1009,56 @@ def expected_frames(spec, sources, reads, track, index, preferred):
 
 
 # ---------------------------------------------------------------- entry points
-def write_edit(request):
-    spec = validate(request)
-    for key, source in spec['sources'].items():
-        if not source['path'].is_file():
-            invalid(f'Source "{key}" is not a readable AAF file.')
-    output, markers_output = spec['output'], spec['markers_output']
-    if not output.parent.is_dir() or output.exists() or output.is_symlink():
-        fail('Choose a new output file in an existing folder.', 'invalid_output')
-    if markers_output and (markers_output.exists() or markers_output.is_symlink()):
-        fail(f'{markers_output.name} already exists next to the output. Choose another name.', 'invalid_output')
-    identities = {key: fingerprint(source['path']) for key, source in spec['sources'].items()}
-    warnings = []
-    with ExitStack() as stack:
-        sources = {}
+class Session:
+    """What one run of the writer shares between the edits it writes: each
+    source AAF opened once, with the fingerprint it had when it was opened,
+    its group packs, and its re-read for the self-check."""
+
+    def __init__(self, stack):
+        self.stack, self.files, self.packs, self.reads = stack, {}, set(), {}
+
+    def open(self, path):
+        if path not in self.files:
+            identity = fingerprint(path)
+            self.files[path] = (self.stack.enter_context(aaf2.open(str(path), 'r')), identity)
+        return self.files[path]
+
+    def pack(self, spec, sources):
+        """The group pack to base this edit on, built if it does not exist
+        yet, or None when the edit refers to no group mob. Several sources
+        with groups: the largest file's pack, the rest copied as before."""
+        groups = referenced_groups(spec, sources)
+        if not groups:
+            return None
+        files = {source.identity: source for source in sources.values()}
+        identity = max(groups, key=lambda key: (files[key].path.stat().st_size, key))
+        path = spec['pack_dir'] / pack_name(identity, groups[identity])
+        built = False
+        if path not in self.packs:
+            if path.is_file():
+                try:
+                    os.utime(path)          # in use: the scratch sweep ages packs by mtime
+                except OSError:
+                    pass
+            else:
+                build_pack(files[identity], groups[identity], path)
+                built = True
+            self.packs.add(path)
+        return {'path': path, 'identity': identity, 'built': built}
+
+    def write(self, request):
+        spec = validate(request)
+        for key, source in spec['sources'].items():
+            if not source['path'].is_file():
+                invalid(f'Source "{key}" is not a readable AAF file.')
+        output, markers_output = spec['output'], spec['markers_output']
+        if not output.parent.is_dir() or output.exists() or output.is_symlink():
+            fail('Choose a new output file in an existing folder.', 'invalid_output')
+        if markers_output and (markers_output.exists() or markers_output.is_symlink()):
+            fail(f'{markers_output.name} already exists next to the output. Choose another name.', 'invalid_output')
+        warnings, sources = [], {}
         for key, info in spec['sources'].items():
-            sources[key] = Source(info, stack.enter_context(aaf2.open(str(info["path"]), "r")))
+            sources[key] = Source(info, *self.open(info['path']))
         for index, track in enumerate(spec['tracks']):
             for key, slot_id in track['slots'].items():
                 sources[key].slot(slot_id, track['kind'], spec['edit_rate'], f'tracks[{index}]')
@@ -902,41 +1069,88 @@ def write_edit(request):
                 slot_id = track['slots'].get(segment['source'])
                 if slot_id is not None and segment['out'] > sources[segment['source']].slots[slot_id].segment.length:
                     invalid(f'segments[{index}]: out_frame is past the end of slot {slot_id} in source "{segment["source"]}".')
-        with pending_file(output) as destination:
-            built = build(spec, sources, destination, warnings)
-            result = verify(spec, sources, destination, built)
-            for key, source in spec['sources'].items():
-                if fingerprint(source['path']) != identities[key]:
-                    fail(f'Source "{key}" changed while the edit was written. Try again.', 'source_changed')
-    if markers_output:
+        pack = self.pack(spec, sources) if spec['pack_dir'] else None
         try:
-            with pending_file(markers_output) as pending:
-                pending.write_text(avid_marker_text(spec, spec['tracks'], built['fps'], built['drop']), encoding='utf-8')
-        except BaseException:
-            output.unlink(missing_ok=True)                  # never leave half a delivery
+            with pending_file(output) as destination:
+                built = build(spec, sources, destination, warnings, pack)
+                result = verify(spec, sources, destination, built, self.reads)
+                for key, source in sources.items():
+                    if fingerprint(source.path) != source.identity:
+                        fail(f'Source "{key}" changed while the edit was written. Try again.', 'source_changed')
+        except BaseException as error:
+            if pack and getattr(error, 'code', None) not in ('cancelled', 'invalid_output'):
+                # Never trust a pack twice that an export failed on: the next
+                # export builds it again from the source.
+                self.packs.discard(pack['path'])
+                pack['path'].unlink(missing_ok=True)
             raise
-    return {'schema_version': SCHEMA_VERSION, 'output': str(output),
-            'markers_output': str(markers_output) if markers_output else None,
-            'sequence_id': built['sequence_id'], 'name': spec['name'], 'approach': spec['approach'],
-            'edit_rate': {'numerator': spec['edit_rate'].numerator, 'denominator': spec['edit_rate'].denominator},
-            'start_timecode_frames': spec['start_tc'], 'timecode_fps': built['fps'], 'drop_frame': built['drop'],
-            'duration_frames': spec['length'], 'tracks': built['tracks'], 'segments': len(spec['segments']),
-            'markers': len(spec['markers']), 'copied_mobs': built['copied_mobs'], 'warnings': warnings,
-            'verify': result}
+        if markers_output:
+            try:
+                with pending_file(markers_output) as pending:
+                    pending.write_text(avid_marker_text(spec, spec['tracks'], built['fps'], built['drop']), encoding='utf-8')
+            except BaseException:
+                output.unlink(missing_ok=True)              # never leave half a delivery
+                raise
+        return {'schema_version': SCHEMA_VERSION, 'output': str(output),
+                'markers_output': str(markers_output) if markers_output else None,
+                'sequence_id': built['sequence_id'], 'name': spec['name'], 'approach': spec['approach'],
+                'edit_rate': {'numerator': spec['edit_rate'].numerator, 'denominator': spec['edit_rate'].denominator},
+                'start_timecode_frames': spec['start_tc'], 'timecode_fps': built['fps'], 'drop_frame': built['drop'],
+                'duration_frames': spec['length'], 'tracks': built['tracks'], 'segments': len(spec['segments']),
+                'markers': len(spec['markers']), 'copied_mobs': built['copied_mobs'], 'warnings': warnings,
+                'pack': {'built': pack['built']} if pack else None, 'verify': result}
 
 
-def write_edit_request(path):
-    request = Path(path)
-    if not request.is_file() or request.stat().st_size > MAX_REQUEST_BYTES:
-        invalid('The edit request must be a JSON file of at most 64 MB.')
+def write_edit(request):
+    with ExitStack() as stack:
+        return Session(stack).write(request)
+
+
+def write_edits(request):
+    """Several edits from one run: each source AAF is opened once and each
+    group pack built at most once. One edit that fails is reported in its
+    place and does not lose the others; Stop ends the whole run."""
+    if not isinstance(request, dict) or request.get('schema_version') != SCHEMA_VERSION:
+        invalid(f'Unsupported edits request schema_version; expected {SCHEMA_VERSION}.')
+    edits = request.get('edits')
+    if not isinstance(edits, list) or not 1 <= len(edits) <= MAX_EDITS:
+        invalid(f'edits must list between 1 and {MAX_EDITS} edit requests.')
+    results = []
+    with ExitStack() as stack:
+        session = Session(stack)
+        for edit in edits:
+            try:
+                results.append(written(session.write, edit))
+            except ReaderError as error:
+                if error.code == 'cancelled':
+                    raise
+                results.append({'error': {'code': error.code, 'message': str(error)}})
+    return {'schema_version': SCHEMA_VERSION, 'results': results}
+
+
+def written(write, request):
     try:
-        data = json.loads(request.read_text(encoding='utf-8'))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        invalid('The edit request is not valid JSON.')
-    try:
-        return write_edit(data)
+        return write(request)
     except ReaderError:
         raise
     except Exception as error:  # pyaaf2 raises bare Exception for bad definitions
         # A traceback is not an answer; the output was never published.
         fail(f'The AAF could not be written ({type(error).__name__}). Nothing was saved.', 'write_failed')
+
+
+def read_request(path):
+    request = Path(path)
+    if not request.is_file() or request.stat().st_size > MAX_REQUEST_BYTES:
+        invalid('The edit request must be a JSON file of at most 64 MB.')
+    try:
+        return json.loads(request.read_text(encoding='utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        invalid('The edit request is not valid JSON.')
+
+
+def write_edit_request(path):
+    return written(write_edit, read_request(path))
+
+
+def write_edits_request(path):
+    return write_edits(read_request(path))

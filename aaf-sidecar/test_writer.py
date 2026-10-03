@@ -2,7 +2,9 @@
 Composer's "Link to (Don't Export) Media" exports. No media is needed."""
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -138,6 +140,46 @@ def nested_fixture(path, shape):
         track.segment.components.append(outer); track.segment.length = SEG1
         return {'sequence_id': str(comp.mob_id), 'A1': track.slot_id, 'recorders': [str(m.mob_id) for m in recs],
                 'angle': f"{recs[2].mob_id}:{recs[2].slots[0].slot_id}"}
+
+
+GROUP_LENGTH, GROUP_IN_SLOT = 4000, 100           # the group clip's length, and where the edit cuts into it
+
+
+def group_clip_fixture(path):
+    """V1, A1 and A2 cut from one Media Composer group clip: a CompositionMob
+    whose Selectors hold every angle, one of them a submaster, as HEAT 2's V1
+    does. The show also holds a clip nothing refers to."""
+    with aaf2.open(str(path), 'w') as f:
+        recs = [master(f, f'Show {r}', [('sound', 1), ('sound', 2)], 24000) for r in ('R1', 'R2', 'R3', 'R4')]
+        cams = [master(f, f'Show {c}', [('picture', 1)], 24000) for c in CAMS]
+        unused = master(f, 'Show unused', [('sound', 1)], 24000)
+        sub = f.create.CompositionMob('Show submaster'); f.content.mobs.append(sub)
+        sub_slot = sub.create_timeline_slot(RATE)
+        sub_slot.segment = recs[3].create_source_clip(recs[3].slots[0].slot_id, 0, 24000, 'sound')
+        group = f.create.CompositionMob('Show group'); f.content.mobs.append(group)
+        picture = group.create_timeline_slot(RATE)
+        picture.segment = selector(f, 'picture', [(m, m.slots[0].slot_id) for m in cams], 0, 1000, GROUP_LENGTH)
+        sound = []
+        for channel in (1, 2):
+            slot = group.create_timeline_slot(RATE)
+            slot.segment = selector(f, 'sound', [(m, m.slots[channel - 1].slot_id) for m in recs[:3]], channel - 1, 1000, GROUP_LENGTH)
+            slot.segment['Alternates'].append(sub.create_source_clip(sub_slot.slot_id, 1000, GROUP_LENGTH, 'sound'))
+            sound.append(slot.slot_id)
+        comp = f.create.CompositionMob('Show edit'); comp['UsageCode'].value = 'Usage_TopLevel'; f.content.mobs.append(comp)
+        total = LEAD + SEG1 + TAIL
+        tc = comp.create_timeline_slot(RATE); tc.segment = f.create.Timecode(fps=24, drop=False, length=total)
+        tc.segment.start = 86400 * 18; tc['PhysicalTrackNumber'].value = 1
+        info = {'sequence_id': str(comp.mob_id), 'total': total, 'group': str(group.mob_id), 'submaster': str(sub.mob_id),
+                'unused': str(unused.mob_id), 'recorders': [str(m.mob_id) for m in recs], 'cams': [str(m.mob_id) for m in cams]}
+        for name, kind, group_slot, number in (('V1', 'picture', picture.slot_id, 1), ('A1', 'sound', sound[0], 1),
+                                               ('A2', 'sound', sound[1], 2)):
+            track = comp.create_empty_sequence_slot(RATE, media_kind=kind); track['PhysicalTrackNumber'].value = number
+            track.segment.components.extend([f.create.Filler(media_kind=kind, length=LEAD),
+                                             group.create_source_clip(group_slot, GROUP_IN_SLOT, SEG1, kind),
+                                             f.create.Filler(media_kind=kind, length=TAIL)])
+            track.segment.length = total
+            info[name] = track.slot_id
+    return info
 
 
 class WriterTests(unittest.TestCase):
@@ -539,6 +581,193 @@ class WriterTests(unittest.TestCase):
         self.assertFalse([p for p in self.root.iterdir() if p.name.endswith('.partial')])
         self.assertEqual(self.read(self.root / 'out.aaf', result['sequence_id'])['duration_frames'], 30)
 
+    # ------------------------------------------------------------ group packs
+    def grouped(self):
+        path = self.root / 'group.aaf'
+        return path, group_clip_fixture(path)
+
+    def keep_picture(self, info):
+        """String Outs' default: picture keeps its groups, sound is the clip that plays."""
+        return [{'kind': 'picture', 'physical_track_number': 1, 'source_slots': {'s1': info['V1']}, 'approach': 'C'},
+                {'kind': 'sound', 'physical_track_number': 1, 'source_slots': {'s1': info['A1']}},
+                {'kind': 'sound', 'physical_track_number': 2, 'source_slots': {'s1': info['A2']}}]
+
+    def bites(self):
+        return [{'kind': 'source', 'source': 's1', 'in_frame': a, 'out_frame': b} for a, b in ((LEAD + 10, LEAD + 90), (LEAD + 200, LEAD + 260))]
+
+    def packed(self, path, info, out, packs, approach='B', tracks='keep picture', segments=None):
+        tracks = self.keep_picture(info) if tracks == 'keep picture' else tracks
+        request = self.request(path, info, segments or self.bites(), approach=approach, tracks=tracks, out=out)
+        if packs is not None:
+            request['pack_dir'] = str(packs)
+        return request
+
+    def mob_ids(self, path):
+        with aaf2.open(str(path), 'r') as f:
+            return {str(key) for key in f.content.mobs.references}
+
+    def plays(self, result):
+        """Every frame of every track, as the reader and the picture walk see it."""
+        manifest = self.read(result['output'], result['sequence_id'])
+        with aaf2.open(result['output'], 'r') as f:
+            top = f.content.mobs.get(aaf2.mobid.MobID(result['sequence_id']))
+            picture = [list(writer.picture_frames(top.slot_at(t['slot_id']).segment, Fraction(RATE), 0, result['duration_frames']))
+                       for t in result['tracks'] if t['kind'] == 'picture']
+        return [t['clips'] for t in manifest['tracks']], picture
+
+    def test_a_group_pack_export_is_the_full_export_mob_for_mob(self):
+        path, info = self.grouped()
+        for approach, tracks in (('B', 'keep picture'), ('C', None)):
+            with self.subTest(approach=approach):
+                packs = self.root / f'packs-{approach}'; packs.mkdir()
+                full = writer.write_edit(self.packed(path, info, f'full-{approach}.aaf', None, approach, tracks))
+                cold = writer.write_edit(self.packed(path, info, f'cold-{approach}.aaf', packs, approach, tracks))
+                walked = []
+                real = writer.check_references
+                def recording(file, mobs, sources):
+                    mobs = list(mobs); walked.append(len(mobs)); return real(file, mobs, sources)
+                with patch.object(writer, 'check_references', recording):
+                    warm = writer.write_edit(self.packed(path, info, f'warm-{approach}.aaf', packs, approach, tracks))
+                self.assertIsNone(full['pack'])
+                self.assertEqual((cold['pack'], warm['pack']), ({'built': True}, {'built': False}))
+                self.assertEqual(walked, [1])                                   # only the new sequence is re-walked
+                expected = self.mob_ids(full['output']) - {full['sequence_id']}
+                self.assertTrue({info['group'], info['submaster'], *info['recorders'], *info['cams']} <= expected)
+                self.assertNotIn(info['unused'], expected)
+                # The pack is exactly the closure of the group clip, nothing else from the show.
+                self.assertEqual(self.mob_ids(next(packs.glob('*.aaf'))), expected)
+                for result in (cold, warm):
+                    self.assertTrue(result['verify']['ok'])
+                    self.assertEqual(self.mob_ids(result['output']) - {result['sequence_id']}, expected)
+                    self.assertEqual((result['copied_mobs'], result['tracks']), (full['copied_mobs'], full['tracks']))
+                    self.assertEqual(self.plays(result), self.plays(full))
+                    with aaf2.open(result['output'], 'r') as f:
+                        self.assertEqual([str(m.mob_id) for m in f.content.toplevel()], [result['sequence_id']])
+                        self.assertEqual(len(list(f.content.essencedata)), 0)
+
+    def test_the_comparison_and_the_self_check_catch_a_pack_missing_a_mob(self):
+        """Break test for the test above: take one mob out of a built pack."""
+        path, info = self.grouped()
+        packs = self.root / 'packs'; packs.mkdir()
+        full = writer.write_edit(self.packed(path, info, 'full.aaf', None))
+        writer.write_edit(self.packed(path, info, 'cold.aaf', packs))
+        pack = next(packs.glob('*.aaf'))
+        # An angle nothing plays (the submaster's recorder): only mob-for-mob can see it go.
+        drop_mob(pack, info['recorders'][3])
+        short = writer.write_edit(self.packed(path, info, 'short.aaf', packs))
+        self.assertNotEqual(self.mob_ids(short['output']) - {short['sequence_id']}, self.mob_ids(full['output']) - {full['sequence_id']})
+        # The camera that plays: the self-check refuses it, nothing is published, the pack is not trusted again.
+        drop_mob(pack, info['cams'][0])
+        with self.assertRaises(reader.ReaderError) as error:
+            writer.write_edit(self.packed(path, info, 'broken.aaf', packs))
+        self.assertEqual(error.exception.code, 'verify_failed')
+        self.assertFalse((self.root / 'broken.aaf').exists())
+        self.assertEqual(list(packs.glob('*.aaf')), [])
+        self.assertEqual(writer.write_edit(self.packed(path, info, 'rebuilt.aaf', packs))['pack'], {'built': True})
+
+    def test_a_changed_source_gets_a_new_pack(self):
+        path, info = self.grouped()
+        packs = self.root / 'packs'; packs.mkdir()
+        self.assertEqual(writer.write_edit(self.packed(path, info, 'one.aaf', packs))['pack'], {'built': True})
+        self.assertEqual(writer.write_edit(self.packed(path, info, 'two.aaf', packs))['pack'], {'built': False})
+        first = set(packs.glob('*.aaf'))
+        stat = path.stat()
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        self.assertEqual(writer.write_edit(self.packed(path, info, 'three.aaf', packs))['pack'], {'built': True})
+        self.assertTrue(first < set(packs.glob('*.aaf')))
+        self.assertEqual(len(list(packs.glob('*.aaf'))), 2)
+
+    def test_a_half_written_pack_is_never_used(self):
+        path, info = self.grouped()
+        packs = self.root / 'packs'; packs.mkdir()
+        # Killed between writing the pack and naming it: no pack, no leftover, no output.
+        with patch.object(writer.os, 'replace', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                writer.write_edit(self.packed(path, info, 'crash.aaf', packs))
+        self.assertEqual(list(packs.iterdir()), [])
+        self.assertFalse((self.root / 'crash.aaf').exists())
+        # A pack that fails its own check is never given its name either, and
+        # the export never starts on it.
+        with patch.object(writer, 'check_references', side_effect=reader.ReaderError('verify_failed', 'dangling')), \
+                patch.object(writer, 'build', side_effect=AssertionError('the export started on an unchecked pack')):
+            with self.assertRaises(reader.ReaderError):
+                writer.write_edit(self.packed(path, info, 'unchecked.aaf', packs))
+        self.assertEqual(list(packs.iterdir()), [])
+        # Nor one whose file on disk lacks a mob the closure copied.
+        real = writer.mob_closure
+        with patch.object(writer, 'mob_closure', lambda *args: real(*args) + [info['unused']]):
+            with self.assertRaises(reader.ReaderError) as error:
+                writer.write_edit(self.packed(path, info, 'lost.aaf', packs))
+        self.assertIn('lost a mob', str(error.exception))
+        self.assertEqual(list(packs.iterdir()), [])
+        # What a SIGKILL leaves behind, a temporary file holding part of a pack, is never opened.
+        stray = packs / '.pack-killed.partial'
+        stray.write_bytes(b'\0' * 4096)
+        result = writer.write_edit(self.packed(path, info, 'after.aaf', packs))
+        self.assertEqual(result['pack'], {'built': True})
+        self.assertTrue(result['verify']['ok'])
+        self.assertEqual(stray.read_bytes(), b'\0' * 4096)
+
+    def test_mobs_from_a_pack_are_neither_copied_nor_walked(self):
+        # The whole point of a pack: its mobs are not looked up in the source
+        # again. Copying nothing is not enough; walking them is the cost.
+        path, info = self.grouped()
+        with aaf2.open(str(path), 'r') as src, aaf2.open() as dst:
+            copied = writer.mob_closure(src, dst, [info['group']])
+            self.assertTrue({info['group'], info['submaster'], *info['cams']} <= set(copied))
+            looked = []
+            mobs = src.content.mobs
+            view = SimpleNamespace(content=SimpleNamespace(mobs=SimpleNamespace(get=lambda key: looked.append(key) or mobs.get(key))))
+            self.assertEqual(writer.mob_closure(view, dst, [info['group'], info['recorders'][0]], frozenset(copied)), [])
+            self.assertEqual(looked, [])
+
+    def test_an_edit_that_refers_to_no_group_builds_no_pack(self):
+        path, info = self.grouped()
+        packs = self.root / 'packs'; packs.mkdir()
+        result = writer.write_edit(self.packed(path, info, 'b.aaf', packs, 'B', None))
+        self.assertIsNone(result['pack'])
+        self.assertEqual(list(packs.iterdir()), [])
+
+    def test_write_edits_opens_each_source_once_and_one_bad_edit_loses_nothing(self):
+        path, info = self.grouped()
+        packs = self.root / 'packs'; packs.mkdir()
+        past_the_end = [{'kind': 'source', 'source': 's1', 'in_frame': 0, 'out_frame': info['total'] + 1}]
+        batch = {'schema_version': 1, 'edits': [self.packed(path, info, 'rosa.aaf', packs),
+                                                 self.packed(path, info, 'bad.aaf', packs, segments=past_the_end),
+                                                 self.packed(path, info, 'dev.aaf', packs, segments=self.bites()[:1])]}
+        real = aaf2.open
+        with patch.object(aaf2, 'open', side_effect=real) as opened:
+            done = writer.write_edits(batch)
+        self.assertEqual(sum(1 for call in opened.call_args_list if call.args[:1] == (str(path),)), 1)
+        first, bad, last = done['results']
+        self.assertEqual((first['pack'], last['pack']), ({'built': True}, {'built': False}))
+        self.assertTrue(first['verify']['ok'] and last['verify']['ok'])
+        self.assertEqual(bad, {'error': {'code': 'invalid_input', 'message': bad['error']['message']}})
+        self.assertIn('past the end', bad['error']['message'])
+        self.assertEqual(sorted(p.name for p in self.root.glob('*.aaf')), ['dev.aaf', 'group.aaf', 'rosa.aaf'])
+        self.assertEqual(len(list(packs.glob('*.aaf'))), 1)
+        # The command line, and a malformed batch refused as a whole.
+        for edit, out in zip(batch['edits'], ('rosa 2.aaf', 'bad 2.aaf', 'dev 2.aaf')):
+            edit['output_path'] = str(self.root / out)
+        request_path = self.root / 'batch.json'
+        request_path.write_text(json.dumps(batch))
+        command = [sys.executable, str(Path(reader.__file__)), 'write-edits', '--request', str(request_path)]
+        ran = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertEqual([sorted(r) == ['error'] for r in json.loads(ran.stdout)['results']], [False, True, False])
+        for wrong in ({'schema_version': 2, 'edits': batch['edits']}, {'schema_version': 1, 'edits': []}, []):
+            with self.assertRaises(reader.ReaderError) as error:
+                writer.write_edits(wrong)
+            self.assertEqual(error.exception.code, 'invalid_input')
+
+    def test_stop_ends_the_whole_batch(self):
+        path, info = self.grouped()
+        batch = {'schema_version': 1, 'edits': [self.packed(path, info, 'a.aaf', None), self.packed(path, info, 'b.aaf', None)]}
+        with patch.object(writer.Session, 'write', side_effect=[{'output': 'a'}, reader.ReaderError('cancelled', 'Stopped.')]):
+            with self.assertRaises(reader.ReaderError) as error:
+                writer.write_edits(batch)
+        self.assertEqual(error.exception.code, 'cancelled')
+
     def test_drop_frame_timecode_text(self):
         self.assertEqual(writer.timecode(1800, 30, True), '00:01:00;02')
         self.assertEqual(writer.timecode(17982, 30, True), '00:10:00;00')
@@ -547,6 +776,11 @@ class WriterTests(unittest.TestCase):
 
 def value_name(component):
     return type(component).__name__
+
+
+def drop_mob(path, mob_id):
+    with aaf2.open(str(path), 'rw') as f:
+        f.content.mobs.pop(aaf2.mobid.MobID(mob_id))
 
 
 if __name__ == '__main__':

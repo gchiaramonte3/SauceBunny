@@ -95,6 +95,7 @@ app_cache_dir()/
   thumbnails/   poster JPEGs                 never swept
   scratch/      job temps, playback prep,    swept at 24h
                 Whisper WAVs, diarizer JSON
+    aaf-packs/  AAF export's group packs     swept at 24h unused
 ```
 
 - `media/` is **sweep-exempt**: downloaded sources and their audio, which are
@@ -103,6 +104,11 @@ app_cache_dir()/
 - `thumbnails/` is sweep-exempt too: posters are cheap to keep and expensive
   to regenerate daily. Settings' thumbnails bucket is the manual purge.
 - `scratch/` is swept at startup, on a background thread, failures non-fatal.
+  The sweep is flat except for `scratch/aaf-packs/`, the one named folder in
+  it: each pack is the closure of one grouped source's group clips (tens of
+  MB for a show like HEAT 2), keyed by the source's fingerprint, and the
+  writer touches a pack whenever an export uses it, so a pack goes after a
+  day unused. Losing one only makes the next export build it again.
 
 `migrate_cache_layout` moves an old install over once, at startup, before the
 sweep runs. The media subtree is RENAMED rather than copied (same filesystem,

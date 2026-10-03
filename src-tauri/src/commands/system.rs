@@ -318,6 +318,21 @@ pub(crate) fn scratch_dir(cache_root: &std::path::Path) -> PathBuf {
     dir
 }
 
+/// AAF export's group packs (aaf-sidecar/writer.py): one cached AAF per
+/// grouped source holding the closure of its group clips, which every later
+/// export of that source copies instead of re-copying the whole show. Inside
+/// `scratch/` because a missing pack is only a slower export. The sweep
+/// covers this folder too, and the writer touches a pack each time it uses
+/// one, so what the sweep removes is a pack nobody exported from for a day.
+pub(crate) const AAF_PACKS_DIRNAME: &str = "aaf-packs";
+
+/// Where group packs go. Ensures the directory, like `scratch_dir`.
+pub(crate) fn aaf_packs_dir(cache_root: &std::path::Path) -> PathBuf {
+    let dir = scratch_dir(cache_root).join(AAF_PACKS_DIRNAME);
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
 /// Where poster JPEGs go. Ensures the directory, for the reason above.
 pub(crate) fn thumbs_dir(cache_root: &std::path::Path) -> PathBuf {
     let dir = cache_root.join(THUMBS_DIRNAME);
@@ -820,6 +835,9 @@ fn sweep_stale_files(cache: &std::path::Path, now: std::time::SystemTime) -> u32
     // install from before the layout tidy still has, and costs one read_dir
     // on a directory that is now three entries wide.
     let mut removed: u32 = sweep_dir_by_age(&scratch_dir(cache), now);
+    // The one folder inside scratch, named so the sweep stays flat everywhere
+    // else: its packs and any temporary a killed export left beside them.
+    removed += sweep_dir_by_age(&scratch_dir(cache).join(AAF_PACKS_DIRNAME), now);
     let entries = match std::fs::read_dir(cache) {
         Ok(it) => it,
         Err(_) => return removed, // missing cache dir is fine
@@ -1576,7 +1594,7 @@ pub fn default_export_path(app: AppHandle) -> Result<String, crate::AppError> {
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-09-30-record-patch";
+pub const BACKEND_BUILD_ID: &str = "2026-10-03-string-outs-spec";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {
@@ -2104,6 +2122,20 @@ mod cache_layout_tests {
         assert!(thumbs_dir(&cache).join("KEY.jpg").is_file());
         assert!(cache.join("media").join("downloads").join("keep.mp4").is_file());
         let _ = old;
+    }
+
+    #[test]
+    fn the_sweep_ages_out_group_packs_inside_scratch() {
+        // A subfolder of scratch is skipped by the flat pass, so packs would
+        // otherwise pile up for ever at tens of MB each.
+        let cache = tmp();
+        touch(&aaf_packs_dir(&cache).join("fingerprint-1-groups.aaf"), b"pack");
+        touch(&aaf_packs_dir(&cache).join(".pack-killed.partial"), b"half");
+        assert_eq!(sweep_stale_files(&cache, std::time::SystemTime::now()), 0);
+        assert!(aaf_packs_dir(&cache).join("fingerprint-1-groups.aaf").is_file());
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(CACHE_TTL_SECONDS * 2);
+        assert_eq!(sweep_stale_files(&cache, later), 2);
+        assert!(!aaf_packs_dir(&cache).join("fingerprint-1-groups.aaf").exists());
     }
 
     #[test]
