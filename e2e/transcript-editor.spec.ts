@@ -61,6 +61,8 @@ async function boot(page: Page, grouped = false, picture = false) {
         case "edit_commit": { const edit = edits.get(id)!; const next = edit.states.length + 1; edit.states.push({ id: next, parent: edit.head, label: args.label as string, document: args.document as Doc }); edit.head = next; return Promise.resolve(headOf(id)); }
         case "edit_undo": { const edit = edits.get(id)!; edit.head = edit.states.find((s) => s.id === edit.head)!.parent ?? edit.head; return Promise.resolve(headOf(id)); }
         case "edit_redo": { const edit = edits.get(id)!; const child = [...edit.states].reverse().find((s) => s.parent === edit.head); if (child) edit.head = child.id; return Promise.resolve(headOf(id)); }
+        case "plugin:dialog|open": return Promise.resolve("/fixtures/Exports");
+        case "aaf_export_edits": return Promise.resolve((args.editIds as string[]).map((id) => ({ edit_id: id, result: { name: id }, error: null })));
         case "edit_history": { const edit = edits.get(id)!; return Promise.resolve({ head: edit.head, states: edit.states.map(({ id: state, parent, label }) => ({ id: state, parent, label, at: state, pinned: null })), next: [] }); }
         default: return original(command, args);
       }
@@ -303,6 +305,10 @@ test("One per person makes a string out for each person who speaks", async ({ pa
   expect(created).toBe(2);
   // Each one is open in a tab, in person order, the first chosen.
   await expect(page.getByRole("tablist", { name: "Open string outs" }).getByRole("tab")).toHaveText([/^SO_Interview_Alex/, /^SO_Interview_Sam/]);
+  // With several open, Export all writes them from one run of the writer.
+  await page.getByRole("button", { name: "Export all (2)…" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Exported 2 of 2 string outs." })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __editCalls: string[] }).__editCalls.filter((c) => c === "aaf_export_edits").length)).toBe(1);
 });
 
 test("coming back reopens the string out that was open, not the welcome", async ({ page }) => {

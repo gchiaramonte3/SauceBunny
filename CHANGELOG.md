@@ -161,7 +161,9 @@ All notable changes to Sauce Bunny. Format loosely follows
   string out, with the same file and every frame checked as before. A
   string out with no kept groups is quicker too (about 2.2 seconds to 1.2).
   Several string outs can be written from one run of the writer, each named
-  from its title and never replacing a file.
+  from its title and never replacing a file: **Export all (N)…** in the
+  String Outs header, whenever two or more are open. One per person opens
+  every string out it makes, so Export all takes them all.
 - String Outs draws a long transcript a page at a time. A real 20-mic,
   3h39m sequence (146,018 words) used to build a million-element page and
   freeze the window for minutes on opening, and cutting it in whole crashed

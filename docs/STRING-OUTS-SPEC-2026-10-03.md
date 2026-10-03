@@ -8,9 +8,8 @@ and the room, V1 as one group clip). The control inventory was read from
 `src/components/Edit*.tsx`, `src/hooks/use-edit-*.ts` and the AAF Audio
 components.
 
-**Status (2026-10-03):** phases 1, 2, 3 and 5 are built and tested; phase 4
-is below. Each phase's own Status line says what was built, what was not,
-and why. The owner's decisions in the list below are still open and nothing
+**Status (2026-10-03):** phases 1 to 5 are built and tested. Each phase's
+own Status line says what was built, what was not, and why. The owner's decisions in the list below are still open and nothing
 that depends on them was built. Each phase stands alone and has a way to
 tell it's done.
 
@@ -313,9 +312,10 @@ green contracts stay green; the docs in 3c.12 match the buttons.
 **Status: built** (October 3). Changes 1 to 3 are in the sidecar
 (`writer.py` group packs, `write-edits`) and in Rust (`aaf_export_edit`
 passes `scratch/aaf-packs`; `aaf_export_edits` and `exportEdits` for a
-batch). Not built: building a pack in the background when a sequence opens
-(the first export builds it), and the One per person button calling
-`exportEdits`, which is UI work. Measured on HEAT 2, 3 bites, 23 tracks,
+batch). The batch is used by **Export all (N)…** in the String Outs header
+whenever two or more string outs are open, and One per person now opens
+every string out it makes, so Export all covers them. Not built: building a
+pack in the background when a sequence opens (the first export builds it). Measured on HEAT 2, 3 bites, 23 tracks,
 CPython 3.12.14 (the bundle's interpreter), each as its own process, fastest
 of 3 on a loaded Mac (load average 10 to 25):
 

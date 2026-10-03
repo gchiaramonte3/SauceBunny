@@ -8,6 +8,7 @@ import { formatError } from "../lib/error-format";
 import { LAST_STRING_OUT, recallLast, rememberLast } from "../lib/last-open";
 import { loadJson, saveJson } from "../lib/storage";
 import { EditList } from "./EditList";
+import { EditExportAll } from "./EditExportAll";
 import { EditNewPanel } from "./EditNewPanel";
 import { EditWorkspace } from "./EditWorkspace";
 import { IconPlus } from "./Icons";
@@ -115,6 +116,7 @@ export function EditPage({ active, aiModelId, onOpenSettings, openRequest }: Pro
           <option value="">Saved string outs…</option>
           {edits?.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
         </select>}
+        {tabs.length > 1 && <EditExportAll editIds={tabs} titleOf={titleOf} />}
         <button type="button" className="btn btn-ghost" onClick={() => setCreating(true)}><IconPlus size={14} />New string out…</button>
       </div>
     </header>
