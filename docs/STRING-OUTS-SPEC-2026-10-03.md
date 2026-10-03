@@ -400,12 +400,34 @@ Add to `docs/HAND-TEST.md`, String Outs:
 
 ## Later
 
-**Send to Avid.** A Media Composer panel (Panel SDK, Media Composer 2024.12
-and later) that receives a string out from Sauce Bunny on this Mac and puts
-it in a bin as "‹sequence› SB.1", as Quickture's panel does. On 2026.8 and
-later its sequence-creation API could make the splices inside Avid itself.
-Needs Avid's developer program and an owner decision; Media Composer writes
-the bin, so the "never write Avid bins" invariant holds.
+**Send to Avid (wanted, October 3).** A string out lands in a Media
+Composer bin with one click, as Quickture's panel does, with no File ▸
+Import.
+
+1. **Access, the owner's step.** Avid's Media Composer Panel SDK (an HTML5
+   panel inside Media Composer, Mac and Windows) is given out on a partner
+   request to Avid's Media Composer Panel SDK Team, not downloaded. Media
+   Composer 2024.12 or later runs third-party panels (Quickture's needs
+   2024.12); 2026.8 adds sequence creation and OTIO import to the MC API and
+   SDK. Nothing below that touches Media Composer can be written before the
+   SDK and its documentation arrive.
+2. **The handoff is files, not a server.** Sauce Bunny writes the AAF it
+   already makes, plus a small request file (sequence name, bin name, the
+   AAF's path), into a To Avid folder: `~/Movies/Sauce Bunny/To Avid/` by
+   default (not Documents, which iCloud evicts), or a folder on NEXIS so
+   another edit seat can receive it. The panel watches that folder, imports
+   each new AAF into a bin named after its sequence ("SO_Rosa SB.1", as
+   Quickture names "QE.1"), and writes a receipt beside it, which Sauce
+   Bunny shows ("In Media Composer, bin Rosa SB"). No loopback server, no
+   new transport, and Sauce Bunny never writes a bin: Media Composer does.
+3. **Built in Sauce Bunny first** (possible now): a Send to Avid button in
+   the editor's toolbar, the folder in Settings, the request and receipt
+   format with tests, and an honest state until the panel exists ("Waiting
+   for Media Composer", with Reveal in Finder to drag the AAF into a bin).
+4. **The panel**, once the SDK arrives: import into the named bin and write
+   the receipt. Later, on 2026.8, the request can carry the splice list
+   (source sequence, In, Out, tracks) instead of an AAF, so Media Composer
+   makes the cut with its own splices.
 
 **Editor habits not yet there**, each its own piece of work:
 - Match Frame and Reverse Match Frame. `docs/TRANSCRIPT-EDITOR-UX.md`
