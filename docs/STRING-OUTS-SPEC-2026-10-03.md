@@ -37,10 +37,22 @@ answered; everything else in this spec can run as written):
 
 1. A Clear button in the timeline tool row, or only the × on the ruler's
    marked range (phase 2.2). The ruler × does not touch the bar.
-2. "Room tone in lifts": build it or remove it (phase 3a.5).
-3. Air between bites on a manual Append (phase 1.5).
-4. Independent tracks instead of the single storyline (phase 1, end).
-5. The Send to Avid panel and Avid's developer program (Later).
+2. ~~"Room tone in lifts": build it or remove it (phase 3a.5).~~ **Answered
+   (October 3):** to Media Composer's Strip Silence spec. Built: Audio ▸
+   **Strip Silence…** replaces the item, with Avid's Threshold (dB),
+   Minimum duration, Pad start and Pad end, on the selected record tracks
+   between In and Out (or the whole cut). The quiet stretches go silent on
+   those tracks only, nothing moves, one undo step, and the AAF carries them
+   as filler, as Avid's leaves filler. A "Keep transcribed words" option
+   (on by default) never strips a word, since bleed can put a quiet line
+   under the threshold on its own mic; off, it is Avid's exact behaviour.
+   Levels come from the mic waveforms (about 10 ms a reading), so it needs
+   View ▸ Waveforms first, as Remove dead space does.
+3. Air between bites on a manual Append (phase 1.5). The owner will decide later.
+4. Independent tracks instead of the single storyline (phase 1, end). The owner will decide later.
+5. ~~The Send to Avid panel and Avid's developer program (Later).~~ **Wanted
+   (October 3).** Needs Avid's Panel SDK, which Avid gives out on a partner
+   request; see Later.
 
 ---
 

@@ -16,6 +16,8 @@ type Props = {
   people: TimelineLane[];
   /** A marker clicked on the ruler: select it, park on it, and show it in the Inspector. */
   onMarker: (id: string) => void;
+  /** Audio ▸ Strip Silence…: Media Composer's, on the selected record tracks. */
+  onStripSilence: () => void;
   playhead: number; playing: boolean; busy: boolean; onToggle: () => void; onSeek: (seconds: number) => void; onScrubStart: () => void; onScrubEnd: () => void;
   tc: (seconds: number) => string; sourceTc: (source: string, seconds: number) => string; sourceName: (id: string) => string;
   sourceLanes: Record<string, string[]>; peaksOf: (source: string, lane: string) => [number, number][] | undefined; durationOf: (source: string) => number;
@@ -59,7 +61,7 @@ export function EditLower(props: Props) {
     // audible spans at all, which would read as silence and cut a laugh.
     deadHint: props.measured ? undefined : props.measuring ? "Waiting for every mic's waveform"
       : props.stalled ? "A mic could not be measured. The reason is shown above the editor" : "Turn on View ▸ Waveforms to measure each mic first",
-    onMarkOut: shown ? side.markOut : ws.markOut, onClearMarks: shown ? side.clearMarks : () => ws.setMarks({ in: null, out: null }), onLift: () => ws.takeMarked(false), onExtract: () => ws.takeMarked(true), onMarker: ws.addMarker,
+    onMarkOut: shown ? side.markOut : ws.markOut, onClearMarks: shown ? side.clearMarks : () => ws.setMarks({ in: null, out: null }), onStripSilence: props.onStripSilence, onLift: () => ws.takeMarked(false), onExtract: () => ws.takeMarked(true), onMarker: ws.addMarker,
     onSnap: props.onSnap, onFollow: props.onFollow, onLoop: props.onLoop,
     onPrevious: () => previous && ws.chooseSeam(previous.index), onNext: () => next && ws.chooseSeam(next.index) };
   const shared = { fps, colors: props.colors, sourceName: props.sourceName, peaksOf: props.peaksOf, durationOf: props.durationOf, pictureOf: props.pictureOf,

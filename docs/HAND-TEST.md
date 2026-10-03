@@ -1242,3 +1242,9 @@ media, WKWebView's audio, and Avid.
     receives only the sequence, or every master clip and group clip in the
     show as well (the file carries them all, as the AAF rules require;
     Media Composer decides what it lists). Report which.
+24. **Strip Silence (Audio menu).** With waveforms on, select A1 only, mark
+    In and Out over a stretch with pauses and choose Audio ▸ Strip
+    Silence…: Threshold -40 dB, Minimum 500 ms, Pads 100/200 ms. The pauses
+    go silent on A1 only (A2 still plays there), nothing moves, ⌘Z brings
+    them back in one step, and an exported AAF shows filler there in Media
+    Composer. With Keep transcribed words on, no word is silenced.

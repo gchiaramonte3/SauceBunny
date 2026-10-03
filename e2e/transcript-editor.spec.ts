@@ -54,7 +54,8 @@ async function boot(page: Page, grouped = false, picture = false) {
         case "aaf_list": return Promise.resolve([{ id: document.id, name: document.manifest.name, track_count: 3, transcribed_tracks: 2, source_path: document.source_path }]);
         case "aaf_open": return Promise.resolve(document);
         case "aaf_speech": return Promise.resolve({ track_id: args.trackId, floor_db: -60, activity: [[160_000, 720_000]], reactions: [], words: words(args.trackId as string), measured: true });
-        case "aaf_waveform": return Promise.resolve({ track_id: args.trackId, peaks: [] });
+        // A read over a range: its first half quiet (-60 dBFS), its second half loud, so Strip Silence has something to find.
+        case "aaf_waveform": return Promise.resolve({ track_id: args.trackId, peaks: args.startFrame == null ? [] : Array.from({ length: 2048 }, (_, index) => index < 1024 ? [-0.001, 0.001] : [-0.5, 0.5]) });
         case "edit_list": return Promise.resolve([...edits.entries()].map(([key, edit]) => ({ id: key, title: headOf(key).document.title, created_at: 1, updated_at: 2, head: edit.head, states: edit.states.length })));
         case "edit_create": edits.set(id, { states: [{ id: 1, parent: null, label: "New Edit", document: args.document as Doc }], head: 1 }); return Promise.resolve(headOf(id));
         case "edit_head": return edits.has(id) ? Promise.resolve(headOf(id)) : Promise.reject(new Error("no such edit"));
@@ -212,6 +213,24 @@ test("marks clear the Avid way on both sides: G, D and F, and the × on the mark
   await page.keyboard.press("g");
   await expect(range).toHaveCount(0);
   await expect(source.locator(".cp-te-src-word.is-selected")).toHaveCount(0);
+});
+
+test("Audio ▸ Strip Silence… silences the quiet stretches on the selected tracks, to Media Composer's settings, in one undo step", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.locator(".cp-te-doc")).toContainText("I moved here in May.");
+  const strip = async () => { await page.getByRole("toolbar", { name: "Timeline tools" }).getByRole("button", { name: "Audio", exact: true }).click(); await page.getByRole("menuitem", { name: "Strip Silence…" }).click(); };
+  await strip();
+  const dialog = page.getByRole("dialog", { name: "Strip Silence" });
+  for (const label of ["Threshold (dB)", "Minimum duration (ms)", "Pad start (ms)", "Pad end (ms)"]) await expect(dialog.getByLabel(label)).toBeVisible();
+  await expect(dialog).toContainText("the whole string out");
+  await expect(dialog.getByRole("button", { name: "Strip" })).toBeEnabled({ timeout: 10_000 });
+  await dialog.getByRole("button", { name: "Strip" }).click();
+  await expect(page.getByRole("status").filter({ hasText: /^Stripped \d+ silences/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo Strip Silence" })).toBeEnabled();
 });
 
 test("a group angle has no track until their words are cut in, then plays on one of their own", async ({ page }) => {

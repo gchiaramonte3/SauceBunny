@@ -20,6 +20,12 @@ All notable changes to Sauce Bunny. Format loosely follows
   Outs. A marked range on any ruler carries a **Clear marks** ×. String
   Outs gains J, K and L (J steps back a second), arrow-key frame steps and
   End. **Open in String Outs** brings AAF Audio's In and Out with it.
+- **Audio ▸ Strip Silence…** in String Outs, to Media Composer's spec:
+  Threshold (dB), Minimum duration, Pad start and Pad end, on the selected
+  tracks between In and Out. Quiet stretches go silent on those tracks only
+  and nothing moves; it is one undo step, and the AAF carries them as
+  filler. Transcribed words are kept unless you untick it. It replaces
+  "Room tone in lifts", which did nothing.
 - Markers on String Outs' ruler can be clicked: the Inspector edits the
   name, comment and colour, and Delete removes it.
 - The side your keys act on (source or record) is outlined, and the other

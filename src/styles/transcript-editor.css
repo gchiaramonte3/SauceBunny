@@ -869,3 +869,13 @@ textarea.cp-te-insp-input { resize: vertical; }
    formatting context, so a paragraph's margin cannot escape it and its
    measured height is the height it takes. */
 .cp-te-textpage { display: flow-root; }
+
+/* Strip Silence: Media Composer's four settings in a small dialog. */
+.cp-te-strip { width: min(420px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r-card); box-shadow: var(--shadow-modal); }
+.cp-te-strip-title { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-bold); color: var(--fg-1); }
+.cp-te-strip-scope { margin: 0; font-size: var(--text-sm); color: var(--fg-3); }
+.cp-te-strip-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.cp-te-strip-fields .cp-input { width: 100%; }
+.cp-te-strip-hint { margin: 0; font-size: var(--text-sm); color: var(--fg-3); }
+.cp-te-strip-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.cp-te-strip-actions .cp-te-pane-note { margin-right: auto; }

@@ -20,6 +20,7 @@ import { EditRecordPane } from "./EditRecordPane";
 import { EditSendTo } from "./EditSendTo";
 import { EditSidePanel, type EditSideTab } from "./EditSidePanel";
 import { EditSourceHost } from "./EditSourceHost";
+import { EditStripSilence } from "./EditStripSilence";
 import type { EditTextStyle } from "./EditTextSettings";
 import type { EditTimelineAudio } from "./EditTimelineTools";
 import { EditToolbar } from "./EditToolbar";
@@ -56,7 +57,7 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
     startFrames: data.documents.get(source.id)?.manifest.start_frame ?? 0 })), [document.sources, data]);
   const [showSource, setShowSource] = useState(true), [showSide, setShowSide] = useState(true), [sideTab, setSideTab] = useState<EditSideTab>("ask"), [showRemoved, setShowRemoved] = useState(true);
   const [zoom, setZoom] = useState(1), [snap, setSnap] = useState(true), [follow, setFollow] = useState(true), [loop, setLoop] = useState(false);
-  const [audio, setAudio] = useState<EditTimelineAudio>({ crossfade: 2, roomTone: false }), [inSource, setInSource] = useState(false);
+  const [audio, setAudio] = useState<EditTimelineAudio>({ crossfade: 2 }), [inSource, setInSource] = useState(false), [stripping, setStripping] = useState(false);
   const [text, setText] = useState<Record<"source" | "edit", EditTextStyle>>({ source: { family: "sans", size: 13, leading: "normal" }, edit: { family: "sans", size: 15, leading: "normal" } });
   const [solo, setSolo] = useState<Set<string>>(new Set()), [mute, setMute] = useState<Set<string>>(new Set());
   const sourceFrames = useMemo(() => Object.fromEntries(Object.entries(data.durations).map(([id, seconds]) => [id, Math.round(seconds * fps)])), [data.durations, fps]);
@@ -71,19 +72,14 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
   const ws = useEditWorkspace({ open, words: trackWords, everyone: data.words, lanes, sourceLanes, durations: data.durations, audible: data.audible, playhead, seek, commit, nameOf, tc, documents: data.documents, snap, fps });
   const side = useEditSourceSide({ document: head.document, sources: infos, documents: data.documents, words: data.words, colors, fps, active, request: sourceMarks });
   /** Insert, Append or Overwrite what the source has marked, text or In to Out, with the mics its track selectors allow. */
-  const placeFromSource = (how: "insert" | "append" | "overwrite") => {
-    const take = side.take(); if (!take) return;
-    if (how === "overwrite") ws.overwrite(take.source, take.words, take); else ws.insert(take.source, take.words, how === "append", take);
-    focusDoc();
-  };
+  const placeFromSource = (how: "insert" | "append" | "overwrite") => { const take = side.take(); if (!take) return;
+    if (how === "overwrite") ws.overwrite(take.source, take.words, take); else ws.insert(take.source, take.words, how === "append", take); focusDoc(); };
   const used = useMemo(() => new Set(ws.placed.map((item) => item.word.id)), [ws.placed]);
   const current = ws.placed.find((item) => item.programStart <= playhead && playhead < item.programEnd);
   const focusDoc = () => requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".cp-te-doc")?.focus());
   const previous = [...ws.seams].reverse().find((item) => item.at < playhead - 1e-3), next = ws.seams.find((item) => item.at > playhead + 1e-3);
-
   useEditEditorKeys({ root, active, fps, ws, side, playback, undo, redo, onHistory: () => { setShowSide(true); setSideTab("history"); }, loop, onLoop: () => setLoop((value) => !value),
     onZoom: setZoom, onSnap: () => setSnap((value) => !value), place: placeFromSource, previous: previous?.index ?? null, next: next?.index ?? null });
-
   const pictureOf = useMemo(() => pictureBlocks(document.sources, data.documents, fps), [document.sources, data.documents, fps]);
   /** A cited line: selected and played in the string out when it is there, otherwise opened in the source, ready to cut in. */
   const jumpTo = (line: AskCitation) => {
@@ -139,9 +135,13 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
     </div>
     <EditLower ws={ws} side={side} people={people} solo={soloed} mute={mute} onSolo={(id) => setSolo((state) => toggled(state, id))} onMute={(id) => setMute((state) => toggled(state, id))} onUntrack={ws.untrack} onMarker={(id) => { ws.setMarker(id); const at = ws.markers.find((item) => item.id === id)?.at; if (at != null) seek(at); setShowSide(true); setSideTab("inspector"); }} lanes={lanes} colors={colors} fps={fps} recordStart={recordStart} playhead={playhead} playing={playback.playing} busy={playback.busy}
       onToggle={() => void playback.toggle()} onSeek={seek} onScrubStart={playback.pause} onScrubEnd={() => undefined}
-      tc={tc} sourceTc={sourceTc} sourceName={sourceName}
+      tc={tc} sourceTc={sourceTc} sourceName={sourceName} onStripSilence={() => setStripping(true)}
       sourceLanes={sourceLanes} peaksOf={(source, lane) => data.peaks.get(`${source}:${lane}`)} durationOf={(source) => data.durations[source] ?? 0} pictureOf={pictureOf}
       waveforms={waveforms} onWaveforms={onWaveforms} measured={data.measured} measuring={data.measuring} stalled={waveforms && !data.loading && !data.measuring && !data.measured}
       audio={audio} onAudio={setAudio} zoom={zoom} onZoom={setZoom} snap={snap} onSnap={() => setSnap((value) => !value)} follow={follow} onFollow={() => setFollow((value) => !value)} loop={loop} onLoop={() => setLoop((value) => !value)} />
+    {stripping && <EditStripSilence open={open} documents={data.documents} words={data.words} commit={commit} nameOf={nameOf} onDone={ws.setMessage} onClose={() => setStripping(false)}
+      request={{ from: ws.marked?.[0] ?? 0, to: ws.marked?.[1] ?? ws.total, lanes: lanes.filter((lane) => ws.onTracks.has(lane.id)).map((lane) => lane.id), sourceLanes }}
+      scope={`${lanes.filter((lane) => ws.onTracks.has(lane.id)).map((lane) => `A${lane.track} ${lane.name}`).join(", ") || "No track selected"} · ${ws.marked ? `${tc(ws.marked[0])} to ${tc(ws.marked[1])}` : "the whole string out"}`}
+      hint={data.measured ? undefined : data.measuring ? "Waiting for every mic's waveform" : "Turn on View ▸ Waveforms to measure each mic first"} />}
   </div>;
 }

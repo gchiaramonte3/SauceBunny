@@ -5,7 +5,7 @@ import { useMenuKeys } from "../hooks/use-menu-keys";
 
 export type EditTrackHeight = "small" | "medium" | "large";
 export type EditTimelineView = { waveforms: boolean; speakerColours: boolean; height: EditTrackHeight };
-export type EditTimelineAudio = { crossfade: 0 | 1 | 2 | 4; roomTone: boolean };
+export type EditTimelineAudio = { crossfade: 0 | 1 | 2 | 4 };
 
 type Props = {
   /** Play and the Record/Source readouts, which lead the row. */
@@ -15,6 +15,8 @@ type Props = {
   marks: { in: number | null; out: number | null };
   /** Clear both marks (G), drawn as a × on the ruler's marked range rather than in this row. */
   onClearMarks?: () => void;
+  /** Audio ▸ Strip Silence…, which opens Media Composer's settings for it. */
+  onStripSilence?: () => void;
   canMark: boolean; snap: boolean; follow: boolean; loop: boolean; finding: boolean;
   /** Why dead space cannot be found yet, or undefined when it can. */
   deadHint?: string;
@@ -111,11 +113,12 @@ export function EditTimelineTools(props: Props) {
         {(["small", "medium", "large"] as const).map((height) => <Radio key={height} checked={view.height === height} onChoose={() => props.onView({ ...view, height })}>
           {height[0].toUpperCase() + height.slice(1)}</Radio>)}
       </>}</Menu>
-      <Menu label="Audio">{() => <>
+      <Menu label="Audio">{(close) => <>
         <div className="cp-popover-header" role="presentation">Crossfade at cuts</div>
         {([0, 1, 2, 4] as const).map((frames) => <Radio key={frames} checked={audio.crossfade === frames} onChoose={() => props.onAudio({ ...audio, crossfade: frames })}>
           {frames ? `${frames} ${frames === 1 ? "frame" : "frames"}` : "Off"}</Radio>)}
-        <Check checked={audio.roomTone} onChange={() => props.onAudio({ ...audio, roomTone: !audio.roomTone })}>Room tone in lifts</Check>
+        {props.onStripSilence && <button type="button" role="menuitem" className="cp-popover-item" disabled={record.off} title={record.hint ?? "Silence the quiet stretches on the selected tracks, as Media Composer's Strip Silence does"}
+          onClick={() => { close(); props.onStripSilence?.(); }}><span className="lbl">Strip Silence…</span></button>}
       </>}</Menu>
       <div className="cp-te-tl-zoom" role="group" aria-label="Zoom">
         <button type="button" className="cp-icon-btn" aria-label="Zoom out" title="Zoom out (⌘−)" disabled={props.zoom <= 1} onClick={() => props.onZoom(-1)}>−</button>
