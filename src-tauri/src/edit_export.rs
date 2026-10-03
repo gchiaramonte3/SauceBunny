@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 /// What the writer needs to know about one source sequence.
+#[derive(Clone)]
 pub struct ExportSource {
     pub id: String,
     pub aaf_path: String,
@@ -28,6 +29,7 @@ pub struct ExportSource {
 /// angles to choose there as the reader names them (`<mob id>:<slot id>`):
 /// every angle of this person's under that track, since their recorder can
 /// be a different master clip in each group.
+#[derive(Clone)]
 pub struct Alternate {
     pub parent_slot: u32,
     pub angles: Vec<String>,
@@ -212,6 +214,75 @@ pub struct EditExportResult {
     pub warnings: Vec<String>,
 }
 
+/// One edit of a batch export: what was written, or why that edit was not.
+/// The other edits of the batch are written either way.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct EditExportOutcome {
+    pub edit_id: String,
+    pub result: Option<EditExportResult>,
+    pub error: Option<String>,
+}
+
+impl EditExportOutcome {
+    pub fn failed(edit_id: &str, error: String) -> Self {
+        Self { edit_id: edit_id.to_owned(), result: None, error: Some(error) }
+    }
+}
+
+/// `write-edits`' answer, one outcome per edit sent, in order. An edit the
+/// writer refused carries `{"error": {"code", "message"}}` in its place, and
+/// its message is the writer's own user-facing copy.
+pub fn batch_outcomes(sent: &[String], stdout: &str) -> Result<Vec<EditExportOutcome>, AppError> {
+    #[derive(Deserialize)]
+    struct Batch { results: Vec<Value> }
+    let batch: Batch = serde_json::from_str(stdout)?;
+    if batch.results.len() != sent.len() {
+        return Err(AppError::internal(format!("The AAF writer answered for {} of {} string outs.", batch.results.len(), sent.len())));
+    }
+    sent.iter().zip(batch.results).map(|(edit_id, result)| Ok(match result.get("error") {
+        Some(error) => EditExportOutcome::failed(edit_id, error.get("message").and_then(Value::as_str)
+            .unwrap_or("The AAF writer refused this string out.").to_owned()),
+        None => EditExportOutcome { edit_id: edit_id.clone(), result: Some(serde_json::from_value(result)?), error: None },
+    })).collect()
+}
+
+/// Room left in a 255-byte file name for " 9999 - Avid markers.txt".
+const MAX_STEM_BYTES: usize = 200;
+
+/// A Finder and Media Composer safe file name from an edit's title, without
+/// the extension: `exportName` in src/lib/edit-export.ts, which the single
+/// export's save dialog proposes, so a batch names files as one export
+/// would. Two differences, both because a batch has no dialog to fix a name
+/// in: it is cut to fit a file name, and it is not NFC-normalised (no
+/// normaliser is in this crate's graph; APFS compares names either way, so
+/// `unique_stem` still sees a clash on disk).
+pub fn export_stem(title: &str) -> String {
+    let mut safe = String::with_capacity(title.len());
+    // A run of path separators becomes one "-", a run of spaces one " ".
+    let mut run = None;
+    for c in title.chars() {
+        let (out, class) = match c {
+            '/' | ':' | '\\' => ('-', Some('/')),
+            c if c.is_whitespace() => (' ', Some(' ')),
+            c => (c, None),
+        };
+        if class.is_some() && class == run { continue; }
+        run = class;
+        safe.push(out);
+    }
+    let safe = crate::commands::truncate_utf8_bytes(safe.trim(), MAX_STEM_BYTES).trim_end();
+    if safe.is_empty() { "Edit".to_owned() } else { safe.to_owned() }
+}
+
+/// `stem`, else `stem 2`, `stem 3` and on: the first name `free` accepts.
+/// Bounded, so a folder where nothing is free is an error rather than a hang.
+pub fn unique_stem(stem: &str, mut free: impl FnMut(&str) -> bool) -> Result<String, AppError> {
+    if free(stem) { return Ok(stem.to_owned()); }
+    (2..10_000).map(|n| format!("{stem} {n}")).find(|candidate| free(candidate))
+        .ok_or_else(|| AppError::invalid(format!("Every name from \"{stem}\" to \"{stem} 9999\" is taken in that folder. Choose another folder.")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,6 +442,50 @@ mod tests {
         }
         let message = build_request(&crowded, &sources(), "C", "/o.aaf").unwrap_err().to_string();
         assert!(message.contains("65 audio tracks") && message.contains("64"), "{message}");
+    }
+
+    #[test]
+    fn names_a_file_the_way_the_save_dialog_does() {
+        // exportName: separators become one "-", whitespace one " ", trimmed, "Edit" when nothing is left.
+        assert_eq!(export_stem("SO_E104/Rosa: v01"), "SO_E104-Rosa- v01");
+        assert_eq!(export_stem("  Rosa \t and\n Dev  "), "Rosa and Dev");
+        assert_eq!(export_stem("a//b\\:c"), "a-b-c");
+        assert_eq!(export_stem("a / b"), "a - b");
+        assert_eq!(export_stem(" / "), "-");
+        assert_eq!(export_stem("   "), "Edit");
+        assert_eq!(export_stem(""), "Edit");
+        // Cut at a character boundary to leave room for " 9999 - Avid markers.txt" in 255 bytes.
+        let long = export_stem(&"é".repeat(300));
+        assert!(long.len() <= MAX_STEM_BYTES && long.chars().all(|c| c == 'é'), "{long}");
+        assert!(long.len() + " 9999 - Avid markers.txt".len() <= 255);
+    }
+
+    #[test]
+    fn a_taken_name_gets_the_next_number_and_never_overwrites() {
+        let taken = ["Rosa", "Rosa 2"];
+        assert_eq!(unique_stem("Rosa", |name| !taken.contains(&name)).unwrap(), "Rosa 3");
+        assert_eq!(unique_stem("Dev", |name| !taken.contains(&name)).unwrap(), "Dev");
+        let mut asked = 0;
+        assert!(unique_stem("Full", |_| { asked += 1; false }).is_err());
+        assert_eq!(asked, 10_000 - 1);
+    }
+
+    #[test]
+    fn a_batch_answer_keeps_each_edit_in_its_place() {
+        let written = json!({ "output": "/o/Rosa.aaf", "markers_output": null, "name": "Rosa", "duration_frames": 48,
+            "segments": 2, "markers": 0, "copied_mobs": 3474, "warnings": [], "pack": { "built": false } });
+        let stdout = json!({ "schema_version": 1, "results": [written,
+            { "error": { "code": "invalid_input", "message": "segments[0]: out_frame is past the end of slot 2." } }] }).to_string();
+        let outcomes = batch_outcomes(&["e1".into(), "e2".into()], &stdout).unwrap();
+        assert_eq!(outcomes[0].edit_id, "e1");
+        assert_eq!(outcomes[0].result.as_ref().map(|result| result.copied_mobs), Some(3474));
+        assert!(outcomes[0].error.is_none());
+        assert_eq!(outcomes[1].edit_id, "e2");
+        assert!(outcomes[1].result.is_none());
+        assert_eq!(outcomes[1].error.as_deref(), Some("segments[0]: out_frame is past the end of slot 2."));
+        // An answer for a different number of edits is not matched up by guesswork.
+        assert!(batch_outcomes(&["e1".into()], &stdout).is_err());
+        assert!(batch_outcomes(&["e1".into()], "not json").is_err());
     }
 
     #[test]

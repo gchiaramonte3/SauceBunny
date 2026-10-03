@@ -227,17 +227,79 @@ pub async fn aaf_speech(app: AppHandle, document_id: String, track_id: String, b
     }).await
 }
 
-/// Write an edit's head as a new AAF for Media Composer (`write-edit`, the
-/// sidecar's one writing command). The sidecar re-reads what it wrote and
-/// compares every frame before publishing, and never overwrites a file.
+/// Write an edit's head as a new AAF for Media Composer (`write-edit`). The
+/// sidecar re-reads what it wrote and compares every frame before publishing,
+/// and never overwrites a file.
 #[tauri::command]
 pub async fn aaf_export_edit(app: AppHandle, edit_id: String, output_path: String, approach: String, job_id: String) -> Result<crate::edit_export::EditExportResult, AppError> {
     diagnostics::operation(&app, &job_id, "export-edit", &format!("Export edit {edit_id} · {}", diagnostics::describe_path(std::path::Path::new(&output_path))), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let document = crate::commands::edits::head_document(&app, &edit_id)?;
-    let root = store::root(&app)?;
+    let sources = export_sources(&app, &job_id, &document, &mut Default::default()).await?;
+    let request = writer_request(&app, &document, &sources, &approach, &output_path)?;
+    Ok(serde_json::from_str(&run_writer(&app, &job_id, "write-edit", &request).await?)?)
+    }).await
+}
+
+/// Several edits' heads, one AAF each, into `output_dir`, from ONE run of the
+/// sidecar (`write-edits`): each source AAF is opened once and its group pack
+/// built at most once. Each file is named from its edit's title as the single
+/// export's dialog would name it, with " 2", " 3" and on when that name is
+/// taken; nothing is overwritten. An edit that cannot be written is reported
+/// in its place and the others are written anyway. Stop ends the whole batch.
+#[tauri::command]
+pub async fn aaf_export_edits(app: AppHandle, edit_ids: Vec<String>, output_dir: String, approach: String, job_id: String) -> Result<Vec<crate::edit_export::EditExportOutcome>, AppError> {
+    use crate::edit_export::{batch_outcomes, export_stem, unique_stem, EditExportOutcome};
+    diagnostics::operation(&app, &job_id, "export-edits", &format!("Export {} edits · {}", edit_ids.len(), diagnostics::describe_path(std::path::Path::new(&output_dir))), async {
+    let _job = process::JobGuard::begin(&app, &job_id)?;
+    let folder = std::path::Path::new(&output_dir);
+    if !folder.is_absolute() || !folder.is_dir() { return Err(AppError::invalid("Choose an existing folder to export into.")); }
+    if edit_ids.is_empty() { return Err(AppError::invalid("Choose at least one string out to export.")); }
+    let mut outcomes: Vec<Option<EditExportOutcome>> = vec![None; edit_ids.len()];
+    let (mut requests, mut sent, mut placed) = (Vec::new(), Vec::new(), Vec::new());
+    let mut taken = std::collections::HashSet::new();
+    let mut known = std::collections::HashMap::new();
+    for (index, edit_id) in edit_ids.iter().enumerate() {
+        let request = async {
+            let document = crate::commands::edits::head_document(&app, edit_id)?;
+            let sources = export_sources(&app, &job_id, &document, &mut known).await?;
+            // Free on disk (the AAF and its marker list) and not chosen by an
+            // earlier edit of this batch. Lowercased: APFS is usually case-blind.
+            let stem = unique_stem(&export_stem(&document.title), |stem| !taken.contains(&stem.to_lowercase())
+                && std::fs::symlink_metadata(folder.join(format!("{stem}.aaf"))).is_err()
+                && std::fs::symlink_metadata(folder.join(format!("{stem} - Avid markers.txt"))).is_err())?;
+            taken.insert(stem.to_lowercase());
+            let output = folder.join(format!("{stem}.aaf"));
+            writer_request(&app, &document, &sources, &approach, &output.to_string_lossy())
+        }.await;
+        match request {
+            Ok(request) => { requests.push(request); sent.push(edit_id.clone()); placed.push(index); }
+            Err(AppError::Cancelled) => return Err(AppError::Cancelled),
+            Err(error) => outcomes[index] = Some(EditExportOutcome::failed(edit_id, error.to_string())),
+        }
+    }
+    if !requests.is_empty() {
+        let batch = serde_json::json!({ "schema_version": 1, "edits": requests });
+        let written = batch_outcomes(&sent, &run_writer(&app, &job_id, "write-edits", &batch).await?)?;
+        for (index, outcome) in placed.into_iter().zip(written) { outcomes[index] = Some(outcome); }
+    }
+    Ok(outcomes.into_iter().flatten().collect())
+    }).await
+}
+
+/// What the writer needs from each AAF an edit cuts from. `known` keeps one
+/// answer per imported AAF across the edits of a batch, so each document is
+/// loaded and each source copied locally once.
+async fn export_sources(app: &AppHandle, job_id: &str, document: &crate::edit_doc::EditDocument,
+    known: &mut std::collections::HashMap<String, crate::edit_export::ExportSource>) -> Result<Vec<crate::edit_export::ExportSource>, AppError>
+{
+    let root = store::root(app)?;
     let mut sources = Vec::new();
     for source in &document.sources {
+        if let Some(found) = known.get(&source.document_id) {
+            sources.push(crate::edit_export::ExportSource { id: source.id.clone(), ..found.clone() });
+            continue;
+        }
         let aaf = store::load(&root, &source.document_id)?;
         store::source_ready(&aaf)?;
         let graph = aaf.manifest.graph.as_ref().ok_or_else(|| AppError::invalid(format!(
@@ -245,7 +307,7 @@ pub async fn aaf_export_edit(app: AppHandle, edit_id: String, output_path: Strin
         // The writer reads the source AAF the way import does: from a verified
         // local copy with the original's fingerprint, not sector by sector
         // over NEXIS, where a large AAF could run into the stage limit.
-        let local = local_read::for_parser(&app, &job_id, std::path::Path::new(&aaf.source_path)).await?;
+        let local = local_read::for_parser(app, job_id, std::path::Path::new(&aaf.source_path)).await?;
         // V1 when it has picture, else the first track that does: the same
         // track String Outs draws, so the export carries the picture shown.
         let picture = graph.picture_tracks.iter().find(|track| track.physical_track_number == Some(1) && !track.clips.is_empty())
@@ -260,23 +322,40 @@ pub async fn aaf_export_edit(app: AppHandle, edit_id: String, output_path: Strin
         let lanes: Vec<crate::edit_export::GroupLane> = graph.lanes.iter().map(|lane| (lane.track_id.as_str(), lane.parent_track_id.as_deref(),
             lane.branch_id.as_deref(), owner(&lane.track_id))).collect();
         let alternates = crate::edit_export::alternates_of(&lanes);
-        sources.push(crate::edit_export::ExportSource { id: source.id.clone(), aaf_path: local.to_string_lossy().into_owned(),
-            sequence_id: graph.sequence_id.clone(), picture_slot: picture.map(|track| track.slot_id), alternates });
+        let found = crate::edit_export::ExportSource { id: source.id.clone(), aaf_path: local.to_string_lossy().into_owned(),
+            sequence_id: graph.sequence_id.clone(), picture_slot: picture.map(|track| track.slot_id), alternates };
+        known.insert(source.document_id.clone(), found.clone());
+        sources.push(found);
     }
-    let request = crate::edit_export::build_request(&document, &sources, &approach, &output_path)?;
+    Ok(sources)
+}
+
+/// The writer's request for one edit, with the folder where it keeps group
+/// packs (`scratch/aaf-packs`): the first export of a grouped source writes
+/// the closure of its group clips there once, and later exports copy it
+/// rather than the whole show again (aaf-sidecar/writer.py).
+fn writer_request(app: &AppHandle, document: &crate::edit_doc::EditDocument, sources: &[crate::edit_export::ExportSource],
+    approach: &str, output_path: &str) -> Result<serde_json::Value, AppError>
+{
+    let mut request = crate::edit_export::build_request(document, sources, approach, output_path)?;
     let cache = app.path().app_cache_dir().map_err(|e| AppError::internal(format!("app_cache_dir: {e}")))?;
-    let scratch = crate::commands::scratch_dir(&cache);
-    std::fs::create_dir_all(&scratch)?;
-    let request_path = scratch.join(format!("write-edit-{job_id}.json"));
-    std::fs::write(&request_path, serde_json::to_vec(&request)?)?;
-    process::progress(&app, &job_id, None, "writing", 0, 0);
-    let result = process::run(&app, &job_id, "write-edit", "saucebunny-aaf",
-        vec!["write-edit".into(), "--request".into(), request_path.to_string_lossy().into_owned()]).await;
+    request["pack_dir"] = serde_json::json!(crate::commands::system::aaf_packs_dir(&cache).to_string_lossy());
+    Ok(request)
+}
+
+/// Run one of the sidecar's writing commands on a request, through a file in
+/// scratch that is removed afterwards. Returns the sidecar's answer.
+async fn run_writer(app: &AppHandle, job_id: &str, command: &str, request: &serde_json::Value) -> Result<String, AppError> {
+    let cache = app.path().app_cache_dir().map_err(|e| AppError::internal(format!("app_cache_dir: {e}")))?;
+    let request_path = crate::commands::scratch_dir(&cache).join(format!("{command}-{job_id}.json"));
+    std::fs::write(&request_path, serde_json::to_vec(request)?)?;
+    process::progress(app, job_id, None, "writing", 0, 0);
+    let result = process::run(app, job_id, command, "saucebunny-aaf",
+        vec![command.into(), "--request".into(), request_path.to_string_lossy().into_owned()]).await;
     let _ = std::fs::remove_file(&request_path);
     let result = result?;
     result.require_success("saucebunny-aaf")?;
-    Ok(serde_json::from_str(&result.stdout)?)
-    }).await
+    Ok(result.stdout)
 }
 
 #[cfg(test)]

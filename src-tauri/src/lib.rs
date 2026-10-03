@@ -286,6 +286,7 @@ pub fn run() {
             commands::session_kick,
             commands::aaf_speech,
             commands::aaf_export_edit,
+            commands::aaf_export_edits,
             commands::edit_list,
             commands::edit_create,
             commands::edit_head,
