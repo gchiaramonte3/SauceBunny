@@ -50,9 +50,9 @@ answered; everything else in this spec can run as written):
    View ▸ Waveforms first, as Remove dead space does.
 3. Air between bites on a manual Append (phase 1.5). The owner will decide later.
 4. Independent tracks instead of the single storyline (phase 1, end). The owner will decide later.
-5. ~~The Send to Avid panel and Avid's developer program (Later).~~ **Wanted
-   (October 3).** Needs Avid's Panel SDK, which Avid gives out on a partner
-   request; see Later.
+5. ~~The Send to Avid panel and Avid's developer program (Later).~~ **Parked
+   (October 3)** as a future integration. Needs Avid's Panel SDK, which Avid
+   gives out on a partner request; the plan is under Later.
 
 ---
 
@@ -400,7 +400,7 @@ Add to `docs/HAND-TEST.md`, String Outs:
 
 ## Later
 
-**Send to Avid (wanted, October 3).** A string out lands in a Media
+**Send to Avid (parked, October 3: a future integration, set aside by the owner).** A string out lands in a Media
 Composer bin with one click, as Quickture's panel does, with no File ▸
 Import.
 
