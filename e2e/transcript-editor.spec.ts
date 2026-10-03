@@ -301,6 +301,8 @@ test("One per person makes a string out for each person who speaks", async ({ pa
   await expect(page.getByRole("heading", { name: "SO_Interview_Alex" })).toBeVisible();
   const created = await page.evaluate(() => (window as unknown as { __editCalls: string[] }).__editCalls.filter((c) => c === "edit_create").length);
   expect(created).toBe(2);
+  // Each one is open in a tab, in person order, the first chosen.
+  await expect(page.getByRole("tablist", { name: "Open string outs" }).getByRole("tab")).toHaveText([/^SO_Interview_Alex/, /^SO_Interview_Sam/]);
 });
 
 test("coming back reopens the string out that was open, not the welcome", async ({ page }) => {
