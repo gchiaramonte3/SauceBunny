@@ -117,6 +117,16 @@ All notable changes to Sauce Bunny. Format loosely follows
   ("two minutes, open with Rosa") and accept or discard the proposed bites.
 
 ### Changed
+- **Export AAF with kept groups is fast after the first time.** A group clip
+  refers to every clip in the show, so "Keep picture groups" carried all of
+  HEAT 2 (31 MB) into every export and took 14 seconds however short the
+  cut. The first export of a grouped AAF now keeps its group clips in the
+  app's scratch cache (cleared after a day unused), and each later export
+  copies them and adds only the new sequence: under a second for that
+  string out, with the same file and every frame checked as before. A
+  string out with no kept groups is quicker too (about 2.2 seconds to 1.2).
+  Several string outs can be written from one run of the writer, each named
+  from its title and never replacing a file.
 - String Outs draws a long transcript a page at a time. A real 20-mic,
   3h39m sequence (146,018 words) used to build a million-element page and
   freeze the window for minutes on opening, and cutting it in whole crashed

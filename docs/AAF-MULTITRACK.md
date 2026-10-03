@@ -160,9 +160,10 @@ before groups were named have no `group_name` or `angles`.
 
 ## Writer
 
-`saucebunny-aaf write-edit --request REQUEST.json` is the sidecar's one
+`saucebunny-aaf write-edit --request REQUEST.json` is the sidecar's
 writing command (Phase 0 and Phase 6 of
-[TRANSCRIPT-EDITOR-PLAN.md](TRANSCRIPT-EDITOR-PLAN.md)). It turns an edit (a
+[TRANSCRIPT-EDITOR-PLAN.md](TRANSCRIPT-EDITOR-PLAN.md)), and `write-edits`
+writes several from one run. It turns an edit (a
 list of source ranges and gaps, with mutes and markers) into a new AAF that
 Media Composer can import, and it never changes an input. The request and
 result shapes are in [`aaf-sidecar/README.md`](../aaf-sidecar/README.md).
@@ -207,6 +208,21 @@ result shapes are in [`aaf-sidecar/README.md`](../aaf-sidecar/README.md).
   with `verify_failed` and nothing is written. The re-read checks only what
   plays: it does not expand group alternates, which a C string-out holds one
   Selector per bite of.
+- **Group packs** (String Outs spec, phase 4). A kept group clip refers to
+  every clip in the show, so a C or "keep picture groups" export of HEAT 2
+  carries 3,474 of its 3,476 mobs however short it is. The app passes
+  `pack_dir` (`<cache>/scratch/aaf-packs`), and the first export of a grouped
+  source writes the closure of the group mobs it refers to into a cached,
+  checked pack keyed by the source's fingerprint and `WRITER_VERSION`. Later
+  exports copy the pack, open it `rw` and add only their own sequence and
+  what the pack lacks; their self-check walks references only from what they
+  added, while the frame, timecode, marker and essence checks are unchanged.
+  The output is the same set of mobs as a full export. Details, and the
+  multi-source rule, in the sidecar README.
+- **Batch.** `aaf_export_edits` sends every string out of a batch to one
+  `write-edits` run, named from each title as the save dialog would name it
+  (" 2", " 3" when taken, never overwriting), and returns one outcome per
+  edit: a result, or why that edit was not written.
 
 The reader changes this needed are small: `LegacySound`/`LegacyPicture`
 tracks are read as sound/picture (they were silently dropped), and the reader's

@@ -286,6 +286,26 @@ green contracts stay green; the docs in 3c.12 match the buttons.
 
 ## Phase 4: faster export
 
+**Status: built** (October 3). Changes 1 to 3 are in the sidecar
+(`writer.py` group packs, `write-edits`) and in Rust (`aaf_export_edit`
+passes `scratch/aaf-packs`; `aaf_export_edits` and `exportEdits` for a
+batch). Not built: building a pack in the background when a sequence opens
+(the first export builds it), and the One per person button calling
+`exportEdits`, which is UI work. Measured on HEAT 2, 3 bites, 23 tracks,
+CPython 3.12.14 (the bundle's interpreter), each as its own process, fastest
+of 3 on a loaded Mac (load average 10 to 25):
+
+| Export option | Before (bundled) | No pack | First export, builds the pack | After |
+|---|---|---|---|---|
+| Keep picture groups | 13.9 s | 12.1 s | 10.6 s | 0.9 s |
+| Keep all groups | 14.6 s | 11.9 s | 10.8 s | 1.1 s |
+| Clip that plays | 2.2 s | 1.2 s | no pack | 1.2 s |
+
+Files and objects copied are unchanged (31 MB and 3,474; 2.1 MB and 154).
+A pack-based export holds the same 3,474 MobIDs as a full one, the pack is
+exactly the group clip's closure, and V1 plays identically. All three as one
+`write-edits` batch: 12.2 s with the pack built once, 2.5 s after.
+
 **What was measured** (bundled sidecar, 3 bites, 23 tracks, HEAT 2):
 
 | Export option | Time | File | Objects copied |

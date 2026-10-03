@@ -109,8 +109,9 @@ hold the end of a chain the pack leaves open. A reused pack is touched, so
 the app's 24-hour scratch sweep removes packs nobody exported from for a day.
 
 HEAT 2, 3 bites, 23 tracks, keep picture groups, CPython 3.12 (the bundle's
-interpreter) on a loaded machine: 14 s for a full export before, now about
-10 s the first time (the pack is built) and under 1 s after.
+interpreter) on a loaded machine: 13.9 s for a full export before, now 10.6 s
+the first time (the pack is built) and 0.9 s after (table in
+docs/STRING-OUTS-SPEC-2026-10-03.md, phase 4).
 
 The AAF is written to a temporary file, re-read with the app's own reader and
 compared frame by frame, then published by atomic link. With markers, a
