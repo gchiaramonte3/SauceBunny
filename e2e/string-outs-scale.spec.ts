@@ -60,8 +60,7 @@ test("a 20-mic, 146k-word sequence opens, cuts in whole and scrolls without draw
   await page.getByRole("button", { name: "String Outs", exact: true }).click();
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Big scene" });
-  const whole = page.getByLabel(/whole sequence/i);
-  if (await whole.isChecked().catch(() => false)) await whole.uncheck();
+  await expect(page.getByLabel(/whole sequence/i)).not.toBeChecked();
   const opening = Date.now();
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.locator(".cp-te-src-body [data-src-index]").first()).toBeVisible({ timeout: 60_000 });

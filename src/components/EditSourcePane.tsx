@@ -24,7 +24,7 @@ type Props = {
   /** Something is marked, as text or as In and Out on the source timeline. */
   canInsert: boolean;
   playhead: number; playing: boolean; onPlay: () => void; onScrub: (seconds: number) => void; onScrubStart: () => void; onScrubEnd: () => void;
-  text: EditTextStyle; onText: (style: EditTextStyle) => void; onInsert: () => void; onAppend: () => void;
+  text: EditTextStyle; onText: (style: EditTextStyle) => void; onPlace: (how: "insert" | "append" | "overwrite") => void;
 };
 
 /**
@@ -32,8 +32,8 @@ type Props = {
  * playhead, read a person at a time through AAF Audio's transcript tabs.
  * Words already in the edit read at full strength and the rest are dimmed,
  * so what the cut left behind shows at a glance. Click a word to park the
- * source there, ⌥-drag to scrub, select a line and press V to put it in the
- * edit at the caret, the way a splice-in works in Media Composer.
+ * source there, ⌥-drag to scrub, select a line and press V to splice it in
+ * at the record playhead, or B to overwrite there, as in Media Composer.
  */
 export function EditSourcePane(props: Props) {
   const { source, speakers, colors, fps, used, range, placed } = props;
@@ -127,10 +127,9 @@ export function EditSourcePane(props: Props) {
       <span className="cp-te-pane-note" aria-live="polite">{range ? `${(range[1] - range[0] + 1).toLocaleString()} selected`
         : `${inEdit.toLocaleString()}/${count.toLocaleString()}${person ? ` of ${person.name}'s words` : ""} used`}</span>
       <div className="cp-te-src-actions">
-        <button type="button" className="btn btn-ghost cp-te-btn" disabled={!props.canInsert} onClick={props.onInsert}
-          title="Insert at the edit's caret (V)">Insert<kbd className="cp-te-kbd">V</kbd></button>
-        <button type="button" className="btn btn-ghost cp-te-btn" disabled={!props.canInsert} onClick={props.onAppend}
-          title="Append to the edit">Append</button>
+        {([["insert", "Insert", "V", "Insert at the record playhead (V)"], ["overwrite", "Overwrite", "B", "Overwrite at the record playhead (B)"], ["append", "Append", null, "Append to the end of the record"]] as const).map(([how, label, key, title]) =>
+          <button key={how} type="button" className="btn btn-ghost cp-te-btn" disabled={!props.canInsert} onClick={() => props.onPlace(how)}
+            title={props.canInsert ? title : "Select words or mark In and Out in the source first"}>{label}{key && <kbd className="cp-te-kbd">{key}</kbd>}</button>)}
       </div>
     </footer>
   </section>;

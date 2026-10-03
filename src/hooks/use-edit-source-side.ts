@@ -84,19 +84,28 @@ export function useEditSourceSide({ document, sources, documents, words, colors,
     pendingSeek.current = null;
   }, [whole, playback, fps]);
 
-  const setRange = (next: [number, number] | null) => setRanges((state) => ({ ...state, [rangeKey]: next }));
-  const mark = (edge: "in" | "out", at = playhead) => {
-    if (!source) return;
-    const base = marks;
-    setRange(null);
-    setExplicit((state) => ({ ...state, [source.id]: { ...base, [edge]: at } }));
+  // The last thing marked wins: selecting text replaces an earlier I or O,
+  // and clearing the text clears them too, so nothing marked before returns.
+  const setRange = (next: [number, number] | null) => {
+    setRanges((state) => ({ ...state, [rangeKey]: next }));
+    if (source) setExplicit((state) => ({ ...state, [source.id]: NO_MARKS }));
   };
+  /** Marks as edited by a key, with Avid's rule that a mark set past the other one clears it. */
+  const setMarks = (next: EditMarks) => {
+    if (!source) return;
+    setRanges((state) => ({ ...state, [rangeKey]: null }));
+    setExplicit((state) => ({ ...state, [source.id]: next }));
+  };
+  const mark = (edge: "in" | "out", at = playhead) => setMarks(edge === "in"
+    ? { in: at, out: marks.out != null && marks.out > at ? marks.out : null }
+    : { in: marks.in != null && marks.in < at ? marks.in : null, out: at });
   return {
     mode, setMode, source, aaf, sources, choose: (id: string) => { playback.pause(); setChosen(id); },
     people, tab, setTab: (next: string) => source && setTabs((state) => ({ ...state, [source.id]: next })),
     own, shown, range, setRange, marks, playback, playhead, laneOf, selected, expanded, solo,
     markIn: () => mark("in"), markOut: () => mark("out"),
-    clearMarks: () => { setRange(null); if (source) setExplicit((state) => ({ ...state, [source.id]: NO_MARKS })); },
+    clearMarks: () => setRange(null),
+    clearEdge: (edge: "in" | "out") => setMarks({ ...marks, [edge]: null }),
     toggleSelector: (trackId: string, only: boolean) => source && setSelectors((state) => {
       const current = new Set(state[source.id] ?? selected);
       const next = only ? new Set([trackId]) : current.delete(trackId) ? current : current.add(trackId);

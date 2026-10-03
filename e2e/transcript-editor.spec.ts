@@ -91,8 +91,10 @@ test("a sequence added with nothing cut in offers the whole sequence, in one und
   await boot(page);
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
-  await page.getByText("Start with the whole sequence").click();
+  // A new string out starts empty, as a new sequence does in Avid: it is built from chunks of the source.
+  await expect(page.getByLabel(/whole sequence/i)).not.toBeChecked();
   await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("combobox", { name: /^Who plays on A\d+$/ })).toHaveCount(0);
   const add = page.getByRole("button", { name: "Add all of Interview" });
   await expect(add).toBeVisible();
   await add.click();
@@ -105,6 +107,7 @@ test("an edit from a sequence shows its words, and a delete is one undoable step
   await boot(page);
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
   await page.getByRole("button", { name: "Create" }).click();
   const moved = page.locator(".cp-te-doc [data-index]", { hasText: "moved" }).first();
   await expect(moved).toBeVisible();
@@ -127,10 +130,40 @@ test("an edit from a sequence shows its words, and a delete is one undoable step
   await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
 });
 
+test("Insert splices at the record playhead, as Avid's V does, and Overwrite (B) replaces what is there", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
+  await page.getByRole("button", { name: "Create" }).click();
+  const record = page.locator(".cp-te-doc");
+  await expect(record).toContainText("Then Rosa called me.");
+  // Park the playhead about 32 s in, after Sam's line (20-24 s) and before Alex's second (40 s), by clicking the timeline.
+  const ruler = (await page.locator(".cp-te-tl-ruler").boundingBox())!;
+  await page.mouse.click(ruler.x + ruler.width * 0.032, ruler.y + ruler.height / 2);
+  await page.getByRole("tab", { name: "Sam" }).click();
+  const source = page.locator(".cp-te-src-body");
+  await source.locator("[data-src-index]", { hasText: "Sam" }).first().click();
+  await source.locator("[data-src-index]", { hasText: "door." }).first().click({ modifiers: ["Shift"] });
+  await page.keyboard.press("v");
+  await expect(page.getByRole("status").filter({ hasText: /Inserted 4 words at 01:00:(2[4-9]|3\d)/ })).toBeVisible();
+  // Not at the start: the cut still opens on Alex, and Sam's line now plays twice, before Alex's second line.
+  const lines = () => record.locator(".cp-te-para").evaluateAll((all) => all.map((paragraph) => paragraph.textContent ?? ""));
+  await expect.poll(async () => (await lines()).map((text) => /moved/.test(text) ? "alex" : /door/.test(text) ? "sam" : /Rosa/.test(text) ? "rosa" : "?")).toEqual(["alex", "sam", "sam", "rosa"]);
+  await expect(page.getByRole("button", { name: /^Undo Insert 4 Words/ })).toBeEnabled();
+  // B lays the same line over what follows the new clip: the cut keeps its length.
+  const total = page.locator(".cp-te-transport .cp-te-readout-of").first();
+  const before = await total.textContent();
+  await page.keyboard.press("b");
+  await expect(page.getByRole("button", { name: "Undo Overwrite" })).toBeEnabled();
+  await expect(total).toHaveText(before!);
+});
+
 test("a group angle has no track until their words are cut in, then plays on one of their own", async ({ page }) => {
   await boot(page, true);
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
   await page.getByRole("button", { name: "Create" }).click();
   const record = page.locator(".cp-te-doc");
   // Who each record track plays, top-down: the patch panel in the track headers.
@@ -160,8 +193,6 @@ test("Source shows the loaded sequence's mics, its group alternates and V1, and 
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
   // An empty record, the way Avid starts a new sequence: the cut is built from the source.
-  const whole = page.getByLabel(/whole sequence/i);
-  if (await whole.isChecked().catch(() => false)) await whole.uncheck();
   await page.getByRole("button", { name: "Create" }).click();
   const record = page.locator(".cp-te-doc");
   await page.getByRole("radio", { name: "Source" }).click();
@@ -200,8 +231,6 @@ test("a new string out has no record tracks until someone is patched, and the em
   await boot(page);
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
-  const whole = page.getByLabel(/whole sequence/i);
-  if (await whole.isChecked().catch(() => false)) await whole.uncheck();
   await page.getByRole("button", { name: "Create" }).click();
   // Nothing cut in yet: no record tracks at all, only the empty one to patch someone to.
   await expect(page.getByRole("combobox", { name: /^Who plays on A\d+$/ })).toHaveCount(0);
@@ -239,6 +268,7 @@ test("the left column is Ask, Inspector, History, with a plain prompt", async ({
   await boot(page);
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
   await page.getByRole("button", { name: "Create" }).click();
   const tabs = page.getByRole("tablist", { name: "String out panels" }).getByRole("tab");
   await expect(tabs).toHaveText(["Ask", "Inspector", "History"]);

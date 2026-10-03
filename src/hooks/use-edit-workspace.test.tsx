@@ -13,13 +13,14 @@ const words = [word("so", "rosa", 1, 1.4), word("anyway", "rosa", 1.5, 2.5), wor
 const timeline: Timeline = { segments: [{ id: "whole", source: "s1", srcIn: 0, srcOut: 10 }], mutes: [] };
 const openEdit = { document: {} as OpenEdit["document"], timeline, markers: [] } satisfies OpenEdit;
 
-function setup(open: OpenEdit = openEdit, everyone?: TimelineWord[]) {
+function setup(open: OpenEdit = openEdit, everyone?: TimelineWord[], playhead = 0, snap = true) {
   const commits: { label: string; change: EditChange }[] = [];
   const commit = vi.fn(async (label: string, change: (state: OpenEdit) => EditChange) => { commits.push({ label, change: change(open) }); return true; });
+  const seek = vi.fn();
   const hook = renderHook(() => useEditWorkspace({ open, words, everyone, lanes, sourceLanes: { s1: ["rosa", "dev"] }, durations: { s1: 10 },
-    audible: new Map([["s1", [[1, 3], [6, 7]]]]), playhead: 0, seek: vi.fn(), commit, nameOf: (id) => id === "rosa" ? "Rosa" : "Dev", tc: (s) => `${s}` }));
+    audible: new Map([["s1", [[1, 3], [6, 7]]]]), playhead, seek, commit, nameOf: (id) => id === "rosa" ? "Rosa" : "Dev", tc: (s) => `${s}`, snap }));
   const select = (from: number, to: number) => act(() => hook.result.current.setSelection({ anchor: from, focus: to, collapsed: false }));
-  return { hook, commits, select };
+  return { hook, commits, select, seek };
 }
 
 it("never cuts through overtalk: silences the speaker's own words and asks about the rest", () => {
@@ -129,6 +130,47 @@ it("patches whoever's words are cut in to the next track down, a group angle inc
   expect(commits[0].change?.timeline?.segments).toHaveLength(2);
   expect(commits[0].change?.timeline?.segments.at(-1)?.tracks).toEqual(["ana"]);
   expect(hook.result.current.message).toBe("Inserted 1 word at 10. Ana is now on a track.");
+});
+
+const patched = { ...openEdit, document: { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } }] } as unknown as OpenEdit["document"] };
+
+it("Insert lands at the record playhead, not at the text's caret, and parks the playhead after the new clip", () => {
+  // Parked inside "later" (6-7 s): with Snap on, the splice moves to the gap before it.
+  const { hook, commits, seek } = setup(patched, undefined, 6.4);
+  const take = { from: 8, to: 9, lanes: ["rosa"] };
+  act(() => hook.result.current.insert("s1", [], false, take));
+  const segments = commits[0].change!.timeline!.segments;
+  expect(segments.map((segment) => [segment.srcIn, segment.srcOut])).toEqual([[0, 4.25], [8, 9], [4.25, 10]]);
+  expect(seek).toHaveBeenLastCalledWith(5.25);
+  // Snap off: exactly where the playhead is, through the word.
+  const exact = setup(patched, undefined, 6.4, false);
+  act(() => exact.hook.result.current.insert("s1", [], false, take));
+  expect(exact.commits[0].change!.timeline!.segments[0].srcOut).toBeCloseTo(6.4);
+});
+
+it("a record In mark wins over the playhead, and the edit clears the record marks", () => {
+  const { hook, commits } = setup(patched, undefined, 9);
+  act(() => hook.result.current.setMarks({ in: 3.5, out: null }));
+  act(() => hook.result.current.insert("s1", [], false, { from: 8, to: 9, lanes: ["rosa"] }));
+  expect(commits[0].change!.timeline!.segments[0].srcOut).toBeCloseTo(3.5);
+  expect(hook.result.current.marks).toEqual({ in: null, out: null });
+});
+
+it("Overwrite replaces what is under the playhead for the clip's length, and the edit keeps its length", () => {
+  const { hook, commits } = setup(patched, undefined, 4);
+  act(() => hook.result.current.overwrite("s1", [], { from: 8, to: 9, lanes: ["rosa"] }));
+  expect(commits[0].label).toBe("Overwrite");
+  const segments = commits[0].change!.timeline!.segments;
+  expect(segments.map((segment) => [segment.srcIn, segment.srcOut])).toEqual([[0, 4], [8, 9], [5, 10]]);
+  expect(hook.result.current.message).toBe("Overwrote 1.0 s at 4.");
+});
+
+it("the record caret is wherever the playhead is until a range is chosen", () => {
+  const { hook } = setup(openEdit, undefined, 6.2);
+  const later = hook.result.current.placed.findIndex((item) => item.word.id === "later");
+  expect(hook.result.current.selection).toMatchObject({ anchor: later, collapsed: true });
+  act(() => hook.result.current.setSelection({ anchor: 0, focus: 1, collapsed: false }));
+  expect(hook.result.current.selection).toMatchObject({ anchor: 0, focus: 1, collapsed: false });
 });
 
 it("an inserted group angle's own next word bounds the air kept after their line", () => {

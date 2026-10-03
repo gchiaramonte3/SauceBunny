@@ -28,7 +28,7 @@ function Host({ list = words, reading = null, onTake = vi.fn() }: { list?: Timel
   const side = useEditSourceSide({ document: edit, sources: [{ id: "s1", short: "Kitchen", duration: 10, startFrames: 86400 }], documents: new Map(),
     words: list, colors: { rosa: "#f00", dev: "#0f0" }, fps: 24, active: true });
   return <EditSourceHost side={side} lanes={lanes} colors={{ rosa: "#f00", dev: "#0f0" }} fps={24} used={new Set()} reading={reading}
-    text={{ family: "sans", size: 13, leading: "normal" }} onText={() => undefined} onInsert={(atEnd) => onTake(side.take(), atEnd)} />;
+    text={{ family: "sans", size: 13, leading: "normal" }} onText={() => undefined} onPlace={(how) => onTake(side.take(), how === "append")} />;
 }
 const shownWords = () => [...document.querySelectorAll(".cp-te-src-word")].map((element) => element.textContent);
 

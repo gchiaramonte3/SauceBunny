@@ -8,8 +8,8 @@ type Props = {
   /** Mics read so far while the words are still arriving, else null. */
   reading: { done: number; total: number } | null;
   text: EditTextStyle; onText: (style: EditTextStyle) => void;
-  /** Insert (or, at the end, Append) what the source has marked. */
-  onInsert: (atEnd: boolean) => void;
+  /** Insert, Append or Overwrite what the source has marked. */
+  onPlace: (how: "insert" | "append" | "overwrite") => void;
 };
 
 /**
@@ -18,7 +18,7 @@ type Props = {
  * Source view reads too: select a line here and the same In to Out is on the
  * source timeline, mark I and O there and Insert takes it from here.
  */
-export function EditSourceHost({ side, lanes, colors, fps, used, reading, text, onText, onInsert }: Props) {
+export function EditSourceHost({ side, lanes, colors, fps, used, reading, text, onText, onPlace }: Props) {
   const { source, playback } = side;
   if (!source) return <section className="cp-te-source cp-te-doc-empty" aria-label="Source"><p>Add an AAF Audio sequence to this string out to cut from it.</p></section>;
   return <div className="cp-te-source-host" data-source-id={source.id}>
@@ -30,6 +30,6 @@ export function EditSourceHost({ side, lanes, colors, fps, used, reading, text, 
       people={side.people} tab={side.tab} onTab={side.setTab} reading={reading} range={side.range} onRange={side.setRange} match={null}
       canInsert={side.take() != null} playhead={side.playhead} playing={playback.playing} onPlay={() => void playback.toggle()}
       onScrub={(seconds) => void playback.seek(Math.round(seconds * fps))} onScrubStart={playback.pause} onScrubEnd={() => undefined}
-      text={text} onText={onText} onInsert={() => onInsert(false)} onAppend={() => onInsert(true)} />
+      text={text} onText={onText} onPlace={onPlace} />
   </div>;
 }
