@@ -1,7 +1,8 @@
 """AAF inspection, embedded PCM extraction and edit export. Never opens locators.
 
-Every command reads its AAF inputs read-only. `write-edit` (writer.py) is the
-one command that creates an AAF, always as a new file published atomically.
+Every command reads its AAF inputs read-only. `write-edit` and `write-edits`
+(writer.py) are the only commands that create an AAF: each export as a new
+file published atomically, and, given a `pack_dir`, a cached group pack there.
 """
 from __future__ import annotations
 import argparse
@@ -533,10 +534,13 @@ def run(args):
         from mxf_info import inspect_many
         return inspect_many(args.input)
     if args.command == 'write-edit':
-        # The one command that writes an AAF. It reads its sources read-only
-        # and publishes a new file only after re-reading it frame by frame.
+        # The commands that write an AAF. They read their sources read-only
+        # and publish a new file only after re-reading it frame by frame.
         from writer import write_edit_request
         return write_edit_request(args.request)
+    if args.command == 'write-edits':
+        from writer import write_edits_request
+        return write_edits_request(args.request)
     path = Path(args.input)
     identity = fingerprint(path)
     if args.expected_fingerprint and args.expected_fingerprint != identity:
@@ -633,8 +637,9 @@ def main():
     commands = parser.add_subparsers(dest='command',required=True)
     child = commands.add_parser('mxf-info')
     child.add_argument('--input', nargs='+', required=True)
-    child = commands.add_parser('write-edit')
-    child.add_argument('--request', required=True)
+    for command in ('write-edit', 'write-edits'):
+        child = commands.add_parser(command)
+        child.add_argument('--request', required=True)
     for command in ('inspect','index','extract','peaks','sequences'):
         child = commands.add_parser(command)
         child.add_argument('--input',required=True)

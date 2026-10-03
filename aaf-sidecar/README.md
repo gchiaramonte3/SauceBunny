@@ -1,8 +1,9 @@
 # Local AAF reader and edit writer
 
 `saucebunny-aaf` is a bounded subprocess. Every command opens its AAF inputs
-read-only; `write-edit` (below) is the one command that creates an AAF, and it
-only ever creates a new file. It does not open media
+read-only; `write-edit` and `write-edits` (below) are the only commands that
+create an AAF: each export only ever as a new file, and given a `pack_dir`, a
+cached group pack there. It does not open media
 locators, start an editor, download packages, or contact a service at runtime.
 It imports a single top-level audio composition from embedded mono PCM WAVE
 or PCMDescriptor essence. The application's multitrack page owns playback,
@@ -73,6 +74,43 @@ design notes in `docs/AAF-MULTITRACK.md`, "Writer"). The request, at most
 - Bounds: 1 to 256 tracks with 1 to 64 sound tracks, 1 to 100,000
   segments, 256 sources, 100,000 markers, 24 hours. All paths absolute;
   `output_path` ends in `.aaf` and must not exist.
+- `pack_dir` (optional, an existing folder; the app passes
+  `<cache>/scratch/aaf-packs`) turns on group packs, below.
+
+#### Group packs
+
+A kept group clip (approach C) is a CompositionMob that can refer to every
+clip in the show, and the Edit Protocol wants every mob it reaches in the
+file, whole, with its original MobID. HEAT 2's V1 is one such group (176
+slots), so every C or "keep picture groups" export carries 3,474 of the
+file's 3,476 mobs however short the cut. The size is fixed; the time is not.
+
+With `pack_dir`, the writer first runs its own copy code into a throwaway
+in-memory file to learn which group or submaster CompositionMobs the edit
+refers to (none under B, which is skipped). If there are any, it writes their
+whole closure, with the source's dictionary, once into
+`<pack_dir>/<source fingerprint>-<WRITER_VERSION>-<hash of the group ids>.aaf`:
+built under a temporary name, checked (every reference from every mob in the
+pack resolves in the pack or is a chain the source itself leaves open, no
+essence, every mob of the closure on disk under its MobID) and only then
+renamed into place, so a pack that exists under its name is complete and a
+killed build leaves only a `.pack-*.partial` nothing opens. The export then
+copies the pack, opens it `rw`, adds its sequence and any mobs the pack lacks
+(pack mobs are neither copied nor walked again), and its self-check walks
+references only from the new sequence and the mobs it added; the frame,
+timecode, marker and essence checks are unchanged. The output is the same
+set of mobs, with the same MobIDs, as a full export. A source with a new
+mtime, size or head/tail has a new fingerprint and gets a new pack; bump
+`WRITER_VERSION` in `writer.py` whenever what the writer writes changes. A
+pack an export fails on is deleted and built again next time. With several
+source files the largest one's pack is the base and the rest are copied as
+before, and then the self-check walks every mob, since a second file could
+hold the end of a chain the pack leaves open. A reused pack is touched, so
+the app's 24-hour scratch sweep removes packs nobody exported from for a day.
+
+HEAT 2, 3 bites, 23 tracks, keep picture groups, CPython 3.12 (the bundle's
+interpreter) on a loaded machine: 14 s for a full export before, now about
+10 s the first time (the pack is built) and under 1 s after.
 
 The AAF is written to a temporary file, re-read with the app's own reader and
 compared frame by frame, then published by atomic link. With markers, a
@@ -87,9 +125,24 @@ stdout:
   "timecode_fps": 24, "drop_frame": false, "duration_frames": 174,
   "tracks": [{ "index": 0, "kind": "sound", "physical_track_number": 1, "label": "A1",
                "slot_id": 2, "data_def": "Sound" }],
-  "segments": 2, "markers": 1, "copied_mobs": 12, "warnings": [],
+  "segments": 2, "markers": 1, "copied_mobs": 12, "warnings": [], "pack": null,
   "verify": { "ok": true, "frames_checked": 348, "tracks_checked": 2, "markers_checked": 1 } }
 ```
+
+`copied_mobs` counts every source mob in the file, the pack's included.
+`pack` is `null` without one, else `{ "built": true }` when this export built
+it and `false` when it reused it.
+
+### `write-edits --request REQUEST.json`
+
+`{"schema_version": 1, "edits": [<write-edit request>, ...]}`, 1 to 256 edits,
+written in one run: each source AAF is opened once, each group pack built at
+most once, and each source's re-read for the self-check shared. Stdout is
+`{"schema_version": 1, "results": [...]}`, one entry per edit in order: the
+`write-edit` result, or `{"error": {"code": ..., "message": ...}}` for an
+edit that was not written. One failing edit does not stop the others and the
+run still exits 0; a malformed batch fails as a whole, and cancellation ends
+the whole run (exit 130).
 
 Error codes beyond the reader's: `invalid_input` (the request), `invalid_output`
 (the output or marker file exists, or its folder does not), `transition_split`
