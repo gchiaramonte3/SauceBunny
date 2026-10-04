@@ -1087,6 +1087,22 @@ client receives.
 `review-writer-contract` now records this. Deleting its `setStatus` entry is
 the acceptance test for whenever the verdict UI gets built.
 
+### Assistants (Claude Code or Claude Desktop, read-only)
+
+1. **Claude Code.** Settings ▸ AI APIs ▸ Use Sauce Bunny from Claude ▸ Copy
+   the Claude Code command, paste it in a terminal, then start `claude` and
+   run `/mcp`: sauce-bunny is connected with ten tools. Ask "What
+   sequences do I have in Sauce Bunny?" and "Find where ISABELLA says she's
+   tired in AFF BANK 1": the answers name timecodes that match AAF Audio,
+   and cite `saucebunny://` line addresses. macOS may first ask to let the
+   terminal see Documents.
+2. **Claude Desktop.** Save extension…, open the `.mcpb`, Install. In a new
+   chat, "Read the string out Sore Feet Complaint clip by clip": clips come
+   back with record and source timecode and who speaks. Quit Sauce Bunny
+   first: it still works (it reads the files).
+3. **Nothing changes.** With Sauce Bunny open on a string out, ask Claude to
+   change it: it says it can only read. History shows no new step.
+
 ### String Outs (needs a transcribed AAF Audio sequence and Media Composer)
 
 Nothing below can be checked by the browser suite: it needs real linked

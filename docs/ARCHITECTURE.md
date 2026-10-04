@@ -494,6 +494,35 @@ metadata, without re-saving a stale pre-conversion snapshot.
 This is not yet enabled by default. See `docs/VIDEO-INTELLIGENCE.md` for tested
 browser surfaces and remaining rollout gates.
 
+## Assistant access: the context layer and `sauce-bunny --mcp`
+
+`src-tauri/src/context/` answers questions about the user's material,
+read-only, in a shape written for a model: sequences (tracks in Avid order,
+people, transcription status, V1 groups, markers), transcripts as lines with
+timecodes, string outs (patched tracks, clips with record and source
+timecode and their words, markers, history) and the Transcripts library.
+Every thing has one `saucebunny://` address, which tools return and accept;
+the review-link parser ignores every host but `review`, so these never read
+as review links. `context/tools.rs` is the one registry of tools, resources
+and prompts.
+
+`sauce-bunny --mcp` (`src-tauri/src/mcp.rs`) serves that registry to MCP
+clients over stdio: Claude Code, Claude Desktop (through the `.mcpb`
+extension Settings ▸ AI APIs saves), Codex CLI. It is the app's own
+executable in another mode, so it reads the stores with the app's own code
+and ships nothing extra; it never starts Tauri, opens no port and works with
+the app closed. It reads AAF Audio documents (atomic writes), the undo log
+through `EditLog::open_read_only` (so the app's commits never wait on it, and
+the app's table setup never runs), and the Transcripts folder. The MCP
+protocol is written by hand (initialize, ping, tools, resources, prompts):
+a few hundred lines, no SDK dependency.
+
+What it cannot see: anything only the running app knows (the playhead, the
+selection, what is open), and what lives only in WebView storage (speaker
+renames and the media link of single-file transcripts, a moved Transcripts
+library unless `--library` names it). Changes and live state are phase 4 of
+the spec and go through the app, so the undo log keeps one writer.
+
 ## Local AI: one transcript ingestion, shared by every feature
 
 `llama-server` runs as a sidecar and the AI Summary, the auto-chapters and the

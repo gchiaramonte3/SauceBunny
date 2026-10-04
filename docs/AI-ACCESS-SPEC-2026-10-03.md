@@ -6,8 +6,8 @@ with routing that lets a model read the different parts of the timelines and
 the transcripts, so a question gets answered from the right data and a
 request gets done to the right thing.
 
-**Status:** not started. Phases 1 and 2 need no owner decision and can run as
-written; phases 3 and 4 each have one, listed at the end.
+**Status (2026-10-03):** phases 1 and 2 are built and tested (see their
+Status lines below); phases 3 and 4 wait on the decisions at the end.
 
 **Rules that hold throughout:** local first (nothing leaves the Mac unless the
 user's own assistant sends it); read-only unless the owner turns writing on;
@@ -207,6 +207,36 @@ means.
 ---
 
 ## Phases
+
+**Phase 1 status: built.** `src-tauri/src/context/`: the addresses
+(`address.rs`), timecode with drop frame (`timecode.rs`), sequences, people,
+transcripts and search (`sequences.rs`), string outs and history
+(`string_outs.rs`), the Transcripts library (`files.rs`), and the one
+registry of ten read tools, the resources and three prompts (`tools.rs`).
+Tested on fixtures (a 20-mic sequence, a grouped one stored main-main-alternate-
+alternate, a string out in a real undo log, an SRT), break-tested, and run
+read-only against the owner's library, where each call took 0.05 to 0.15 s
+and a search for "tired" from ISABELLA and NATHANIEL found the lines the hand
+test knew. Differences from the text below: the frontend's duplicated
+serializers move to phase 3, when those features switch to the tool loop
+(they cannot call tools before it exists); the result types get ts-rs
+bindings then too; search is case-insensitive but not accent-insensitive,
+since CLAUDE.md treats accent folding as a product decision.
+
+**Phase 2 status: built.** `sauce-bunny --mcp` (`src-tauri/src/mcp.rs`):
+the app's own executable in another mode rather than a second binary, so it
+reads the stores with the app's code and ships nothing extra. The protocol
+is written by hand (no `rmcp` dependency for six methods): it answers in the
+client's revision when it knows it (2025-11-25, 2025-06-18, 2025-03-26),
+lists tools with input schemas and read-only annotations, returns results
+as text and `structuredContent` (no `outputSchema`, which a client would
+validate against), serves the fixed resources, eight templates and three
+prompts. Settings ▸ AI APIs ▸ Use Sauce Bunny from Claude shows the Claude
+Code command, copies a Claude Desktop config entry, and saves a `.mcpb`
+extension written on demand (a manifest plus a launcher that runs this
+install). A test starts the real executable with `--mcp` and talks to it
+over stdio. `get_app_state` and the live address `saucebunny://app` wait for
+phase 4.
 
 | Phase | Builds | Done when |
 |---|---|---|

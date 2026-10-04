@@ -13,7 +13,7 @@ mod local_read;
 mod mxf_header;
 pub mod model;
 mod process;
-mod store;
+pub(crate) mod store;
 mod transcribe;
 
 use crate::{commands::JobRegistry, AppError};

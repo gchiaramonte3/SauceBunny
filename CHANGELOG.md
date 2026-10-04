@@ -20,6 +20,15 @@ All notable changes to Sauce Bunny. Format loosely follows
   Outs. A marked range on any ruler carries a **Clear marks** ×. String
   Outs gains J, K and L (J steps back a second), arrow-key frame steps and
   End. **Open in String Outs** brings AAF Audio's In and Out with it.
+- **Claude and other assistants can read Sauce Bunny** (read-only), through
+  MCP: Settings ▸ AI APIs ▸ Use Sauce Bunny from Claude gives the one-line
+  command for Claude Code and saves a one-click extension for Claude
+  Desktop. They can list sequences and string outs, see who is on which mic
+  and whether it is transcribed, read a person's lines in a timecode range,
+  search every transcript, and read a string out clip by clip with record
+  and source timecode. Every line, clip and sequence has a
+  `saucebunny://` address they cite. It is the app itself started in another
+  mode, works with the app closed, opens no port and changes nothing.
 - **Audio ▸ Strip Silence…** in String Outs, to Media Composer's spec:
   Threshold (dB), Minimum duration, Pad start and Pad end, on the selected
   tracks between In and Out. Quiet stretches go silent on those tracks only

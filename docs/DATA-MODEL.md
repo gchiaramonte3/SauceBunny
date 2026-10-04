@@ -312,6 +312,14 @@ cannot strand an edit. `review-store`, `screening-store` and
 not bitten because the two windows write disjoint keys, but nothing enforces
 that.
 
+A third reader can run beside the app: `sauce-bunny --mcp`, the MCP server
+(docs/AI-ACCESS-SPEC-2026-10-03.md). It only reads. AAF Audio documents and
+the Documents JSON stores are written atomically, so it always sees a whole
+file; `timelines.sqlite` is opened read-only (`EditLog::open_read_only`),
+which in WAL mode never blocks the app's commits and never runs the app's
+`CREATE TABLE` setup. It must never write any store: the app's in-process
+writer locks would not see it.
+
 ### 3.8 Privacy and limits — green
 
 No secret outside the Keychain, and a test says so. Growth is bounded

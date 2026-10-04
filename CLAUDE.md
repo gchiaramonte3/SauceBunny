@@ -66,7 +66,7 @@ What that rules in and out:
 
 Do **not** add any of the following. If you think the app needs one, stop and explain why before writing code.
 
-- No backend framework (no Express, no FastAPI, no Hono — this is a desktop app). **One deliberate exception (r58/r63):** a tiny `127.0.0.1` loopback HTTP server in `src-tauri/src/stream_proxy.rs` that streams remuxed web video into the `<video>`/MSE pipeline. It binds loopback only (never `0.0.0.0`), serves no app logic, and is the *only* way to play web sources with audio in WKWebView (see "Media playback path"). It is a media primitive, not an app backend — don't grow it into one.
+- No backend framework (no Express, no FastAPI, no Hono — this is a desktop app). `sauce-bunny --mcp` (src-tauri/src/mcp.rs) is not one: it is the app's executable answering an MCP client on stdin and stdout when that client starts it, listening on no port, read-only (docs/AI-ACCESS-SPEC-2026-10-03.md). **One deliberate exception (r58/r63):** a tiny `127.0.0.1` loopback HTTP server in `src-tauri/src/stream_proxy.rs` that streams remuxed web video into the `<video>`/MSE pipeline. It binds loopback only (never `0.0.0.0`), serves no app logic, and is the *only* way to play web sources with audio in WKWebView (see "Media playback path"). It is a media primitive, not an app backend — don't grow it into one.
 - No CSS framework (no Tailwind, no styled-components, no CSS-in-JS)
 - No state management library (no Redux, no Zustand, no Jotai, no MobX)
 - No router (no React Router, no TanStack Router — single-page app, second window uses `?window=panel`)
@@ -98,7 +98,9 @@ src/                          # React 18 + TypeScript (strict)
   PanelApp.tsx                # Floating side-panel window root (r44.B)
 src-tauri/                    # Rust backend
   src/
-    main.rs                   # 4-line shim — calls sauce_bunny_lib::run()
+    main.rs                   # shim: `--mcp` serves MCP over stdio (mcp.rs), else run()
+    context/                  # read-only answers for assistants (sequences, transcripts, string outs)
+    mcp.rs                    # `sauce-bunny --mcp`: the context over MCP, stdio, no window
     lib.rs                    # Tauri app setup, menu, window management, command registry
     commands/                 # Invoke handlers, split by domain (r47):
       mod.rs                  #   shared helpers + event types, re-exports

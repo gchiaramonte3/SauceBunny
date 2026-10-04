@@ -17,6 +17,8 @@ mod edit_export;
 mod edit_log;
 // Per-mic speech analysis from the waveform overview (Transcript Editor).
 mod speech;
+pub mod context;
+pub mod mcp;
 pub use error::AppError;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -287,6 +289,8 @@ pub fn run() {
             commands::aaf_speech,
             commands::aaf_export_edit,
             commands::aaf_export_edits,
+            commands::mcp_setup,
+            commands::mcp_save_extension,
             commands::edit_list,
             commands::edit_create,
             commands::edit_head,

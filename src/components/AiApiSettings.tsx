@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { IconCheck, IconAlert } from "./Icons";
+import { AssistantAccess } from "./AssistantAccess";
 import {
   loadAiProvider, setAiProvider, loadCloudModel, setCloudModel,
   hasApiKey, setApiKey, deleteApiKey, cloudChat,
@@ -142,6 +143,7 @@ export function AiApiSettings() {
       )}
 
       {CLOUD.map((p) => <CloudProviderCard key={p.id} p={p} />)}
+      <AssistantAccess />
     </section>
   );
 }

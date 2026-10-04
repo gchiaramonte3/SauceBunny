@@ -1513,3 +1513,7 @@
   color: var(--fg-4);
 }
 .cp-about-credits-cta .btn { display: inline-flex; align-items: center; gap: 5px; }
+
+/* Use Sauce Bunny from Claude: the MCP server's install line and extension. */
+.cp-assist-about { display: block; margin: 0 0 6px; line-height: var(--leading-snug); }
+.cp-assist-command { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--text-sm); }

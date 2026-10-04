@@ -400,7 +400,7 @@ fn collect_transcripts(dir: &Path, folder_label: &str, depth_remaining: u32, out
     }
 }
 
-fn scan_transcript_root(path: &str) -> Vec<TranscriptFile> {
+pub(crate) fn scan_transcript_root(path: &str) -> Vec<TranscriptFile> {
     let root = PathBuf::from(path);
     // A missing library (nothing transcribed yet) is the normal first-run case,
     // not an error — return an empty list rather than surfacing a scary error.
