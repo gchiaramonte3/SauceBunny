@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { LlmModel } from "../bindings/LlmModel";
 import type { LlmServerInfo } from "../bindings/LlmServerInfo";
 import { streamChat, type ChatMessage } from "./ai-chat";
-import { cloudChat, loadAiProvider, loadCloudModel, type CloudProvider } from "./ai-provider";
+import { cloudChat, loadAiProvider, loadCloudModel, serviceTier, type CloudProvider } from "./ai-provider";
 import { ensureLocalAiServer, selectLocalAiModel } from "./local-ai-server";
 
 /**
@@ -48,7 +48,7 @@ export type AskModel =
  * key already sits in the Keychain.
  */
 export async function connectModel(choice: StringOutModel, appLocalModelId: string | null | undefined, signal: AbortSignal): Promise<AskModel> {
-  if (choice.kind === "cloud") return { kind: "cloud", provider: choice.provider, ctx: 32000, name: `${CLOUD_NAMES[choice.provider]} · ${loadCloudModel(choice.provider)}` };
+  if (choice.kind === "cloud") return { kind: "cloud", provider: choice.provider, ctx: 32000, name: `${CLOUD_NAMES[choice.provider]} · ${loadCloudModel(choice.provider)}${serviceTier(choice.provider) ? " · Ultrafast" : ""}` };
   const models = await invoke<LlmModel[]>("list_llm_models");
   signal.throwIfAborted();
   const chosen = selectLocalAiModel(models, choice.id ?? appLocalModelId);

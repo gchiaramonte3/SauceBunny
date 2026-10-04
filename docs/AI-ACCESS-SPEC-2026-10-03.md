@@ -292,5 +292,11 @@ is visible only to Ask inside the app.
 3. **Models for tool use: Claude and OpenAI with the user's own keys, plus
    local Qwen.** Other local models keep the current path; "we'll deal with
    other models later". The cloud model is the free-text model id in
-   Settings ▸ AI APIs, so any model the key can reach (a faster OpenAI model
-   included) works without a code change, as long as it supports tools.
+   Settings ▸ AI APIs, so any model the key can reach works without a code
+   change, as long as it supports tools. OpenAI's faster tier is a switch in
+   the ChatGPT card, **Ultrafast** (`service_tier: "ultrafast"`, offered for
+   gpt-6-astra at about six times the price per token). OpenAI documents it
+   only on the Responses API, so with the switch on, `cloud_chat` and the
+   tool loop send OpenAI requests there (`commands/openai_responses.rs`,
+   `store: false`, reasoning returned encrypted and handed back each round);
+   with it off, nothing changes.

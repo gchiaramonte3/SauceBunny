@@ -42,6 +42,31 @@ export function setCloudModel(p: CloudProvider, model: string): void {
   try { localStorage.setItem(MODEL_KEY(p), model.trim() || DEFAULT_CLOUD_MODEL[p]); } catch { /* ignore */ }
 }
 
+/**
+ * OpenAI's Ultrafast tier: the same model up to about six times faster
+ * through the API, at about six times the price per token, offered for
+ * gpt-6-astra. Off unless the user turns it on, and it only ever reaches
+ * requests to OpenAI. Rust sends those through the Responses API
+ * (`openai_responses.rs`), the one place OpenAI offers the tier.
+ */
+const ULTRAFAST_KEY = "saucebunny.ai.ultrafast.openai";
+
+export function loadUltrafast(): boolean {
+  try { return localStorage.getItem(ULTRAFAST_KEY) === "1"; } catch { return false; }
+}
+
+export function setUltrafast(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(ULTRAFAST_KEY, "1");
+    else localStorage.removeItem(ULTRAFAST_KEY);
+  } catch { /* storage unavailable: the choice lasts this session */ }
+}
+
+/** The service tier a request to this provider asks for: Ultrafast for OpenAI when chosen, else none. */
+export function serviceTier(p: CloudProvider): "ultrafast" | null {
+  return p === "openai" && loadUltrafast() ? "ultrafast" : null;
+}
+
 // ── Keychain (Rust) — the key is write/clear/check-only from the frontend ──
 export function hasApiKey(p: CloudProvider): Promise<boolean> {
   return invoke<boolean>("has_api_key", { provider: p });
@@ -83,6 +108,7 @@ export async function cloudChat(
         provider, model: loadCloudModel(provider), system, messages,
         request_id: requestId ?? null,
         temperature: temperature ?? null,
+        service_tier: serviceTier(provider),
       },
     });
   } finally {

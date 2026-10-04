@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AssistantReply } from "../bindings/AssistantReply";
 import type { EditDocument } from "../bindings/EditDocument";
 import type { ChatMessage } from "../lib/ai-chat";
-import { loadCloudModel } from "../lib/ai-provider";
+import { loadCloudModel, serviceTier } from "../lib/ai-provider";
 import { citeAddress, parseToolsAnswer, toolsHistory, toolsQuestion, toolsSystem } from "../lib/edit-ask-tools";
 import type { TimelineWord } from "../lib/edit-model";
 import { askBuildTitle, askFindPrompt, askMentioned, askParts, askPrompt, asksToBuild, askRecords, cite, parseAskAnswer, parseAskFind, scopeLines, type AskCitation, type AskLine, type AskMention, type AskMessage } from "../lib/edit-ask";
@@ -76,7 +76,7 @@ export function useEditAsk({ editId, lines, mentions, nameOf, sourceName, appLoc
           const reply = await invoke<AssistantReply>("assistant_chat", { args: {
             provider: connected.kind === "cloud" ? connected.provider : "local", model: connected.kind === "cloud" ? loadCloudModel(connected.provider) : connected.server.model_id,
             system: toolsSystem(document, editId), messages: [...toolsHistory(earlier, document), { role: "user", content: toolsQuestion(question, askMentioned(question, mentions), sourceName) }],
-            app_state: screen(), library: transcriptLibrary(), request_id: requestId } });
+            app_state: screen(), library: transcriptLibrary(), request_id: requestId, service_tier: connected.kind === "cloud" ? serviceTier(connected.provider) : null } });
           if (!live()) return;
           const parsed = parseToolsAnswer(reply.text);
           const cited = (list: string[]) => list.map((address) => citeAddress(address, document, words)).filter((line): line is AskCitation => !!line);

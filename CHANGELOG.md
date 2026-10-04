@@ -38,6 +38,12 @@ All notable changes to Sauce Bunny. Format loosely follows
   the same line, and **Stop** cancels mid-lookup. Build and Remove are still
   buttons you press; the model changes nothing. Other local models keep
   working the way they did.
+- **Ultrafast for ChatGPT** (Settings ▸ AI APIs, in the ChatGPT card):
+  OpenAI's fastest tier, for gpt-6-astra, on every request the app sends to
+  OpenAI, including Ask's lookups. It costs about six times as much per
+  token, so it is off until you turn it on, and the switch says so. Test
+  checks that your model accepts it. Requests on this tier ask OpenAI not
+  to store the conversation.
 - **Audio ▸ Strip Silence…** in String Outs, to Media Composer's spec:
   Threshold (dB), Minimum duration, Pad start and Pad end, on the selected
   tracks between In and Out. Quiet stretches go silent on those tracks only

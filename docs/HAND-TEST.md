@@ -1120,6 +1120,14 @@ the acceptance test for whenever the verdict UI gets built.
    stops within a second and says it was stopped.
 5. Repeat 1 with ChatGPT, then with a local Qwen model, then with a non-Qwen
    local model (it answers the old way, from lines in the prompt).
+6. **Ultrafast** (costs about six times the usual rate, so keep the question
+   small). Settings ▸ AI APIs ▸ ChatGPT: set the model to `gpt-6-astra`, turn
+   Ultrafast on, press Test: it connects. Ask's model reads "ChatGPT ·
+   gpt-6-astra · Ultrafast", and step 1 answers noticeably faster than with
+   the switch off. In the OpenAI usage dashboard the requests show the
+   Ultrafast tier. Set the model back to one without the tier (`gpt-4o`) and
+   press Test: OpenAI's own error says why, and nothing is charged at the
+   Ultrafast rate. Turn the switch off.
 
 ### String Outs (needs a transcribed AAF Audio sequence and Media Composer)
 

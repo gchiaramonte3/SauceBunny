@@ -1302,6 +1302,25 @@
   text-decoration: underline;
 }
 .cp-aiapi-link:hover { color: var(--fg-1); }
+/* The ChatGPT card's Ultrafast switch: the switch, then what it costs. */
+.cp-aiapi-speed {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+}
+.cp-aiapi-speed .cp-toggle-switch { margin-top: 1px; }
+.cp-aiapi-speed-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-snug);
+  color: var(--fg-3);
+}
+.cp-aiapi-speed-name { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--fg-1); }
 .cp-aiapi-msg {
   display: flex; align-items: center; gap: 6px;
   margin: 8px 0 0;

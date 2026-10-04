@@ -24,6 +24,8 @@ vi.mock("../lib/string-out-model", async (original) => ({
 }));
 
 import { EditSidePanel } from "./EditSidePanel";
+import { connectModel } from "../lib/string-out-model";
+import { setUltrafast } from "../lib/ai-provider";
 
 // Rosa's line is cue r1 of AAF track 1 in document "doc", Dev's is cue d1 of track 2.
 const word = (track: string, cue: string, index: number, text: string, start: number): TimelineWord =>
@@ -59,6 +61,7 @@ it("Claude looks things up with tools: told where it is, what is on screen and w
   expect(await screen.findByText("Rosa moved.")).toBeTruthy();
   const args = sent[0];
   expect(args.provider).toBe("anthropic");
+  expect(args.service_tier).toBeNull();
   expect(args.system).toContain('"Kitchen bites" (saucebunny://string-out/e1)');
   expect(args.system).toContain("saucebunny://sequence/doc");
   expect(args.system).not.toContain("moved");
@@ -89,4 +92,18 @@ it("a follow-up replays earlier citations as addresses, so they still mean the s
   await screen.findByText("Yes.");
   const history = sent[1].messages as { role: string; content: string }[];
   expect(history.find((message) => message.role === "assistant")?.content).toContain(ROSA);
+});
+
+it("ChatGPT with Ultrafast on asks for the tier; the same question without it does not", async () => {
+  const chatgpt = { kind: "cloud", provider: "openai", ctx: 32000, name: "ChatGPT" } as const;
+  vi.mocked(connectModel).mockResolvedValueOnce(chatgpt).mockResolvedValueOnce(chatgpt);
+  replies.push(JSON.stringify({ answer: "Fast.", lines: [], action: null }), JSON.stringify({ answer: "Standard.", lines: [], action: null }));
+  setUltrafast(true);
+  setup();
+  ask("who is tired?");
+  await screen.findByText("Fast.");
+  setUltrafast(false);
+  ask("who is tired?");
+  await screen.findByText("Standard.");
+  expect(sent.map((args) => [args.provider, args.service_tier])).toEqual([["openai", "ultrafast"], ["openai", null]]);
 });

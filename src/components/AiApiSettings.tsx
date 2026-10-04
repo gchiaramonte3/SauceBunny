@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { IconCheck, IconAlert } from "./Icons";
 import { AssistantAccess } from "./AssistantAccess";
+import { OpenAiSpeed } from "./OpenAiSpeed";
 import {
   loadAiProvider, setAiProvider, loadCloudModel, setCloudModel,
   hasApiKey, setApiKey, deleteApiKey, cloudChat,
@@ -89,6 +90,7 @@ function CloudProviderCard({ p }: { p: (typeof CLOUD)[number] }) {
         <span>{p.modelHint}</span>
         <button type="button" className="cp-aiapi-link" onClick={() => openExternal(p.keyUrl)}>Get a key ↗</button>
       </div>
+      {p.id === "openai" && <OpenAiSpeed />}
       {/* status for a success, alert for a failure: saving a key is a
           deliberate act whose result the user is waiting on, and a wrong key
           reported only in colour is reported to nobody. */}

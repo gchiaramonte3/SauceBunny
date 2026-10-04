@@ -50,6 +50,7 @@ pub mod llm;
 pub use llm::*;
 pub mod cloud_ai;
 pub use cloud_ai::*;
+pub(crate) mod openai_responses;
 pub mod video_intelligence;
 pub use video_intelligence::*;
 pub mod session_key;

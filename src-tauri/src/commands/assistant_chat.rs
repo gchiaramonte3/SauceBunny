@@ -45,6 +45,8 @@ pub struct AssistantChatArgs {
     /// The Transcripts library when the user moved it; else the default.
     pub library: Option<String>,
     pub request_id: Option<String>,
+    /// "ultrafast" sends ChatGPT through the Responses API's Ultrafast tier.
+    pub service_tier: Option<String>,
 }
 
 #[derive(Debug, Serialize, ts_rs::TS)]
@@ -122,6 +124,11 @@ pub async fn assistant_chat(app: AppHandle, held: State<'_, AssistantContext>, l
     match args.provider.as_str() {
         "anthropic" => anthropic(&client, "https://api.anthropic.com/v1/messages", &key_for("anthropic")?, &args, ctx, cancel, tools_used).await,
         "openai" | "local" => {
+            if args.provider == "openai" {
+                if let Some(tier) = super::openai_responses::tier(args.service_tier.as_deref())? {
+                    return responses(&client, super::openai_responses::URL, &key_for("openai")?, tier, &args, ctx, cancel, tools_used).await;
+                }
+            }
             let (url, key) = if args.provider == "local" {
                 let server = llm.current().ok_or_else(|| AppError::invalid("The local model is not running. Ask again to start it."))?;
                 (format!("{}/v1/chat/completions", server.base_url), server.api_key)
@@ -218,6 +225,46 @@ async fn openai(client: &reqwest::Client, url: &str, key: &str, args: &Assistant
     Err(AppError::invalid(format!("{name} kept looking without answering. Ask something narrower.")))
 }
 
+/// Room for an answer on the Responses path, where a reasoning model's
+/// thinking counts against the same limit as its words.
+const RESPONSES_TOKENS: u32 = 16_000;
+
+/// ChatGPT on the Ultrafast tier: the same loop over the Responses API. What
+/// the model produced each round (its reasoning, encrypted, and its calls)
+/// goes back as it came, followed by the tools' results.
+#[allow(clippy::too_many_arguments)]
+async fn responses(client: &reqwest::Client, url: &str, key: &str, tier: &str, args: &AssistantChatArgs, ctx: Arc<Context>, cancel: Option<Arc<Notify>>, mut tools_used: Vec<String>) -> Result<AssistantReply, AppError> {
+    use super::openai_responses::{body, out_of_room, text};
+    let tools: Vec<Value> = definitions().into_iter().map(|(name, description, schema)| json!({ "type": "function", "name": name, "description": description, "parameters": schema })).collect();
+    let mut input: Vec<Value> = args.messages.iter().map(|message| json!({ "role": message.role, "content": message.content })).collect();
+    for round in 0..=MAX_ROUNDS {
+        if stopped(&cancel) { return Err(AppError::invalid("Stopped.")); }
+        let mut request_body = body(&args.model, &args.system, &input, RESPONSES_TOKENS, tier, true);
+        if round < MAX_ROUNDS { request_body["tools"] = json!(tools); }
+        let request = client.post(url).header("authorization", format!("Bearer {key}")).header("content-type", "application/json").json(&request_body);
+        let (status, reply_text) = post_and_read(request, cancel.clone()).await?;
+        if !status.is_success() { return Err(AppError::invalid(format!("ChatGPT error {}: {}", status.as_u16(), provider_error(&reply_text)))); }
+        let reply: Value = serde_json::from_str(&reply_text)?;
+        let output = reply["output"].as_array().cloned().unwrap_or_default();
+        let calls: Vec<Value> = output.iter().filter(|item| item["type"] == "function_call").cloned().collect();
+        if calls.is_empty() {
+            if out_of_room(&reply) { return Err(AppError::invalid("ChatGPT ran out of room before finishing. Ask something narrower.")); }
+            let answer = text(&reply);
+            if answer.trim().is_empty() { return Err(AppError::invalid("ChatGPT returned an empty answer.")); }
+            return Ok(AssistantReply { text: answer, tools_used });
+        }
+        input.extend(output);
+        for call in &calls {
+            let tool = call["name"].as_str().unwrap_or_default().to_string();
+            tools_used.push(tool.clone());
+            let arguments: Value = call["arguments"].as_str().and_then(|raw| serde_json::from_str(raw).ok()).unwrap_or_else(|| json!({}));
+            let (content, _) = run(ctx.clone(), args.app_state.clone(), tool, arguments).await;
+            input.push(json!({ "type": "function_call_output", "call_id": call["call_id"], "output": content }));
+        }
+    }
+    Err(AppError::invalid("ChatGPT kept looking without answering. Ask something narrower."))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,7 +311,7 @@ mod tests {
 
     fn ask(provider: &str) -> AssistantChatArgs {
         AssistantChatArgs { provider: provider.into(), model: "m".into(), system: "s".into(), messages: vec![AssistantMessage { role: "user".into(), content: "Who is tired?".into() }],
-            app_state: None, library: None, request_id: None }
+            app_state: None, library: None, request_id: None, service_tier: None }
     }
 
     #[tokio::test]
@@ -302,6 +349,25 @@ mod tests {
         let seen = handle.join().unwrap();
         assert!(seen.last().unwrap().get("tools").is_none());
         assert!(seen[0].get("tools").is_some());
+    }
+
+    #[tokio::test]
+    async fn ultrafast_goes_through_the_responses_api_and_hands_back_what_the_model_produced() {
+        let f = fixture();
+        let call = json!({ "status": "completed", "output": [
+            { "type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "sealed" },
+            { "type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "search_transcripts", "arguments": "{\"query\":\"tired\",\"people\":[\"P2\"]}" } ] });
+        let done = json!({ "status": "completed", "output": [{ "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "P2 is." }] }] });
+        let (url, handle) = server(vec![call, done]);
+        let reply = responses(&reqwest::Client::new(), &url, "k", "ultrafast", &ask("openai"), Arc::new(Context::new(f.ctx.roots.clone())), None, Vec::new()).await.unwrap();
+        assert_eq!((reply.text.as_str(), reply.tools_used.as_slice()), ("P2 is.", ["search_transcripts".to_string()].as_slice()));
+        let seen = handle.join().unwrap();
+        assert_eq!((seen[0]["service_tier"].as_str(), seen[0]["store"].as_bool(), seen[0]["instructions"].as_str()), (Some("ultrafast"), Some(false), Some("s")));
+        // The Responses API's flat tool shape, not Chat Completions' nested one.
+        assert_eq!((seen[0]["tools"][0]["type"].as_str(), seen[0]["tools"][0]["name"].is_string()), (Some("function"), true));
+        let input = seen[1]["input"].as_array().unwrap();
+        assert!(input.iter().any(|item| item["type"] == "reasoning" && item["encrypted_content"] == "sealed"), "the reasoning was not handed back");
+        assert!(input.iter().any(|item| item["type"] == "function_call_output" && item["call_id"] == "call_1" && item["output"].as_str().unwrap().contains("I am so tired")));
     }
 
     #[test]

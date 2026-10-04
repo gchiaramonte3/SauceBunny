@@ -133,6 +133,9 @@ pub struct CloudChatArgs {
     /// Optional caller-minted id enabling `cloud_chat_cancel`. Without it the
     /// request simply isn't cancellable (the pre-r142 behaviour).
     pub request_id: Option<String>,
+    /// "ultrafast" for OpenAI's Ultrafast tier (Settings ▸ AI APIs), which
+    /// goes through the Responses API (`openai_responses`). OpenAI only.
+    pub service_tier: Option<String>,
 }
 
 /// In-flight chat requests by caller-minted id. `cloud_chat_cancel` looks the
@@ -270,6 +273,36 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
             Ok(out)
         }
         "openai" => {
+            if let Some(tier) = super::openai_responses::tier(args.service_tier.as_deref())? {
+                let input: Vec<serde_json::Value> = args.messages.iter()
+                    .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
+                    .collect();
+                let body = super::openai_responses::body(&args.model, &args.system, &input, max_tokens, tier, false);
+                let req = client
+                    .post(super::openai_responses::URL)
+                    .header("authorization", format!("Bearer {key}"))
+                    .header("content-type", "application/json")
+                    .json(&body);
+                let (status, text) = post_and_read(req, cancel).await?;
+                if !status.is_success() {
+                    return Err(AppError::invalid(format!(
+                        "OpenAI API error {}: {}",
+                        status.as_u16(),
+                        provider_error(&text)
+                    )));
+                }
+                let v: serde_json::Value = serde_json::from_str(&text)?;
+                if super::openai_responses::out_of_room(&v) {
+                    return Err(AppError::invalid(
+                        "ChatGPT ran out of room before finishing. Try a shorter transcript or a smaller question.",
+                    ));
+                }
+                let out = super::openai_responses::text(&v);
+                if out.trim().is_empty() {
+                    return Err(AppError::invalid("OpenAI returned an empty response."));
+                }
+                return Ok(out);
+            }
             // System as the first message. `max_completion_tokens`, not
             // `max_tokens`: current OpenAI models reject the old name.
             let mut msgs = vec![serde_json::json!({ "role": "system", "content": args.system })];
