@@ -29,6 +29,15 @@ All notable changes to Sauce Bunny. Format loosely follows
   and source timecode. Every line, clip and sequence has a
   `saucebunny://` address they cite. It is the app itself started in another
   mode, works with the app closed, opens no port and changes nothing.
+- **Ask in String Outs looks things up itself** with Claude, ChatGPT or a
+  local Qwen model: instead of being handed every line, the model searches
+  the transcripts, reads one person or one stretch of timecode, opens a
+  string out, and sees what is on screen (the playhead, the selection, the
+  marks), as many times as the question needs. Answers cite each line by
+  its `saucebunny://` address, so a line cited three questions ago is still
+  the same line, and **Stop** cancels mid-lookup. Build and Remove are still
+  buttons you press; the model changes nothing. Other local models keep
+  working the way they did.
 - **Audio ▸ Strip Silence…** in String Outs, to Media Composer's spec:
   Threshold (dB), Minimum duration, Pad start and Pad end, on the selected
   tracks between In and Out. Quiet stretches go silent on those tracks only

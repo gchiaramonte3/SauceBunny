@@ -17,7 +17,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("../lib/string-out-model", async (original) => ({
   ...(await original<typeof import("../lib/string-out-model")>()),
-  connectModel: vi.fn(async () => ({ kind: "cloud", provider: "anthropic", ctx: 32000, name: "Claude" })),
+  // A small local model that cannot call tools: Ask reads it the transcript as records.
+  connectModel: vi.fn(async () => ({ kind: "local", server: { base_url: "http://127.0.0.1:1", api_key: "k", model_id: "llama-3.2-3b-instruct", ctx: 32000 }, name: "Llama" })),
   chat: vi.fn(async (_model: unknown, system: string, messages: { content: string }[]) => {
     asked.push({ system, user: messages[messages.length - 1].content });
     return replies.shift() ?? "{}";
@@ -129,7 +130,7 @@ it("removing lines ignores overtalk from a group angle nobody hears", async () =
 it("reads a transcript too long for the model in parts, then answers from the lines they found", async () => {
   const models = await import("../lib/string-out-model");
   // A context this small holds one line at a time, so each line is its own part.
-  vi.mocked(models.connectModel).mockResolvedValueOnce({ kind: "cloud", provider: "anthropic", ctx: 40, name: "Claude" });
+  vi.mocked(models.connectModel).mockResolvedValueOnce({ kind: "local", server: { base_url: "http://127.0.0.1:1", api_key: "k", model_id: "llama-3.2-3b-instruct", ctx: 40 }, name: "Llama" });
   replies.push('{"lines":[0]}', '{"lines":[]}', '{"answer":"Rosa says it.","lines":[0],"action":{"kind":"build","title":"Rosa moves","lines":"same"}}');
   setup();
   const box = screen.getByRole("combobox", { name: /Ask anything/ });

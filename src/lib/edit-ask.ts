@@ -1,4 +1,5 @@
 import type { TimelineLane, TimelineWord } from "./edit-model";
+import { secondsToClock } from "./timecode";
 
 /**
  * Ask, in String Outs: questions about the transcripts, answered by the model
@@ -92,7 +93,7 @@ export function scopeLines(lines: AskLine[], question: string, mentions: AskMent
   return lines.filter((line) => (!people.length || people.includes(line.track)) && (!sources.length || sources.includes(line.source)));
 }
 
-const clock = (_source: string, seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
+const clock = (_source: string, seconds: number) => secondsToClock(seconds);
 
 /**
  * The records the model reads, one per line, as short as they can be: every

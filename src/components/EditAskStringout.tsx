@@ -3,10 +3,9 @@ import { useAiStringout } from "../hooks/use-ai-stringout";
 import { layoutBites } from "../lib/edit-stringout";
 import { editStore, newEditId } from "../lib/edit-store";
 import { formatError } from "../lib/error-format";
+import { secondsToClock } from "../lib/timecode";
 
 type Props = { documentId: string; onOpen: (id: string) => void; appLocalModelId?: string | null };
-
-const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 
 /**
  * Ask for a string-out in words ("two minutes, open with Rosa"). The answer
@@ -38,10 +37,10 @@ export function EditAskStringout({ documentId, onOpen, appLocalModelId }: Props)
     </form>
     {(ai.message || error) && <p className="cp-te-pane-note" role="status">{error ?? ai.message}</p>}
     {proposal && proposal.bites.length > 0 && <section className="cp-te-proposal" aria-label="Proposed string out">
-      <h3 className="cp-te-picker-head">{proposal.title} · {proposal.bites.length} bites · {clock(seconds)}</h3>
+      <h3 className="cp-te-picker-head">{proposal.title} · {proposal.bites.length} bites · {secondsToClock(seconds)}</h3>
       <ol className="cp-te-proposal-list">{proposal.bites.map((bite, index) => <li key={`${bite.lane}-${bite.from}-${index}`}>
         <span className="cp-te-proposal-who">{proposal.names[bite.lane] ?? bite.lane}</span>
-        <span className="cp-te-proposal-at">{clock(bite.from)}</span>
+        <span className="cp-te-proposal-at">{secondsToClock(bite.from)}</span>
         <span className="cp-te-proposal-text">{bite.text}</span></li>)}</ol>
       <div className="cp-te-src-actions">
         <button type="button" className="btn btn-primary" onClick={() => void accept()}>Make this string out</button>

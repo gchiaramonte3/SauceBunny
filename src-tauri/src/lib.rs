@@ -199,6 +199,7 @@ pub fn run() {
         .manage(commands::JobRegistry::default())
         .manage(commands::recording::Recorder::default())
         .manage(commands::LlmServer::default())
+        .manage(commands::AssistantContext::default())
         .manage(commands::VideoIntelligenceState::default())
         .manage(commands::SessionManager::default())
         .manage(commands::PendingReviewLink::default())
@@ -290,6 +291,7 @@ pub fn run() {
             commands::aaf_export_edit,
             commands::aaf_export_edits,
             commands::mcp_setup,
+            commands::assistant_chat,
             commands::mcp_save_extension,
             commands::edit_list,
             commands::edit_create,

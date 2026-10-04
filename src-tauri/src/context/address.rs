@@ -125,6 +125,15 @@ mod tests {
     }
 
     #[test]
+    fn spells_addresses_as_the_app_does() {
+        // The same three cases are pinned in src/lib/edit-ask-tools.test.ts, so the two sides cannot drift.
+        let line = |track: &str, cue: &str| Address::Line { sequence: "ab".into(), track: track.into(), cue: cue.into() }.to_string();
+        assert_eq!(line("track-3", "c 12"), "saucebunny://sequence/ab/line/track-3/c%2012");
+        assert_eq!(line("t", "é:1"), "saucebunny://sequence/ab/line/t/%C3%A9:1");
+        assert_eq!(line("a/b", "x"), "saucebunny://sequence/ab/line/a%2Fb/x");
+    }
+
+    #[test]
     fn refuses_what_it_does_not_know() {
         assert!(Address::parse("https://example.com").is_err());
         assert!(Address::parse("saucebunny://review/abc").is_err());

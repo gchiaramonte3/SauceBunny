@@ -281,7 +281,7 @@ impl LlmServer {
             *i = None;
         }
     }
-    fn current(&self) -> Option<LlmServerInfo> {
+    pub(crate) fn current(&self) -> Option<LlmServerInfo> {
         self.info.lock().ok().and_then(|g| g.clone())
     }
     /// Claim ownership for a new attempt and return its generation.

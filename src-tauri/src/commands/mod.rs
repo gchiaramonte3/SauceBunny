@@ -62,6 +62,8 @@ pub mod edits;
 pub use edits::*;
 pub mod assistant;
 pub use assistant::*;
+pub mod assistant_chat;
+pub use assistant_chat::*;
 // Tier B bridge (no invoke commands of its own; used by stream_proxy + session).
 pub mod peer_stream;
 pub mod ndi;

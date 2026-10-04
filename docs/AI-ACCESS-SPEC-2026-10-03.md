@@ -6,8 +6,11 @@ with routing that lets a model read the different parts of the timelines and
 the transcripts, so a question gets answered from the right data and a
 request gets done to the right thing.
 
-**Status (2026-10-03):** phases 1 and 2 are built and tested (see their
-Status lines below); phases 3 and 4 wait on the decisions at the end.
+**Status (2026-10-03):** phases 1, 2 and 3 are built and tested (see their
+Status lines below). Phase 4 is closed by the owner's decisions at the end:
+no channel from an outside assistant into the running app, and no tool that
+changes a string out. What is on screen reaches the in-app Ask only, as
+`get_app_state`.
 
 **Rules that hold throughout:** local first (nothing leaves the Mac unless the
 user's own assistant sends it); read-only unless the owner turns writing on;
@@ -198,9 +201,9 @@ means.
 - The MCP server runs only when the user's assistant starts it, and only for
   that user. What it returns goes wherever that assistant sends it: Claude
   Desktop sends it to Anthropic. Settings says this in one sentence.
-- Read-only by default. Change tools need the app running and a setting,
-  "Let assistants change string outs", off by default; MCP clients also ask
-  before a tool call.
+- Read-only, with no setting to change that (the owner, October 3: "right
+  now I don't want that feature"). Ask proposes a Build or a Remove as
+  buttons the editor presses; nothing an assistant says changes a cut.
 - Transcripts are data: tool results mark them as quoted material, and no
   change happens because a transcript line asked for it.
 
@@ -238,6 +241,39 @@ install). A test starts the real executable with `--mcp` and talks to it
 over stdio. `get_app_state` and the live address `saucebunny://app` wait for
 phase 4.
 
+**Phase 3 status: built.** `assistant_chat` (`src-tauri/src/commands/assistant_chat.rs`)
+runs the loop in Rust: model, tool call, the context layer, tool result,
+model, up to ten rounds, the last of which offers no tools so the model has
+to answer. Anthropic Messages (`tool_use`/`tool_result`) for Claude; OpenAI
+Chat Completions tools for ChatGPT and for the local llama-server, which
+speaks the same format. Tool results are capped at 80,000 characters, a
+failing tool answers with why, and Stop reaches a request mid-round through
+the same cancel registry `cloud_chat` uses. The tools offered are the
+registry's ten plus `get_app_state`, which answers from a snapshot the
+renderer sends with the question (the open string out, the playhead's line,
+the selection, the marks), so "this" and "here" mean what is on screen and
+no channel into the app was needed. In String Outs, Ask
+(`src/lib/edit-ask-tools.ts`, `use-edit-ask.ts`) sends the question, the
+@-mentions as hints, earlier turns with their citations as addresses, and
+that snapshot; the answer cites line addresses, which become the words in
+this string out (an address that names nothing here is dropped, never
+guessed). Claude, ChatGPT and local Qwen models take the tools path; any
+other local model keeps the old lines-in-the-prompt path, and so does a
+Qwen run whose tool call fails. Tests: mocked providers for both wire
+formats, tool rounds, the round limit and a cancel between rounds (Rust);
+the citations, follow-ups and build by address (jsdom); and an e2e where a
+cited address comes back as the speaker's own words, break-tested by
+disabling the address lookup. The two duplicated transcript serializers
+(AI Summary, reader Analysis) are now one, `modelTranscript` in
+`components/transcript/helpers.tsx`, and the three minute-clock copies use
+`secondsToClock`. Not done: ts-rs bindings for the tool RESULT shapes,
+since nothing in the renderer reads them (the model does).
+
+**Phase 4 status: closed by decision.** No live channel for an outside
+assistant and no change tools (decisions 1 and 2 below). An outside
+assistant reads everything on disk through `sauce-bunny --mcp`; the screen
+is visible only to Ask inside the app.
+
 | Phase | Builds | Done when |
 |---|---|---|
 | 1 | The context layer: the addresses, the one line shape, the read tools as Rust functions with ts-rs types; the duplicated serializers replaced by it | Unit tests on fixtures for every tool, including a 20-mic sequence and a grouped one; an address round-trips; paging stops under budget; break-tested |
@@ -245,17 +281,16 @@ phase 4.
 | 3 | Ask on tools: the Rust tool loop for Claude and OpenAI, the local path behind a capability check, the router prompt with on-screen state, citations as addresses | Mocked-provider tests for tool rounds, cancel mid-round and the round limit; e2e: "@ROSA tired" cites Rosa's lines by address; the old path still works for a small local model |
 | 4 | Live state and changes through the running app (`get_app_state`, `open`, the change tools), gated by the setting | e2e: an external client's insert is one labelled undo step; with the setting off, change tools are refused; the app's own undo log stays the only writer |
 
-## Decisions for the owner
+## Decisions for the owner (answered October 3)
 
-1. **How the MCP server reaches the running app (phase 4).** Recommended: a
-   Unix socket in the app's support folder, readable only by this user, which
-   the app owns. It is a new local channel, so CLAUDE.md asks for this to be
-   agreed first. (There is a precedent: the opt-in, token-paired loopback
-   WebSocket the Premiere bridge already uses.) Without it, external
-   assistants can read everything on disk but cannot see the playhead or make
-   changes.
-2. **Whether assistants may change string outs at all (phase 4)**, and if so
-   whether the setting is per app or per string out.
-3. **Which models are offered for tool use (phase 3):** the defaults are
-   Claude and OpenAI by API key, plus the local models that pass the
-   capability check (Qwen3 4B and up); the smaller ones keep the current path.
+1. **A channel from the MCP server into the running app: no.** "I don't want
+   live access for an outside assistant... I just want agentic assistance."
+   The in-app Ask sees the screen through `get_app_state`; an outside
+   assistant reads the stores on disk and nothing else.
+2. **Assistants changing string outs: no**, for now. Ask still proposes a
+   Build or a Remove for the editor to press.
+3. **Models for tool use: Claude and OpenAI with the user's own keys, plus
+   local Qwen.** Other local models keep the current path; "we'll deal with
+   other models later". The cloud model is the free-text model id in
+   Settings ▸ AI APIs, so any model the key can reach (a faster OpenAI model
+   included) works without a code change, as long as it supports tools.

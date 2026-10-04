@@ -21,7 +21,7 @@ use tokio::sync::Notify;
 /// Keychain service; the account is the provider ("anthropic" / "openai").
 const KEYCHAIN_SERVICE: &str = "com.saucebunny.desktop.ai";
 
-fn entry(provider: &str) -> Result<keyring::Entry, AppError> {
+pub(crate) fn entry(provider: &str) -> Result<keyring::Entry, AppError> {
     if provider != "anthropic" && provider != "openai" {
         return Err(AppError::invalid(format!("Unknown AI provider: {provider}")));
     }
@@ -140,14 +140,14 @@ pub struct CloudChatArgs {
 /// closing the connection so a stopped request stops BILLING too (streaming
 /// APIs meter on delivery; a one-shot body abandoned mid-generation is closed
 /// at the socket and the provider halts generation server-side).
-fn chat_cancels() -> &'static Mutex<HashMap<String, Arc<Notify>>> {
+pub(crate) fn chat_cancels() -> &'static Mutex<HashMap<String, Arc<Notify>>> {
     static M: OnceLock<Mutex<HashMap<String, Arc<Notify>>>> = OnceLock::new();
     M.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Removes the registry entry when `cloud_chat` returns by ANY path (success,
 /// API error, cancellation) so ids can't accumulate.
-struct CancelGuard(Option<String>);
+pub(crate) struct CancelGuard(pub(crate) Option<String>);
 impl Drop for CancelGuard {
     fn drop(&mut self) {
         if let Some(id) = self.0.take() {
@@ -174,7 +174,7 @@ pub fn cloud_chat_cancel(request_id: String) -> Result<(), AppError> {
 
 /// Send + read-body under the caller's cancel Notify. Dropping the reqwest
 /// future on cancel is what actually tears the connection down.
-async fn post_and_read(
+pub(crate) async fn post_and_read(
     req: reqwest::RequestBuilder,
     cancel: Option<Arc<Notify>>,
 ) -> Result<(reqwest::StatusCode, String), AppError> {
@@ -313,7 +313,7 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
 /// The provider's own `error.message`, which is the sentence a user can act
 /// on. Both Anthropic and OpenAI use that shape; the raw body is a JSON blob
 /// with the useful line buried in it.
-fn provider_error(text: &str) -> String {
+pub(crate) fn provider_error(text: &str) -> String {
     serde_json::from_str::<serde_json::Value>(text)
         .ok()
         .and_then(|v| v["error"]["message"].as_str().map(|s| s.to_string()))

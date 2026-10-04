@@ -64,6 +64,10 @@ async function boot(page: Page, grouped = false, picture = false) {
         case "edit_redo": { const edit = edits.get(id)!; const child = [...edit.states].reverse().find((s) => s.parent === edit.head); if (child) edit.head = child.id; return Promise.resolve(headOf(id)); }
         case "plugin:dialog|open": return Promise.resolve("/fixtures/Exports");
         case "aaf_export_edits": return Promise.resolve((args.editIds as string[]).map((id) => ({ edit_id: id, result: { name: id }, error: null })));
+        // Ask on tools: the reply cites Alex's first line by the address the Rust context layer gives it.
+        case "has_api_key": return Promise.resolve(true);
+        case "assistant_chat": (window as unknown as { __asked: unknown[] }).__asked = [...((window as unknown as { __asked?: unknown[] }).__asked ?? []), args.args];
+          return Promise.resolve({ text: JSON.stringify({ answer: "Alex moved in May.", lines: [`saucebunny://sequence/${document.id}/line/track-1/a1`], action: null }), tools_used: ["search_transcripts"] });
         case "edit_history": { const edit = edits.get(id)!; return Promise.resolve({ head: edit.head, states: edit.states.map(({ id: state, parent, label }) => ({ id: state, parent, label, at: state, pinned: null })), next: [] }); }
         default: return original(command, args);
       }
@@ -328,6 +332,27 @@ test("One per person makes a string out for each person who speaks", async ({ pa
   await page.getByRole("button", { name: "Export all (2)…" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Exported 2 of 2 string outs." })).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { __editCalls: string[] }).__editCalls.filter((c) => c === "aaf_export_edits").length)).toBe(1);
+});
+
+test("Ask with Claude looks lines up with tools and cites them by address, never pasting the transcript", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("saucebunny.stringOuts.model", JSON.stringify({ kind: "cloud", provider: "anthropic" })));
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
+  await page.getByRole("button", { name: "Create" }).click();
+  const prompt = page.getByRole("combobox", { name: /Ask anything/ });
+  await prompt.fill("where does Alex say he moved?");
+  await prompt.press("Enter");
+  await expect(page.getByText("Alex moved in May.")).toBeVisible();
+  // The address came back as Alex's own words, a line the editor can jump to.
+  await expect(page.locator(".cp-te-pane-side").getByText(/I moved here in May/)).toBeVisible();
+  const asked = await page.evaluate(() => (window as unknown as { __asked: { provider: string; system: string; app_state: { string_out: { address: string } } }[] }).__asked);
+  expect(asked).toHaveLength(1);
+  expect(asked[0].provider).toBe("anthropic");
+  expect(asked[0].system).toContain("saucebunny://sequence/sequence-test");
+  expect(asked[0].system).not.toContain("moved here");
+  expect(asked[0].app_state.string_out.address).toMatch(/^saucebunny:\/\/string-out\//);
 });
 
 test("coming back reopens the string out that was open, not the welcome", async ({ page }) => {

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
-import { parseSrt, groupIntoTurns, fmtTime } from "../lib/srt";
-import { loadSpeakerOverrides, prepareCues, resolveSpeakerName } from "./transcript/helpers";
+import { modelTranscript } from "./transcript/helpers";
 import { formatError } from "../lib/error-format";
 import { Markdown } from "./Markdown";
 import { IconSparkles, IconSpinnerArc, IconRefresh, IconAlert } from "./Icons";
@@ -14,30 +13,6 @@ import { TRANSCRIPTS_CHANGED_EVENT } from "../lib/transcript-history";
 import type { LlmServerInfo } from "../bindings/LlmServerInfo";
 
 const DEFAULT_STYLE: SummaryStyle = { format: "bullets", length: "standard" };
-
-/** Timestamped plain text for the model, speaker-attributed + ctx-budgeted.
- *  A lean twin of AiSummary's transcriptForModel (pure — kept local per the
- *  "duplicate before a 3rd consumer" rule; the two never share stateful logic). */
-function buildTranscriptForModel(raw: string, ctx: number, srtPath: string) {
-  const overrides = loadSpeakerOverrides(srtPath);
-  let turns;
-  try { turns = groupIntoTurns(prepareCues(parseSrt(raw), overrides)); } catch { return null; }
-  if (!turns.length) return null;
-  const hasSpeakers = turns.some((t) => !!t.speaker);
-  // Per-turn LINES, not a joined blob: the shared prefix windows by line so
-  // every feature produces byte-identical transcript text for a source.
-  const lines = turns.map((t) => {
-    const name = t.speaker ? resolveSpeakerName(t.speaker, overrides) : null;
-    return `[${fmtTime(t.start)}] ${name ? name + ": " : ""}${t.cues.map((c) => c.text).join(" ")}`;
-  });
-  const text = lines.join("\n");
-  const budget = Math.floor(ctx * 3.5 * 0.65);
-  const truncated = text.length > budget;
-  let clipped = truncated ? text.slice(0, budget) : text;
-  const last = clipped.charCodeAt(clipped.length - 1);
-  if (truncated && last >= 0xd800 && last <= 0xdbff) clipped = clipped.slice(0, -1);
-  return { text: clipped, truncated, hasSpeakers, lines };
-}
 
 type Props = {
   /** The open transcript's SRT path (the analysis sidecar keys on it). */
@@ -128,7 +103,7 @@ export function ReaderAnalysis({ transcriptPath, visible, selectedModelId, style
           }
           if (ctrl.signal.aborted) { cancelStart(); return; }
         }
-        const built = buildTranscriptForModel(raw, info.ctx, transcriptPath);
+        const built = modelTranscript(raw, info.ctx, transcriptPath);
         if (!built) { setError("This transcript has no readable content to analyze."); setPhase("error"); return; }
         setPhase("generating");
         const messages: ChatMessage[] = [
@@ -145,7 +120,7 @@ export function ReaderAnalysis({ transcriptPath, visible, selectedModelId, style
       } else {
         // Cloud provider (Claude / ChatGPT) — one-shot via Rust (non-streaming).
         // A generous budget: cloud contexts are large; this bounds cost, not the model.
-        const built = buildTranscriptForModel(raw, 32000, transcriptPath);
+        const built = modelTranscript(raw, 32000, transcriptPath);
         if (!built) { setError("This transcript has no readable content to analyze."); setPhase("error"); return; }
         setPhase("generating");
         const system = `${buildTaskInstruction(style ?? DEFAULT_STYLE, built.hasSpeakers)}\n\n${buildSourcePrefix(built.lines, 32000).system}`;

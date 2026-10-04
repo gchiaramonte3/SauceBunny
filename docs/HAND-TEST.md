@@ -1103,6 +1103,24 @@ the acceptance test for whenever the verdict UI gets built.
 3. **Nothing changes.** With Sauce Bunny open on a string out, ask Claude to
    change it: it says it can only read. History shows no new step.
 
+### Ask with tools (String Outs, needs a Claude or OpenAI key, or a Qwen model)
+
+1. In a string out made from AFF BANK 1, set Ask's model to Claude. Ask
+   "Find every line where @ISABELLA or @NATHANIEL says they're tired,
+   exhausted or that something is hard". While it works, the status says it
+   is looking things up; the answer cites lines including 19:52:32:13 and
+   20:18:12:01, and clicking one opens it in the source on that person's tab.
+2. Select a few words in the record text and ask "who says this, and where
+   else do they talk about it?": the answer is about the selection, not the
+   whole sequence.
+3. Ask "make a string out of those": **Make new string out** appears and
+   nothing changes until you press it. Ask a follow-up ("is that every
+   time?"): it still knows which lines it meant.
+4. Ask something broad and press **Stop** while it is still looking: it
+   stops within a second and says it was stopped.
+5. Repeat 1 with ChatGPT, then with a local Qwen model, then with a non-Qwen
+   local model (it answers the old way, from lines in the prompt).
+
 ### String Outs (needs a transcribed AAF Audio sequence and Media Composer)
 
 Nothing below can be checked by the browser suite: it needs real linked
