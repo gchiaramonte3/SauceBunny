@@ -28,7 +28,9 @@ A macOS desktop app for **clipping sections out of online videos** (YouTube, Vim
   SQLite (`edit_log.rs`, `app_data_dir()/timelines.sqlite`) and mirrored as
   JSON to `~/Documents/Sauce Bunny/Edits/`. Playback is `src/lib/edit-audio.ts`
   on one AudioContext; export goes through `edit_export.rs` to the AAF
-  sidecar's `write-edit`. Open string outs are tabs over one editor
+  sidecar's `write-edit` (or `write-edits` for several string outs from one
+  run), which keeps each grouped source's group clips as a cached pack in
+  `scratch/aaf-packs/`. Open string outs are tabs over one editor
   (`EditPage`, no keep-alive). Every mic in a source is a person (a lane);
   record tracks are PATCHED lanes (`EditTrack.featured`), top-down, none in a
   new string out, and a clip names the lanes it plays (`EditSegment.tracks`),
@@ -491,6 +493,35 @@ rate; old marks restore to the nearest source frame once, including late FPS
 metadata, without re-saving a stale pre-conversion snapshot.
 This is not yet enabled by default. See `docs/VIDEO-INTELLIGENCE.md` for tested
 browser surfaces and remaining rollout gates.
+
+## Assistant access: the context layer and `sauce-bunny --mcp`
+
+`src-tauri/src/context/` answers questions about the user's material,
+read-only, in a shape written for a model: sequences (tracks in Avid order,
+people, transcription status, V1 groups, markers), transcripts as lines with
+timecodes, string outs (patched tracks, clips with record and source
+timecode and their words, markers, history) and the Transcripts library.
+Every thing has one `saucebunny://` address, which tools return and accept;
+the review-link parser ignores every host but `review`, so these never read
+as review links. `context/tools.rs` is the one registry of tools, resources
+and prompts.
+
+`sauce-bunny --mcp` (`src-tauri/src/mcp.rs`) serves that registry to MCP
+clients over stdio: Claude Code, Claude Desktop (through the `.mcpb`
+extension Settings ▸ AI APIs saves), Codex CLI. It is the app's own
+executable in another mode, so it reads the stores with the app's own code
+and ships nothing extra; it never starts Tauri, opens no port and works with
+the app closed. It reads AAF Audio documents (atomic writes), the undo log
+through `EditLog::open_read_only` (so the app's commits never wait on it, and
+the app's table setup never runs), and the Transcripts folder. The MCP
+protocol is written by hand (initialize, ping, tools, resources, prompts):
+a few hundred lines, no SDK dependency.
+
+What it cannot see: anything only the running app knows (the playhead, the
+selection, what is open), and what lives only in WebView storage (speaker
+renames and the media link of single-file transcripts, a moved Transcripts
+library unless `--library` names it). Changes and live state are phase 4 of
+the spec and go through the app, so the undo log keeps one writer.
 
 ## Local AI: one transcript ingestion, shared by every feature
 

@@ -697,7 +697,7 @@ export default function App() {
   const [sessionsRequestTick,setSessionsRequestTick] = useState(0);
   const [multitrackOpenRequest, setMultitrackOpenRequest] = useState<{ id: string; tick: number; frame?: number; trackId?: string } | null>(null);
   // AAF Audio's "Open in String Outs": which sequence, and a tick so the same one can be asked for twice.
-  const [editorOpenRequest, setEditorOpenRequest] = useState<{ documentId: string; tick: number } | null>(null);
+  const [editorOpenRequest, setEditorOpenRequest] = useState<{ documentId: string; tick: number; marks?: { in: number | null; out: number | null } | null } | null>(null);
   const previewStatus = ndiInput.previewState.phase === "error" ? "Preview needs attention · Not shared with room"
     : ndiInput.snapshot.candidate?.decodedReady && ndiInput.snapshot.candidate.encodedReady ? "Preview ready · Not shared with room" : "Preview connecting · Not shared with room";
   const ndiMonitorRef = useRef<ReviewProgramSurfacesHandle>(null);
@@ -4881,7 +4881,7 @@ export default function App() {
           <div ref={multitrackViewRef} tabIndex={-1} className="cp-view cp-view-multitrack" hidden={activeView !== "multitrack"}>
             <MultitrackPage
               openRequest={multitrackOpenRequest}
-              onOpenInStringOuts={(documentId) => { setEditorOpenRequest((previous) => ({ documentId, tick: (previous?.tick ?? 0) + 1 })); setActiveView("editor"); }}
+              onOpenInStringOuts={(documentId, marks) => { setEditorOpenRequest((previous) => ({ documentId, marks, tick: (previous?.tick ?? 0) + 1 })); setActiveView("editor"); }}
               active={activeView === "multitrack"}
               aiModelId={defaults.llmSummarizationModel}
               onOpenSettings={() => { setSettingsInitialTab("transcription"); setSettingsOpen(true); }}

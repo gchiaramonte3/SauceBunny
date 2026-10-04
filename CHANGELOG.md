@@ -8,6 +8,71 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [0.6.0] - 2026-09-29
 
 ### Added
+- **String Outs cuts like an editing timeline.** V splices at the record In
+  mark, else the playhead (with Snap on, in the gap between words), instead
+  of at the text caret, which started at the first word. The playhead parks
+  after the new clip, so V again builds the cut in order. **B overwrites**
+  for the clip's length without moving anything after it, and the source
+  pane has an Overwrite button. The record text's caret follows the
+  playhead. A new string out made from a sequence starts empty.
+- **Avid's marking keys in String Outs and AAF Audio:** G clears both marks,
+  D clears In, F clears Out, Q and W go to them, on either side of String
+  Outs. A marked range on any ruler carries a **Clear marks** ×. String
+  Outs gains J, K and L (J steps back a second), arrow-key frame steps and
+  End. **Open in String Outs** brings AAF Audio's In and Out with it.
+- **Claude and other assistants can read Sauce Bunny** (read-only), through
+  MCP: Settings ▸ AI APIs ▸ Use Sauce Bunny from Claude gives the one-line
+  command for Claude Code and saves a one-click extension for Claude
+  Desktop. They can list sequences and string outs, see who is on which mic
+  and whether it is transcribed, read a person's lines in a timecode range,
+  search every transcript, and read a string out clip by clip with record
+  and source timecode. Every line, clip and sequence has a
+  `saucebunny://` address they cite. It is the app itself started in another
+  mode, works with the app closed, opens no port and changes nothing.
+- **Ask in String Outs looks things up itself** with Claude, ChatGPT or a
+  local Qwen model: instead of being handed every line, the model searches
+  the transcripts, reads one person or one stretch of timecode, opens a
+  string out, and sees what is on screen (the playhead, the selection, the
+  marks), as many times as the question needs. Answers cite each line by
+  its `saucebunny://` address, so a line cited three questions ago is still
+  the same line, and **Stop** cancels mid-lookup. Build and Remove are still
+  buttons you press; the model changes nothing. Other local models keep
+  working the way they did.
+- **Ultrafast for ChatGPT** (Settings ▸ AI APIs, in the ChatGPT card):
+  OpenAI's fastest tier, for gpt-6-astra, on every request the app sends to
+  OpenAI, including Ask's lookups. It costs about six times as much per
+  token, so it is off until you turn it on, and the switch says so. Test
+  checks that your model accepts it. Requests on this tier ask OpenAI not
+  to store the conversation.
+- **Audio ▸ Strip Silence…** in String Outs, to Media Composer's spec:
+  Threshold (dB), Minimum duration, Pad start and Pad end, on the selected
+  tracks between In and Out. Quiet stretches go silent on those tracks only
+  and nothing moves; it is one undo step, and the AAF carries them as
+  filler. Transcribed words are kept unless you untick it. It replaces
+  "Room tone in lifts", which did nothing.
+- Markers on String Outs' ruler can be clicked: the Inspector edits the
+  name, comment and colour, and Delete removes it.
+- The side your keys act on (source or record) is outlined, and the other
+  side's selection steps back.
+- **Person tabs read in track order**, A1, A2, A3, with a group's alternate
+  mics right after their own track, in AAF Audio and String Outs. Each tab
+  starts with its track.
+
+### Fixed
+- String Outs ignored every letter key straight after it opened, until
+  something inside it was clicked.
+- With the timeline on Source, Z, X, M, T, A, S and ⌘B still edited the
+  record while their buttons were off. Home and Loop now follow the side
+  shown.
+- Escape on the "Extract anyway?" warning performed a Lift. It now only
+  closes the warning.
+- View ▸ Audio ▸ Crossfade at cuts changed only the drawing; playback now
+  uses it.
+- Source marks set with I and O while the timeline showed Record were not
+  shown anywhere, and an earlier I and O came back when a text selection was
+  cleared. They now show on the source pane's rail and over the words.
+- One name per thing: the record side is Record, silencing is Silence, the
+  toolbar's panel toggle is Source text. Disabled controls say why.
 - **Record tracks are patched, not a row per person.** A new string out
   starts with no tracks, as an Avid sequence does; people go on A1, A2… as
   their words are cut in, top-down. A string out Ask builds (or One per
@@ -117,6 +182,18 @@ All notable changes to Sauce Bunny. Format loosely follows
   ("two minutes, open with Rosa") and accept or discard the proposed bites.
 
 ### Changed
+- **Export AAF with kept groups is fast after the first time.** A group clip
+  refers to every clip in the show, so "Keep picture groups" carried all of
+  HEAT 2 (31 MB) into every export and took 14 seconds however short the
+  cut. The first export of a grouped AAF now keeps its group clips in the
+  app's scratch cache (cleared after a day unused), and each later export
+  copies them and adds only the new sequence: under a second for that
+  string out, with the same file and every frame checked as before. A
+  string out with no kept groups is quicker too (about 2.2 seconds to 1.2).
+  Several string outs can be written from one run of the writer, each named
+  from its title and never replacing a file: **Export all (N)…** in the
+  String Outs header, whenever two or more are open. One per person opens
+  every string out it makes, so Export all takes them all.
 - String Outs draws a long transcript a page at a time. A real 20-mic,
   3h39m sequence (146,018 words) used to build a million-element page and
   freeze the window for minutes on opening, and cutting it in whole crashed

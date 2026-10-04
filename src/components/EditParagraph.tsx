@@ -79,7 +79,7 @@ export function EditParagraph(props: Props) {
                 if (event.key === "Escape") props.onCorrect(item.word.id, props.corrections[item.word.id] ?? null);
               }}
               onBlur={(event) => props.onCorrect(item.word.id, event.currentTarget.value.trim() || null)} />
-            : <span className={className} data-index={index} title={item.muted ? `Removed from ${speaker.name}'s track only` : undefined}>{text}</span>}
+            : <span className={className} data-index={index} title={item.muted ? `Silenced (${speaker.name} only)` : undefined}>{text}</span>}
           {caret === index + 1 && props.caretAfter && caretMark}{" "}
         </span>;
       })}

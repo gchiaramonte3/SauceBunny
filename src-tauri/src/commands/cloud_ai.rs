@@ -21,7 +21,7 @@ use tokio::sync::Notify;
 /// Keychain service; the account is the provider ("anthropic" / "openai").
 const KEYCHAIN_SERVICE: &str = "com.saucebunny.desktop.ai";
 
-fn entry(provider: &str) -> Result<keyring::Entry, AppError> {
+pub(crate) fn entry(provider: &str) -> Result<keyring::Entry, AppError> {
     if provider != "anthropic" && provider != "openai" {
         return Err(AppError::invalid(format!("Unknown AI provider: {provider}")));
     }
@@ -133,6 +133,9 @@ pub struct CloudChatArgs {
     /// Optional caller-minted id enabling `cloud_chat_cancel`. Without it the
     /// request simply isn't cancellable (the pre-r142 behaviour).
     pub request_id: Option<String>,
+    /// "ultrafast" for OpenAI's Ultrafast tier (Settings ▸ AI APIs), which
+    /// goes through the Responses API (`openai_responses`). OpenAI only.
+    pub service_tier: Option<String>,
 }
 
 /// In-flight chat requests by caller-minted id. `cloud_chat_cancel` looks the
@@ -140,14 +143,14 @@ pub struct CloudChatArgs {
 /// closing the connection so a stopped request stops BILLING too (streaming
 /// APIs meter on delivery; a one-shot body abandoned mid-generation is closed
 /// at the socket and the provider halts generation server-side).
-fn chat_cancels() -> &'static Mutex<HashMap<String, Arc<Notify>>> {
+pub(crate) fn chat_cancels() -> &'static Mutex<HashMap<String, Arc<Notify>>> {
     static M: OnceLock<Mutex<HashMap<String, Arc<Notify>>>> = OnceLock::new();
     M.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Removes the registry entry when `cloud_chat` returns by ANY path (success,
 /// API error, cancellation) so ids can't accumulate.
-struct CancelGuard(Option<String>);
+pub(crate) struct CancelGuard(pub(crate) Option<String>);
 impl Drop for CancelGuard {
     fn drop(&mut self) {
         if let Some(id) = self.0.take() {
@@ -174,7 +177,7 @@ pub fn cloud_chat_cancel(request_id: String) -> Result<(), AppError> {
 
 /// Send + read-body under the caller's cancel Notify. Dropping the reqwest
 /// future on cancel is what actually tears the connection down.
-async fn post_and_read(
+pub(crate) async fn post_and_read(
     req: reqwest::RequestBuilder,
     cancel: Option<Arc<Notify>>,
 ) -> Result<(reqwest::StatusCode, String), AppError> {
@@ -270,6 +273,36 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
             Ok(out)
         }
         "openai" => {
+            if let Some(tier) = super::openai_responses::tier(args.service_tier.as_deref())? {
+                let input: Vec<serde_json::Value> = args.messages.iter()
+                    .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
+                    .collect();
+                let body = super::openai_responses::body(&args.model, &args.system, &input, max_tokens, tier, false);
+                let req = client
+                    .post(super::openai_responses::URL)
+                    .header("authorization", format!("Bearer {key}"))
+                    .header("content-type", "application/json")
+                    .json(&body);
+                let (status, text) = post_and_read(req, cancel).await?;
+                if !status.is_success() {
+                    return Err(AppError::invalid(format!(
+                        "OpenAI API error {}: {}",
+                        status.as_u16(),
+                        provider_error(&text)
+                    )));
+                }
+                let v: serde_json::Value = serde_json::from_str(&text)?;
+                if super::openai_responses::out_of_room(&v) {
+                    return Err(AppError::invalid(
+                        "ChatGPT ran out of room before finishing. Try a shorter transcript or a smaller question.",
+                    ));
+                }
+                let out = super::openai_responses::text(&v);
+                if out.trim().is_empty() {
+                    return Err(AppError::invalid("OpenAI returned an empty response."));
+                }
+                return Ok(out);
+            }
             // System as the first message. `max_completion_tokens`, not
             // `max_tokens`: current OpenAI models reject the old name.
             let mut msgs = vec![serde_json::json!({ "role": "system", "content": args.system })];
@@ -313,7 +346,7 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
 /// The provider's own `error.message`, which is the sentence a user can act
 /// on. Both Anthropic and OpenAI use that shape; the raw body is a JSON blob
 /// with the useful line buried in it.
-fn provider_error(text: &str) -> String {
+pub(crate) fn provider_error(text: &str) -> String {
     serde_json::from_str::<serde_json::Value>(text)
         .ok()
         .and_then(|v| v["error"]["message"].as_str().map(|s| s.to_string()))

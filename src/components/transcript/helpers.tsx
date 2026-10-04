@@ -13,7 +13,7 @@
 
 import type React from "react";
 import { applySplits, type CueSplits } from "../../lib/cue-splits";
-import type { Cue, Turn } from "../../lib/srt";
+import { fmtTime, groupIntoTurns, parseSrt, type Cue, type Turn } from "../../lib/srt";
 import { pathKey } from "../../lib/repath";
 
 /**
@@ -574,4 +574,33 @@ export function resolveSpeakerName(
   const resolved = resolveAliasChain(tag, ov.aliases);
   const key = resolved ?? "__NULL__";
   return ov.global[key] ?? humanizeSpeakerTag(resolved, opts);
+}
+
+/**
+ * A transcript as the local and cloud models read it: one line per turn,
+ * `[m:ss] Name: words`, with the same renames and per-cue reassignments the
+ * panel shows, clipped to about 65% of `ctx` at ~3.5 chars a token. `lines`
+ * is the UNCLIPPED list, which the shared prefix windows by line so every
+ * feature sends byte-identical transcript text for one source. The AI
+ * Summary and the reader's Analysis each kept a copy of this until they
+ * could drift.
+ */
+export function modelTranscript(raw: string, ctx: number, srtPath: string | null) {
+  const overrides = loadSpeakerOverrides(srtPath);
+  let turns: Turn[];
+  try { turns = groupIntoTurns(prepareCues(parseSrt(raw), overrides)); } catch { return null; }
+  if (!turns.length) return null;
+  const hasSpeakers = turns.some((t) => !!t.speaker);
+  const lines = turns.map((t) => {
+    const name = t.speaker ? resolveSpeakerName(t.speaker, overrides) : null;
+    return `[${fmtTime(t.start)}] ${name ? name + ": " : ""}${t.cues.map((c) => c.text).join(" ")}`;
+  });
+  const text = lines.join("\n");
+  const budget = Math.floor(ctx * 3.5 * 0.65);
+  const truncated = text.length > budget;
+  let clipped = truncated ? text.slice(0, budget) : text;
+  // Never end on a lone high surrogate (a split emoji), which would encode as a replacement char.
+  const last = clipped.charCodeAt(clipped.length - 1);
+  if (truncated && last >= 0xd800 && last <= 0xdbff) clipped = clipped.slice(0, -1);
+  return { text: clipped, truncated, hasSpeakers, lines };
 }

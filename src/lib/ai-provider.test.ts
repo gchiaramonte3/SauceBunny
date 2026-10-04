@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withFailingStorage } from "../test-setup";
 import {
   DEFAULT_CLOUD_MODEL, cloudChat, deleteApiKey, hasApiKey,
-  loadAiProvider, loadCloudModel, setAiProvider, setApiKey, setCloudModel,
+  loadAiProvider, loadCloudModel, loadUltrafast, serviceTier, setAiProvider, setApiKey, setCloudModel, setUltrafast,
 } from "./ai-provider";
 
 const h = vi.hoisted(() => ({
@@ -117,6 +117,37 @@ describe("cloud model ids", () => {
     expect(loadCloudModel("openai")).toBe(DEFAULT_CLOUD_MODEL.openai);
     setCloudModel("openai", "  gpt-4o-mini  ");
     expect(loadCloudModel("openai")).toBe("gpt-4o-mini");
+  });
+});
+
+describe("Ultrafast costs about six times as much, so it is never on by accident", () => {
+  const tierSent = async (provider: "anthropic" | "openai") => {
+    h.calls.length = 0;
+    await cloudChat(provider, "sys", []);
+    return (h.calls.find((c) => c.cmd === "cloud_chat")!.args as { args: Record<string, unknown> }).args.service_tier;
+  };
+
+  it("is off with nothing stored, and every request says so", async () => {
+    expect(loadUltrafast()).toBe(false);
+    expect(await tierSent("openai")).toBeNull();
+  });
+
+  it("reaches OpenAI only, and stops the moment it is turned off", async () => {
+    setUltrafast(true);
+    expect(await tierSent("openai")).toBe("ultrafast");
+    expect(await tierSent("anthropic")).toBeNull();
+    setUltrafast(false);
+    expect(await tierSent("openai")).toBeNull();
+    expect(localStorage.getItem("saucebunny.ai.ultrafast.openai")).toBeNull();
+  });
+
+  it("fails toward the standard price when storage is unreadable or holds junk", () => {
+    for (const junk of ["true", "ultrafast", "yes", ""]) {
+      localStorage.setItem("saucebunny.ai.ultrafast.openai", junk);
+      expect(serviceTier("openai"), `"${junk}" turned Ultrafast on`).toBeNull();
+    }
+    localStorage.setItem("saucebunny.ai.ultrafast.openai", "1");
+    withFailingStorage("getItem", () => { expect(serviceTier("openai")).toBeNull(); });
   });
 });
 

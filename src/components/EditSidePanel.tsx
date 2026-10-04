@@ -5,6 +5,7 @@ import { useEditAsk } from "../hooks/use-edit-ask";
 import type { EditChange } from "../hooks/use-edit-session";
 import type { useEditWorkspace } from "../hooks/use-edit-workspace";
 import { askLines, askMentions, type AskCitation, type AskMessage } from "../lib/edit-ask";
+import { appState } from "../lib/edit-ask-tools";
 import { fromDocument, toDocument, type OpenEdit } from "../lib/edit-document";
 import { removeWithoutCuttingOvertalk, type TimelineLane, type TimelineWord } from "../lib/edit-model";
 import { editStore, newEditId } from "../lib/edit-store";
@@ -38,7 +39,8 @@ export function EditSidePanel(props: Props) {
     return words.filter((word) => on.has(word.track));
   }, [words, props.lanes]);
   const mentions = useMemo(() => askMentions(props.lanes, document.sources), [props.lanes, document.sources]);
-  const ask = useEditAsk({ editId: props.editId, lines, mentions, nameOf: props.nameOf, sourceName: props.sourceName, appLocalModelId: props.appLocalModelId, sourceTc: props.sourceTc });
+  const ask = useEditAsk({ editId: props.editId, lines, mentions, nameOf: props.nameOf, sourceName: props.sourceName, appLocalModelId: props.appLocalModelId, sourceTc: props.sourceTc,
+    document, words, screen: () => appState({ editId: props.editId, document, selected: ws.selected, caret: ws.placed[ws.caret], marks: ws.marks, tc: props.tc }) });
   /** A proposal lands here as one undo step, or as a new string out that leaves this one alone. */
   const apply = async (message: AskMessage, into: "here" | "new") => {
     const action = message.action;

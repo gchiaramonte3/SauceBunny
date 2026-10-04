@@ -123,6 +123,21 @@ describe("edit list playback", () => {
     expect(after.gain!.gain.curves[0]).toMatchObject({ when: startOf(after)[0], duration: JOIN_FADE_SECONDS });
     player.close();
   });
+  it("plays the crossfade View ▸ Audio asks for, never under the 10 ms that stops a click", async () => {
+    const player = new EditAudio(FPS, vi.fn());
+    player.setJoinFade(4 / FPS);
+    player.setDocument(edit(), ["T1"]);
+    await player.seek(0, 1);
+    context.currentTime = 2; tick();
+    await vi.waitFor(() => expect(voices("a1")).toHaveLength(3));
+    const out = voices("a2")[0].gain!.gain.curves.at(-1)!, cut = .015 + 132 / FPS;
+    expect(out.duration).toBeCloseTo(4 / FPS, 6);
+    expect(out.when + out.duration).toBeCloseTo(cut + 2 / FPS, 6);
+    // "Off" keeps the de-click.
+    const quiet = new EditAudio(FPS, vi.fn());
+    quiet.setJoinFade(0);
+    expect((quiet as unknown as { joinFade: number }).joinFade).toBe(JOIN_FADE_SECONDS);
+  });
   it("crossfades every join with equal-power ramps centred on the cut", async () => {
     const player = new EditAudio(FPS, vi.fn());
     player.setDocument(edit(), ["T1"]);

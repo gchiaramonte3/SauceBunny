@@ -27,7 +27,8 @@ export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
   const labels = useMemo(() => sequenceLabels(saved), [saved]);
   const [title, setTitle] = useState("");
   const [from, setFrom] = useState("");
-  const [whole, setWhole] = useState(true);
+  // Empty by default, as a new sequence is in Avid: the cut is built from chunks of the source.
+  const [whole, setWhole] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -54,7 +55,8 @@ export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
       if (!made.length) { setError("Nobody in this sequence has a transcript yet. Transcribe it in AAF Audio first."); return; }
       const ids: string[] = [];
       for (const document of made) { const id = newEditId(); await editStore.create(id, document); ids.push(id); }
-      onOpen(ids[0]);
+      // Every one gets a tab, so Export all reaches them; the first stays chosen.
+      for (const id of [...ids, ids[0]]) onOpen(id);
     } catch (cause) {
       setError(formatError(cause));
     } finally { setBusy(false); }

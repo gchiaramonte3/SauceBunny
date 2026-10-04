@@ -1,6 +1,7 @@
 import type { LaneBite } from "./edit-stringout";
 import { buildSourcePrefix } from "./prompt-prefix";
 import { chat, contextOf, type AskModel } from "./string-out-model";
+import { secondsToClock } from "./timecode";
 
 /**
  * AI string-outs (plan Phase 7, step 3). The model sees every bite in the
@@ -11,10 +12,8 @@ import { chat, contextOf, type AskModel } from "./string-out-model";
  */
 export type StringoutProposal = { title: string; bites: number[] };
 
-const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
-
 export function biteRecords(bites: LaneBite[], nameOf: (lane: string) => string): string[] {
-  return bites.map((bite, id) => JSON.stringify({ id, who: nameOf(bite.lane), at: clock(bite.from), seconds: Math.round(bite.to - bite.from), text: bite.text }));
+  return bites.map((bite, id) => JSON.stringify({ id, who: nameOf(bite.lane), at: secondsToClock(bite.from), seconds: Math.round(bite.to - bite.from), text: bite.text }));
 }
 
 export function proposalPrompt(request: string): string {

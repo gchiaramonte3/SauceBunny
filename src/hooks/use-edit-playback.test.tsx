@@ -13,6 +13,7 @@ vi.mock("../lib/edit-audio", () => ({
     setDocument(...args: unknown[]) { this.record.calls.push(["setDocument", ...args]); }
     setLevel(...args: unknown[]) { this.record.calls.push(["setLevel", ...args]); }
     setTrackLevel(...args: unknown[]) { this.record.calls.push(["setTrackLevel", ...args]); }
+    setJoinFade(...args: unknown[]) { this.record.calls.push(["setJoinFade", ...args]); }
     seek(...args: unknown[]) { this.record.calls.push(["seek", ...args]); return Promise.resolve(); }
     toggle() { this.record.calls.push(["toggle"]); return Promise.resolve(); }
     pause() { this.record.calls.push(["pause"]); }
@@ -37,7 +38,7 @@ describe("useEditPlayback", () => {
     await act(() => result.current.toggle());
     expect(engines).toHaveLength(1);
     expect(engines[0].fps).toBeCloseTo(23.976, 3);
-    expect(engines[0].calls.map(([name]) => name)).toEqual(["setDocument", "setLevel", "toggle"]);
+    expect(engines[0].calls.map(([name]) => name)).toEqual(["setDocument", "setLevel", "setJoinFade", "toggle"]);
     expect(engines[0].calls[0]).toEqual(["setDocument", document, ["T1"], {}]);
     act(() => engines[0].notify({ frame: 12, rate: 1, busy: false, error: null }));
     expect(result.current).toMatchObject({ frame: 12, playing: true });

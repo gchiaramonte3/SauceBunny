@@ -66,7 +66,7 @@ What that rules in and out:
 
 Do **not** add any of the following. If you think the app needs one, stop and explain why before writing code.
 
-- No backend framework (no Express, no FastAPI, no Hono — this is a desktop app). **One deliberate exception (r58/r63):** a tiny `127.0.0.1` loopback HTTP server in `src-tauri/src/stream_proxy.rs` that streams remuxed web video into the `<video>`/MSE pipeline. It binds loopback only (never `0.0.0.0`), serves no app logic, and is the *only* way to play web sources with audio in WKWebView (see "Media playback path"). It is a media primitive, not an app backend — don't grow it into one.
+- No backend framework (no Express, no FastAPI, no Hono — this is a desktop app). `sauce-bunny --mcp` (src-tauri/src/mcp.rs) is not one: it is the app's executable answering an MCP client on stdin and stdout when that client starts it, listening on no port, read-only (docs/AI-ACCESS-SPEC-2026-10-03.md). **One deliberate exception (r58/r63):** a tiny `127.0.0.1` loopback HTTP server in `src-tauri/src/stream_proxy.rs` that streams remuxed web video into the `<video>`/MSE pipeline. It binds loopback only (never `0.0.0.0`), serves no app logic, and is the *only* way to play web sources with audio in WKWebView (see "Media playback path"). It is a media primitive, not an app backend — don't grow it into one.
 - No CSS framework (no Tailwind, no styled-components, no CSS-in-JS)
 - No state management library (no Redux, no Zustand, no Jotai, no MobX)
 - No router (no React Router, no TanStack Router — single-page app, second window uses `?window=panel`)
@@ -98,7 +98,9 @@ src/                          # React 18 + TypeScript (strict)
   PanelApp.tsx                # Floating side-panel window root (r44.B)
 src-tauri/                    # Rust backend
   src/
-    main.rs                   # 4-line shim — calls sauce_bunny_lib::run()
+    main.rs                   # shim: `--mcp` serves MCP over stdio (mcp.rs), else run()
+    context/                  # read-only answers for assistants (sequences, transcripts, string outs)
+    mcp.rs                    # `sauce-bunny --mcp`: the context over MCP, stdio, no window
     lib.rs                    # Tauri app setup, menu, window management, command registry
     commands/                 # Invoke handlers, split by domain (r47):
       mod.rs                  #   shared helpers + event types, re-exports
@@ -586,7 +588,7 @@ All sidecars are bundled binaries invoked through `tauri-plugin-shell`. Each lon
 | saucebunny-dictate | Live on-device dictation for review comments (Apple Speech, partial results while you speak) | `npm run build:dictate` (builds from `swift-sidecar/`) |
 | saucebunny-capture | ScreenCaptureKit engine for co-review screen sharing (display list + capture) | `npm run build:capture` (builds from `swift-sidecar/`) |
 | saucebunny-audio-analysis | Optional local-file sound evidence (system AVFoundation + SoundAnalysis, no capture); used by the feature-flagged Advanced Intelligence preview, not a calibrated music verdict | `npm run build:audio-analysis` (resource helper under `audio-runtime/`) |
-| saucebunny-aaf | AAF inspection, timeline-aligned PCM extraction and waveforms (inputs read-only), plus `write-edit`: a new, self-verified, metadata-only AAF of an edit for Media Composer | `npm run build:aaf` (freezes `aaf-sidecar/` with pinned pyaaf2 and a bundled Python runtime) |
+| saucebunny-aaf | AAF inspection, timeline-aligned PCM extraction and waveforms (inputs read-only), plus `write-edit` (and `write-edits`, a batch from one run): a new, self-verified, metadata-only AAF of an edit for Media Composer, copying a group's mobs from a cached pack after the first export | `npm run build:aaf` (freezes `aaf-sidecar/` with pinned pyaaf2 and a bundled Python runtime) |
 
 **Not in git**: sidecar binaries are assembled locally by `npm run setup`
 (fresh clones) — they are gitignored, and CI stubs them.
@@ -746,7 +748,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and fifteen rules in this file are checked by a test rather than remembered. If you
+One hundred and sixteen rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -905,6 +907,7 @@ written after finding the rule already broken somewhere.
 | `tablist-overflow-contract` | No `role="tablist"` scrolls sideways. On a Mac that always shows scrollbars (a mouse attached, and most older machines) the AAF Audio person tabs wore a permanent scrollbar; a strip that can grow uses `TabStrip`, which draws the tabs that fit and puts the rest behind "N more". Read from source because headless Chromium draws overlay scrollbars, so no rendered test could see it |
 | `text-decoration-contract` | A `text-decoration` shorthand names only the line. WebKit reads its style and colour parts only from Safari 26.2, and macOS 14 can run Safari 17, where `underline dotted` is dropped whole and the underline vanishes. Style and colour go in their longhands |
 | `mark-shape-contract` | A stem in the marker colour draws the chevron wing: every `border-left`/`-right` or inset side shadow in `var(--marker)` belongs to a class with a `--mark-wing-*` wing, or is one of two named regions that sit under winged marks. AAF Audio's and String Outs' rulers drew a flat violet band with no wing, and nothing at all for a lone In or Out, beside Clip's chevrons; both now draw `RulerMarks` (marks.css). The design catalog's stylesheets are scanned too: they load after production's and win |
+| `mark-keys-contract` | AAF Audio and String Outs bind the same seven marking keys to the same meanings, Avid's: I and O mark, G clears both, D clears In, F clears Out, Q and W go to the marks. They drifted apart in separate files: AAF Audio cleared with G while String Outs used ⌥X and ignored G, and neither had D or F |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:

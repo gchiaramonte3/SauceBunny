@@ -17,7 +17,7 @@ export function EditTimelineEmpty({ sources, sourceName, durationOf, onAddWhole 
     {sources.length ? <div className="cp-te-tl-empty-card">
       <p>Nothing is cut in yet. Select lines in Source and press Insert (V) or Append, or start from a whole sequence.</p>
       {onAddWhole && <div className="cp-te-tl-empty-actions">{sources.map((source) => <button key={source} type="button" className="btn btn-ghost"
-        disabled={durationOf(source) <= 0} onClick={() => onAddWhole(source)}>Add all of {sourceName(source)}</button>)}</div>}
+        disabled={durationOf(source) <= 0} title={durationOf(source) <= 0 ? "Reading the sequence's length…" : undefined} onClick={() => onAddWhole(source)}>Add all of {sourceName(source)}</button>)}</div>}
     </div> : <div className="cp-te-tl-empty-card"><p>Nothing to cut from yet. Choose a sequence in Add sequence… above.</p></div>}
   </div>;
 }

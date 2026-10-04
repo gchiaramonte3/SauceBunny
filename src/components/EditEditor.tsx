@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { EditHead } from "../bindings/EditHead";
 import type { EditHistory } from "../bindings/EditHistory";
-import { useEditKeys } from "../hooks/use-edit-keys";
+import { useEditEditorKeys } from "../hooks/use-edit-editor-keys";
 import { useEditPlayback } from "../hooks/use-edit-playback";
-import { useEditSourceSide } from "../hooks/use-edit-source-side";
+import { useEditSourceSide, type EditSourceMarks } from "../hooks/use-edit-source-side";
 import type { EditChange } from "../hooks/use-edit-session";
 import type { EditSourceData } from "../hooks/use-edit-sources";
 import { useEditWorkspace } from "../hooks/use-edit-workspace";
@@ -20,7 +20,9 @@ import { EditRecordPane } from "./EditRecordPane";
 import { EditSendTo } from "./EditSendTo";
 import { EditSidePanel, type EditSideTab } from "./EditSidePanel";
 import { EditSourceHost } from "./EditSourceHost";
+import { EditStripSilence } from "./EditStripSilence";
 import type { EditTextStyle } from "./EditTextSettings";
+import type { EditTimelineAudio } from "./EditTimelineTools";
 import { EditToolbar } from "./EditToolbar";
 import { EditTranscript } from "./EditTranscript";
 
@@ -31,6 +33,8 @@ type Props = {
   commit: (label: string, change: (open: OpenEdit) => EditChange, group?: string | null) => Promise<boolean>;
   undo: () => void; redo: () => void; jump: (state: number) => void; pin: (state: number, name: string | null) => void; onClose: () => void; addSource: React.ReactNode;
   onOpenEdit: (id: string) => void; onSettings: () => void; appLocalModelId: string | null | undefined;
+  /** AAF Audio's In and Out, carried by "Open in String Outs" into the source made from that sequence. */
+  sourceMarks?: EditSourceMarks | null;
 };
 
 /** Well-separated hues from the transcript palette, in lane order. */
@@ -38,7 +42,7 @@ const HUES = [0, 2, 5, 8, 10, 4, 11, 1, 6, 9, 3, 7];
 const toggled = (set: Set<string>, item: string) => { const next = new Set(set); if (!next.delete(item)) next.add(item); return next; };
 
 /** The Transcript Editor on one open edit: source, record, history and timeline. */
-export function EditEditor({ editId, head, open, history, data, active, waveforms, onWaveforms, commit, undo, redo, jump, pin, onClose, addSource, onOpenEdit, onSettings, appLocalModelId }: Props) {
+export function EditEditor({ editId, head, open, history, data, active, waveforms, onWaveforms, commit, undo, redo, jump, pin, onClose, addSource, onOpenEdit, onSettings, appLocalModelId, sourceMarks }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const document = open.document, fps = rateOf(document.edit_rate), recordStart = document.start_timecode_frames;
   // Everyone, for Ask and the source pane; the people on a track (all but a
@@ -53,41 +57,29 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
     startFrames: data.documents.get(source.id)?.manifest.start_frame ?? 0 })), [document.sources, data]);
   const [showSource, setShowSource] = useState(true), [showSide, setShowSide] = useState(true), [sideTab, setSideTab] = useState<EditSideTab>("ask"), [showRemoved, setShowRemoved] = useState(true);
   const [zoom, setZoom] = useState(1), [snap, setSnap] = useState(true), [follow, setFollow] = useState(true), [loop, setLoop] = useState(false);
+  const [audio, setAudio] = useState<EditTimelineAudio>({ crossfade: 2 }), [inSource, setInSource] = useState(false), [stripping, setStripping] = useState(false);
   const [text, setText] = useState<Record<"source" | "edit", EditTextStyle>>({ source: { family: "sans", size: 13, leading: "normal" }, edit: { family: "sans", size: 15, leading: "normal" } });
   const [solo, setSolo] = useState<Set<string>>(new Set()), [mute, setMute] = useState<Set<string>>(new Set());
   const sourceFrames = useMemo(() => Object.fromEntries(Object.entries(data.durations).map(([id, seconds]) => [id, Math.round(seconds * fps)])), [data.durations, fps]);
   // Only people with a track can be soloed: one who loses theirs takes their solo with them.
   const soloed = useMemo(() => new Set([...solo].filter((id) => heard.has(id))), [solo, heard]);
   const audible = lanes.filter((lane) => (soloed.size ? soloed.has(lane.id) : !mute.has(lane.id))).map((lane) => lane.id);
-  const playback = useEditPlayback({ document: head.document, audible, active, sourceFrames });
+  const playback = useEditPlayback({ document: head.document, audible, active, sourceFrames, joinFade: audio.crossfade / fps });
   const playhead = playback.frame / fps, seek = (seconds: number) => void playback.seek(Math.max(0, Math.round(seconds * fps)));
   const tc = (seconds: number) => editTc(seconds, fps, recordStart);
   const sourceTc = (source: string, seconds: number) => editTc(seconds, fps, infos.find((info) => info.id === source)?.startFrames ?? 0);
   const nameOf = (id: string) => people.find((lane) => lane.id === id)?.name ?? id, sourceName = (id: string) => document.sources.find((source) => source.id === id)?.name ?? "Gap";
-  const ws = useEditWorkspace({ open, words: trackWords, everyone: data.words, lanes, sourceLanes, durations: data.durations, audible: data.audible, playhead, seek, commit, nameOf, tc, documents: data.documents });
-  const side = useEditSourceSide({ document: head.document, sources: infos, documents: data.documents, words: data.words, colors, fps, active }), onSourceSide = side.mode === "source";
-  /** Insert or Append what the source has marked, text or In to Out, with the mics its track selectors allow. */
-  const insertFromSource = (atEnd: boolean) => { const take = side.take(); if (!take) return; ws.insert(take.source, take.words, atEnd, take); focusDoc(); };
+  const ws = useEditWorkspace({ open, words: trackWords, everyone: data.words, lanes, sourceLanes, durations: data.durations, audible: data.audible, playhead, seek, commit, nameOf, tc, documents: data.documents, snap, fps });
+  const side = useEditSourceSide({ document: head.document, sources: infos, documents: data.documents, words: data.words, colors, fps, active, request: sourceMarks });
+  /** Insert, Append or Overwrite what the source has marked, text or In to Out, with the mics its track selectors allow. */
+  const placeFromSource = (how: "insert" | "append" | "overwrite") => { const take = side.take(); if (!take) return;
+    if (how === "overwrite") ws.overwrite(take.source, take.words, take); else ws.insert(take.source, take.words, how === "append", take); focusDoc(); };
   const used = useMemo(() => new Set(ws.placed.map((item) => item.word.id)), [ws.placed]);
   const current = ws.placed.find((item) => item.programStart <= playhead && playhead < item.programEnd);
   const focusDoc = () => requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".cp-te-doc")?.focus());
   const previous = [...ws.seams].reverse().find((item) => item.at < playhead - 1e-3), next = ws.seams.find((item) => item.at > playhead + 1e-3);
-
-  // Loop: in to out when marked, else the whole edit, by seeking back at the end.
-  const [loopFrom, loopTo] = ws.marked ?? [0, ws.total];
-  useEffect(() => { if (loop && playback.playing && playhead >= loopTo - 1 / fps) void playback.seek(Math.round(loopFrom * fps), true); }, [loop, playback, playhead, loopFrom, loopTo, fps]);
-
-  // Space, I, O and clearing act on whichever side the timeline shows, as they follow the active monitor in Avid.
-  useEditKeys(root, active, {
-    toggle: () => void (onSourceSide ? side.playback : playback).toggle(), sourceToggle: () => void side.playback.toggle(), undo, redo, history: () => { setShowSide(true); setSideTab("history"); }, start: () => seek(0),
-    cutHere: ws.cutHere, loop: () => setLoop((value) => !value), zoomIn: () => setZoom((z) => Math.min(32, z * 2)), zoomOut: () => setZoom((z) => Math.max(1, z / 2)), zoomFit: () => setZoom(1),
-    clearMarks: () => onSourceSide ? side.clearMarks() : ws.setMarks({ in: null, out: null }), mode: () => side.setMode((mode) => mode === "source" ? "record" : "source"),
-    escape: () => { if (ws.dead) { ws.setDead(null); return true; } if (ws.prompt) { ws.setPrompt(null); return true; } if (ws.extractGuard) { ws.setExtractGuard(null); return true; } return false; },
-    markIn: onSourceSide ? side.markIn : ws.markIn, markOut: onSourceSide ? side.markOut : ws.markOut, sourceMarkIn: side.markIn, sourceMarkOut: side.markOut,
-    lift: () => ws.takeMarked(false), extract: () => ws.takeMarked(true), marker: ws.addMarker, markClip: ws.markClip,
-    snap: () => setSnap((value) => !value), previous: () => previous && ws.chooseSeam(previous.index), next: () => next && ws.chooseSeam(next.index), insert: () => insertFromSource(false),
-  });
-
+  useEditEditorKeys({ root, active, fps, ws, side, playback, undo, redo, onHistory: () => { setShowSide(true); setSideTab("history"); }, loop, onLoop: () => setLoop((value) => !value),
+    onZoom: setZoom, onSnap: () => setSnap((value) => !value), place: placeFromSource, previous: previous?.index ?? null, next: next?.index ?? null });
   const pictureOf = useMemo(() => pictureBlocks(document.sources, data.documents, fps), [document.sources, data.documents, fps]);
   /** A cited line: selected and played in the string out when it is there, otherwise opened in the source, ready to cut in. */
   const jumpTo = (line: AskCitation) => {
@@ -117,11 +109,13 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
           where={(line) => `${sourceName(line.source)} · ${nameOf(line.track)} · ${sourceTc(line.source, line.from)}`} sourceTc={sourceTc}
           onJump={jumpTo} onOpenEdit={onOpenEdit} onSettings={onSettings} appLocalModelId={appLocalModelId} />
       </div>
-      {showSource && <div className="cp-te-pane cp-te-pane-source">
+      {/* The side Space, I, O and the marks act on is lifted, as Avid lights the active monitor. */}
+      {showSource && <div className={`cp-te-pane cp-te-pane-source${inSource || side.mode === "source" ? " is-active" : " is-idle"}`}
+        onFocus={() => setInSource(true)} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setInSource(false); }}>
         <EditSourceHost side={side} lanes={people} colors={colors} fps={fps} used={used} reading={data.read}
-          text={text.source} onText={(style) => setText((state) => ({ ...state, source: style }))} onInsert={insertFromSource} />
+          text={text.source} onText={(style) => setText((state) => ({ ...state, source: style }))} onPlace={placeFromSource} />
       </div>}
-      <div className="cp-te-pane cp-te-pane-record">
+      <div className={`cp-te-pane cp-te-pane-record${showSource && (inSource || side.mode === "source") ? " is-idle" : " is-active"}`}>
         <EditRecordPane playhead={playhead} total={ws.total} tc={tc(playhead)} totalTc={tc(ws.total)} marks={ws.seams.map((item) => item.at)}
           onScrub={seek} onScrubStart={playback.pause} onScrubEnd={() => undefined} text={text.edit} onText={(style) => setText((state) => ({ ...state, edit: style }))}>
           {data.loading && !ws.placed.length ? <p className="cp-te-doc-empty" role="status">Reading each microphone's words…</p>
@@ -132,18 +126,22 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
               onDelete={ws.remove} onScrub={seek} onMove={ws.move} onEdit={() => ws.setMessage("Correct words in AAF Audio's transcript; the string out follows it.")} />}
           {ws.prompt && <EditOvertalkPrompt title={`${ws.names(ws.prompt.result.crosstalk.map((word) => word.track))} talks under this.`}
             body={`Silenced ${ws.names(ws.prompt.who)} only. Cutting for everyone also removes ${ws.prompt.result.crosstalk.length === 1 ? "one word" : `${ws.prompt.result.crosstalk.length} words`} of ${ws.names(ws.prompt.result.crosstalk.map((word) => word.track))}'s.`}
-            keep="Keep" other="Cut for everyone" onKeep={() => { ws.setPrompt(null); focusDoc(); }} onOther={() => ws.prompt && ws.applyDelete(ws.prompt.keys, ws.prompt.count)} />}
+            keep="Keep" other="Cut for everyone" onKeep={() => { ws.setPrompt(null); focusDoc(); }} onDismiss={() => { ws.setPrompt(null); focusDoc(); }} onOther={() => ws.prompt && ws.applyDelete(ws.prompt.keys, ws.prompt.count)} />}
           {ws.extractGuard && <EditOvertalkPrompt title={`${ws.names(ws.extractGuard.who)} ${ws.extractGuard.who.length > 1 ? "talk" : "talks"} in this range.`}
             body={`Extract closes the range up on every track, so ${ws.extractGuard.count === 1 ? "one word" : `${ws.extractGuard.count} words`} on a track that is not selected would go too. Lift takes it off the selected tracks only.`}
-            keep="Lift selected tracks" other="Extract anyway" onKeep={() => ws.takeMarked(false)} onOther={() => ws.takeMarked(true, true)} />}
+            keep="Lift selected tracks" other="Extract anyway" onKeep={() => ws.takeMarked(false)} onDismiss={() => { ws.setExtractGuard(null); focusDoc(); }} onOther={() => ws.takeMarked(true, true)} />}
         </EditRecordPane>
       </div>
     </div>
-    <EditLower ws={ws} side={side} people={people} solo={soloed} mute={mute} onSolo={(id) => setSolo((state) => toggled(state, id))} onMute={(id) => setMute((state) => toggled(state, id))} onUntrack={ws.untrack} lanes={lanes} colors={colors} fps={fps} recordStart={recordStart} playhead={playhead} playing={playback.playing} busy={playback.busy}
+    <EditLower ws={ws} side={side} people={people} solo={soloed} mute={mute} onSolo={(id) => setSolo((state) => toggled(state, id))} onMute={(id) => setMute((state) => toggled(state, id))} onUntrack={ws.untrack} onMarker={(id) => { ws.setMarker(id); const at = ws.markers.find((item) => item.id === id)?.at; if (at != null) seek(at); setShowSide(true); setSideTab("inspector"); }} lanes={lanes} colors={colors} fps={fps} recordStart={recordStart} playhead={playhead} playing={playback.playing} busy={playback.busy}
       onToggle={() => void playback.toggle()} onSeek={seek} onScrubStart={playback.pause} onScrubEnd={() => undefined}
-      tc={tc} sourceTc={sourceTc} sourceName={sourceName}
+      tc={tc} sourceTc={sourceTc} sourceName={sourceName} onStripSilence={() => setStripping(true)}
       sourceLanes={sourceLanes} peaksOf={(source, lane) => data.peaks.get(`${source}:${lane}`)} durationOf={(source) => data.durations[source] ?? 0} pictureOf={pictureOf}
       waveforms={waveforms} onWaveforms={onWaveforms} measured={data.measured} measuring={data.measuring} stalled={waveforms && !data.loading && !data.measuring && !data.measured}
-      zoom={zoom} onZoom={setZoom} snap={snap} onSnap={() => setSnap((value) => !value)} follow={follow} onFollow={() => setFollow((value) => !value)} loop={loop} onLoop={() => setLoop((value) => !value)} />
+      audio={audio} onAudio={setAudio} zoom={zoom} onZoom={setZoom} snap={snap} onSnap={() => setSnap((value) => !value)} follow={follow} onFollow={() => setFollow((value) => !value)} loop={loop} onLoop={() => setLoop((value) => !value)} />
+    {stripping && <EditStripSilence open={open} documents={data.documents} words={data.words} commit={commit} nameOf={nameOf} onDone={ws.setMessage} onClose={() => setStripping(false)}
+      request={{ from: ws.marked?.[0] ?? 0, to: ws.marked?.[1] ?? ws.total, lanes: lanes.filter((lane) => ws.onTracks.has(lane.id)).map((lane) => lane.id), sourceLanes }}
+      scope={`${lanes.filter((lane) => ws.onTracks.has(lane.id)).map((lane) => `A${lane.track} ${lane.name}`).join(", ") || "No track selected"} · ${ws.marked ? `${tc(ws.marked[0])} to ${tc(ws.marked[1])}` : "the whole string out"}`}
+      hint={data.measured ? undefined : data.measuring ? "Waiting for every mic's waveform" : "Turn on View ▸ Waveforms to measure each mic first"} />}
   </div>;
 }

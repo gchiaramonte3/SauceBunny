@@ -95,6 +95,7 @@ app_cache_dir()/
   thumbnails/   poster JPEGs                 never swept
   scratch/      job temps, playback prep,    swept at 24h
                 Whisper WAVs, diarizer JSON
+    aaf-packs/  AAF export's group packs     swept at 24h unused
 ```
 
 - `media/` is **sweep-exempt**: downloaded sources and their audio, which are
@@ -103,6 +104,11 @@ app_cache_dir()/
 - `thumbnails/` is sweep-exempt too: posters are cheap to keep and expensive
   to regenerate daily. Settings' thumbnails bucket is the manual purge.
 - `scratch/` is swept at startup, on a background thread, failures non-fatal.
+  The sweep is flat except for `scratch/aaf-packs/`, the one named folder in
+  it: each pack is the closure of one grouped source's group clips (tens of
+  MB for a show like HEAT 2), keyed by the source's fingerprint, and the
+  writer touches a pack whenever an export uses it, so a pack goes after a
+  day unused. Losing one only makes the next export build it again.
 
 `migrate_cache_layout` moves an old install over once, at startup, before the
 sweep runs. The media subtree is RENAMED rather than copied (same filesystem,
@@ -305,6 +311,14 @@ cannot strand an edit. `review-store`, `screening-store` and
 `localStorage` itself is last-write-wins per key with no coordination. It has
 not bitten because the two windows write disjoint keys, but nothing enforces
 that.
+
+A third reader can run beside the app: `sauce-bunny --mcp`, the MCP server
+(docs/AI-ACCESS-SPEC-2026-10-03.md). It only reads. AAF Audio documents and
+the Documents JSON stores are written atomically, so it always sees a whole
+file; `timelines.sqlite` is opened read-only (`EditLog::open_read_only`),
+which in WAL mode never blocks the app's commits and never runs the app's
+`CREATE TABLE` setup. It must never write any store: the app's in-process
+writer locks would not see it.
 
 ### 3.8 Privacy and limits — green
 

@@ -10,7 +10,7 @@ import { EditPictureRow } from "./EditPictureRow";
 import type { EditRowsView } from "./EditSourceTimeline";
 import { EditTimelineEmpty } from "./EditTimelineEmpty";
 import { EditTimelineRow } from "./EditTimelineRow";
-import { EditTimelineRuler } from "./EditTimelineRuler";
+import { EditTimelineRuler, type EditRulerMarkers } from "./EditTimelineRuler";
 
 type ToolProps = Omit<React.ComponentProps<typeof EditTimelineTools>, "allText" | "onAllText" | "view" | "onView" | "measuring" | "audio" | "onAudio" | "zoom" | "onZoom">;
 
@@ -25,7 +25,7 @@ type Props = {
   peaksOf: (source: string, speaker: string) => [number, number][] | undefined; durationOf: (source: string) => number;
   pictureOf?: React.ComponentProps<typeof EditPictureRow>["pictureOf"];
   onScrubStart: () => void; onScrubEnd: () => void;
-  zoom: number; onZoom: (zoom: number) => void; markers: number[]; tools: ToolProps;
+  zoom: number; onZoom: (zoom: number) => void; markers: EditRulerMarkers; tools: ToolProps; audio: EditTimelineAudio; onAudio: (audio: EditTimelineAudio) => void;
   /** Avid's track selectors: on tracks take Lift and show the marked region. */
   tracks: Set<string>; onTrack: (speaker: string, only: boolean) => void;
   dead: EditDeadReview | null; onDeadSkip: (index: number) => void; onDeadPreset: (preset: EditDeadPreset) => void; onDeadApply: () => void; onDeadCancel: () => void;
@@ -62,7 +62,6 @@ export function EditTimeline(props: Props) {
   const [look, setLook] = useState<Omit<EditTimelineView, "waveforms">>({ speakerColours: true, height: "medium" });
   const view: EditTimelineView = { ...look, waveforms: props.waveforms };
   const setView = ({ waveforms, ...next }: EditTimelineView) => { setLook(next); if (waveforms !== props.waveforms) props.onWaveforms(waveforms); };
-  const [audio, setAudio] = useState<EditTimelineAudio>({ crossfade: 2, roomTone: false });
   const [text, setText] = useState<Set<string>>(new Set());
   const [width, setWidth] = useState(800);
   const ruler = useRef<HTMLDivElement>(null);
@@ -93,7 +92,7 @@ export function EditTimeline(props: Props) {
   const band = chosen.length ? [Math.min(...chosen.map((i) => i.programStart)), Math.max(...chosen.map((i) => i.programEnd))] : null;
   const marked = marks.in != null && marks.out != null && marks.out > marks.in ? [marks.in, marks.out] : null;
   // Snap pulls a scrub onto an edit point, a marker, a mark or a word edge within 8 px.
-  const targets = useMemo(() => [0, total, ...seams.map((s) => s.at), ...props.markers, ...(marks.in != null ? [marks.in] : []), ...(marks.out != null ? [marks.out] : []),
+  const targets = useMemo(() => [0, total, ...seams.map((s) => s.at), ...props.markers.list.map((m) => m.at), ...(marks.in != null ? [marks.in] : []), ...(marks.out != null ? [marks.out] : []),
     ...placed.flatMap((item) => [item.programStart, item.programEnd])], [total, seams, props.markers, marks.in, marks.out, placed]);
   // Scrub: press anywhere on the ruler or a lane and drag. The playhead
   // follows every pointer move, and playback waits until you let go.
@@ -118,15 +117,15 @@ export function EditTimeline(props: Props) {
     onPointerCancel: () => { if (held.current) { held.current = false; props.onScrubEnd(); } },
   };
   const toggleText = (id: string) => setText((current) => { const next = new Set(current); if (!next.delete(id)) next.add(id); return next; });
-  const fade = audio.crossfade / fps;
+  const audio = props.audio, fade = audio.crossfade / fps;
   return <section className={`cp-te-timeline is-${view.height}${view.speakerColours ? " is-speaker" : ""}`} aria-label="Edit timeline">
     <EditTimelineTools {...props.tools} zoom={zoom} onZoom={(direction) => props.onZoom(direction === 0 ? 1 : Math.max(1, Math.min(32, direction > 0 ? zoom * 2 : zoom / 2)))}
-      view={view} onView={setView} measuring={props.measuring} audio={audio} onAudio={setAudio}
+      view={view} onView={setView} measuring={props.measuring} audio={audio} onAudio={props.onAudio}
       allText={speakers.every((s) => text.has(s.id))} onAllText={() => setText(speakers.every((s) => text.has(s.id)) ? new Set() : new Set(speakers.map((s) => s.id)))} />
     {props.dead && <EditDeadSpaceBar review={props.dead} onPreset={props.onDeadPreset} onApply={props.onDeadApply} onCancel={props.onDeadCancel} />}
     <div className="cp-te-tl-grid" style={{ "--te-rows": speakers.length + (props.patch ? 2 : 1) + (props.pictureOf && edit.segments.some((segment) => !isGap(segment) && props.pictureOf?.(segment.source).length) ? 1 : 0) } as React.CSSProperties}>
       <div className="cp-te-tl-corner">{props.corner}</div>
-      <EditTimelineRuler rulerRef={ruler} fps={fps} recordStart={props.recordStart} start={start} span={span} x={x} w={w} width={width} marks={marks} markers={props.markers}
+      <EditTimelineRuler rulerRef={ruler} fps={fps} recordStart={props.recordStart} start={start} span={span} x={x} w={w} width={width} marks={marks} onClearMarks={props.tools.onClearMarks} markers={props.markers}
         seams={seams} seam={props.seam} describe={(cut) => describe(cut, fps, props.recordStart)} onSeam={(cut) => { props.onSeek(cut.at); props.onSeam(cut.index); }} scrub={scrub} />
       {props.pictureOf && <EditPictureRow edit={edit} starts={starts} start={start} span={span} x={x} w={w} pictureOf={props.pictureOf} />}
       {props.rows ? props.rows({ start, span, width, x, w, scrub, waveforms: view.waveforms, text, onText: toggleText }) : speakers.map((speaker) => <EditTimelineRow key={speaker.id} speaker={speaker} color={colors[speaker.id]} soloed={solo.has(speaker.id)} quiet={solo.size > 0 && !solo.has(speaker.id)}

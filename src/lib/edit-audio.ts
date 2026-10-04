@@ -43,7 +43,6 @@ export type VoicePiece = { from: number; to: number; fadeIn: EdgeKind; fadeOut: 
 const SCHEDULE_LEAD_SECONDS = 0.015;
 /** Equal-power crossfade length at a join, and the fade at a mute's edges. */
 export const JOIN_FADE_SECONDS = 0.01;
-const HANDLE_SECONDS = JOIN_FADE_SECONDS / 2;
 const CURVE_POINTS = 64;
 const HELD_WINDOWS = 6;
 
@@ -165,6 +164,7 @@ export class EditAudio {
   private preparing: string | null = null;
   private resuming: Promise<void> | null = null;
   private state: EditAudioState = { frame: 0, rate: 0, busy: false, error: null };
+  private joinFade = JOIN_FADE_SECONDS;
   private readonly fadeIn = equalPower(true);
   private readonly fadeOut = equalPower(false);
 
@@ -201,6 +201,8 @@ export class EditAudio {
   }
 
   setLevel(volume: number, muted: boolean) { this.master.gain.value = muted ? 0 : volume; }
+  /** Crossfade length at a cut, from View ▸ Audio; "Off" still keeps the 10 ms that stops a click. Takes effect from the next block scheduled. */
+  setJoinFade(seconds = JOIN_FADE_SECONDS) { this.joinFade = Math.max(JOIN_FADE_SECONDS, seconds); }
   setTrackLevel(trackId: string, gain: number) { this.trackGain(trackId).gain.value = clampTrackGain(gain); }
 
   toggle() {
@@ -366,9 +368,10 @@ export class EditAudio {
         // A join is an equal-power crossfade centred on the cut: the outgoing
         // piece runs on into its handle and the incoming one starts early,
         // each as far as its decoded window (and the clock) allows.
-        const pre = piece.fadeIn === "join" ? Math.max(0, Math.min(HANDLE_SECONDS, offset, start - this.context.currentTime)) : 0;
-        const post = piece.fadeOut === "join" ? Math.max(0, Math.min(HANDLE_SECONDS, buffer.duration - offset - length)) : 0;
-        this.voice(track.id, buffer, start - pre, offset - pre, length + pre + post, piece.fadeIn ? JOIN_FADE_SECONDS : 0, piece.fadeOut ? JOIN_FADE_SECONDS : 0);
+        const handle = this.joinFade / 2;
+        const pre = piece.fadeIn === "join" ? Math.max(0, Math.min(handle, offset, start - this.context.currentTime)) : 0;
+        const post = piece.fadeOut === "join" ? Math.max(0, Math.min(handle, buffer.duration - offset - length)) : 0;
+        this.voice(track.id, buffer, start - pre, offset - pre, length + pre + post, piece.fadeIn === "join" ? this.joinFade : piece.fadeIn ? JOIN_FADE_SECONDS : 0, piece.fadeOut === "join" ? this.joinFade : piece.fadeOut ? JOIN_FADE_SECONDS : 0);
       }
     }
   }

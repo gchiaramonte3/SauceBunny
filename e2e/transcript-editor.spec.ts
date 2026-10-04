@@ -54,13 +54,20 @@ async function boot(page: Page, grouped = false, picture = false) {
         case "aaf_list": return Promise.resolve([{ id: document.id, name: document.manifest.name, track_count: 3, transcribed_tracks: 2, source_path: document.source_path }]);
         case "aaf_open": return Promise.resolve(document);
         case "aaf_speech": return Promise.resolve({ track_id: args.trackId, floor_db: -60, activity: [[160_000, 720_000]], reactions: [], words: words(args.trackId as string), measured: true });
-        case "aaf_waveform": return Promise.resolve({ track_id: args.trackId, peaks: [] });
+        // A read over a range: its first half quiet (-60 dBFS), its second half loud, so Strip Silence has something to find.
+        case "aaf_waveform": return Promise.resolve({ track_id: args.trackId, peaks: args.startFrame == null ? [] : Array.from({ length: 2048 }, (_, index) => index < 1024 ? [-0.001, 0.001] : [-0.5, 0.5]) });
         case "edit_list": return Promise.resolve([...edits.entries()].map(([key, edit]) => ({ id: key, title: headOf(key).document.title, created_at: 1, updated_at: 2, head: edit.head, states: edit.states.length })));
         case "edit_create": edits.set(id, { states: [{ id: 1, parent: null, label: "New Edit", document: args.document as Doc }], head: 1 }); return Promise.resolve(headOf(id));
         case "edit_head": return edits.has(id) ? Promise.resolve(headOf(id)) : Promise.reject(new Error("no such edit"));
         case "edit_commit": { const edit = edits.get(id)!; const next = edit.states.length + 1; edit.states.push({ id: next, parent: edit.head, label: args.label as string, document: args.document as Doc }); edit.head = next; return Promise.resolve(headOf(id)); }
         case "edit_undo": { const edit = edits.get(id)!; edit.head = edit.states.find((s) => s.id === edit.head)!.parent ?? edit.head; return Promise.resolve(headOf(id)); }
         case "edit_redo": { const edit = edits.get(id)!; const child = [...edit.states].reverse().find((s) => s.parent === edit.head); if (child) edit.head = child.id; return Promise.resolve(headOf(id)); }
+        case "plugin:dialog|open": return Promise.resolve("/fixtures/Exports");
+        case "aaf_export_edits": return Promise.resolve((args.editIds as string[]).map((id) => ({ edit_id: id, result: { name: id }, error: null })));
+        // Ask on tools: the reply cites Alex's first line by the address the Rust context layer gives it.
+        case "has_api_key": return Promise.resolve(true);
+        case "assistant_chat": (window as unknown as { __asked: unknown[] }).__asked = [...((window as unknown as { __asked?: unknown[] }).__asked ?? []), args.args];
+          return Promise.resolve({ text: JSON.stringify({ answer: "Alex moved in May.", lines: [`saucebunny://sequence/${document.id}/line/track-1/a1`], action: null }), tools_used: ["search_transcripts"] });
         case "edit_history": { const edit = edits.get(id)!; return Promise.resolve({ head: edit.head, states: edit.states.map(({ id: state, parent, label }) => ({ id: state, parent, label, at: state, pinned: null })), next: [] }); }
         default: return original(command, args);
       }
@@ -91,8 +98,10 @@ test("a sequence added with nothing cut in offers the whole sequence, in one und
   await boot(page);
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
-  await page.getByText("Start with the whole sequence").click();
+  // A new string out starts empty, as a new sequence does in Avid: it is built from chunks of the source.
+  await expect(page.getByLabel(/whole sequence/i)).not.toBeChecked();
   await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("combobox", { name: /^Who plays on A\d+$/ })).toHaveCount(0);
   const add = page.getByRole("button", { name: "Add all of Interview" });
   await expect(add).toBeVisible();
   await add.click();
@@ -105,6 +114,7 @@ test("an edit from a sequence shows its words, and a delete is one undoable step
   await boot(page);
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
   await page.getByRole("button", { name: "Create" }).click();
   const moved = page.locator(".cp-te-doc [data-index]", { hasText: "moved" }).first();
   await expect(moved).toBeVisible();
@@ -127,10 +137,111 @@ test("an edit from a sequence shows its words, and a delete is one undoable step
   await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
 });
 
+test("Insert splices at the record playhead, as Avid's V does, and Overwrite (B) replaces what is there", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
+  await page.getByRole("button", { name: "Create" }).click();
+  const record = page.locator(".cp-te-doc");
+  await expect(record).toContainText("Then Rosa called me.");
+  // The source's person tabs read left to right in track order, each with its track.
+  await expect(page.getByRole("tablist", { name: "Transcripts by person" }).getByRole("tab")).toHaveText(["All voices", "A1 Alex", "A2 Sam", "A3 Room"]);
+  // Park the playhead about 32 s in, after Sam's line (20-24 s) and before Alex's second (40 s), by clicking the timeline.
+  const ruler = (await page.locator(".cp-te-tl-ruler").boundingBox())!;
+  await page.mouse.click(ruler.x + ruler.width * 0.032, ruler.y + ruler.height / 2);
+  await page.getByRole("tab", { name: "Sam" }).click();
+  const source = page.locator(".cp-te-src-body");
+  await source.locator("[data-src-index]", { hasText: "Sam" }).first().click();
+  await source.locator("[data-src-index]", { hasText: "door." }).first().click({ modifiers: ["Shift"] });
+  await page.keyboard.press("v");
+  await expect(page.getByRole("status").filter({ hasText: /Inserted 4 words at 01:00:(2[4-9]|3\d)/ })).toBeVisible();
+  // Not at the start: the cut still opens on Alex, and Sam's line now plays twice, before Alex's second line.
+  const lines = () => record.locator(".cp-te-para").evaluateAll((all) => all.map((paragraph) => paragraph.textContent ?? ""));
+  await expect.poll(async () => (await lines()).map((text) => /moved/.test(text) ? "alex" : /door/.test(text) ? "sam" : /Rosa/.test(text) ? "rosa" : "?")).toEqual(["alex", "sam", "sam", "rosa"]);
+  await expect(page.getByRole("button", { name: /^Undo Insert 4 Words/ })).toBeEnabled();
+  // B lays the same line over what follows the new clip: the cut keeps its length.
+  const total = page.locator(".cp-te-transport .cp-te-readout-of").first();
+  const before = await total.textContent();
+  await page.keyboard.press("b");
+  await expect(page.getByRole("button", { name: "Undo Overwrite" })).toBeEnabled();
+  await expect(total).toHaveText(before!);
+});
+
+test("marks clear the Avid way on both sides: G, D and F, and the × on the marked range", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.locator(".cp-te-doc")).toContainText("Then Rosa called me.");
+  const ruler = page.locator(".cp-te-tl-ruler"), box = (await ruler.boundingBox())!;
+  const range = ruler.locator(".cp-te-tl-marked");
+  const record = page.locator(".cp-te-transport .cp-te-readout-tc").first();
+  // Park the playhead, and wait for it to land before marking there.
+  const park = async (fraction: number) => {
+    const before = await record.textContent();
+    await page.mouse.click(box.x + box.width * fraction, box.y + box.height / 2);
+    await expect(record).not.toHaveText(before!);
+  };
+  // Straight after opening, focus is on the view around the editor: the keys still reach it.
+  await park(0.03); await page.keyboard.press("i"); await park(0.05); await page.keyboard.press("o");
+  await expect(range).toHaveCount(1);
+  await page.keyboard.press("g");
+  await expect(range).toHaveCount(0);
+  // D clears In alone, so no closed range and no ×; F then clears Out.
+  await park(0.03); await page.keyboard.press("i"); await park(0.05); await page.keyboard.press("o");
+  await page.keyboard.press("d");
+  await expect(range).toHaveCount(0);
+  await expect(ruler.locator(".cp-mark.out")).toHaveCount(1);
+  await page.keyboard.press("f");
+  await expect(ruler.locator(".cp-mark")).toHaveCount(0);
+  // The × on a closed range clears both, with its key in the tooltip.
+  await park(0.03); await page.keyboard.press("i"); await park(0.05); await page.keyboard.press("o");
+  const clear = page.getByRole("button", { name: "Clear marks" });
+  await expect(clear).toHaveAttribute("title", "Clear marks (G)");
+  await clear.click();
+  await expect(range).toHaveCount(0);
+  // Q goes to In; J steps back a second (the engine plays forward only).
+  await park(0.03); await page.keyboard.press("i"); await park(0.05);
+  await page.keyboard.press("q");
+  const atIn = await record.textContent();
+  await page.keyboard.press("j");
+  await expect(record).not.toHaveText(atIn!);
+  // On the source side, G clears the text that marks it.
+  await page.getByRole("radio", { name: "Source" }).click();
+  const source = page.locator(".cp-te-src-body");
+  await source.locator("[data-src-index]", { hasText: "Then" }).first().click();
+  await source.locator("[data-src-index]", { hasText: "me." }).first().click({ modifiers: ["Shift"] });
+  await expect(range).toHaveCount(1);
+  await page.keyboard.press("g");
+  await expect(range).toHaveCount(0);
+  await expect(source.locator(".cp-te-src-word.is-selected")).toHaveCount(0);
+});
+
+test("Audio ▸ Strip Silence… silences the quiet stretches on the selected tracks, to Media Composer's settings, in one undo step", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.locator(".cp-te-doc")).toContainText("I moved here in May.");
+  const strip = async () => { await page.getByRole("toolbar", { name: "Timeline tools" }).getByRole("button", { name: "Audio", exact: true }).click(); await page.getByRole("menuitem", { name: "Strip Silence…" }).click(); };
+  await strip();
+  const dialog = page.getByRole("dialog", { name: "Strip Silence" });
+  for (const label of ["Threshold (dB)", "Minimum duration (ms)", "Pad start (ms)", "Pad end (ms)"]) await expect(dialog.getByLabel(label)).toBeVisible();
+  await expect(dialog).toContainText("the whole string out");
+  await expect(dialog.getByRole("button", { name: "Strip" })).toBeEnabled({ timeout: 10_000 });
+  await dialog.getByRole("button", { name: "Strip" }).click();
+  await expect(page.getByRole("status").filter({ hasText: /^Stripped \d+ silences/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo Strip Silence" })).toBeEnabled();
+});
+
 test("a group angle has no track until their words are cut in, then plays on one of their own", async ({ page }) => {
   await boot(page, true);
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
   await page.getByRole("button", { name: "Create" }).click();
   const record = page.locator(".cp-te-doc");
   // Who each record track plays, top-down: the patch panel in the track headers.
@@ -160,8 +271,6 @@ test("Source shows the loaded sequence's mics, its group alternates and V1, and 
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
   // An empty record, the way Avid starts a new sequence: the cut is built from the source.
-  const whole = page.getByLabel(/whole sequence/i);
-  if (await whole.isChecked().catch(() => false)) await whole.uncheck();
   await page.getByRole("button", { name: "Create" }).click();
   const record = page.locator(".cp-te-doc");
   await page.getByRole("radio", { name: "Source" }).click();
@@ -200,8 +309,6 @@ test("a new string out has no record tracks until someone is patched, and the em
   await boot(page);
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
-  const whole = page.getByLabel(/whole sequence/i);
-  if (await whole.isChecked().catch(() => false)) await whole.uncheck();
   await page.getByRole("button", { name: "Create" }).click();
   // Nothing cut in yet: no record tracks at all, only the empty one to patch someone to.
   await expect(page.getByRole("combobox", { name: /^Who plays on A\d+$/ })).toHaveCount(0);
@@ -219,6 +326,33 @@ test("One per person makes a string out for each person who speaks", async ({ pa
   await expect(page.getByRole("heading", { name: "SO_Interview_Alex" })).toBeVisible();
   const created = await page.evaluate(() => (window as unknown as { __editCalls: string[] }).__editCalls.filter((c) => c === "edit_create").length);
   expect(created).toBe(2);
+  // Each one is open in a tab, in person order, the first chosen.
+  await expect(page.getByRole("tablist", { name: "Open string outs" }).getByRole("tab")).toHaveText([/^SO_Interview_Alex/, /^SO_Interview_Sam/]);
+  // With several open, Export all writes them from one run of the writer.
+  await page.getByRole("button", { name: "Export all (2)…" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Exported 2 of 2 string outs." })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __editCalls: string[] }).__editCalls.filter((c) => c === "aaf_export_edits").length)).toBe(1);
+});
+
+test("Ask with Claude looks lines up with tools and cites them by address, never pasting the transcript", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("saucebunny.stringOuts.model", JSON.stringify({ kind: "cloud", provider: "anthropic" })));
+  await boot(page);
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
+  await page.getByRole("button", { name: "Create" }).click();
+  const prompt = page.getByRole("combobox", { name: /Ask anything/ });
+  await prompt.fill("where does Alex say he moved?");
+  await prompt.press("Enter");
+  await expect(page.getByText("Alex moved in May.")).toBeVisible();
+  // The address came back as Alex's own words, a line the editor can jump to.
+  await expect(page.locator(".cp-te-pane-side").getByText(/I moved here in May/)).toBeVisible();
+  const asked = await page.evaluate(() => (window as unknown as { __asked: { provider: string; system: string; app_state: { string_out: { address: string } } }[] }).__asked);
+  expect(asked).toHaveLength(1);
+  expect(asked[0].provider).toBe("anthropic");
+  expect(asked[0].system).toContain("saucebunny://sequence/sequence-test");
+  expect(asked[0].system).not.toContain("moved here");
+  expect(asked[0].app_state.string_out.address).toMatch(/^saucebunny:\/\/string-out\//);
 });
 
 test("coming back reopens the string out that was open, not the welcome", async ({ page }) => {
@@ -239,6 +373,7 @@ test("the left column is Ask, Inspector, History, with a plain prompt", async ({
   await boot(page);
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
   await page.getByRole("button", { name: "Create" }).click();
   const tabs = page.getByRole("tablist", { name: "String out panels" }).getByRole("tab");
   await expect(tabs).toHaveText(["Ask", "Inspector", "History"]);

@@ -1,9 +1,12 @@
 import { useRef } from "react";
+import { RulerMarks } from "./RulerMarks";
 
 type Props = {
   label: string; value: number; max: number; text: string;
   /** Where the edit points are, drawn as ticks on the rail. */
   marks?: number[];
+  /** In and Out on this rail, drawn as every ruler draws them, so marks are visible wherever the timeline is. */
+  range?: { in: number | null; out: number | null };
   onScrub: (value: number) => void; onScrubStart?: () => void; onScrubEnd?: () => void;
 };
 
@@ -14,7 +17,7 @@ type Props = {
  * and onScrubEnd). Arrow keys step a second, Shift five, Home and End go to
  * the ends. The rail is its own element, so a drag that leaves it keeps going.
  */
-export function EditScrubber({ label, value, max, text, marks = [], onScrub, onScrubStart, onScrubEnd }: Props) {
+export function EditScrubber({ label, value, max, text, marks = [], range, onScrub, onScrubStart, onScrubEnd }: Props) {
   const rail = useRef<HTMLDivElement>(null);
   const held = useRef(false);
   const span = Math.max(0.001, max);
@@ -45,6 +48,7 @@ export function EditScrubber({ label, value, max, text, marks = [], onScrub, onS
       event.stopPropagation();
       onScrub(Math.max(0, Math.min(max, next)));
     }}>
+    {range && <RulerMarks from={range.in} to={range.out} x={(t) => `${(t / span) * 100}%`} w={(d) => `${(d / span) * 100}%`} />}
     <span className="cp-te-scrub-track" aria-hidden="true">
       {marks.map((mark, index) => <span key={index} className="cp-te-scrub-mark" style={{ left: `${(mark / span) * 100}%` }} />)}
       <span className="cp-te-scrub-fill" />

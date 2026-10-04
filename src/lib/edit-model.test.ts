@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addEdit, clipAround, extractProgram, findDeadSpace, insertGap, isGap, liftOnTracks, liftProgram, removeDeadSpace, GAP, deleteWords as deleteKeys, ghostLines, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration, programToSource,
-  healSeam, removeRange, restoreRange, seamList, spliceIn, unmuteWords, type Timeline, type TimelineWord,
+  healSeam, overwrite, removeRange, restoreRange, seamList, snapToGap, spliceIn, unmuteWords, type Timeline, type TimelineWord,
 } from "./edit-model";
 
 /** A small generated scene: six lines across five tracks, and a second source. */
@@ -98,6 +98,26 @@ describe("transcript editor model", () => {
     expect(edit.segments.map((s) => [s.srcIn, s.srcOut])).toEqual([[10, 14], [1, 3], [14, 20]]);
     expect(spliceIn(base, "s", 1, 3, 10).segments.map((s) => [s.srcIn, s.srcOut])).toEqual([[10, 20], [1, 3]]);
     expect(spliceIn(base, "s", 1, 3, 0).segments.map((s) => [s.srcIn, s.srcOut])).toEqual([[1, 3], [10, 20]]);
+  });
+
+  it("overwrite replaces what is under it for its own length and moves nothing after it", () => {
+    const base: Timeline = { segments: [{ id: "x", source: "s", srcIn: 10, srcOut: 20 }], mutes: [] };
+    const edit = overwrite(base, "t", 1, 3, 4);
+    expect(edit.segments.map((s) => [s.source, s.srcIn, s.srcOut])).toEqual([["s", 10, 14], ["t", 1, 3], ["s", 16, 20]]);
+    expect(programDuration(edit)).toBe(programDuration(base));
+    // Past the end it runs on, as Avid's does.
+    const tail = overwrite(base, "t", 0, 4, 8);
+    expect(tail.segments.map((s) => [s.source, s.srcIn, s.srcOut])).toEqual([["s", 10, 18], ["t", 0, 4]]);
+    expect(programDuration(tail)).toBe(12);
+  });
+
+  it("with Snap on a splice lands in the gap between words, never inside one", () => {
+    const edit: Timeline = { segments: [{ id: "x", source: "s", srcIn: 0, srcOut: 4 }], mutes: [] };
+    const placed = placeWords([w("one", "a", 0.5, 1.5), w("two", "a", 2, 3)], edit);
+    expect(snapToGap(edit, placed, 1.2)).toBeCloseTo(1.75, 6);
+    expect(snapToGap(edit, placed, 0.7)).toBe(0);
+    // Already between words: it stays where it is.
+    expect(snapToGap(edit, placed, 3.5)).toBe(3.5);
   });
 
   it("a source range used twice is cut only where it was selected", () => {

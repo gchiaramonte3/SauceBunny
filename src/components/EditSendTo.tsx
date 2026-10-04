@@ -46,7 +46,7 @@ export function EditSendTo({ editId, selected, sequenceOf, onDone }: Props) {
     }
   };
   return <select className="cp-select cp-te-add-source" aria-label="Add the selection to another string out" value="" disabled={!selected.length || !edits.length}
-    title={edits.length ? "Add the selected words to another string out" : "Make another string out to send bites to"}
+    title={!edits.length ? "Make another string out to send bites to" : selected.length ? "Add the selected words to another string out" : "Select words in the record first"}
     onChange={(event) => { const target = edits.find((item) => item.id === event.target.value); if (target) void send(target); }}>
     <option value="" disabled>Add to…</option>
     {edits.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}

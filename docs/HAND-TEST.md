@@ -1087,6 +1087,48 @@ client receives.
 `review-writer-contract` now records this. Deleting its `setStatus` entry is
 the acceptance test for whenever the verdict UI gets built.
 
+### Assistants (Claude Code or Claude Desktop, read-only)
+
+1. **Claude Code.** Settings ▸ AI APIs ▸ Use Sauce Bunny from Claude ▸ Copy
+   the Claude Code command, paste it in a terminal, then start `claude` and
+   run `/mcp`: sauce-bunny is connected with ten tools. Ask "What
+   sequences do I have in Sauce Bunny?" and "Find where ISABELLA says she's
+   tired in AFF BANK 1": the answers name timecodes that match AAF Audio,
+   and cite `saucebunny://` line addresses. macOS may first ask to let the
+   terminal see Documents.
+2. **Claude Desktop.** Save extension…, open the `.mcpb`, Install. In a new
+   chat, "Read the string out Sore Feet Complaint clip by clip": clips come
+   back with record and source timecode and who speaks. Quit Sauce Bunny
+   first: it still works (it reads the files).
+3. **Nothing changes.** With Sauce Bunny open on a string out, ask Claude to
+   change it: it says it can only read. History shows no new step.
+
+### Ask with tools (String Outs, needs a Claude or OpenAI key, or a Qwen model)
+
+1. In a string out made from AFF BANK 1, set Ask's model to Claude. Ask
+   "Find every line where @ISABELLA or @NATHANIEL says they're tired,
+   exhausted or that something is hard". While it works, the status says it
+   is looking things up; the answer cites lines including 19:52:32:13 and
+   20:18:12:01, and clicking one opens it in the source on that person's tab.
+2. Select a few words in the record text and ask "who says this, and where
+   else do they talk about it?": the answer is about the selection, not the
+   whole sequence.
+3. Ask "make a string out of those": **Make new string out** appears and
+   nothing changes until you press it. Ask a follow-up ("is that every
+   time?"): it still knows which lines it meant.
+4. Ask something broad and press **Stop** while it is still looking: it
+   stops within a second and says it was stopped.
+5. Repeat 1 with ChatGPT, then with a local Qwen model, then with a non-Qwen
+   local model (it answers the old way, from lines in the prompt).
+6. **Ultrafast** (costs about six times the usual rate, so keep the question
+   small). Settings ▸ AI APIs ▸ ChatGPT: set the model to `gpt-6-astra`, turn
+   Ultrafast on, press Test: it connects. Ask's model reads "ChatGPT ·
+   gpt-6-astra · Ultrafast", and step 1 answers noticeably faster than with
+   the switch off. In the OpenAI usage dashboard the requests show the
+   Ultrafast tier. Set the model back to one without the tier (`gpt-4o`) and
+   press Test: OpenAI's own error says why, and nothing is charged at the
+   Ultrafast rate. Turn the switch off.
+
 ### String Outs (needs a transcribed AAF Audio sequence and Media Composer)
 
 Nothing below can be checked by the browser suite: it needs real linked
@@ -1097,12 +1139,12 @@ media, WKWebView's audio, and Avid.
 2. Press Space. Audio plays from the linked MXFs; delete a sentence and play
    across the cut: no click at the join (10 ms crossfade). Delete a line with
    someone talking over it: the prompt appears and nothing below moves until
-   you choose **Close up for everyone**.
+   you choose **Cut for everyone**.
 3. ⌘Z / ⇧⌘Z step through the History panel (⌘Y). Quit and reopen: the edit
    and its whole history come back, and `~/Documents/Sauce Bunny/Edits/`
    holds a readable JSON copy.
 4. Mark In/Out (I/O), Lift (Z) leaves a gap, Extract (X) closes it. Remove
-   dead space: the review lists spans, Apply removes them.
+   dead space: the review lists spans, Remove takes them out.
 5. **Export AAF** (**Keep picture groups**, now the default), import into
    Media Composer: the sequence relinks to the original master clips, V1 is
    the group clip and still switches angles (right-click V1 ▸ the group's
@@ -1208,3 +1250,43 @@ media, WKWebView's audio, and Avid.
     whole. In and Out are white with a grey span between them, drawn with
     the chevron mark, in Clip, AAF Audio, String Outs and the Transcripts
     player. The transport row names no one: who is talking is not in it.
+19. **Cutting like an editing timeline (October 3 spec, phase 1).** In a
+    string out with a few bites, click the timeline to park the playhead
+    in the middle of the second bite, select a line in the source and
+    press V: the line lands at the playhead, the bite splits around it,
+    and the playhead parks after it, so V again builds the cut in order.
+    With Snap on (N) a press inside a word lands in the gap before or
+    after it. Set a record In with I and press V: the In wins over the
+    playhead. Press B with a line selected: it replaces what follows the
+    playhead and the running time does not change. A new string out made
+    from a sequence starts empty.
+20. **Marks, the Avid way (phase 2).** In String Outs on the record side,
+    on the source side, and in AAF Audio: I and O mark, G clears both, D
+    clears In, F clears Out, Q and W go to them. A closed range shows a ×
+    at its Out end; clicking it clears both. Straight after opening String
+    Outs (nothing clicked yet) I and O still work. Mark a range in AAF
+    Audio and click **Open in String Outs**: the source opens with that
+    range marked on its rail and over its words. J steps back a second, K
+    stops, L plays.
+21. **Which side is live, and what the menus do (phase 3).** Click in the
+    source text: the source pane gets a lifted outline and the record's
+    selection steps back; click the timeline and the record lights. With
+    the timeline on Source, Z, X, M and T do nothing (their buttons are
+    off too). View ▸ Audio ▸ Crossfade at cuts: 4 frames sounds softer at
+    a cut than Off. Click a marker on the ruler: the Inspector shows its
+    name, comment and colour; Delete on the marker removes it.
+22. **Tabs in track order.** On a grouped sequence (HEAT 2 or "Sequence
+    with a Group Clip") the person tabs read A1, A1's alternates, A2 and
+    on, left to right, in AAF Audio and in String Outs' source pane, each
+    tab starting with its track. "N more" lists the rest in that order.
+23. **What a Keep picture groups import puts in the bin.** Import a string
+    out exported with **Keep picture groups**. Note whether the bin
+    receives only the sequence, or every master clip and group clip in the
+    show as well (the file carries them all, as the AAF rules require;
+    Media Composer decides what it lists). Report which.
+24. **Strip Silence (Audio menu).** With waveforms on, select A1 only, mark
+    In and Out over a stretch with pauses and choose Audio ▸ Strip
+    Silence…: Threshold -40 dB, Minimum 500 ms, Pads 100/200 ms. The pauses
+    go silent on A1 only (A2 still plays there), nothing moves, ⌘Z brings
+    them back in one step, and an exported AAF shows filler there in Media
+    Composer. With Keep transcribed words on, no word is silenced.

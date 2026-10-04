@@ -115,6 +115,22 @@ impl EditLog {
         Self::init(db)
     }
 
+    /// The history for a reader outside the app (the MCP server): read-only,
+    /// so it never takes the write lock the app's commits need, and never runs
+    /// `init`, which creates tables and writes the schema version. WAL lets it
+    /// read while the app writes. A history from a newer app is refused.
+    pub fn open_read_only(path: &Path) -> Result<Self, AppError> {
+        let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)
+            .map_err(store_error)?;
+        db.busy_timeout(std::time::Duration::from_millis(500)).map_err(store_error)?;
+        let found: Option<String> = db.query_row("SELECT value FROM meta WHERE key='schema_version'", [], |row| row.get(0))
+            .optional().map_err(store_error)?;
+        if found.and_then(|version| version.parse::<i64>().ok()).is_some_and(|version| version > LOG_SCHEMA_VERSION) {
+            return Err(AppError::Invalid("The edit history was written by a newer version of Sauce Bunny. Update the app to read it.".into()));
+        }
+        Ok(Self { db })
+    }
+
     #[cfg(test)]
     pub fn in_memory() -> Result<Self, AppError> {
         Self::init(Connection::open_in_memory().map_err(store_error)?)

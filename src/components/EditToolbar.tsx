@@ -20,10 +20,11 @@ export function EditToolbar(props: Props) {
       aria-label="Ask, Inspector and History" title={`${props.side ? "Hide" : "Show"} Ask, Inspector and History`}><IconPanelLeft size={15} /></button>
     <div className="cp-te-titles">
       <h2 className="cp-te-title">{props.title}</h2>
-      <span className="cp-te-subtitle">{props.subtitle}</span>
+      {/* Named after its sequence, the title would only say it twice. */}
+      {props.subtitle !== props.title && <span className="cp-te-subtitle">{props.subtitle}</span>}
     </div>
     <button type="button" className={`btn btn-ghost cp-te-btn${props.source ? " is-on" : ""}`} aria-pressed={props.source} onClick={props.onSource}
-      title={`${props.source ? "Hide" : "Show"} the source panel`}>Source</button>
+      title={`${props.source ? "Hide" : "Show"} the source text`}>Source text</button>
     <span className="cp-te-toolbar-gap" />
     <button type="button" className={`btn btn-ghost cp-te-btn${props.showRemoved ? " is-on" : ""}`} aria-pressed={props.showRemoved} onClick={props.onShowRemoved}
       title={`${props.showRemoved ? "Hide" : "Show"} removed lines`}>Removed lines</button>

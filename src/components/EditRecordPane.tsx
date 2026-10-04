@@ -13,9 +13,9 @@ type Props = {
  * its timecode and the text settings, above the edit's transcript.
  */
 export function EditRecordPane(props: Props) {
-  return <section className="cp-te-record" aria-label="Edit" style={editTextVars(props.text)}>
+  return <section className="cp-te-record" aria-label="Record" style={editTextVars(props.text)}>
     <div className="cp-te-tools">
-      <EditScrubber label="Edit position" value={props.playhead} max={props.total} text={props.tc} marks={props.marks}
+      <EditScrubber label="Record position" value={props.playhead} max={props.total} text={props.tc} marks={props.marks}
         onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} />
       <span className="cp-te-tools-tc">{props.tc}<span className="cp-te-tools-of"> / {props.totalTc}</span></span>
       <EditTextSettings pane="Edit" style={props.text} onChange={props.onText} />

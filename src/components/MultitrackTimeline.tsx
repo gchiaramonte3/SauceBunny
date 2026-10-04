@@ -23,8 +23,8 @@ type Props = {
   expanded?: Set<string>; onExpand?: (id: string, all?: boolean) => void;
   /** Last zoom, track size and text overlays for this sequence; reported back as they change. */
   initialView?: TimelineView; onViewState?: (view: Required<TimelineView>) => void;
-  /** In and Out, in frames with Out included, drawn on the ruler as Clip draws them. */
-  marks?: { in: number | null; out: number | null };
+  /** In and Out, in frames with Out included, drawn on the ruler as Clip draws them; clearing both (G) from the × on the range. */
+  marks?: { in: number | null; out: number | null }; onClearMarks?: () => void;
   onRetryWaveform?: (trackId: string) => void;
   frame: number; onSeek: (frame: number, trackId?: string) => void; onScrub?: (frame: number) => void;
   onScrubEnd?: (frame: number, resume: boolean) => void; playing?: boolean; showWaveforms?: boolean; transport?: ReactNode;
@@ -52,7 +52,7 @@ function TranscriptStatus({ transcript, owner, duration }: { transcript?: AafTra
     {review ? <IconAlert size={16} /> : <IconCircleCheck size={16} />}
   </span>;
 }
-export function MultitrackTimeline({ document, waveforms, waveformErrors, selected, onSelect, onRename, solo, muted = new Set(), onSolo, onMute, levels = {}, onLevel, onTrackMenu, onOwnerMenu, frame, onSeek, onScrub, onScrubEnd, playing = false, showWaveforms = true, waveformsBuilding = [], transport, detail, onView, expanded = new Set(), onExpand, initialView, onViewState, marks = { in: null, out: null }, onRetryWaveform }: Props) {
+export function MultitrackTimeline({ document, waveforms, waveformErrors, selected, onSelect, onRename, solo, muted = new Set(), onSolo, onMute, levels = {}, onLevel, onTrackMenu, onOwnerMenu, frame, onSeek, onScrub, onScrubEnd, playing = false, showWaveforms = true, waveformsBuilding = [], transport, detail, onView, expanded = new Set(), onExpand, initialView, onViewState, marks = { in: null, out: null }, onClearMarks, onRetryWaveform }: Props) {
   const [zoom, setZoom] = useState(initialView?.zoom ?? 1), [start, setStart] = useState(0), [density, setDensity] = useState(initialView?.density ?? "small");
   const [textTracks, setTextTracks] = useState(() => new Set(initialView?.text ?? [])), [dragging, setDragging] = useState(false), [hover, setHover] = useState<number | null>(null);
   useEffect(() => { onViewState?.({ zoom, density, text: [...textTracks] }); }, [onViewState, zoom, density, textTracks]);
@@ -90,7 +90,7 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
   const playheadTimecode = sequenceTimecode(document.manifest, frame);
   // Out is the last marked frame, so the span ends at its far edge. The ruler
   // clips 8px out, so a mark scrolled off either side simply is not drawn.
-  const rulerMarks = <RulerMarks from={marks.in} to={marks.out === null ? null : marks.out + 1} x={(edge) => `${(edge - viewStart) / span * 100}%`} w={(length) => `${length / span * 100}%`} />;
+  const rulerMarks = <RulerMarks from={marks.in} to={marks.out === null ? null : marks.out + 1} x={(edge) => `${(edge - viewStart) / span * 100}%`} w={(length) => `${length / span * 100}%`} onClear={onClearMarks} />;
   const moveZoom = (next: number) => { setZoom(next); setStart(Math.max(0, Math.min(duration - duration / next, Math.floor(frame - duration / next / 2)))); };
   const pickFrame = (clientX: number, element: HTMLElement) => { const bounds = element.getBoundingClientRect(); return clampFrame(viewStart + (clientX - bounds.left) / Math.max(1, bounds.width) * span, duration); };
   const endGesture = (pointer: number, cancelled = false) => {
@@ -106,7 +106,7 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
       <MultitrackZoom zoom={zoom} onZoom={moveZoom} />
     </div>
     <div className="cp-multitrack-lanes">
-      <div className="cp-multitrack-ruler-row"><div className="cp-multitrack-lane-heading">Track / mic owner</div><div ref={rulerRef} className="cp-multitrack-ruler" aria-hidden="true">{ruler.map((timecode, index) => <span key={index}>{timecode}</span>)}{rulerMarks}</div></div>
+      <div className="cp-multitrack-ruler-row"><div className="cp-multitrack-lane-heading">Track / mic owner</div><div ref={rulerRef} className="cp-multitrack-ruler">{ruler.map((timecode, index) => <span key={index} aria-hidden="true">{timecode}</span>)}{rulerMarks}</div></div>
       <MultitrackPictureLane tracks={document.manifest.graph?.picture_tracks} viewStart={viewStart} viewEnd={viewEnd} span={span} frame={frame} />
       {visibleLanes(document, expanded).map((track) => {
         const child = alternativeLane(document, track.id), ready = laneReady(document, track.id);

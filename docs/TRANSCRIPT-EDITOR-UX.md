@@ -61,7 +61,7 @@ Phase 1, and the text and the tracks are drawn from the same data.
    - drag across the timeline ruler or lanes;
    - drag the rail at the top of the Edit or a Source;
    - hold **Option** and drag across the words themselves.
-9. Press **Ask** (⌘K) and type `pull every line from @Ro`. Pick **@Rosa**,
+9. Open the **Ask** tab and type `pull every line from @Ro`. Pick **@Rosa**,
    add `in @ITM`, and send. Six lines come back; **Add 6 Lines to the End**
    puts them in the edit, and ⌘Z takes them out.
 10. Use the **gear** on the Edit or a Source to change its typeface, size and
@@ -224,11 +224,11 @@ small badge naming it.
   that has focus, and only one thing plays at a time.
 - Words already in the edit read at full strength; the rest are dimmed, so
   what the cut left out is visible at a glance. The footer counts them.
-- **V** splices the source selection into the edit at the caret. **Add to
-  end** appends it. Both are Avid's verbs, on Avid's key.
-- **F** is Match Frame: it finds the edit's selection in the source.
-  **⇧F** is Reverse Match Frame: it finds a source word in the edit, or says
-  it is not used.
+- **V** splices the source selection into the record at the record In mark,
+  or the playhead. **B** overwrites there. **Append** puts it at the end.
+  Avid's verbs, on Avid's keys.
+- Match Frame and Reverse Match Frame are not built yet. **F** is Avid's
+  Clear Out, as it is in AAF Audio, so Match Frame will need another key.
 - Overwrite (B), Lift (Z) and Extract (X) on marked ranges are Phase 1 work,
   not in the prototype.
 
@@ -370,7 +370,7 @@ not be fetched from this session.)
 
 The prototype holds this in memory (`design-system/transcript-editor-history.ts`,
 pure and tested), because the catalog may not write to disk. The panel is
-**History**, a dockable tab (⌘Y, or the clock beside undo and redo).
+**History**, a tab in the left column (⌘Y).
 
 **In the app: a database.** SQLite through `rusqlite` (MIT, `bundled`, so no
 system library), written only from Rust:
@@ -470,7 +470,7 @@ Four columns of tabs over a full-width timeline:
   - The left-panel toggle and the title lead; the right-panel toggle trails.
   - Undo and redo name what they will do.
   - ⌃⌘S toggles the left panel and ⌃⌘I the right, matching SwiftUI's
-    `SidebarCommands` and `InspectorCommands`. ⌘K opens Ask.
+    `SidebarCommands` and `InspectorCommands`. ⌘K is the app's command palette, not Ask.
 - Nothing critical lives only in the timeline or at the bottom of the window,
   because people drag windows past the bottom of the screen. Every timeline
   action also has a key or an inspector button.

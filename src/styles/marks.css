@@ -56,3 +56,26 @@
 }
 .cp-mark.in::before  { right: 100%; clip-path: var(--mark-wing-l); }
 .cp-mark.out::before { left:  100%; clip-path: var(--mark-wing-r); }
+
+/* Clear (G) on a closed range, at its Out end: clearing is something you can
+   see and click, not only a key. Neutral, never the marker violet, so it
+   reads as a control on the mark rather than part of it. */
+.cp-mark-clear {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  margin-top: -12px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--r-sm);
+  background: var(--bg-3);
+  color: var(--fg-2);
+  font-size: var(--text-md);
+  line-height: var(--leading-none);
+  cursor: pointer;
+}
+.cp-mark-clear:hover { background: var(--bg-4); color: var(--fg-0); }

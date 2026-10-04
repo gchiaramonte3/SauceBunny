@@ -50,6 +50,7 @@ pub mod llm;
 pub use llm::*;
 pub mod cloud_ai;
 pub use cloud_ai::*;
+pub(crate) mod openai_responses;
 pub mod video_intelligence;
 pub use video_intelligence::*;
 pub mod session_key;
@@ -60,6 +61,10 @@ pub mod review_grant;
 pub use review_grant::*;
 pub mod edits;
 pub use edits::*;
+pub mod assistant;
+pub use assistant::*;
+pub mod assistant_chat;
+pub use assistant_chat::*;
 // Tier B bridge (no invoke commands of its own; used by stream_proxy + session).
 pub mod peer_stream;
 pub mod ndi;

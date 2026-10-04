@@ -39,15 +39,15 @@ it("exports an all-untimed result and does not mislabel it as no speech", () => 
 it("opens on a person, supports all voices and reaches every person from the tabs", () => {
   const document = fixture(); document.transcripts.push({ ...multitrackTranscript("track-2"), cues: [{ ...multitrackTranscript().cues[0], text: "Sam's answer." }] });
   const seek = vi.fn(); render(<MultitrackTranscript document={document} frame={250} solo={new Set()} onSeek={seek} />);
-  expect(screen.getByRole("tab", { name: "Alex" }).getAttribute("aria-selected")).toBe("true");
+  expect(screen.getByRole("tab", { name: "A1 Alex" }).getAttribute("aria-selected")).toBe("true");
   expect(screen.queryByText("Sam's answer.")).toBeNull();
-  fireEvent.click(screen.getByRole("tab", { name: "Sam mic" }));
+  fireEvent.click(screen.getByRole("tab", { name: "A2 Sam mic" }));
   expect(screen.getByRole("tabpanel", { name: "Sam mic" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /Sam's answer/ })); expect(seek).toHaveBeenCalledWith(239, "track-2");
   fireEvent.click(screen.getByRole("tab", { name: "All voices" }));
   expect(screen.getAllByRole("button", { name: /answer/ })).toHaveLength(2);
   fireEvent.keyDown(screen.getByRole("tab", { name: "All voices" }), { key: "End" });
-  expect(screen.getByRole("tab", { name: "Room" }).getAttribute("aria-selected")).toBe("true");
+  expect(screen.getByRole("tab", { name: "A3 Room" }).getAttribute("aria-selected")).toBe("true");
 });
 it("reveals the first saved text automatically until a person is explicitly selected", () => {
   const document = multitrackFixture(), props = { frame: 0, solo: new Set<string>(), onSeek: vi.fn() };
@@ -55,7 +55,7 @@ it("reveals the first saved text automatically until a person is explicitly sele
   const saved = { ...document, transcripts: [multitrackTranscript("track-2")] };
   view.rerender(<MultitrackTranscript {...props} document={saved} />);
   expect(screen.getByRole("tabpanel", { name: "Sam mic" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("tab", { name: "Room" }));
+  fireEvent.click(screen.getByRole("tab", { name: "A3 Room" }));
   view.rerender(<MultitrackTranscript {...props} document={{ ...saved, transcripts: [...saved.transcripts, multitrackTranscript()] }} />);
   expect(screen.getByRole("tabpanel", { name: "Room" })).toBeTruthy();
 });
@@ -91,10 +91,10 @@ it("keeps the chosen person when their mic is renamed", () => {
   const document = fixture(); document.transcripts.push({ ...multitrackTranscript("track-2"), cues: [{ ...multitrackTranscript().cues[0], text: "Sam's answer." }] });
   const props = { frame: 0, solo: new Set<string>(), onSeek: vi.fn() };
   const view = render(<MultitrackTranscript {...props} document={document} />);
-  fireEvent.click(screen.getByRole("tab", { name: "Sam mic" }));
+  fireEvent.click(screen.getByRole("tab", { name: "A2 Sam mic" }));
   const renamed = { ...document, labels: [...document.labels, { track_id: "track-2", owner_name: "Samantha", cast_member_id: null, color: null }] };
   view.rerender(<MultitrackTranscript {...props} document={renamed} />);
-  expect(screen.getByRole("tab", { name: "Samantha" }).getAttribute("aria-selected")).toBe("true");
+  expect(screen.getByRole("tab", { name: "A2 Samantha" }).getAttribute("aria-selected")).toBe("true");
   expect(screen.getByText("Sam's answer.")).toBeTruthy();
 });
 it("does not reformat fixed transcript clocks on playback ticks; highlighting and new data stay live", () => {

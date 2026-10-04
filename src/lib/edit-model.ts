@@ -253,6 +253,39 @@ export function spliceIn(edit: Timeline, source: string, srcIn: number, srcOut: 
   return { ...split.edit, segments };
 }
 
+/**
+ * Overwrite (Avid's B): the source range replaces what is at the program
+ * position for its own length, on every track, and nothing after it moves.
+ * Past the end of the edit it simply runs on, as Avid's does.
+ */
+export function overwrite(edit: Timeline, source: string, srcIn: number, srcOut: number, program: number, tracks?: string[]): Timeline {
+  if (srcOut <= srcIn) return edit;
+  const end = Math.min(programDuration(edit), program + srcOut - srcIn);
+  const cleared = end > program ? extractProgram(edit, program, end).edit : edit;
+  return spliceIn(cleared, source, srcIn, srcOut, program, tracks);
+}
+
+/**
+ * Where a splice lands with Snap on: the program position nearest `program`
+ * that is not inside a word, so a cut never lands mid-word. Candidates are the
+ * edit's start and end, every edit point, and the middle of each gap between
+ * two words that play one after another.
+ */
+export function snapToGap(edit: Timeline, placed: PlacedWord[], program: number): number {
+  const total = programDuration(edit);
+  const candidates = [0, total, ...segmentStarts(edit)];
+  const audible = placed.filter((item) => !item.muted);
+  // Overtalk overlaps: a gap starts where the LAST word still sounding ends.
+  let reach = audible[0]?.programEnd ?? 0;
+  for (const item of audible.slice(1)) {
+    if (item.programStart >= reach - 1e-6) candidates.push((reach + item.programStart) / 2);
+    reach = Math.max(reach, item.programEnd);
+  }
+  const inside = audible.find((item) => program > item.programStart + 1e-6 && program < item.programEnd - 1e-6);
+  if (!inside) return Math.max(0, Math.min(total, program));
+  return candidates.reduce((best, at) => Math.abs(at - program) < Math.abs(best - program) ? at : best, candidates[0]);
+}
+
 /** Add Edit: cut every track at a program position and remove nothing. */
 export function addEdit(edit: Timeline, program: number): Timeline {
   const split = splitAt(edit, program);

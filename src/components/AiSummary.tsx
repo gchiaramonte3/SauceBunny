@@ -3,8 +3,7 @@ import type { CutMarkerChange } from "../lib/cut-markers";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { parseSrt, groupIntoTurns, fmtTime } from "../lib/srt";
-import { loadSpeakerOverrides, prepareCues, resolveSpeakerName, SPEAKERS_CHANGED_EVENT } from "./transcript/helpers";
+import { modelTranscript, SPEAKERS_CHANGED_EVENT } from "./transcript/helpers";
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
 import { ensureLocalAiServer, selectLocalAiModel } from "../lib/local-ai-server";
 import { loadAiProvider, cloudChat } from "../lib/ai-provider";
@@ -385,37 +384,11 @@ function TextSummary({
   // attribute points by name — works for any model.
   const transcriptForModel = useMemo(() => {
     if (!raw) return null;
-    const overrides = loadSpeakerOverrides(transcriptPath);
-    let turns;
-    // Per-cue reassignments reach the model too. Before this they could not:
-    // the old per-TURN layer was invisible to anything that re-parsed the
-    // file, so a summary could attribute a line to the wrong person.
-    try { turns = groupIntoTurns(prepareCues(parseSrt(raw), overrides)); } catch { return null; }
-    if (!turns.length) return null;
-    const hasSpeakers = turns.some((t) => !!t.speaker);
-    const lines = turns.map((t) => {
-      const name = t.speaker ? resolveSpeakerName(t.speaker, overrides) : null;
-      const who = name ? `${name}: ` : "";
-      return `[${fmtTime(t.start)}] ${who}${t.cues.map((c) => c.text).join(" ")}`;
-    });
-    const text = lines.join("\n");
-    // Budget: ~3.5 chars/token, keep ~65% of ctx for the transcript, rest for chat.
     // Cloud models have large contexts; don't shrink the transcript to the local
     // server's ctx when a cloud provider is active (mirrors ReaderAnalysis' 32k).
-    const ctx = loadAiProvider() === "local" ? (server?.ctx ?? 16384) : 32000;
-    const budget = Math.floor(ctx * 3.5 * 0.65);
-    const truncated = text.length > budget;
-    let clipped = text;
-    if (truncated) {
-      clipped = text.slice(0, budget);
-      // Don't end on a lone high surrogate (a split emoji / astral char) — it
-      // would encode to a replacement char in the request body.
-      const last = clipped.charCodeAt(clipped.length - 1);
-      if (last >= 0xd800 && last <= 0xdbff) clipped = clipped.slice(0, -1);
-    }
-    // `lines` is the UNCLIPPED per-turn list — the chapters run windows it
-    // itself (sampled evenly across the duration, not head-truncated).
-    return { text: clipped, truncated, hasSpeakers, lines };
+    // `lines` comes back UNCLIPPED: the chapters run windows it itself (sampled
+    // evenly across the duration, not head-truncated).
+    return modelTranscript(raw, loadAiProvider() === "local" ? (server?.ctx ?? 16384) : 32000, transcriptPath);
   }, [raw, server?.ctx, transcriptPath, speakersTick]); // eslint-disable-line react-hooks/exhaustive-deps -- speakersTick is a mutation counter; renaming reads localStorage, which the linter can't see
 
   useEffect(() => {

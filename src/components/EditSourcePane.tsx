@@ -23,8 +23,10 @@ type Props = {
   range: [number, number] | null; onRange: (range: [number, number] | null) => void; match: string | null;
   /** Something is marked, as text or as In and Out on the source timeline. */
   canInsert: boolean;
+  /** The source's In and Out (seconds), shown on its rail and, when set by I and O, on the words between them. */
+  marks: { in: number | null; out: number | null };
   playhead: number; playing: boolean; onPlay: () => void; onScrub: (seconds: number) => void; onScrubStart: () => void; onScrubEnd: () => void;
-  text: EditTextStyle; onText: (style: EditTextStyle) => void; onInsert: () => void; onAppend: () => void;
+  text: EditTextStyle; onText: (style: EditTextStyle) => void; onPlace: (how: "insert" | "append" | "overwrite") => void;
 };
 
 /**
@@ -32,8 +34,8 @@ type Props = {
  * playhead, read a person at a time through AAF Audio's transcript tabs.
  * Words already in the edit read at full strength and the rest are dimmed,
  * so what the cut left behind shows at a glance. Click a word to park the
- * source there, ⌥-drag to scrub, select a line and press V to put it in the
- * edit at the caret, the way a splice-in works in Media Composer.
+ * source there, ⌥-drag to scrub, select a line and press V to splice it in
+ * at the record playhead, or B to overwrite there, as in Media Composer.
  */
 export function EditSourcePane(props: Props) {
   const { source, speakers, colors, fps, used, range, placed } = props;
@@ -68,7 +70,7 @@ export function EditSourcePane(props: Props) {
     <div className="cp-te-tools">
       <button type="button" className="cp-icon-btn cp-te-play" aria-label={props.playing ? `Pause ${source.short}` : `Play ${source.short}`}
         title={props.playing ? "Pause the source (Space)" : "Play the source (Space)"} onClick={props.onPlay}>{props.playing ? <IconPause size={14} /> : <IconPlay size={14} />}</button>
-      <EditScrubber label={`${source.short} position`} value={props.playhead} max={source.duration} text={editTc(props.playhead, fps, source.startFrames)}
+      <EditScrubber label={`${source.short} position`} value={props.playhead} max={source.duration} text={editTc(props.playhead, fps, source.startFrames)} range={props.marks}
         onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} />
       <span className="cp-te-tools-tc">{editTc(props.playhead, fps, source.startFrames)}</span>
       <EditTextSettings pane="Source" style={props.text} onChange={props.onText} />
@@ -116,8 +118,9 @@ export function EditSourcePane(props: Props) {
           <p className="cp-te-src-text">{paragraph.words.map((item, position) => {
             const index = first + position;
             const chosen = range != null && index >= range[0] && index <= range[1];
+            const marked = !range && props.marks.in != null && props.marks.out != null && item.word.start >= props.marks.in - 1e-6 && item.word.end <= props.marks.out + 1e-6;
             return <span key={item.word.id}><span data-src-index={index}
-              className={`cp-te-src-word${used.has(item.word.id) ? " is-used" : ""}${chosen ? " is-selected" : ""}${props.match === item.word.id ? " is-match" : ""}${current === item.word.id ? " is-current" : ""}`}>
+              className={`cp-te-src-word${used.has(item.word.id) ? " is-used" : ""}${chosen ? " is-selected" : ""}${marked ? " is-marked" : ""}${props.match === item.word.id ? " is-match" : ""}${current === item.word.id ? " is-current" : ""}`}>
               {props.corrections[item.word.id] ?? item.word.text}</span>{" "}</span>;
           })}</p>
         </div>;
@@ -127,10 +130,9 @@ export function EditSourcePane(props: Props) {
       <span className="cp-te-pane-note" aria-live="polite">{range ? `${(range[1] - range[0] + 1).toLocaleString()} selected`
         : `${inEdit.toLocaleString()}/${count.toLocaleString()}${person ? ` of ${person.name}'s words` : ""} used`}</span>
       <div className="cp-te-src-actions">
-        <button type="button" className="btn btn-ghost cp-te-btn" disabled={!props.canInsert} onClick={props.onInsert}
-          title="Insert at the edit's caret (V)">Insert<kbd className="cp-te-kbd">V</kbd></button>
-        <button type="button" className="btn btn-ghost cp-te-btn" disabled={!props.canInsert} onClick={props.onAppend}
-          title="Append to the edit">Append</button>
+        {([["insert", "Insert", "V", "Insert at the record playhead (V)"], ["overwrite", "Overwrite", "B", "Overwrite at the record playhead (B)"], ["append", "Append", null, "Append to the end of the record"]] as const).map(([how, label, key, title]) =>
+          <button key={how} type="button" className="btn btn-ghost cp-te-btn" disabled={!props.canInsert} onClick={() => props.onPlace(how)}
+            title={props.canInsert ? title : "Select words or mark In and Out in the source first"}>{label}{key && <kbd className="cp-te-kbd">{key}</kbd>}</button>)}
       </div>
     </footer>
   </section>;
