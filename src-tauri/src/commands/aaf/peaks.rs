@@ -115,12 +115,17 @@ pub fn query(path: &Path, first: u64, end: u64, expected_samples: u64, hz: u32) 
 /// Where a track's overview pyramid lives: the native reader's, or the one
 /// built from linked (NEXIS) media, whichever this document uses.
 pub fn overview_path(app: &AppHandle, document: &AafDocument, track: &str) -> Result<std::path::PathBuf, AppError> {
-    let cache = store::cache(app)?;
-    Ok(if super::linked_audio::needed(document) {
+    Ok(overview_in(&store::cache(app)?, document, track))
+}
+
+/// The overview's file inside a known AAF cache folder, for callers with no
+/// `AppHandle` (the accuracy scorer, `sauce-bunny --eval-ownership`).
+pub fn overview_in(cache: &Path, document: &AafDocument, track: &str) -> std::path::PathBuf {
+    if super::linked_audio::needed(document) {
         cache.join(format!("{}.peaks-v2.bin", store::cache_key(document, track, "linked-pyramid")))
     } else {
         cache.join(format!("{}.peaks-v1.bin", store::cache_key(document, track, "pyramid")))
-    })
+    }
 }
 
 /// The pyramid's finest level whole, for speech analysis: (pairs, hz, bucket).

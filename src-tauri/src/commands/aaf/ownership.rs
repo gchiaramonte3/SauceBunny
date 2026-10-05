@@ -39,10 +39,22 @@ pub struct AafOwnership {
     /// How many mic owners' voices the voice check learned (0 until it runs).
     #[serde(default)]
     pub voices: u32,
+    /// How far apart this document's mics are: the median of how much louder
+    /// the loudest copy of a shared word is than the next (`bleed::separation`).
+    /// Under about 3 dB, levels settle few lines and the reader says so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub separation_db: Option<f32>,
 }
 
 /// Where a document's answer is cached, from the app's support folder. Also
 /// read by the context layer, which has a path but no `AppHandle`.
+/// A document's waveform overviews that exist in an AAF cache folder, for
+/// callers with no `AppHandle`.
+pub fn overviews_in(cache: &Path, document: &AafDocument) -> Vec<(String, PathBuf)> {
+    document.manifest.tracks.iter().map(|track| (track.id.clone(), peaks::overview_in(cache, document, &track.id))).filter(|(_, path)| path.is_file()).collect()
+}
+
 pub fn cache_file(app_data: &Path, document_id: &str) -> PathBuf {
     app_data.join("ownership").join(format!("{document_id}.json"))
 }
@@ -133,7 +145,8 @@ pub fn analyse(document: &AafDocument, overviews: &[(String, PathBuf)]) -> Analy
 /// Everything after the reads: the resolver, then the voice check's calls on
 /// words the resolver was unsure of, then the editor's calls, which win.
 pub fn compute(document: &AafDocument, overviews: &[(String, PathBuf)], missing: Vec<String>, stamp: String, voices: Option<&super::voices::Voiceprints>) -> Result<AafOwnership, AppError> {
-    let Analysis { mut labels, cue_lengths, measured, .. } = analyse(document, overviews);
+    let Analysis { mut labels, cue_lengths, measured, channels, words } = analyse(document, overviews);
+    let separation_db = bleed::separation(&channels, &words).map(|gap| (gap * 10.0).round() / 10.0);
     for decision in voices.iter().flat_map(|voices| voices.decisions.iter()) {
         let key = (decision.track_id.clone(), decision.cue_id.clone(), decision.index);
         if labels.get(&key).is_some_and(|word| word.label == AafOwnershipLabel::Unsure) { labels.insert(key, decision.clone()); }
@@ -159,7 +172,7 @@ pub fn compute(document: &AafDocument, overviews: &[(String, PathBuf)], missing:
     let mut listed: Vec<AafWordOwnership> = labels.into_values().filter(|word| word.label != AafOwnershipLabel::Owner || word.manual).collect();
     listed.sort_by(|a, b| (&a.track_id, &a.cue_id, a.index).cmp(&(&b.track_id, &b.cue_id, b.index)));
     Ok(AafOwnership { document_id: document.id.clone(), measured, missing, words: listed, counts, stamp,
-        warnings: voices.map(|voices| voices.warnings.clone()).unwrap_or_default(), voices: voices.map_or(0, |voices| voices.voices.len() as u32) })
+        warnings: voices.map(|voices| voices.warnings.clone()).unwrap_or_default(), voices: voices.map_or(0, |voices| voices.voices.len() as u32), separation_db })
 }
 
 #[cfg(test)]

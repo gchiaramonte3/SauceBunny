@@ -27,8 +27,13 @@ pub const ENROL_MIN_SECONDS: f64 = 2.0;
 pub const ENROL_SECONDS: f64 = 60.0;
 /// Learned from one window of a mic (the most it can extract at once).
 pub const WINDOW_SECONDS: f64 = 600.0;
-/// A voice matches when its cosine reaches this...
-pub const MATCH: f32 = 0.5;
+/// A voice matches when its cosine reaches this... MEASURED on AFF BANK 1
+/// (20 lavs, 4 minutes): the same person's two halves scored 0.29 to 0.7
+/// (median 0.54), different people 0.09 median and 0.30 at most, and on 20
+/// held-out 1.5 s clips 0.40 called 35% right and none wrong (0.50: 20% right;
+/// 0.30: 40% right, 5% wrong). Synthetic speech had suggested 0.5; real lavs
+/// are noisier. A small sample: phase 0's scenes should move it.
+pub const MATCH: f32 = 0.4;
 /// ...and beats the next voice by this much.
 pub const MARGIN: f32 = 0.1;
 /// Two owners this alike cannot be told apart by voice.
@@ -39,8 +44,10 @@ pub const SWAP: f32 = 0.5;
 pub const WORD_SECONDS: f64 = 1.5;
 /// The owner's mic hears a word first, by a few milliseconds of air.
 pub const LEAD_MS: f32 = 2.0;
-/// A check stays bounded on a sequence full of unsure words.
-pub const MAX_WORDS: usize = 600;
+/// A check stays bounded on a sequence full of unsure words: about a 3-hour,
+/// 20-mic sequence whose mics barely separate (AFF BANK 1 had 2,000 unsure
+/// words a minute). Words are heard a ten-minute window at a time.
+pub const MAX_WORDS: usize = 100_000;
 const HZ: f64 = 16_000.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,10 +88,15 @@ pub fn centroid(prints: &[Vec<f32>]) -> Option<Vec<f32>> {
 /// delta dB) in time order: words at least `ENROL_DB` louder than every other
 /// mic, joined across gaps under 0.3 s, kept when at least 2 s long.
 pub fn stretches(words: &[(i64, i64, f32)]) -> Vec<(i64, i64)> {
-    let (gap, shortest) = ((0.3 * HZ) as i64, (ENROL_MIN_SECONDS * HZ) as i64);
+    join(&words.iter().filter(|(_, _, delta)| *delta >= ENROL_DB).map(|(s, e, _)| (*s, *e)).collect::<Vec<_>>(), ENROL_MIN_SECONDS)
+}
+
+/// Spans in time order joined across gaps under 0.3 s, kept when at least
+/// `shortest` seconds long.
+pub fn join(spans: &[(i64, i64)], shortest: f64) -> Vec<(i64, i64)> {
+    let (gap, shortest) = ((0.3 * HZ) as i64, (shortest * HZ) as i64);
     let mut out: Vec<(i64, i64)> = Vec::new();
-    for &(start, end, delta) in words {
-        if delta < ENROL_DB { continue; }
+    for &(start, end) in spans {
         match out.last_mut() {
             Some(last) if start - last.1 <= gap => last.1 = last.1.max(end),
             _ => out.push((start, end)),
@@ -93,6 +105,10 @@ pub fn stretches(words: &[(i64, i64, f32)]) -> Vec<(i64, i64)> {
     out.retain(|(start, end)| end - start >= shortest);
     out
 }
+
+/// Below this much dominant speech, a voice is learned from the words only
+/// this mic heard instead.
+pub const ENROL_FALLBACK_SECONDS: f64 = 15.0;
 
 /// The window of `WINDOW_SECONDS` inside [from, to) holding the most stretch
 /// time, and the stretches in it up to `ENROL_SECONDS`.
@@ -198,6 +214,7 @@ pub async fn check(app: &AppHandle, document_id: &str, job: &str) -> Result<owne
     let total = frame_samples(document.manifest.duration_frames, &document.manifest.edit_rate)?;
     let at: HashMap<(String, String, u32), (i64, i64)> = analysis.words.iter().map(|w| ((w.track_id.clone(), w.cue_id.clone(), w.index), (w.start, w.end))).collect();
     let tracks: Vec<String> = document.transcripts.iter().map(|t| t.track_id.clone()).filter(|t| analysis.measured.contains(t)).collect();
+    let unique = bleed::unique_words(&analysis.words);
 
     // 1. Each owner's voice, early in the day and (on a long sequence) late.
     let mut voices = Vec::new();
@@ -207,7 +224,15 @@ pub async fn check(app: &AppHandle, document_id: &str, job: &str) -> Result<owne
         let mut owned: Vec<(i64, i64, f32)> = analysis.labels.values().filter(|w| &w.track_id == track && w.label == AafOwnershipLabel::Owner && !w.manual)
             .filter_map(|w| at.get(&(w.track_id.clone(), w.cue_id.clone(), w.index)).map(|(s, e)| (*s, *e, w.delta_db))).collect();
         owned.sort_by_key(|(start, _, _)| *start);
-        let found = stretches(&owned);
+        let mut found = stretches(&owned);
+        // When no mic clearly dominates (AFF BANK 1: none was 15 dB louder
+        // for two seconds), learn the voice from what only this mic heard.
+        if (found.iter().map(|(s, e)| e - s).sum::<i64>() as f64) < ENROL_FALLBACK_SECONDS * HZ {
+            let mut own_words: Vec<(i64, i64)> = analysis.words.iter().filter(|w| &w.track_id == track && unique.contains(&(w.track_id.clone(), w.cue_id.clone(), w.index)))
+                .map(|w| (w.start, w.end)).collect();
+            own_words.sort_unstable();
+            found = join(&own_words, 1.5);
+        }
         let Some((early_at, early)) = best_window(&found, 0, total) else { continue };
         let mut learned = Vec::new();
         let half = total / 2;
@@ -248,68 +273,72 @@ pub async fn check(app: &AppHandle, document_id: &str, job: &str) -> Result<owne
         }
     }
 
-    // 3. The unsure words, in clusters a mic at a time, with the loudest other
-    //    mic over the same stretch for who-heard-it-first.
+    // 3. The unsure words, a mic and a ten-minute window at a time: one clip
+    //    per window, every word in it heard by voice in one sidecar call, and
+    //    the loudest other mic's clip only for words the voice cannot settle.
+    //    On AFF BANK 1, whose mics sit 0.8 dB apart, 80% of words were unsure,
+    //    so this has to be the window's cost, not a clip per word.
     let mut unsure: Vec<&AafWordOwnership> = analysis.labels.values().filter(|w| w.label == AafOwnershipLabel::Unsure && voices.iter().any(|v| v.track_id == w.track_id)).collect();
-    unsure.sort_by_key(|w| at.get(&(w.track_id.clone(), w.cue_id.clone(), w.index)).map(|(s, _)| *s).unwrap_or(0));
+    unsure.sort_by_key(|w| (w.track_id.clone(), at.get(&(w.track_id.clone(), w.cue_id.clone(), w.index)).map(|(s, _)| *s).unwrap_or(0)));
     unsure.truncate(MAX_WORDS);
-    let by_track = unsure.iter().fold(HashMap::<&str, Vec<&AafWordOwnership>>::new(), |mut map, w| { map.entry(w.track_id.as_str()).or_default().push(w); map });
+    let window = (WINDOW_SECONDS * HZ) as i64;
+    let mut by_window: std::collections::BTreeMap<(String, i64), Vec<&AafWordOwnership>> = std::collections::BTreeMap::new();
+    for word in &unsure {
+        let (start, _) = at[&(word.track_id.clone(), word.cue_id.clone(), word.index)];
+        by_window.entry((word.track_id.clone(), start / window)).or_default().push(word);
+    }
     let scores_for = |print: &[f32]| -> Vec<(String, f32)> { voices.iter().map(|v| (v.track_id.clone(), cos(print, &v.early))).collect() };
+    let text_of = |w: &AafWordOwnership| analysis.words.iter().find(|x| x.track_id == w.track_id && x.cue_id == w.cue_id && x.index == w.index).map(|x| x.text.clone()).unwrap_or_default();
     let mut decisions = Vec::new();
-    let (pad, join, longest) = ((0.75 * HZ) as i64, (20.0 * HZ) as i64, (60.0 * HZ) as i64);
-    for (done, (track, words)) in by_track.iter().enumerate() {
+    let pad = (0.25 * HZ) as i64;
+    let windows = by_window.len();
+    for (done, ((track, slot), words)) in by_window.into_iter().enumerate() {
         process::check_cancelled(app, job)?;
-        process::progress(app, job, Some(track), "checking-voices", done as i64, by_track.len() as i64);
-        // Words close together share one clip: within 20 s of the last, and
-        // no clip longer than a minute.
-        let span_of = |w: &AafWordOwnership| at[&(w.track_id.clone(), w.cue_id.clone(), w.index)];
-        let mut clusters: Vec<Vec<&AafWordOwnership>> = Vec::new();
-        for word in words {
-            let (start, _) = span_of(word);
-            let fits = clusters.last().is_some_and(|cluster| {
-                let (first, _) = span_of(cluster[0]);
-                let (_, last) = span_of(cluster[cluster.len() - 1]);
-                start - last <= join && start - first <= longest
-            });
-            match clusters.last_mut() {
-                Some(cluster) if fits => cluster.push(word),
-                _ => clusters.push(vec![word]),
+        process::progress(app, job, Some(&track), "checking-voices", done as i64, windows as i64);
+        let (from, to) = (slot * window, ((slot + 1) * window).min(total));
+        let (wav, _work, offset) = clip(app, &document, &track, from, to, job).await?;
+        let spans: Vec<(i64, i64)> = words.iter().map(|w| at[&(w.track_id.clone(), w.cue_id.clone(), w.index)]).collect();
+        let listened: Vec<(f64, f64)> = spans.iter().map(|(s, e)| {
+            let middle = (s + e) as f64 / 2.0 - offset as f64;
+            (((middle / HZ) - WORD_SECONDS / 2.0).max(0.0), (middle / HZ) + WORD_SECONDS / 2.0)
+        }).collect();
+        let heard = prints(app, job, &wav, &listened).await?;
+        let mut undecided = Vec::new();
+        for ((word, span), print) in words.iter().zip(&spans).zip(heard) {
+            match print.as_deref().map(|print| decide(&track, &scores_for(print), &twins)).unwrap_or(Call::Unknown) {
+                Call::Owner => decisions.push(AafWordOwnership { label: AafOwnershipLabel::Owner, heard_on: None, ..(*word).clone() }),
+                // Another owner's voice on this mic: when their own mic heard
+                // the same word, this copy is bleed from it; when it did not,
+                // they leaned into this mic, and the line stays visible as theirs.
+                Call::Other(other) => {
+                    let label = if bleed::heard_on(&analysis.words, &other, span.0, &text_of(word)) { AafOwnershipLabel::Bleed } else { AafOwnershipLabel::Other };
+                    decisions.push(AafWordOwnership { label, heard_on: Some(other), ..(*word).clone() });
+                }
+                Call::Unknown => undecided.push((*word, *span)),
             }
         }
-        for cluster in clusters {
-            let spans: Vec<(i64, i64)> = cluster.iter().map(|w| span_of(w)).collect();
-            let (from, to) = ((spans[0].0 - pad).max(0), (spans[spans.len() - 1].1 + pad).min(total));
-            let (wav, _work, offset) = clip(app, &document, track, from, to, job).await?;
-            let windows: Vec<(f64, f64)> = spans.iter().map(|(s, e)| {
-                let middle = (s + e) as f64 / 2.0 - offset as f64;
-                (((middle / HZ) - WORD_SECONDS / 2.0).max(0.0), (middle / HZ) + WORD_SECONDS / 2.0)
-            }).collect();
-            let heard = prints(app, job, &wav, &windows).await?;
-            // The loudest other mic over the cluster, for the timing check.
-            let rival = analysis.channels.iter().filter(|c| c.track_id != **track)
-                .filter_map(|c| bleed::snr(c, from, to).map(|level| (c.track_id.clone(), level))).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id);
-            let (mine, theirs) = match &rival {
-                Some(rival) => {
-                    let (other, _work2, other_offset) = clip(app, &document, rival, from, to, job).await?;
-                    (audio::read_wav(&wav).ok().map(|s| (s, offset)), audio::read_wav(&other).ok().map(|s| (s, other_offset)))
-                }
-                None => (None, None),
+        // Who heard it first, for what the voice left open: each word against
+        // the loudest other mic over it, one clip per rival in this window.
+        let mine = if undecided.is_empty() { None } else { audio::read_wav(&wav).ok() };
+        let mut rivals: HashMap<String, Option<(Vec<f32>, i64)>> = HashMap::new();
+        for (word, span) in undecided {
+            let Some(mine) = &mine else { break };
+            let Some(rival) = analysis.channels.iter().filter(|c| c.track_id != track)
+                .filter_map(|c| bleed::snr(c, span.0, span.1).map(|level| (c.track_id.clone(), level))).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id) else { continue };
+            if !rivals.contains_key(&rival) {
+                let read = match clip(app, &document, &rival, from, to, job).await {
+                    Ok((other, _work2, other_offset)) => audio::read_wav(&other).ok().map(|samples| (samples, other_offset)),
+                    Err(error) => return Err(error),
+                };
+                rivals.insert(rival.clone(), read);
+            }
+            let Some(Some((theirs, their_offset))) = rivals.get(&rival) else { continue };
+            let cut = |samples: &Vec<f32>, origin: i64| -> Vec<f32> {
+                let (s, e) = ((span.0 - origin - pad).max(0) as usize, ((span.1 - origin + pad).max(0) as usize).min(samples.len()));
+                if s < e { samples[s..e].to_vec() } else { vec![] }
             };
-            for ((word, span), print) in cluster.iter().zip(&spans).zip(heard) {
-                let mut call = print.as_deref().map(|print| decide(track, &scores_for(print), &twins)).unwrap_or(Call::Unknown);
-                if call == Call::Unknown {
-                    if let (Some((a, a_at)), Some((b, b_at))) = (&mine, &theirs) {
-                        let cut = |samples: &Vec<f32>, origin: i64| -> Vec<f32> {
-                            let (s, e) = ((span.0 - origin - pad / 3).max(0) as usize, ((span.1 - origin + pad / 3).max(0) as usize).min(samples.len()));
-                            if s < e { samples[s..e].to_vec() } else { vec![] }
-                        };
-                        if let Some((lead, strength)) = lag_ms(&cut(a, *a_at), &cut(b, *b_at)) {
-                            if lead >= LEAD_MS && strength >= 0.3 { call = Call::Owner; }
-                        }
-                    }
-                }
-                let (label, heard_on) = match call { Call::Owner => (AafOwnershipLabel::Owner, None), Call::Other(track) => (AafOwnershipLabel::Other, Some(track)), Call::Unknown => continue };
-                decisions.push(AafWordOwnership { track_id: word.track_id.clone(), cue_id: word.cue_id.clone(), index: word.index, label, heard_on, delta_db: word.delta_db, manual: false });
+            if let Some((lead, strength)) = lag_ms(&cut(mine, offset), &cut(theirs, *their_offset)) {
+                if lead >= LEAD_MS && strength >= 0.3 { decisions.push(AafWordOwnership { label: AafOwnershipLabel::Owner, heard_on: None, ..word.clone() }); }
             }
         }
     }
@@ -365,7 +394,7 @@ mod tests {
         assert_eq!(decide("rosa", &scores(0.72, 0.10), &none), Call::Owner);
         assert_eq!(decide("rosa", &scores(0.20, 0.70), &none), Call::Other("dev".into()));
         assert_eq!(decide("rosa", &scores(0.55, 0.50), &none), Call::Unknown, "too close to call");
-        assert_eq!(decide("rosa", &scores(0.40, 0.30), &none), Call::Unknown, "matches nobody");
+        assert_eq!(decide("rosa", &scores(0.35, 0.20), &none), Call::Unknown, "matches nobody");
         let twins: HashSet<String> = ["rosa".to_string(), "dev".to_string()].into();
         assert_eq!(decide("rosa", &scores(0.72, 0.10), &twins), Call::Unknown);
     }

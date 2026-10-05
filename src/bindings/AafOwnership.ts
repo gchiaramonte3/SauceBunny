@@ -29,4 +29,10 @@ warnings: Array<string>,
 /**
  * How many mic owners' voices the voice check learned (0 until it runs).
  */
-voices: number, };
+voices: number, 
+/**
+ * How far apart this document's mics are: the median of how much louder
+ * the loudest copy of a shared word is than the next (`bleed::separation`).
+ * Under about 3 dB, levels settle few lines and the reader says so.
+ */
+separation_db?: number, };

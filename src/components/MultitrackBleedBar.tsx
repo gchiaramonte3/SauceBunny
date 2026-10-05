@@ -25,6 +25,7 @@ export function MultitrackBleedBar({ ownership, bleed, hidden, show, onShow, mea
               : `${bleed} ${bleed === 1 ? "line" : "lines"} heard on another mic ${hidden ? "hidden" : "dimmed"}.`}
       {!busy && ready && missing > 0 && ` ${missing} ${missing === 1 ? "mic is" : "mics are"} not measured yet.`}
       {!busy && ready && (ownership?.voices ?? 0) > 0 && ` Voices checked for ${ownership?.voices} people.`}
+      {!busy && ready && ownership?.separation_db != null && ownership.separation_db < 3 && ` These mics hear each other almost equally (a shared line is about ${ownership.separation_db.toFixed(1)} dB louder on one than the next), so levels settle few lines${(ownership.voices ?? 0) > 0 ? "" : "; Check voices can do more"}.`}
     </span>
     {busy ? <button type="button" className="btn btn-ghost" onClick={onCancel}>{measuring ? "Stop measuring" : "Stop checking"}</button>
       : <>{(!ready || missing > 0) && <button type="button" className="btn btn-ghost" onClick={onMeasure}>Measure mics</button>}

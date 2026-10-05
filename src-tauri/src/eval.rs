@@ -202,10 +202,121 @@ fn report(name: &str, s: &Scores) -> String {
 
 fn home() -> PathBuf { std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default() }
 
+/// One mic for `--eval-bleed`: a 16 kHz mono WAV and the words a recognizer
+/// heard on it (the diarize sidecar's `--words` file), both from time zero.
+#[derive(Debug, Deserialize)]
+struct BleedMic { track: String, wav: PathBuf, words: PathBuf }
+
+#[derive(Debug, Deserialize)]
+struct BleedRun { mics: Vec<BleedMic>, #[serde(default)] truth: Option<PathBuf>, #[serde(default)] out: Option<PathBuf>, #[serde(default = "film")] fps: f64 }
+
+#[derive(Deserialize)]
+struct SidecarWord { text: String, start: f64, end: f64 }
+
+/// dB per 20 ms frame straight from 16 kHz samples (the loudest sample in each
+/// frame), the same reading `bleed::frames` takes from a waveform overview.
+pub fn frames_from_samples(samples: &[f32]) -> Vec<f32> {
+    let per = (crate::bleed::FRAME_SECONDS * 16_000.0) as usize;
+    samples.chunks(per).map(|frame| {
+        let peak = frame.iter().fold(0f32, |most, value| most.max(value.abs()));
+        if peak <= 0.0 { -96.0 } else { (20.0 * peak.log10()).max(-96.0) }
+    }).collect()
+}
+
+fn read_wav_16k(path: &Path) -> Result<Vec<f32>, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut at = 12;
+    while at + 8 <= bytes.len() {
+        let size = u32::from_le_bytes([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]]) as usize;
+        if &bytes[at..at + 4] == b"data" {
+            let end = (at + 8 + size).min(bytes.len());
+            return Ok(bytes[at + 8..end].chunks_exact(2).map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0).collect());
+        }
+        at += 8 + size + size % 2;
+    }
+    Err(format!("{}: no audio data", path.display()))
+}
+
+/// `--eval-bleed <run.json>`: the real resolver on real audio, levels measured
+/// from the WAVs themselves. Prints the labels' spread, writes every label to
+/// `out`, and scores against `truth` (the scene CSV format) when given: how
+/// the bleed resolver does on mixes whose answer is known.
+fn bleed_run(path: &str) -> i32 {
+    let run: BleedRun = match std::fs::read(path).map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string())) {
+        Ok(run) => run, Err(error) => { eprintln!("{path}: {error}"); return 2; }
+    };
+    let mut channels = Vec::new();
+    let mut words = Vec::new();
+    for mic in &run.mics {
+        let samples = match read_wav_16k(&mic.wav) { Ok(samples) => samples, Err(error) => { eprintln!("{error}"); return 2; } };
+        let levels = frames_from_samples(&samples);
+        let floors = crate::bleed::floors(&levels);
+        channels.push(crate::bleed::Channel { track_id: mic.track.clone(), levels, floors });
+        let heard: Vec<SidecarWord> = match std::fs::read(&mic.words).map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice(&b).map_err(|e| e.to_string())) {
+            Ok(heard) => heard, Err(error) => { eprintln!("{}: {error}", mic.words.display()); return 2; }
+        };
+        for (index, word) in heard.into_iter().enumerate() {
+            words.push(crate::bleed::Word { track_id: mic.track.clone(), cue_id: format!("w{index}"), index: 0, text: word.text,
+                start: (word.start * 16_000.0) as i64, end: (word.end * 16_000.0) as i64 });
+        }
+    }
+    let labels = crate::bleed::resolve(&channels, &words);
+    if let Some(gap) = crate::bleed::separation(&channels, &words) { println!("separation: the loudest copy of a shared word is {gap:.1} dB above the next (median)"); }
+    let by_word: HashMap<(String, String), &crate::bleed::AafWordOwnership> = labels.iter().map(|label| ((label.track_id.clone(), label.cue_id.clone()), label)).collect();
+    let mut spread: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let hyps: Vec<HypWord> = words.iter().map(|word| {
+        let label = by_word.get(&(word.track_id.clone(), word.cue_id.clone())).map(|label| label.label);
+        *spread.entry(label.map_or("unlabelled".to_string(), |label| format!("{label:?}").to_lowercase())).or_default() += 1;
+        HypWord { track: word.track_id.clone(), start: word.start as f64 / 16_000.0, end: word.end as f64 / 16_000.0, text: word.text.clone(), label }
+    }).collect();
+    println!("labels: {}", spread.iter().map(|(label, count)| format!("{label} {count}")).collect::<Vec<_>>().join(" · "));
+    if let Some(out) = &run.out {
+        let rows: Vec<serde_json::Value> = words.iter().map(|word| {
+            let label = by_word.get(&(word.track_id.clone(), word.cue_id.clone()));
+            serde_json::json!({ "track": word.track_id, "start": word.start as f64 / 16_000.0, "end": word.end as f64 / 16_000.0, "text": word.text,
+                "label": label.map(|l| format!("{:?}", l.label).to_lowercase()), "heard_on": label.and_then(|l| l.heard_on.clone()), "delta_db": label.map(|l| l.delta_db) })
+        }).collect();
+        if let Err(error) = std::fs::write(out, serde_json::to_vec(&rows).unwrap_or_default()) { eprintln!("{}: {error}", out.display()); return 2; }
+    }
+    if let Some(truth) = &run.truth {
+        let references = match std::fs::read_to_string(truth).map_err(|e| e.to_string()).and_then(|text| parse_csv(&text)) { Ok(refs) => refs, Err(error) => { eprintln!("{error}"); return 2; } };
+        print!("{}", report(&truth.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), &score(&references, &hyps, &[], run.fps)));
+    }
+    0
+}
+
+/// `--eval-ownership <document>`: the app's own bleed labels for a whole AAF
+/// Audio document, from its cached waveform overviews, with no window. What
+/// Measure mics computes, printed: the spread of labels, the mics' separation,
+/// and how many cue lines All voices would hide.
+fn ownership_run(id: &str) -> i32 {
+    let roots = Roots::for_home(&home(), None);
+    let document = match crate::commands::aaf::store::load(&roots.multitrack, id) { Ok(document) => document, Err(error) => { eprintln!("{error}"); return 2; } };
+    let cache = home().join("Library").join("Caches").join("com.saucebunny.desktop").join("media").join("aaf");
+    let overviews = crate::commands::aaf::ownership::overviews_in(&cache, &document);
+    println!("{}: {} mics, {} with a waveform overview", document.manifest.name, document.manifest.tracks.len(), overviews.len());
+    let started = std::time::Instant::now();
+    let answer = match crate::commands::aaf::ownership::compute(&document, &overviews, vec![], String::new(), None) { Ok(answer) => answer, Err(error) => { eprintln!("{error}"); return 2; } };
+    let c = &answer.counts;
+    let total = (c.owner + c.bleed + c.overtalk + c.offmic + c.unsure + c.other).max(1);
+    let pct = |n: u32| n as f64 / total as f64 * 100.0;
+    println!("{total} words in {:.1} s: owner {:.1}% · bleed {:.1}% · overtalk {:.1}% · off-mic {:.1}% · unsure {:.1}%",
+        started.elapsed().as_secs_f64(), pct(c.owner), pct(c.bleed), pct(c.overtalk), pct(c.offmic), pct(c.unsure));
+    if let Some(gap) = answer.separation_db { println!("separation: the loudest copy of a shared word is {gap:.1} dB above the next (median)"); }
+    let mut per_cue: HashMap<(String, String), (u32, u32)> = HashMap::new();
+    for word in &answer.words { let entry = per_cue.entry((word.track_id.clone(), word.cue_id.clone())).or_default(); entry.0 += u32::from(word.label == AafOwnershipLabel::Bleed); }
+    let cues: Vec<(String, String, usize)> = document.transcripts.iter().flat_map(|t| t.cues.iter().map(move |cue| (t.track_id.clone(), cue.id.clone(), cue.text.split_whitespace().count()))).collect();
+    let hidden = cues.iter().filter(|(track, cue, count)| per_cue.get(&(track.clone(), cue.clone())).is_some_and(|(bleed, _)| *count > 0 && f64::from(*bleed) / *count as f64 >= 0.6)).count();
+    println!("All voices would hide {hidden} of {} cue lines as bleed", cues.len());
+    0
+}
+
 /// `--eval [dir] [--hyp file]`: score every scene; exit 0 with a report.
 pub fn run(args: &[String]) -> i32 {
     let value = |flag: &str| args.iter().position(|arg| arg == flag).and_then(|at| args.get(at + 1)).filter(|value| !value.starts_with("--")).cloned();
     if args.iter().any(|arg| arg == "--eval-template") { return template(args); }
+    if let Some(path) = value("--eval-bleed") { return bleed_run(&path); }
+    if let Some(id) = value("--eval-ownership") { return ownership_run(&id); }
     let dir = value("--eval").map(PathBuf::from).unwrap_or_else(|| home().join("Documents").join("Sauce Bunny Eval"));
     let ctx = Context::new(Roots::for_home(&home(), None));
     let hyp: Option<Vec<HypWord>> = match value("--hyp") {
@@ -304,6 +415,17 @@ mod tests {
         assert_eq!((s.offmic_words, s.offmic_flagged), (1, 1));
         // The hidden owner word also counts as missed in the accuracy score.
         assert_eq!(s.deletions, 1);
+    }
+
+    #[test]
+    fn levels_from_samples_take_the_loudest_sample_of_each_twenty_milliseconds() {
+        let mut samples = vec![0.001f32; 16_000];
+        samples[400] = 0.5;
+        let frames = frames_from_samples(&samples);
+        assert_eq!(frames.len(), 50);
+        assert!((frames[1] - (-6.02)).abs() < 0.05, "{}", frames[1]);
+        assert!((frames[0] - (-60.0)).abs() < 0.05);
+        assert_eq!(frames_from_samples(&[0.0; 320])[0], -96.0);
     }
 
     #[test]

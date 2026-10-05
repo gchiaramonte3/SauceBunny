@@ -138,11 +138,22 @@ pub fn resolve(channels: &[Channel], words: &[Word]) -> Vec<AafWordOwnership> {
     for word in words { by_track.entry(word.track_id.as_str()).or_default().push((word.start, word.end, normal(&word.text))); }
     for list in by_track.values_mut() { list.sort_by_key(|(start, _, _)| *start); }
     let reach = (MATCH_SECONDS * HZ) as i64;
-    let carries = |track: &str, word: &Word, text: &str| -> bool {
+    let carries = |track: &str, start: i64, text: &str| -> bool {
         let Some(list) = by_track.get(track) else { return false };
-        let first = list.partition_point(|(start, _, _)| *start < word.start - reach);
-        list[first..].iter().take_while(|(start, _, _)| *start <= word.start + reach).any(|(_, _, other)| same_word(text, other))
+        let first = list.partition_point(|(s, _, _)| *s < start - reach);
+        list[first..].iter().take_while(|(s, _, _)| *s <= start + reach).any(|(_, _, other)| same_word(text, other))
     };
+    let tracks: Vec<&str> = by_track.keys().copied().collect();
+    let copies_of = |track: &str, start: i64, text: &str| -> Vec<&str> { tracks.iter().copied().filter(|other| *other != track && carries(other, start, text)).collect() };
+    // Words no other mic heard, by track: someone speaking on their own lav.
+    // Measured on AFF BANK 1: 55% of spoken words were heard on one mic only.
+    let mut unique: HashMap<&str, Vec<(i64, i64)>> = HashMap::new();
+    for (track, list) in &by_track {
+        for (start, end, text) in list {
+            if !text.is_empty() && copies_of(track, *start, text).is_empty() { unique.entry(track).or_default().push((*start, *end)); }
+        }
+    }
+    let speaking = |track: &str, start: i64, end: i64| unique.get(track).is_some_and(|spans| spans.iter().any(|(s, e)| *s < end && start < *e));
     let mut out = Vec::new();
     for word in words {
         let Some(&mine) = index.get(word.track_id.as_str()) else { continue };
@@ -155,25 +166,92 @@ pub fn resolve(channels: &[Channel], words: &[Word]) -> Vec<AafWordOwnership> {
         let label = |label, heard_on: Option<&str>| AafWordOwnership { track_id: word.track_id.clone(), cue_id: word.cue_id.clone(),
             index: word.index, label, heard_on: heard_on.map(str::to_string), delta_db: (delta * 10.0).round() / 10.0, manual: false };
         if delta >= OWNER_DB { out.push(label(AafOwnershipLabel::Owner, None)); continue; }
-        let source = others.iter().filter(|(track, level)| level - own >= BLEED_DB && carries(track, word, &text))
-            .max_by(|a, b| a.1.total_cmp(&b.1));
-        if let Some((track, _)) = source { out.push(label(AafOwnershipLabel::Bleed, Some(track))); continue; }
-        if own < OPEN_DB {
-            // Weak here and weak everywhere, said on several mics: someone with
-            // no lav (crew, a producer), not this mic's owner.
-            let copies = others.iter().filter(|(track, _)| carries(track, word, &text)).count();
-            let quiet = others.iter().all(|(_, level)| *level < OPEN_DB);
-            out.push(label(if copies >= 2 && quiet { AafOwnershipLabel::Offmic } else { AafOwnershipLabel::Unsure }, None));
+        let copies = copies_of(&word.track_id, word.start, &text);
+        if copies.is_empty() {
+            // Only this mic heard it, so no other mic owns it. Ten dB or more
+            // under the loudest mic it is more likely that mic's line misheard
+            // than this owner speaking, so it stays unsure. Otherwise it is the
+            // owner's, and someone else speaking their own words at the same
+            // moment makes it overtalk: two people, each on their own lav.
+            let talking = others.iter().any(|(track, level)| *level >= OPEN_DB && speaking(track, word.start, word.end));
+            out.push(label(if delta <= -OWNER_DB { AafOwnershipLabel::Unsure }
+                else if talking && own >= OPEN_DB { AafOwnershipLabel::Overtalk } else { AafOwnershipLabel::Owner }, None));
             continue;
         }
-        // Open here, near the loudest, and another mic open with different
-        // words: two people talking at once, each loud on their own lav. Both
-        // are kept. Far below the loudest mic is not someone talking over; it
-        // is a copy of another person's line the recognizer heard differently.
-        let talking = delta > -OWNER_DB && others.iter().any(|(track, level)| *level >= OPEN_DB && !carries(track, word, &text));
-        out.push(label(if talking { AafOwnershipLabel::Overtalk } else if delta >= PROBABLE_DB { AafOwnershipLabel::Owner } else { AafOwnershipLabel::Unsure }, None));
+        let source = others.iter().filter(|(track, level)| level - own >= BLEED_DB && copies.contains(track))
+            .max_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((track, _)) = source { out.push(label(AafOwnershipLabel::Bleed, Some(track))); continue; }
+        // Faint on every mic that heard it, and heard on three or more: someone
+        // with no lav (crew, a producer). Faint means under OPEN_DB - 4, since
+        // quiet lavs put ordinary speech just under OPEN_DB (AFF BANK 1's own
+        // words sit at about 11 dB over the floor).
+        let faint = OPEN_DB - 4.0;
+        let everywhere = own < faint && copies.iter().all(|track| others.iter().any(|(other, level)| other == track && *level < faint));
+        if copies.len() >= 2 && everywhere { out.push(label(AafOwnershipLabel::Offmic, None)); continue; }
+        out.push(label(if delta >= PROBABLE_DB && own >= OPEN_DB { AafOwnershipLabel::Owner } else { AafOwnershipLabel::Unsure }, None));
     }
     out
+}
+
+/// The words no other mic heard, by (track, cue, index): someone speaking on
+/// their own lav. The voice check learns voices from these when no mic
+/// clearly dominates (AFF BANK 1: no stretch was 15 dB louder than the rest).
+pub fn unique_words(words: &[Word]) -> std::collections::HashSet<(String, String, u32)> {
+    let reach = (MATCH_SECONDS * HZ) as i64;
+    let mut sorted: Vec<&Word> = words.iter().collect();
+    sorted.sort_by_key(|word| word.start);
+    let mut out = std::collections::HashSet::new();
+    for (i, word) in sorted.iter().enumerate() {
+        let text = normal(&word.text);
+        if text.is_empty() { continue; }
+        let first = sorted.partition_point(|other| other.start < word.start - reach);
+        let shared = sorted[first..].iter().take_while(|other| other.start <= word.start + reach).enumerate()
+            .any(|(j, other)| first + j != i && other.track_id != word.track_id && same_word(&text, &normal(&other.text)));
+        if !shared { out.insert((word.track_id.clone(), word.cue_id.clone(), word.index)); }
+    }
+    out
+}
+
+/// Whether another mic heard the same word at about the same moment.
+pub fn heard_on(words: &[Word], track: &str, start: i64, text: &str) -> bool {
+    let reach = (MATCH_SECONDS * HZ) as i64;
+    let text = normal(text);
+    words.iter().any(|other| other.track_id == track && (other.start - start).abs() <= reach && same_word(&text, &normal(&other.text)))
+}
+
+/// How far apart a document's mics are, from the words heard on more than
+/// one: the median of how much louder the loudest copy is than the next.
+/// Measured on AFF BANK 1 at 0.8 dB: levels there settle very few lines, and
+/// the reader says so rather than implying the labels are sure.
+pub fn separation(channels: &[Channel], words: &[Word]) -> Option<f32> {
+    let index: HashMap<&str, &Channel> = channels.iter().map(|channel| (channel.track_id.as_str(), channel)).collect();
+    let reach = (MATCH_SECONDS * HZ) as i64;
+    let mut sorted: Vec<&Word> = words.iter().filter(|word| index.contains_key(word.track_id.as_str())).collect();
+    sorted.sort_by_key(|word| word.start);
+    let mut used = vec![false; sorted.len()];
+    let mut gaps = Vec::new();
+    for i in 0..sorted.len() {
+        if used[i] { continue; }
+        let text = normal(&sorted[i].text);
+        if text.is_empty() { continue; }
+        let mut levels = vec![];
+        let mut seen: Vec<&str> = vec![];
+        for j in i..sorted.len() {
+            if sorted[j].start - sorted[i].start > reach { break; }
+            let word = sorted[j];
+            if used[j] || seen.contains(&word.track_id.as_str()) || !same_word(&text, &normal(&word.text)) { continue; }
+            used[j] = true;
+            seen.push(word.track_id.as_str());
+            if let Some(level) = snr(index[word.track_id.as_str()], word.start, word.end) { levels.push(level); }
+        }
+        if levels.len() >= 2 {
+            levels.sort_by(|a, b| b.total_cmp(a));
+            gaps.push(levels[0] - levels[1]);
+        }
+    }
+    if gaps.is_empty() { return None; }
+    gaps.sort_by(f32::total_cmp);
+    Some(gaps[gaps.len() / 2])
 }
 
 #[cfg(test)]
@@ -234,17 +312,53 @@ mod tests {
 
     #[test]
     fn a_quiet_copy_without_the_same_words_is_never_called_bleed() {
-        // Hiding a real line is worse than showing a duplicate: no matching
-        // text on the louder mic, so this stays visible as unsure.
+        // Hiding a real line is worse than showing a duplicate: no other mic
+        // heard "whisper", so it is never bleed. 20 dB under Rosa's mic it is
+        // more likely her line misheard than Dev talking, so it stays unsure;
+        // a few dB under, it is Dev's own.
         let rosa = channel("rosa", 60.0, &[(10.0, 10.5, -20.0)]);
         let dev = channel("dev", 60.0, &[(10.0, 10.5, -40.0)]);
         let out = resolve(&[rosa, dev], &[word("rosa", "kitchen", 10.0, 10.5), word("dev", "whisper", 10.0, 10.5)]);
         assert_eq!(label_of(&out, "dev"), Some(AafOwnershipLabel::Unsure));
+        let rosa = channel("rosa", 60.0, &[(20.0, 20.5, -30.0)]);
+        let dev = channel("dev", 60.0, &[(10.0, 10.5, -33.0)]);
+        let out = resolve(&[rosa, dev], &[word("dev", "whisper", 10.0, 10.5)]);
+        assert_eq!(label_of(&out, "dev"), Some(AafOwnershipLabel::Owner));
+    }
+
+    #[test]
+    fn copies_at_almost_the_same_level_stay_visible_as_unsure() {
+        // AFF BANK 1's reality: the same word on two mics about 1 dB apart.
+        // Level cannot say whose it is, so neither copy is hidden.
+        let a = channel("a", 60.0, &[(10.0, 10.5, -40.0)]);
+        let b = channel("b", 60.0, &[(10.0, 10.5, -41.0)]);
+        let out = resolve(&[a, b], &[word("a", "kitchen", 10.0, 10.5), word("b", "kitchen", 10.02, 10.5)]);
+        assert!(out.iter().all(|w| w.label == AafOwnershipLabel::Unsure), "{out:?}");
+    }
+
+    #[test]
+    fn a_word_only_one_mic_heard_is_unique_and_a_shared_one_is_not() {
+        let words = [word("rosa", "kitchen", 10.0, 10.5), word("dev", "Kitchen,", 10.05, 10.5), word("rosa", "alone", 20.0, 20.5), word("dev", "alone", 25.0, 25.5)];
+        let unique = unique_words(&words);
+        assert_eq!(unique.len(), 2, "only the two far-apart 'alone's are unique: {unique:?}");
+        assert!(heard_on(&words, "dev", (10.0 * HZ) as i64, "kitchen"));
+        assert!(!heard_on(&words, "dev", (20.0 * HZ) as i64, "alone"), "five seconds apart is not the same moment");
+    }
+
+    #[test]
+    fn separation_is_how_far_the_loudest_copy_sits_above_the_next() {
+        let rosa = channel("rosa", 60.0, &[(10.0, 10.5, -20.0), (20.0, 20.5, -30.0)]);
+        let dev = channel("dev", 60.0, &[(10.0, 10.5, -38.0), (20.0, 20.5, -32.0)]);
+        let words = [word("rosa", "kitchen", 10.0, 10.5), word("dev", "kitchen", 10.0, 10.5), word("rosa", "door", 20.0, 20.5), word("dev", "door", 20.0, 20.5), word("rosa", "alone", 30.0, 30.5)];
+        // Two shared words: 18 dB apart and 2 dB apart; the word only Rosa heard does not count.
+        let gap = separation(&[rosa, dev], &words).unwrap();
+        assert!((gap - 18.0).abs() < 0.5 || (gap - 2.0).abs() < 0.5, "{gap}");
+        assert!(separation(&[], &words).is_none());
     }
 
     #[test]
     fn someone_on_no_lav_is_off_mic() {
-        // A producer off camera: faint on three lavs, the same word on each.
+        // A producer off camera: faint on three lavs (6 dB over the floor), the same word on each.
         let quiet = |track| channel(track, 60.0, &[(10.0, 10.5, -54.0)]);
         let words = [word("a", "again", 10.0, 10.5), word("b", "again", 10.0, 10.5), word("c", "again", 10.0, 10.5)];
         let out = resolve(&[quiet("a"), quiet("b"), quiet("c")], &words);

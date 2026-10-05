@@ -1119,10 +1119,15 @@ the acceptance test for whenever the verdict UI gets built.
 3. **Your call wins.** Right-click a dimmed line ▸ "Name, on their own mic":
    it shows normally everywhere; right-click ▸ "Use the automatic call" puts
    it back. Reopen the AAF: the call is still there.
-4. **Check voices** (with some lines still unsure): it runs, says how many
-   voices it checked, and any warnings make sense (two people who really
-   sound alike; a mic you know was swapped). Settings ▸ Transcription ▸
-   Voiceprints shows the count; Delete all, confirmed, empties it.
+4. **Check voices** on AFF BANK 1 (the run nothing automated has done end to
+   end: its parts were measured, the in-app loop was not). The bar first
+   says these mics hear each other almost equally. Check voices runs (one
+   mic and ten minutes at a time; Stop works), says how many voices it
+   checked, and All voices then hides more than the handful levels alone
+   did. Listen to five newly hidden lines: each should be a copy of someone
+   else's line. Any warnings make sense (two people who really sound alike;
+   a mic you know was swapped). Settings ▸ Transcription ▸ Voiceprints
+   shows the count; Delete all, confirmed, empties it.
 5. **Spell cast names.** On a scene with unusual names, generate with the
    box off, then on: names are spelled as on the mics, and read the rest of
    the scene for any word wrongly turned into a name.

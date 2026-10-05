@@ -155,6 +155,53 @@ fixtures run in `npm run verify`.
 
 ---
 
+### Measured on AFF BANK 1 (October 4, no hand labels)
+
+The owner had one AAF to give, so phase 0 was run without listening:
+`scripts/eval-aaf-scene.mjs` exports a busy 4-minute scene's 20 mics with the
+app's own AAF reader, transcribes them with Parakeet v3 and Ultra, runs the
+resolver on levels read from the audio, builds mixes with KNOWN answers from
+real voices (each person's words only their own mic heard), and writes a
+short list of lines to check by ear. `sauce-bunny --eval-ownership <doc>`
+runs the app's ownership code on the whole document from its cached
+overviews. What it found, and what changed because of it:
+
+- **Word times.** The old length-based guess was off by 501 ms on average,
+  1,110 ms at the 90th percentile; 82% of words moved by more than a frame
+  once Parakeet's own times were kept (10,310 words). Phase 1 was worth it.
+- **v3 against Ultra** differ on 15.2% of words. Without a reference that
+  says how much changes, not which is right; the report lists where.
+- **These mics barely separate.** Each spoken word lands on about five of
+  the 20 lavs, and the loudest copy is 0.8 dB above the next at the median
+  (1.8 dB over the whole 1h42m document), whether measured by peak or RMS,
+  with or without a high-pass, raw or against the floor. The design assumed
+  15 to 20 dB. Waveform correlation (0.16 to 0.7 between the two loudest
+  mics) says they are separate mics in a room, not one feed copied.
+- **So the resolver was recalibrated**: a word no other mic heard is its
+  owner's (55% of spoken words were heard on one mic only) unless that mic
+  is 10 dB or more under the loudest; overtalk means two mics each with
+  their own unique words at once (it had fired whenever any of 19 mics was
+  open); off-mic needs the word faint on every mic that heard it. The
+  answer carries the document's separation and the reader says when it is
+  under 3 dB. On the whole document: owner 8.6%, bleed 2.7%, overtalk 18.6%,
+  off-mic 4.4%, unsure 65.8%; All voices hides 6 of 9,597 lines.
+- **Known answers, real voices** (Tom and Kacy): owner words wrongly hidden
+  0 in every mix; bleed hidden about 90% at -12 dB, 98 to 100% at -18 dB, 93
+  to 95% at -24 dB in turns (half to three quarters at -12 dB talking over
+  each other), and about 1% at -3 dB, where level cannot decide.
+- **Voices settle what levels cannot.** Same person 0.29 to 0.70 (median
+  0.54), different people at most 0.30; on held-out clips a 0.40 match was
+  never wrong, so `MATCH` is 0.40, not 0.50. Voices are learned from words
+  only the mic heard when no stretch dominates by 15 dB (none here did).
+  With the new rule (another owner's voice, with the same word on their
+  own mic, makes this copy bleed), the -3 dB mixes went from 1% to 91-93% of
+  bleed hidden in turns, 61-64% talking over, with 1 owner word of 115
+  wrongly hidden. The voice check now reads each mic once per ten-minute
+  window, not a clip per cluster, and takes up to 100,000 unsure words.
+
+Not run end to end inside the app: Check voices' own export-and-embed loop
+(its parts were each run on this AAF). It is the first hand test below.
+
 ## Phase 1: keep each word's real time
 
 The cheapest accuracy win: Parakeet already measured these times.
