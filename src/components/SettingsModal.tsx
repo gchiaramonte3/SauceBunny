@@ -359,6 +359,12 @@ const MODEL_INFO: Record<string, ModelInfo> = {
     speed: "~2× realtime on Apple Silicon.",
     whenToUse: "Final captions for delivery; archival transcripts.",
   },
+  "large-v3-turbo": {
+    tagline: "The most accurate Whisper, in any language.",
+    accuracy: "Fewer errors than Medium on conversation and noisy rooms; multilingual.",
+    speed: "About as fast as Medium on Apple Silicon.",
+    whenToUse: "When Whisper is the engine and accuracy matters most.",
+  },
 };
 
 function ModelInfoPopover({ id }: { id: string }) {

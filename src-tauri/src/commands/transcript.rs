@@ -66,6 +66,10 @@ const WHISPER_MODELS: &[(&str, &str, u64)] = &[
     ("base.en",   "Base (English)",   147_700_000),
     ("small.en",  "Small (English)",  487_700_000),
     ("medium.en", "Medium (English)", 1_530_000_000),
+    // Multilingual, and the most accurate Whisper offered: fewer errors than
+    // medium.en on conversational speech at a similar speed on Apple Silicon
+    // (accuracy spec, phase 2). Exact size at the pinned commit.
+    ("large-v3-turbo", "Large v3 Turbo (multilingual)", 1_624_555_275),
 ];
 
 fn whisper_models_dir(app: &AppHandle) -> Result<PathBuf, crate::AppError> {

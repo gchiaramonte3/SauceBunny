@@ -23,6 +23,8 @@ export function MultitrackModelPicker({ choice, models, disabled, onChange, para
         : <button type="button" className="btn btn-ghost" disabled={disabled || !!parakeet.downloading} onClick={() => { void parakeet.download(parakeetModel); }}>Download {chosen.name} ({chosen.size})</button>}
       {parakeet.downloadError && <span role="alert">{parakeet.downloadError}</span>}
     </div>}
+    <label className="cp-multitrack-names" title="Tells the recognizer the mic owners' names so they are spelled right. It can occasionally respell a word that sounds like a name; Parakeet downloads a 100 MB speller the first time.">
+      <input type="checkbox" checked={choice.castNames === true} disabled={disabled} onChange={(event) => onChange({ ...choice, castNames: event.target.checked })} />Spell cast names</label>
     {choice.engine === "whisper" && <details className="cp-multitrack-asr-options">
       <summary>Options · {choice.fast ? "Fast" : "Accurate"}{choice.speechOnly ? " · Speech filter" : ""}</summary>
       <div><label><span>Decoding</span><select className="cp-select" value={choice.fast ? "fast" : "accurate"} disabled={disabled} onChange={event => onChange({ ...choice, fast: event.target.value === "fast" })}><option value="accurate">Accurate</option><option value="fast">Fast</option></select></label>

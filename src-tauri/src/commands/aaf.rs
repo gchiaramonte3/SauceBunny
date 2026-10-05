@@ -190,13 +190,13 @@ pub async fn aaf_waveform(app: AppHandle, document_id: String, track_id: String,
 #[allow(clippy::too_many_arguments)]
 pub async fn aaf_transcribe_track(app: AppHandle, document_id: String, track_id: String,
     start_frame: i64, duration_frames: i64, engine: AafEngine, model_id: String,
-    language: String, fast: bool, speech_only: Option<bool>, job_id: String) -> Result<AafTrackTranscript, AppError>
+    language: String, fast: bool, speech_only: Option<bool>, cast_names: Option<bool>, job_id: String) -> Result<AafTrackTranscript, AppError>
 {
     diagnostics::operation(&app, &job_id, "transcribe", &format!("Transcribe document {document_id} · track {track_id} · model {model_id} · frames {start_frame} + {duration_frames} · fast {fast} · speech filter {}", speech_only.unwrap_or(false)), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
     let document = store::load(&store::root(&app)?, &document_id)?;
     super::video_intelligence::yield_video_background(&app);
-    transcribe::transcribe(&app, &document, &track_id, start_frame, duration_frames, engine, &model_id, &language, fast, speech_only.unwrap_or(false), &job_id).await
+    transcribe::transcribe(&app, &document, &track_id, start_frame, duration_frames, engine, &model_id, &language, fast, speech_only.unwrap_or(false), cast_names.unwrap_or(false), &job_id).await
     }).await
 }
 

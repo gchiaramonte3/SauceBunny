@@ -12,4 +12,10 @@ start_sample: number, end_sample: number, text: string, boundary_review: boolean
  * it was kept and on Whisper runs, whose words are still placed by
  * length (docs/TRANSCRIPT-ACCURACY-SPEC-2026-10-04.md, phase 1).
  */
-words?: Array<AafCueWord>, };
+words?: Array<AafCueWord>, 
+/**
+ * Why this cue may have been invented rather than heard (Whisper's
+ * stock phrases and loops on silence). A label for the editor to check;
+ * the cue is never removed (accuracy spec, phase 2).
+ */
+suspect?: string, };

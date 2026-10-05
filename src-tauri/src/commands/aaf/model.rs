@@ -113,6 +113,12 @@ pub struct AafCue {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub words: Option<Vec<AafCueWord>>,
+    /// Why this cue may have been invented rather than heard (Whisper's
+    /// stock phrases and loops on silence). A label for the editor to check;
+    /// the cue is never removed (accuracy spec, phase 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub suspect: Option<String>,
 }
 
 /// A recognized word: sequence-relative 16 kHz samples, like its cue, and the

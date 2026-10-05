@@ -4,7 +4,22 @@ use crate::{commands::JobRegistry, AppError};
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 
-struct EngineConfig { engine: AafEngine, model_id: String, model_path: String, language: String, fast: bool, vad_model: Option<String>, parakeet: &'static str }
+struct EngineConfig { engine: AafEngine, model_id: String, model_path: String, language: String, fast: bool, vad_model: Option<String>, parakeet: &'static str,
+    /// Names to spell right (accuracy spec, phase 2): Whisper's prompt, Parakeet's vocabulary.
+    names: Vec<String> }
+
+/// The people on this AAF's mics, as names a recognizer can be told to spell:
+/// each mic owner once, no blanks, at most fifty (a Whisper prompt holds about
+/// 224 tokens, and a short list keeps Parakeet's rescorer cautious).
+pub fn cast_names(document: &AafDocument) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for label in &document.labels {
+        let name = label.owner_name.trim();
+        if name.chars().filter(|c| c.is_alphabetic()).count() >= 3 && !names.iter().any(|known| known.eq_ignore_ascii_case(name)) { names.push(name.to_string()); }
+    }
+    names.truncate(50);
+    names
+}
 // Enforce the limit natively too: a second window or overlapping IPC must not
 // turn a group expansion into dozens of recognizer processes.
 static RECOGNIZER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
@@ -31,7 +46,7 @@ fn engine_config(app: &AppHandle, engine: AafEngine, model_id: &str, language: &
         }
     };
     let parakeet = crate::commands::transcript::parakeet_model(matches!(engine, AafEngine::Parakeet).then_some(model_id.as_str())).map(|model| model.arg).unwrap_or("v3");
-    Ok(EngineConfig { engine, model_id, model_path, language, fast, vad_model: None, parakeet })
+    Ok(EngineConfig { engine, model_id, model_path, language, fast, vad_model: None, parakeet, names: Vec::new() })
 }
 
 #[derive(Debug)]
@@ -93,6 +108,32 @@ fn cue_range(start: &str, end: &str, available: i64) -> Result<(i64, i64), Strin
         return Err("The engine returned a time outside the audio segment it received.".into());
     }
     Ok((start, end.min(available)))
+}
+
+/// Whisper's stock inventions on silence or room tone (Barański et al. 2025
+/// list the recurring ones). Each is also something a person can really say,
+/// so a match is a label to check, never a deletion.
+const INVENTED: &[&str] = &["thank you", "thank you so much", "thanks for watching", "thank you for watching", "thank you very much",
+    "please subscribe", "subscribe to my channel", "like and subscribe", "subtitles by the amara org community", "you", "bye", "the end",
+    "see you next time", "i'll see you next time", "thanks for listening", "transcription by castingwords"];
+
+/// Why a Whisper cue may be invented: a stock phrase, or one short phrase
+/// looping four times or more ("I'm sorry. I'm sorry. I'm sorry. I'm sorry.").
+pub fn suspect(text: &str) -> Option<String> {
+    let words: Vec<String> = text.split_whitespace().map(|word| word.chars().filter(|c| c.is_alphanumeric() || *c == '\'').flat_map(char::to_lowercase).collect::<String>())
+        .filter(|word| !word.is_empty()).collect();
+    let joined = words.join(" ");
+    if INVENTED.contains(&joined.as_str()) { return Some("Whisper often invents this phrase on silence. Check the audio.".into()); }
+    for size in 1..=4 {
+        if words.len() < size * 4 { break; }
+        let looping = words.chunks(size).filter(|chunk| chunk.len() == size).collect::<Vec<_>>();
+        let mut run = 1;
+        for pair in looping.windows(2) {
+            run = if pair[0] == pair[1] { run + 1 } else { 1 };
+            if run >= 4 { return Some("This repeats itself, which Whisper does on silence. Check the audio.".into()); }
+        }
+    }
+    None
 }
 
 /// One word as the Parakeet sidecar writes it (`--words`): seconds from the
@@ -173,7 +214,7 @@ pub fn parse_cues(text: &str, chunk: &Chunk, rate: &AafRate, track: &str, words:
         let words = words.and_then(|words| cue_words(words, offset, absolute_start, absolute_end, &text));
         cues.push(AafCue { id: format!("{track}-{}-{index}", chunk.start),
             start_sample: absolute_start, end_sample: absolute_end, text,
-            boundary_review: absolute_start < owner_start || absolute_end > owner_end, words });
+            boundary_review: absolute_start < owner_start || absolute_end > owner_end, words, suspect: None });
     }
     Ok(ParsedCues { cues, timing_issues })
 }
@@ -196,8 +237,14 @@ fn parakeet_batch_args(config: &EngineConfig, files: &[(&Path, &Path)]) -> Resul
         "input": wav.to_string_lossy(), "output": output.with_extension("srt").to_string_lossy(),
         "words": output.with_extension("words.json").to_string_lossy() })).collect();
     let manifest = first.with_extension("batch.json");
-    Ok((vec!["--asr".into(), "--asr-model".into(), config.parakeet.into(), "--batch".into(), manifest.to_string_lossy().into_owned(),
-        "--models-dir".into(), config.model_path.clone(), "--emit-progress".into()], manifest, serde_json::to_string(&items)?))
+    let mut args = vec!["--asr".into(), "--asr-model".into(), config.parakeet.into(), "--batch".into(), manifest.to_string_lossy().into_owned(),
+        "--models-dir".into(), config.model_path.clone(), "--emit-progress".into()];
+    if !config.names.is_empty() {
+        let vocabulary = first.with_extension("names.json");
+        std::fs::write(&vocabulary, serde_json::to_vec(&config.names)?)?;
+        args.extend(["--vocabulary".into(), vocabulary.to_string_lossy().into_owned()]);
+    }
+    Ok((args, manifest, serde_json::to_string(&items)?))
 }
 
 fn whisper_batch_args(config: &EngineConfig, files: &[(&Path, &Path)]) -> Result<Vec<String>, AppError> {
@@ -207,6 +254,9 @@ fn whisper_batch_args(config: &EngineConfig, files: &[(&Path, &Path)]) -> Result
         &wav.to_string_lossy(), &output.to_string_lossy(), &config.language, config.vad_model.as_deref(), config.fast);
     for (wav, output) in &files[1..] {
         args.extend(["-f".into(), wav.to_string_lossy().into_owned(), "-of".into(), output.to_string_lossy().into_owned()]);
+    }
+    if !config.names.is_empty() {
+        args.extend(["--prompt".into(), format!("Names: {}.", config.names.join(", "))]);
     }
     if config.vad_model.is_some() {
         // Retain short/quiet utterances and pad boundaries. Still opt-in: no VAD
@@ -261,7 +311,7 @@ async fn run_batch(app: &AppHandle, job: &str, config: &EngineConfig, files: &[(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64,
-    engine: AafEngine, model_id: &str, language: &str, fast: bool, speech_only: bool, job: &str) -> Result<AafTrackTranscript, AppError>
+    engine: AafEngine, model_id: &str, language: &str, fast: bool, speech_only: bool, names: bool, job: &str) -> Result<AafTrackTranscript, AppError>
 {
     let lane = store::track(document, track)?;
     store::source_ready(document)?;
@@ -271,6 +321,7 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
         return Err(AppError::invalid("Choose a transcription range within the sequence"));
     }
     let mut config = engine_config(app, engine, model_id, language, fast)?;
+    if names { config.names = cast_names(document); }
     let whisper = matches!(config.engine, AafEngine::Whisper);
     if whisper && speech_only {
         config.vad_model = crate::commands::transcript::cached_vad_model(app).map(|path| path.to_string_lossy().into_owned());
@@ -308,7 +359,8 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
             let texts = run_batch(app, job, &config, &files).await?;
             for ((chunk, _, _, _), (text, words)) in prepared.iter().zip(texts) {
                 process::check_cancelled(app, job)?;
-                let parsed = parse_cues(&text, chunk, &document.manifest.edit_rate, track, words.as_deref())?;
+                let mut parsed = parse_cues(&text, chunk, &document.manifest.edit_rate, track, words.as_deref())?;
+                if whisper { for cue in &mut parsed.cues { cue.suspect = suspect(&cue.text); } }
                 cues.extend(parsed.cues);
                 timing_issues.extend(parsed.timing_issues);
             }
@@ -339,7 +391,7 @@ mod tests {
     use super::*;
     fn config(fast: bool, vad: bool) -> EngineConfig {
         EngineConfig { engine: AafEngine::Whisper, model_id: "medium.en".into(), model_path: "model with spaces.bin".into(),
-            language: "en".into(), fast, vad_model: vad.then(|| "installed-vad.bin".into()), parakeet: "v3" }
+            language: "en".into(), fast, vad_model: vad.then(|| "installed-vad.bin".into()), parakeet: "v3", names: vec![] }
     }
     #[test]
     fn batch_reuses_one_model_and_keeps_each_input_output_pair_separate() {
@@ -489,6 +541,49 @@ mod tests {
         assert_eq!(items[1]["words"], "/w/two/transcript.words.json");
         assert!(parakeet_batch_args(&config, &[files[0]; PARAKEET_BATCH_SIZE + 1]).is_err());
         assert!(parakeet_batch_args(&config, &[]).is_err());
+    }
+
+    #[test]
+    fn cast_names_reach_whisper_as_a_prompt_and_parakeet_as_a_vocabulary_file() {
+        let mut whisper = config(false, false);
+        whisper.names = vec!["Rosa".into(), "Xiomara".into()];
+        let args = whisper_batch_args(&whisper, &[(Path::new("one.wav"), Path::new("one"))]).unwrap();
+        assert!(args.windows(2).any(|pair| pair == ["--prompt", "Names: Rosa, Xiomara."]));
+        assert!(!whisper_batch_args(&config(false, false), &[(Path::new("one.wav"), Path::new("one"))]).unwrap().contains(&"--prompt".to_string()));
+        let dir = std::env::temp_dir().join(format!("names-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut parakeet = whisper;
+        parakeet.engine = AafEngine::Parakeet;
+        let out = dir.join("transcript");
+        let (args, _, _) = parakeet_batch_args(&parakeet, &[(Path::new("one.wav"), out.as_path())]).unwrap();
+        let at = args.iter().position(|arg| arg == "--vocabulary").unwrap();
+        assert_eq!(std::fs::read_to_string(&args[at + 1]).unwrap(), r#"["Rosa","Xiomara"]"#);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cast_names_are_each_mic_owner_once_without_blanks() {
+        let mut document: AafDocument = serde_json::from_value(serde_json::json!({
+            "schema_version": 2, "id": "d".repeat(64), "source_path": "/x.aaf", "source_size": 1, "source_modified_ms": 1,
+            "manifest": { "schema_version": 1, "name": "X", "source_fingerprint": "e".repeat(64), "edit_rate": { "numerator": 24, "denominator": 1 },
+                "start_frame": 0, "duration_frames": 24, "timecode_fps": 24, "drop_frame": false, "tracks": [{ "id": "1", "name": "1", "clips": [], "warnings": [] }], "warnings": [] },
+            "labels": [], "transcripts": [] })).unwrap();
+        for name in ["Rosa", " rosa ", "", "Al", "Xiomara", "12"] {
+            document.labels.push(AafTrackLabel { track_id: "1".into(), owner_name: name.into(), cast_member_id: None, color: None, gender: None, marker_color: None });
+        }
+        assert_eq!(cast_names(&document), ["Rosa", "Xiomara"]);
+    }
+
+    #[test]
+    fn whispers_stock_inventions_and_loops_are_labelled_and_real_lines_are_not() {
+        assert!(suspect("Thank you for watching!").is_some());
+        assert!(suspect("  you. ").is_some());
+        assert!(suspect("I'm sorry. I'm sorry. I'm sorry. I'm sorry.").is_some());
+        assert!(suspect("no no no no").is_some());
+        // A real line that only CONTAINS a stock phrase, or repeats a little, is left alone.
+        assert!(suspect("Thank you for watching my kids last night.").is_none());
+        assert!(suspect("I'm sorry, I'm sorry, I didn't mean it.").is_none());
+        assert!(suspect("").is_none());
     }
 
     #[test]

@@ -150,6 +150,7 @@ struct Args {
   var words: String?                 // also write the measured words as JSON here
   var batch: String?                 // JSON list of {input, output, words}: one model load for all
   var asrModel: ParakeetVersion = .v3
+  var vocabulary: String?            // JSON list of names to spell (cast), cautious rescoring
   // ── Voiceprints (accuracy spec, phase 4) ──
   var embed: Bool = false            // one voiceprint per span of --input
   var spans: String?                 // JSON list of [start, end] seconds
@@ -188,6 +189,8 @@ func parseArgs(_ argv: [String]) -> Args {
       i += 1; if i < argv.count { a.words = argv[i] }
     case "--batch":
       i += 1; if i < argv.count { a.batch = argv[i] }
+    case "--vocabulary":
+      i += 1; if i < argv.count { a.vocabulary = argv[i] }
     case "--embed":
       a.embed = true
     case "--spans":
@@ -274,6 +277,8 @@ func printHelp() {
       --models-dir DIR      Where the Parakeet Core ML models live.
       --words FILE          Also write each word's measured time and confidence.
       --batch FILE          JSON list of {input, output, words}; one model load.
+      --vocabulary FILE     JSON list of names to spell right (cautious rescoring;
+                            downloads a ~100 MB CTC model the first time).
       --prepare-asr-models  Download the chosen Parakeet and exit.
       --embed               One voiceprint per span of --input (16 kHz mono):
                             --spans FILE ([[start, end], ...] seconds) and
@@ -543,6 +548,22 @@ func runAsrMode(args: Args) async {
     }
     let asr = AsrManager(config: .default)
     try await asr.loadModels(models)
+    // Names to spell right (accuracy spec, phase 2), on CAUTIOUS settings: a
+    // published measurement had the defaults swap 21% of look-alike words for
+    // a vocabulary term, the stricter similarity 9%. A rescorer failure costs
+    // the names, never the transcript.
+    var boosting: VocabularyBoostingSession? = nil
+    if let path = args.vocabulary, let data = FileManager.default.contents(atPath: path),
+       let names = try? JSONDecoder().decode([String].self, from: data), !names.isEmpty {
+      emitStatus(["phase": "prepare", "message": "Loading the name speller…", "backend": "parakeet"], emit: args.emitProgress)
+      do {
+        let ctc = try await CtcModels.downloadAndLoad(variant: .ctc110m)
+        let vocabulary = CustomVocabularyContext(terms: names.map { CustomVocabularyTerm(text: $0) }, minSimilarity: 0.7)
+        boosting = try await VocabularyBoostingSession(vocabulary: vocabulary, ctcModels: ctc)
+      } catch {
+        eprintln("warning: names were not boosted: \(error)")
+      }
+    }
 
     for (index, item) in items.enumerated() {
       emitStatus(["phase": "process", "message": "Transcribing with \(label)…", "backend": "parakeet",
@@ -551,8 +572,18 @@ func runAsrMode(args: Args) async {
       // since the files are separate windows, not one stream.
       var state = try TdtDecoderState()
       let result = try await asr.transcribe(URL(fileURLWithPath: item.input), decoderState: &state)
-      let tokens = (result.tokenTimings ?? []).map {
+      var tokens = (result.tokenTimings ?? []).map {
         CueToken(token: $0.token, startTime: Double($0.startTime), endTime: Double($0.endTime), confidence: $0.confidence)
+      }
+      if let boosting, let timings = result.tokenTimings, !timings.isEmpty,
+         let samples = try? loadWavAsFloatArray(path: item.input),
+         let rescored = await boosting.rescore(text: result.text, tokenTimings: timings, audioSamples: samples), rescored.wasModified {
+        // Applied to the measured words, which keep their times; one token a
+        // word then rebuilds the cues by the same rules as before.
+        let pairs = rescored.replacements.filter(\.shouldReplace).compactMap { item in item.replacementWord.map { (item.originalWord, $0) } }
+        tokens = applyReplacements(tokensToWords(tokens), pairs).map {
+          CueToken(token: " " + $0.text, startTime: $0.start, endTime: $0.end, confidence: $0.confidence)
+        }
       }
       let srt = tokensToSrt(tokens)
       if srt.isEmpty && !batch {

@@ -73,6 +73,62 @@ public func tokensToWords(_ tokens: [CueToken]) -> [TimedWord] {
   return words
 }
 
+/// Put a vocabulary rescorer's replacements ("in video" -> "NVIDIA", or a cast
+/// name spelled right) into measured words without losing their times. Each
+/// (original, replacement) pair takes the next run of words, in order, whose
+/// letters match `original`; the run becomes one word with the replacement's
+/// text, the run's start and end, the punctuation the run ended with, and its
+/// lowest confidence. A pair that matches nothing changes nothing.
+public func applyReplacements(_ words: [TimedWord], _ pairs: [(String, String)]) -> [TimedWord] {
+  var out = words
+  var cursor = 0
+  for (original, replacement) in pairs where plausibleReplacement(original, replacement) {
+    let wanted = original.split(separator: " ").map { bare(String($0)) }.filter { !$0.isEmpty }
+    guard !wanted.isEmpty, !replacement.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+    var at = cursor
+    while at + wanted.count <= out.count {
+      if (0..<wanted.count).allSatisfy({ bare(out[at + $0].text) == wanted[$0] }) { break }
+      at += 1
+    }
+    guard at + wanted.count <= out.count else { continue }
+    let run = out[at..<(at + wanted.count)]
+    let tail = String(run.last!.text.reversed().prefix { !($0.isLetter || $0.isNumber) }.reversed())
+    let merged = TimedWord(text: replacement + tail, start: run.first!.start, end: run.last!.end, confidence: run.map(\.confidence).min() ?? 1)
+    out.replaceSubrange(at..<(at + wanted.count), with: [merged])
+    cursor = at + 1
+  }
+  return out
+}
+
+func bare(_ text: String) -> String { text.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "'" } }
+
+func editDistance(_ a: String, _ b: String) -> Int {
+  let b = Array(b)
+  var row = Array(0...b.count)
+  for (i, ca) in a.enumerated() {
+    var previous = row[0]
+    row[0] = i + 1
+    for (j, cb) in b.enumerated() {
+      let next = min(row[j + 1] + 1, row[j] + 1, previous + (ca == cb ? 0 : 1))
+      previous = row[j + 1]
+      row[j + 1] = next
+    }
+  }
+  return row[b.count]
+}
+
+/// Our own guard on the rescorer, because it needs one. MEASURED on Parakeet
+/// v3 with FluidAudio 0.17.5 at its cautious similarity (0.7): given the
+/// names "Xiomara" and "Saoirse" it rightly turned "Siomara" into "Xiomara"
+/// and also turned "it was funny" into "it Saoirse", deleting two real words.
+/// A replacement is a respelling: at most two words, sharing at least 60% of
+/// their letters with the name.
+public func plausibleReplacement(_ original: String, _ replacement: String) -> Bool {
+  let (from, to) = (bare(original), bare(replacement))
+  guard !from.isEmpty, !to.isEmpty, original.split(separator: " ").count <= 2 else { return false }
+  return 1 - Double(editDistance(from, to)) / Double(max(from.count, to.count)) >= 0.6
+}
+
 /// A sentence ends here, and the word before it is not an abbreviation whose
 /// period belongs to the word ("U.S.", "e.g.", "Mr.").
 func endsSentence(_ text: String) -> Bool {

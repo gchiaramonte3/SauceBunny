@@ -250,4 +250,35 @@ final class CueBreakTests: XCTestCase {
       XCTAssertFalse(t.hasSuffix("Mr."), "broke after a title: \(texts)")
     }
   }
+
+  // ── Vocabulary (accuracy spec, phase 2) ──
+
+  private func w(_ text: String, _ start: Double, _ confidence: Float = 0.9) -> TimedWord {
+    TimedWord(text: text, start: start, end: start + 0.3, confidence: confidence)
+  }
+
+  func testAReplacementKeepsTheTimesOfTheWordsItReplaces() {
+    let words = [w("Then", 0), w("Rosie", 0.4, 0.4), w("said,", 0.8), w("Mac", 1.2), w("Kenzie", 1.5), w("left.", 1.8)]
+    let out = applyReplacements(words, [("Rosie", "Rosa"), ("Mac Kenzie", "MacKenzie")])
+    XCTAssertEqual(out.map(\.text), ["Then", "Rosa", "said,", "MacKenzie", "left."])
+    XCTAssertEqual(out[1].start, 0.4); XCTAssertEqual(out[1].confidence, 0.4)
+    // Two words became one, spanning both.
+    XCTAssertEqual(out[3].start, 1.2); XCTAssertEqual(out[3].end, 1.8, accuracy: 0.0001)
+  }
+
+  /// The swap measured on real Parakeet output: "was funny" is not a way of
+  /// spelling "Saoirse", and taking it would delete two words that were said.
+  func testAReplacementThatIsNotARespellingIsRefused() {
+    let words = [w("Xiomara", 0), w("did", 0.4), w("not", 0.6), w("think", 0.8), w("it", 1.0), w("was", 1.2), w("funny.", 1.4)]
+    let out = applyReplacements(words, [("was funny", "Saoirse"), ("Xiomara", "Xiomara")])
+    XCTAssertEqual(out.map(\.text), words.map(\.text))
+    XCTAssertTrue(plausibleReplacement("Siomara", "Xiomara"))
+    XCTAssertFalse(plausibleReplacement("in the video", "NVIDIA"), "three words are not one name")
+  }
+
+  func testAReplacementKeepsPunctuationAndMatchesNothingItShouldNot() {
+    let out = applyReplacements([w("ask", 0), w("rosie.", 0.4)], [("Rosie", "Rosa"), ("Devon", "Dev")])
+    XCTAssertEqual(out.map(\.text), ["ask", "Rosa."])
+    XCTAssertEqual(applyReplacements([w("hello", 0)], [("", "x"), ("hello", " ")]).map(\.text), ["hello"])
+  }
 }

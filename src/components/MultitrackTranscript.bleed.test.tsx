@@ -70,3 +70,10 @@ it("checks voices when the levels left words unsure, and reports what it found",
   expect(screen.getByText(/Voices checked for 2 people/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Check voices" })).toBeNull();
 });
+
+it("shows why a Whisper line may have been invented, and keeps the line", () => {
+  const document = fixture();
+  document.transcripts = [{ ...multitrackTranscript("track-1"), engine: "whisper", cues: [{ ...multitrackTranscript().cues[0], text: "Thank you for watching.", suspect: "Whisper often invents this phrase on silence. Check the audio." }] }];
+  render(<MultitrackTranscript document={document} frame={0} solo={new Set()} onSeek={vi.fn()} />);
+  expect(screen.getByRole("button", { name: /Thank you for watching\..*invents this phrase/ })).toBeTruthy();
+});

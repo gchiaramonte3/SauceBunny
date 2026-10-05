@@ -273,6 +273,7 @@
 .cp-multitrack-generation .cp-multitrack-options { margin: 0; align-items: center; gap: 10px; }
 .cp-multitrack-options label { flex-direction: row; align-items: center; gap: 6px; }
 .cp-multitrack-options .cp-select { min-width: 100px; max-width: 160px; }
+.cp-multitrack-names { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); font-size: var(--text-base); }
 .cp-multitrack-asr-options { min-width: 0; max-width: 280px; color: var(--fg-3); font-size: var(--text-base); }
 .cp-multitrack-asr-options summary { min-height: 30px; align-content: center; cursor: pointer; padding: 4px 6px; border-radius: var(--r-sm); }
 .cp-multitrack-asr-options summary:hover { color: var(--fg-1); background: var(--bg-3); }
