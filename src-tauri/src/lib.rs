@@ -8,6 +8,7 @@ mod error;
 #[cfg(test)]
 mod nightly;
 mod stream_proxy;
+mod asset_protocol;
 mod stream_failure;
 mod acquisition_gate;
 mod premiere_bridge;
@@ -198,6 +199,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Replaces Tauri's own asset:// handler, which reads files on the main
+        // thread: a stalled network volume froze the app past Force Quit.
+        .register_asynchronous_uri_scheme_protocol("asset", asset_protocol::handle)
         .manage(commands::JobRegistry::default())
         .manage(commands::recording::Recorder::default())
         .manage(commands::LlmServer::default())

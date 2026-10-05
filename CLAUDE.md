@@ -111,6 +111,7 @@ src-tauri/                    # Rust backend
       transcript.rs           #   whisper + diarizer pipelines
       system.rs               #   JobRegistry, cache, fs, windows, build-id
     stream_proxy.rs           # loopback media proxy (token-gated; see below)
+    asset_protocol.rs         # asset:// served off the main thread (see Asset-protocol scope)
   tauri.conf.json             # Tauri config (titleBarStyle: Overlay, sidecar declarations)
   Cargo.toml                  # Package: sauce-bunny · lib: sauce_bunny_lib
 swift-sidecar/                # Speaker diarization (Swift 5.9+, SPM)
@@ -572,6 +573,19 @@ large library would put a thousand-pattern scan on the playback byte-range path.
 Guarded by `src/lib/asset-scope-contract.test.ts` — do not widen the scope to
 get unblocked.
 
+**The `asset://` handler is ours, and it must stay off the main thread.**
+Tauri's built-in handler opens and reads the file on the thread WKWebView asks
+from, which is the MAIN thread: every 1 MB range a `<video>` pulls, and the
+whole file when a request has no Range. On Avid NEXIS under daytime load that
+froze the window, and a read the volume never answered parked the main thread
+in an uninterruptible kernel wait that Force Quit could not reach. `lib.rs`
+registers `asset_protocol::handle` under the name `asset`, which makes Tauri
+skip its own; the handler does the same scope check and answers on the
+blocking pool. It also serves only the app's own pages, where Tauri's served
+any webview, including the media resolver's external page. Do not remove the
+registration or call `respond()` before `spawn_blocking`; the asset-scope
+contract checks both.
+
 Don't reintroduce the IFrame, custom URI schemes for `<video>`, or WebCodecs-audio — all three are proven non-starters in WKWebView (see the deep-research notes that drove r61/r63).
 
 ---
@@ -752,7 +766,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and seventeen rules in this file are checked by a test rather than remembered. If you
+One hundred and eighteen rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -913,6 +927,7 @@ written after finding the rule already broken somewhere.
 | `mark-shape-contract` | A stem in the marker colour draws the chevron wing: every `border-left`/`-right` or inset side shadow in `var(--marker)` belongs to a class with a `--mark-wing-*` wing, or is one of two named regions that sit under winged marks. AAF Audio's and String Outs' rulers drew a flat violet band with no wing, and nothing at all for a lone In or Out, beside Clip's chevrons; both now draw `RulerMarks` (marks.css). The design catalog's stylesheets are scanned too: they load after production's and win |
 | `mark-keys-contract` | AAF Audio and String Outs bind the same seven marking keys to the same meanings, Avid's: I and O mark, G clears both, D clears In, F clears Out, Q and W go to the marks. They drifted apart in separate files: AAF Audio cleared with G while String Outs used ⌥X and ignored G, and neither had D or F |
 | `voiceprint-contract` | Voiceprints (the voice check's 256-number description of each mic owner's voice, accuracy spec phase 4) are biometric data: written only under `app_data_dir()/voiceprints`, never under Documents, never read by the context layer that answers assistants or by the co-review wire, never in a command's answer or the ownership cache. Only the labels they settle travel |
+| `main-thread-contract` | No NEW `#[tauri::command]` runs on the main thread: it is `async fn` or `#[tauri::command(async)]`. A plain `fn` command runs on the thread that draws the window, so one `exists()` on Avid NEXIS under daytime load froze the app, and a read the volume never answered put it past Force Quit. The 76 left there touch nothing a network volume can hold up (settings, keychain, app data); the list is shrink-only. Tauri's own `asset://` handler had the same flaw and is replaced (`asset_protocol.rs`, pinned by `asset-scope-contract`) |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:

@@ -1264,7 +1264,7 @@ pub fn open_external_url(url: String) -> Result<(), crate::AppError> {
    ipc-surface-contract would fail an orphan - and because a destructive
    primitive that still exists is one wiring mistake from being reachable. */
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reveal_in_finder(path: String) -> Result<(), crate::AppError> {
     let p = PathBuf::from(&path);
     if !p.exists() {
@@ -1530,7 +1530,7 @@ pub async fn read_text_file_capped(path: String, max_bytes: Option<u64>) -> Resu
 /// `mkdir -p` semantics — no error if the directory already exists.
 /// Refuses obviously-bad inputs (empty, root) so a buggy caller can't
 /// accidentally create dotfile-noise at `/`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ensure_dir_exists(path: String) -> Result<(), crate::AppError> {
     if path.trim().is_empty() {
         return Err("path is empty".into());
@@ -1616,7 +1616,7 @@ pub fn get_stream_proxy_base() -> Option<String> {
 /// existing `/v1/` → `/fmp4/v1/` string-replace turns it into the remux URL,
 /// so the whole streaming frontend works on it unchanged. The path itself
 /// never appears in any URL; the CSPRNG id is the only thing on the wire.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn peer_media_register(path: String) -> Result<serde_json::Value, crate::AppError> {
     let p = std::path::PathBuf::from(&path);
     if !p.is_file() {

@@ -477,7 +477,7 @@ fn ensure_dest_clear(dest: &Path) -> Result<(), crate::AppError> {
 
 /// Rename a transcript file (.srt/.vtt) to `<new_stem>.<ext>` in place, carrying
 /// its sidecars along. Returns the new path. The SOURCE media file is untouched.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_transcript(srt_path: String, new_stem: String) -> Result<String, crate::AppError> {
     let src = PathBuf::from(&srt_path);
     if !src.is_file() {
@@ -507,7 +507,7 @@ pub fn rename_transcript(srt_path: String, new_stem: String) -> Result<String, c
 }
 
 /// Create a one-level subfolder in the transcript library. Returns its path.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_transcript_folder(library_path: String, name: String) -> Result<String, crate::AppError> {
     let stem = valid_stem(&name)?;
     let dir = PathBuf::from(&library_path).join(&stem);
@@ -565,7 +565,7 @@ fn list_transcript_folders_sync(library_path: &str) -> Result<Vec<String>, crate
 /// The DIRECTORY is a project's identity, so renaming one is a real move on
 /// disk rather than a label change in a JSON file — which is what keeps the
 /// transcripts findable in Finder under the name the user chose.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_transcript_folder(
     library_path: String,
     folder: String,
@@ -617,7 +617,7 @@ pub fn rename_transcript_folder(
 /// thing that gets reported as data loss rather than a mis-click. The caller
 /// moves the transcripts out first, which makes the destructive step explicit
 /// and reversible up to that point.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_transcript_folder(library_path: String, folder: String) -> Result<(), crate::AppError> {
     // Same traversal guard as the rename: validated before anything on disk
     // is looked at, let alone removed.
@@ -700,7 +700,7 @@ pub(crate) fn transcripts_in(dir: &Path) -> usize {
 /// does NOT fall back to copy+delete across volumes: that turns a gesture the
 /// user thinks is instant into a multi-gigabyte copy with no progress and no
 /// cancel, on media files. Across volumes this fails and says so.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn move_library_file(src_path: String, dest_dir: String) -> Result<String, crate::AppError> {
     let src = PathBuf::from(&src_path);
     if !src.is_file() {
@@ -784,7 +784,7 @@ fn copy_library_file_sync(src_path: String, dest_dir: String) -> Result<String, 
 }
 
 /// Move a transcript (+ its sidecars) into `dest_dir`. Returns the new path.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn move_transcript_to_folder(srt_path: String, dest_dir: String) -> Result<String, crate::AppError> {
     let src = PathBuf::from(&srt_path);
     if !src.is_file() {

@@ -13,7 +13,7 @@ fn transcript_file(path: &Path) -> Result<PathBuf, crate::AppError> {
     std::fs::canonicalize(path).map_err(|e| format!("Cannot resolve transcript: {e}").into())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn trash_transcript(path: String) -> Result<(), crate::AppError> {
     let target = transcript_file(Path::new(&path))?;
     #[cfg(target_os = "macos")]

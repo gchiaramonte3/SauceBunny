@@ -3176,7 +3176,7 @@ pub(crate) fn analysis_sidecar_path(srt_path: &std::path::Path) -> std::path::Pa
 /// Rust just writes it durably, because a torn file would be a corrupt reuse.
 /// Keyed by the SRT path via co-location — analysis is a property of THIS
 /// transcript, so it should not follow the source (unlike speaker names).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_transcript_analysis(srt_path: String, json: String) -> Result<(), crate::AppError> {
     let sidecar = analysis_sidecar_path(std::path::Path::new(&srt_path));
     atomic_write(&sidecar, json.as_bytes())

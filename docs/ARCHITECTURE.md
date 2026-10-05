@@ -68,6 +68,7 @@ What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Ever
 │   │   ├── commands/          # Tauri commands by domain — twelve modules:
 │   │   │                     #   download, media, transcript, library, tags, system,
 │   │   │                     #   session, peer_stream, rung, llm, cloud_ai, sniff
+│   │   ├── asset_protocol.rs  # asset:// (local media) served off the main thread
 │   │   └── stream_proxy.rs    # loopback fMP4 media proxy for web playback
 │   ├── binaries/              # Bundled sidecar executables (gitignored; fetched by `npm run setup`)
 │   ├── capabilities/          # Tauri permission lists

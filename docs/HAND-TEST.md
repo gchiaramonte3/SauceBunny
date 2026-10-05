@@ -1103,6 +1103,22 @@ the acceptance test for whenever the verdict UI gets built.
 3. **Nothing changes.** With Sauce Bunny open on a string out, ask Claude to
    change it: it says it can only read. History shows no new step.
 
+### Media on Avid NEXIS during the working day (the freeze past Force Quit)
+
+The app used to read every chunk of a playing clip on its main thread, so a
+NEXIS volume slowing down under daytime load froze the window, and a read the
+volume never answered left it unkillable. Reads now happen off that thread.
+
+1. With NEXIS mounted and busy (or while AAF Audio is transcribing or
+   measuring mics from it), open a clip that lives on NEXIS and play it,
+   scrub it, and open the Library on a NEXIS folder with posters.
+2. While it plays, move the window, open Settings, switch views: the app
+   answers immediately even when the picture stalls. A stall now shows as a
+   clip that stops loading, never a spinning cursor over the whole window.
+3. If a clip ever hangs, ⌘Q (or Force Quit) closes the app. It may take as
+   long as the volume does to give up on that one read, but the window must
+   not be frozen while it waits.
+
 ### Transcript accuracy (AAF Audio, needs a transcribed multi-mic AAF)
 
 1. **Parakeet Ultra.** In AAF Audio, Engine Parakeet, Model "Parakeet Ultra

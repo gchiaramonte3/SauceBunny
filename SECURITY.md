@@ -79,6 +79,13 @@ replaced a `**` scope under which the renderer could read any file on the
 machine over `asset://`. Both halves are pinned by
 `src/lib/asset-scope-contract.test.ts`.
 
+The handler itself is the app's own (`src-tauri/src/asset_protocol.rs`), not
+Tauri's: Tauri's read files on the main thread, which froze the app on a slow
+network volume. It keeps the same scope and answers, and it serves only the
+app's own pages (`tauri://localhost`, or the Vite server in development).
+Tauri's answered any webview with that webview's own origin, including the
+window that loads an outside page to resolve web media.
+
 **Known gap, stated plainly:** the renderer is still not sandboxed. The app's
 own file commands (`write_text_to_path`, `write_bytes_to_path`,
 `read_text_file_capped`) accept absolute paths with no scope of their own, so

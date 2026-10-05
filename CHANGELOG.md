@@ -82,6 +82,13 @@ All notable changes to Sauce Bunny. Format loosely follows
   starts with its track.
 
 ### Fixed
+- **The app could freeze past Force Quit on Avid NEXIS.** Video, audio and
+  posters were read off disk on the app's main thread, by the media loader
+  Tauri ships (one megabyte per request, or a whole file when no range was
+  asked for). On a network volume under daytime load each read could take
+  seconds, and a read the volume never answered left that thread waiting in
+  the kernel, where Force Quit cannot reach it. Those reads now happen on a
+  background pool: a slow volume slows that clip, not the app.
 - String Outs ignored every letter key straight after it opened, until
   something inside it was clicked.
 - With the timeline on Source, Z, X, M, T, A, S and ⌘B still edited the
