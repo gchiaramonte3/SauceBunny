@@ -82,6 +82,12 @@ All notable changes to Sauce Bunny. Format loosely follows
   starts with its track.
 
 ### Added
+- **Screen capture in Preview ▸ Source works in every build.** It used to need
+  an embedded copy of OBS that ordinary builds never included ("The embedded
+  OBS capture runtime is missing"). Screen now uses macOS's own sharing
+  picker: no Screen Recording permission, no monthly "bypass the private
+  window picker" alert, and a 356 KB helper instead of an OBS engine. System
+  audio comes through a Core Audio tap (macOS 14.2+). Window and Region follow.
 - **The Pipeline on String Outs**, the same log AAF Audio has, at the foot of
   the page; ⌘\ opens and closes it on every page. Every call String Outs
   makes is timed: one still running says so at 2, 10, 30 and 60 seconds,

@@ -13,7 +13,7 @@ describe("capture audio policy", () => {
   });
   it("keeps the same review pass and an independent draft when changing audio", () => {
     const next = copyCaptureSelection({ ...selection, audio: false });
-    expect(next.audio).toBe(false); expect(next.crop).not.toBe(selection.crop);
+    expect(next.audio).toBe(false); expect("crop" in next && next.crop).not.toBe(selection.crop);
     expect(captureSourceIdentity(next)).toBe(captureSourceIdentity(selection));
     expect(validCaptureSelection(next)).toBe(true);
     expect(validCaptureSelection({ ...selection, audio: "false" } as unknown as ObsSelection)).toBe(false);

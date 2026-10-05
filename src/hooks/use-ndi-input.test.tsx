@@ -3,6 +3,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionState } from "../bindings/SessionState";
 import type { ObsSelection } from "../bindings/ObsSelection";
+import type { ObsWindowSelection } from "../bindings/ObsWindowSelection";
 import type { NdiStatusResult } from "../bindings/NdiStatusResult";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listeners: new Map<string, (event: { payload: unknown }) => void>() }));
@@ -213,7 +214,7 @@ describe("private preview is not the room presentation", () => {
 });
 
 describe("application capture uses the existing preview controller", () => {
-  const capture = (): Exclude<ObsSelection, { kind: "display" }> => ({ application: "com.adobe.PremierePro", process: 123, window: 45,
+  const capture = (): ObsWindowSelection => ({ application: "com.adobe.PremierePro", process: 123, window: 45,
     crop: { x: 0, y: 0, width: 1, height: 1 } });
   function native() {
     let next = 0;

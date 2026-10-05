@@ -13,7 +13,7 @@ import { CaptureSourceTabs } from "./CaptureSourcePicker";
 import { ObsBroadcastControls } from "./ObsBroadcastControls";
 import type { ObsBroadcast } from "../hooks/use-obs-broadcast";
 import type { ObsSelection } from "../bindings/ObsSelection";
-import { copyCaptureSelection, isDisplayCapture, sameProgramSource } from "../lib/ndi-program-source";
+import { copyCaptureSelection, isDisplayCapture, sameProgramSource, isPickedCapture } from "../lib/ndi-program-source";
 import type { NdiPlaybackRecovery } from "./NdiProgramMonitor";
 import "../styles/ndi-input.css";
 
@@ -50,9 +50,9 @@ const SOURCE_TABS: { id: SourceTab; label: string }[] = [
   { id: "window", label: "Window" }, { id: "region", label: "Region" },
 ];
 const captureTab = (selection: ObsSelection): CaptureMode => {
-  if (!isDisplayCapture(selection)) return "window";
-  const { crop } = selection;
-  return crop.x === 0 && crop.y === 0 && crop.width === 1 && crop.height === 1 ? "screen" : "region";
+  if (isPickedCapture(selection)) return selection.kind;
+  // Screen is macOS's picker now; an OBS display capture, whole or part, belongs to Region until it moves too.
+  return isDisplayCapture(selection) ? "region" : "window";
 };
 
 /** Connection controls only. Picture and audio belong to the existing Preview

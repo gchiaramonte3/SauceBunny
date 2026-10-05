@@ -17,6 +17,8 @@ type BrowserFixture = {
   __obsDisplays: ObsDisplayChoice[];
   __obsBroadcast: ObsBroadcastStatus;
   __obsBroadcastReadError: string | null;
+  /** What macOS's sharing picker answers in this fixture: a pick, or a cancel. */
+  __pickOutcome: "chosen" | "cancelled";
   __TAURI_INTERNALS__: { invoke: (command: string, args?: unknown) => Promise<unknown> };
 };
 
@@ -42,6 +44,7 @@ async function boot(page: Page) {
     let selected: ObsSelection | null = null;
     fixture.__obsBroadcast = { sourceId, attempt: 0, phase: "off", error: null };
     fixture.__obsBroadcastReadError = null;
+    fixture.__pickOutcome = "chosen";
     const program = { id: sourceId, name: applicationName, url: `http://127.0.0.1:51730/obs-ui-fixture/${sourceId}` };
     const telemetry = { sourceId, phase: "live", error: null, inputWidth: 160, inputHeight: 108,
       outputFps: 30, inputFps: 30, connectionCount: 1, receivedFrames: 60, ndiDroppedFrames: 0,
@@ -60,11 +63,17 @@ async function boot(page: Page) {
       return originalFetch(input, init);
     };
     fixture.__TAURI_INTERNALS__.invoke = (command, value) => {
-      if (command.startsWith("obs_") || ["capture_window_thumbnail", "capture_display_thumbnail", "ndi_start", "ndi_stop", "ndi_publish", "ndi_unpublish"].includes(command)) {
+      if (command.startsWith("obs_") || command.startsWith("program_capture_") || ["capture_window_thumbnail", "capture_display_thumbnail", "ndi_start", "ndi_stop", "ndi_publish", "ndi_unpublish"].includes(command)) {
         fixture.__obsCalls.push({ command, args: value });
       }
       const args = value as { application?: string; process?: number; window?: number; selection?: ObsSelection; id?: string; attempt?: number } | undefined;
       if (command === "obs_preflight") return Promise.resolve({ available: true, error: null });
+      // Screen runs on macOS's sharing picker (docs/PROGRAM-CAPTURE.md).
+      if (command === "program_capture_preflight") return Promise.resolve({ available: true, error: null, kinds: ["screen"], systemAudio: true });
+      if (command === "program_capture_choose") return Promise.resolve(fixture.__pickOutcome === "cancelled" ? { outcome: "cancelled" }
+        : { outcome: "chosen", choice: { choice: "d".repeat(32), kind: "screen", label: "Generated studio display", width: 1920, height: 1080 } });
+      if (command === "program_capture_cancel_choose") return Promise.resolve();
+      if (command === "program_capture_start") { selected = args!.selection!; return Promise.resolve({ program, selection: selected }); }
       if (command === "obs_applications") return Promise.resolve([{ app: application, pid: 101, name: applicationName }]);
       if (command === "obs_windows") return Promise.resolve(args?.application === application ? fixture.__obsWindows : []);
       if (command === "obs_all_windows") return Promise.resolve(fixture.__obsWindows);
@@ -144,7 +153,7 @@ async function chooseCapture(page: Page) {
 }
 async function writes(page: Page) {
   return page.evaluate(() => (window as unknown as BrowserFixture).__obsCalls.filter(({ command }) =>
-    !["obs_preflight", "obs_applications", "obs_windows", "obs_all_windows", "obs_displays", "obs_broadcast_status", "capture_window_thumbnail", "capture_display_thumbnail"].includes(command)));
+    !["obs_preflight", "program_capture_preflight", "obs_applications", "obs_windows", "obs_all_windows", "obs_displays", "obs_broadcast_status", "capture_window_thumbnail", "capture_display_thumbnail"].includes(command)));
 }
 
 for (const scale of [100, 125]) {
@@ -159,13 +168,17 @@ for (const scale of [100, 125]) {
     await gear(page).click(); const dialog = captureDialog(page);
     await expect(dialog.getByRole("tab")).toHaveText(["NDI", "Screen", "Window", "Region"]);
     await dialog.getByRole("tab", { name: "Screen", exact: true }).click();
-    const screen = dialog.getByRole("button", { name: /Generated studio display .* Display 7$/ });
     await expect(dialog.getByRole("button", { name: "Preview source" })).toBeDisabled();
-    await screen.click(); await expect(dialog.getByRole("button", { name: "Preview source" })).toBeEnabled();
+    expect(await writes(page)).toEqual([]);
+    // macOS's picker chooses, and its Share click starts that preview.
+    await dialog.getByRole("button", { name: "Choose screen…" }).click();
+    await expect(dialog.getByRole("status", { name: "Selected screen" })).toHaveText("Selected: Generated studio display");
+    await expect.poll(async () => (await writes(page)).map(item => item.command)).toEqual(["program_capture_choose", "program_capture_start"]);
+    expect((await writes(page))[1].args).toEqual({ selection: { choice: "d".repeat(32), kind: "screen", label: "Generated studio display", audio: false } });
     const systemAudio = dialog.getByRole("checkbox", { name: "Include system audio" });
     await expect(systemAudio).toBeEnabled(); await expect(systemAudio).not.toBeChecked();
     await systemAudio.focus(); await page.keyboard.press("Space"); await expect(systemAudio).toBeChecked();
-    await expect(dialog.getByText(/Hides Sauce Bunny's windows/)).toBeVisible();
+    await expect(dialog.getByText(/Sauce Bunny's own playback is left out/)).toBeVisible();
     await dialog.getByRole("tab", { name: "Region", exact: true }).click();
     await expect(dialog.getByRole("button", { name: "Preview source" })).toBeDisabled();
     await dialog.getByRole("button", { name: /Generated portrait display .* Display 8$/ }).click();
@@ -176,7 +189,7 @@ for (const scale of [100, 125]) {
     }
     await expect(dialog.getByRole("button", { name: "Preview source" })).toBeEnabled();
     await dialog.getByRole("tab", { name: "Screen", exact: true }).click();
-    await expect(dialog.getByRole("button", { name: /Generated studio display .* Display 7$/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("status", { name: "Selected screen" })).toHaveText("Selected: Generated studio display");
     await expect(systemAudio).toBeChecked();
     await dialog.getByRole("tab", { name: "Window", exact: true }).click();
     await expect(dialog.locator('.cp-capture-source[aria-pressed="true"]')).toHaveCount(0);
@@ -185,7 +198,8 @@ for (const scale of [100, 125]) {
     await expect(systemAudio).toBeChecked();
     await expect(dialog.getByRole("button", { name: /Generated portrait display .* Display 8$/ })).toHaveAttribute("aria-pressed", "true");
     await expect(dialog.getByRole("button", { name: "Preview source" })).toBeInViewport();
-    expect(await writes(page)).toEqual([]);
+    // Nothing since the pick: drafts on other tabs stay local until their own Preview.
+    expect((await writes(page)).map(item => item.command)).toEqual(["program_capture_choose", "program_capture_start"]);
     await page.screenshot({ path: test.info().outputPath(`unified-region-${scale}.png`) });
     await dialog.getByRole("button", { name: "Preview source" }).click();
     await expect.poll(async () => (await writes(page)).filter(item => item.command === "obs_start").length).toBe(1);
@@ -197,9 +211,9 @@ for (const scale of [100, 125]) {
   });
 }
 
-test("display rearrangement disables a stale draft without selecting another screen", async ({ page }) => {
+test("display rearrangement disables a stale Region draft without selecting another display", async ({ page }) => {
   await boot(page); await gear(page).click(); const dialog = captureDialog(page);
-  await dialog.getByRole("tab", { name: "Screen", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Region", exact: true }).click();
   await dialog.getByRole("button", { name: /Generated studio display .* Display 7$/ }).click();
   await page.evaluate(() => { (window as unknown as BrowserFixture).__obsDisplays[0].geometry.x = 1920; });
   await dialog.getByRole("button", { name: "Refresh displays" }).click();
@@ -207,6 +221,19 @@ test("display rearrangement disables a stale draft without selecting another scr
   await expect(dialog.getByRole("button", { name: "Preview source" })).toBeDisabled();
   await expect(dialog.locator('.cp-capture-source[aria-pressed="true"]')).toHaveCount(0);
   expect(await writes(page)).toEqual([]);
+});
+
+test("opening Source never shows macOS's picker, and a cancelled pick starts nothing", async ({ page }) => {
+  await boot(page); await gear(page).click(); const dialog = captureDialog(page);
+  await dialog.getByRole("tab", { name: "Screen", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Choose screen…" })).toBeEnabled();
+  expect(await writes(page)).toEqual([]);
+  await page.evaluate(() => { (window as unknown as BrowserFixture).__pickOutcome = "cancelled"; });
+  await dialog.getByRole("button", { name: "Choose screen…" }).click();
+  await expect.poll(async () => (await writes(page)).map(item => item.command)).toEqual(["program_capture_choose"]);
+  await expect(dialog.getByRole("button", { name: "Choose screen…" })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Preview source" })).toBeDisabled();
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
 });
 
 test("crop gestures and audio choice stay local until Preview", async ({ page }) => {

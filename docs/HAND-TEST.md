@@ -1103,6 +1103,28 @@ the acceptance test for whenever the verdict UI gets built.
 3. **Nothing changes.** With Sauce Bunny open on a string out, ask Claude to
    change it: it says it can only read. History shows no new step.
 
+### Preview ▸ Source ▸ Screen on macOS's picker (docs/PROGRAM-CAPTURE.md)
+
+1. Review ▸ Preview gear ▸ Source ▸ Screen ▸ **Choose screen…**: macOS's own
+   sharing picker appears (not a list of ours). Sauce Bunny's windows are not
+   offered. No Screen Recording prompt and no "bypass the private window
+   picker" alert appear, now or after a week.
+2. Pick a display and press Share: the Preview shows it within a few seconds,
+   labelled with the display's name. **Sauce Bunny's own windows must not
+   appear in the picture** (no hall of mirrors). macOS's menu bar shows its
+   screen-sharing indicator; its Stop sharing ends the preview cleanly.
+3. Cancel the picker instead: nothing starts and nothing reads as an error.
+4. Tick Include system audio, play something in another app: the first time,
+   macOS asks once for "System Audio Recording" for Sauce Bunny. Allow it; the
+   room hears the other app. Leave the Preview muted (its default) and check
+   nothing echoes; then unmute it briefly and note whether Sauce Bunny's own
+   playback is captured back (the open question in docs/PROGRAM-CAPTURE.md).
+5. Stop the preview, preview again: no second pick is needed. Quit and
+   relaunch: Screen says to choose again. After quitting, no
+   `saucebunny-program-capture` process is left (`pgrep -fl program-capture`).
+6. System Settings ▸ Privacy and Security ▸ Screen and System Audio Recording:
+   Sauce Bunny is not listed under Screen Recording.
+
 ### The Pipeline on String Outs (what to send when it hangs)
 
 1. In String Outs, press ⌘\: the Pipeline opens at the foot of the page with

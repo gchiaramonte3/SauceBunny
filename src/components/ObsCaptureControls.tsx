@@ -4,11 +4,12 @@ import type { ObsWindowChoice } from "../bindings/ObsWindowChoice";
 import type { ObsSelection } from "../bindings/ObsSelection";
 import type { ObsPreflight } from "../bindings/ObsPreflight";
 import { formatError } from "../lib/error-format";
-import { copyCaptureSelection, isDisplayCapture } from "../lib/ndi-program-source";
+import { copyCaptureSelection, isWindowCapture } from "../lib/ndi-program-source";
 import { captureWindowKey, useCaptureWindowThumbnails } from "../hooks/use-capture-window-thumbnails";
 import { CaptureSourceGrid, CaptureRegionEditor, CaptureAudioOption, captureRegionValid } from "./CaptureSourcePicker";
 import { ObsDisplayCaptureControls } from "./ObsDisplayCaptureControls";
 import { CapturePreviewFooter } from "./CapturePreviewFooter";
+import { ProgramCaptureControls } from "./ProgramCaptureControls";
 
 const FULL_WINDOW = { x: 0, y: 0, width: 1, height: 1 };
 type WindowSelection = Extract<ObsSelection, { application: string }>;
@@ -32,6 +33,8 @@ export type ObsCaptureControlProps = {
 
 /** The source tab selects one private capture path, never a room share. */
 export function ObsCaptureControls({ mode = "window", ...props }: ObsCaptureControlProps) {
+  // Screen runs on macOS's sharing picker; the OBS paths below retire with OBS (docs/PROGRAM-CAPTURE.md).
+  if (mode === "screen") return <ProgramCaptureControls {...props} mode={mode}/>;
   return mode === "window" ? <ObsWindowCaptureControls {...props}/>
     : <ObsDisplayCaptureControls key={mode} {...props} mode={mode}/>;
 }
@@ -39,7 +42,7 @@ export function ObsCaptureControls({ mode = "window", ...props }: ObsCaptureCont
 /** Metadata discovery is separate from bounded picker snapshots. Only Preview
  * starts continuous capture, with the exact window/PID/crop/audio selection. */
 function ObsWindowCaptureControls({ open, disabled, initialSelection, onSelectionChange, onPreview, refreshRequest = 0, footerTarget, reportedPreviewError }: ObsCaptureControlProps) {
-  const [selection, setSelection] = useState<WindowSelection>(() => initialSelection && !isDisplayCapture(initialSelection) ? initialSelection : EMPTY_SELECTION);
+  const [selection, setSelection] = useState<WindowSelection>(() => initialSelection && isWindowCapture(initialSelection) ? initialSelection : EMPTY_SELECTION);
   const [windows, setWindows] = useState<ObsWindowChoice[]>([]);
   const [runtime, setRuntime] = useState<ObsPreflight | null>(null);
   const [runtimeDiscovery, setRuntimeDiscovery] = useState<DiscoveryState>({ phase: "idle", error: null });
@@ -52,7 +55,7 @@ function ObsWindowCaptureControls({ open, disabled, initialSelection, onSelectio
   const cancelScan = useCallback(() => { scan.current++; }, []);
   const cancelPreviewFeedback = useCallback(() => { previewGeneration.current++; }, []);
   useEffect(() => {
-    if (initialSelection && !isDisplayCapture(initialSelection)) setSelection(initialSelection);
+    if (initialSelection && isWindowCapture(initialSelection)) setSelection(initialSelection);
   }, [initialSelection]);
   useEffect(() => {
     if (!open) { action.current = false; setStarting(false); }

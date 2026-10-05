@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ObsSelection } from "../bindings/ObsSelection";
+import type { ObsWindowSelection } from "../bindings/ObsWindowSelection";
 import { emptyNdiTelemetry, type NdiLocalProgram } from "../lib/ndi-program-coordinator";
 import { copyCaptureSelection } from "../lib/ndi-program-source";
 import { useCapturePreviewReveal } from "./use-capture-preview-reveal";
 
-const selection = (): Exclude<ObsSelection, { kind: "display" }> => ({ application: "com.generated.Editor", process: 101, window: 501,
+const selection = (): ObsWindowSelection => ({ application: "com.generated.Editor", process: 101, window: 501,
   crop: { x: .1, y: .2, width: .5, height: .6 }, audio: false });
 function candidate(overrides: Partial<NdiLocalProgram> = {}, capture = selection()): NdiLocalProgram {
   return { id: "a".repeat(32), name: "Generated editor window", url: "/generated-not-loaded", reviewKey: "generated-review",

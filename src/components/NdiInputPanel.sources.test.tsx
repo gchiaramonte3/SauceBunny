@@ -22,6 +22,10 @@ const regionSelection: ObsDisplaySelection = { kind: "display", displayUuid: dis
 function ordinary(command: string, args: Record<string, unknown>) {
   if (command === "ndi_discover") return Promise.resolve({ bridgeCompiled: true, runtime: "ready", sources: [{ name: "Generated NDI" }], error: null });
   if (command === "obs_preflight") return Promise.resolve({ available: true, error: null });
+  if (command === "program_capture_preflight") return Promise.resolve({ available: true, error: null, kinds: ["screen"], systemAudio: true });
+  if (command === "program_capture_cancel_choose") return Promise.resolve();
+  if (command === "program_capture_choose") return Promise.resolve({ outcome: "chosen",
+    choice: { choice: "0123456789abcdef0123456789abcdef", kind: "screen", label: "Generated screen", width: 1200, height: 900 } });
   if (command === "obs_displays") return Promise.resolve(displays);
   if (command === "obs_all_windows") return Promise.resolve([{ app: "com.generated.Editor", pid: 101, id: 501,
     applicationName: "Generated editor", title: "Composer", width: 1000, height: 800 }]);
@@ -42,6 +46,11 @@ function candidate(id: string, capture: ObsSelection, ready = false): NdiLocalPr
 }
 const tab = (name: string) => screen.getByRole("tab", { name }) as HTMLButtonElement;
 const preview = () => screen.getByRole("button", { name: /^(Preview source|Starting preview…)$/ }) as HTMLButtonElement;
+/** Screen runs on macOS's sharing picker: Choose screen… resolves with a pick and starts its preview. */
+const chooseScreen = async () => {
+  fireEvent.click(await screen.findByRole("button", { name: "Choose screen…" }));
+  await screen.findByRole("status", { name: "Selected screen" });
+};
 const chooseDisplay = async (id: number) => fireEvent.click(await screen.findByRole("button", { name: new RegExp(`Display ${id}$`) }));
 const changeField = (name: string, value: number) => fireEvent.change(screen.getByRole("spinbutton", { name }), { target: { value: String(value) } });
 const fieldValue = (name: string) => (screen.getByRole("spinbutton", { name }) as HTMLInputElement).valueAsNumber;
@@ -79,7 +88,8 @@ describe("one private source chooser", () => {
     const view = render(<NdiInputPanel input={source} onClose={onClose}/>);
     fireEvent.click(tab(mode));
     if (mode === "Window") fireEvent.click(await screen.findByRole("button", { name: /Window 501$/ }));
-    else { await chooseDisplay(20); if (mode === "Region") { changeField("Width", 40); changeField("Height", 50); } }
+    else if (mode === "Screen") await chooseScreen();
+    else { await chooseDisplay(20); changeField("Width", 40); changeField("Height", 50); }
     fireEvent.click(preview());
     await screen.findByText(message);
     source.snapshot = { ...source.snapshot, error: message };
@@ -137,7 +147,7 @@ describe("one private source chooser", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Include application audio" }));
     fireEvent.click(tab("Region")); await chooseDisplay(20);
     changeField("Left", 20); changeField("Top", 10); changeField("Width", 40); changeField("Height", 60);
-    fireEvent.click(tab("Screen")); await chooseDisplay(10); expect(preview().disabled).toBe(false);
+    fireEvent.click(tab("Screen")); await chooseScreen(); await waitFor(() => expect(preview().disabled).toBe(false));
     fireEvent.click(tab("Region")); await waitFor(() => expect(preview().disabled).toBe(false));
     expect(fieldValue("Left")).toBe(20); expect(fieldValue("Height")).toBe(60);
     expect(screen.getByRole("status", { name: "Selected display" }).textContent).toContain("Display 20");
@@ -146,7 +156,7 @@ describe("one private source chooser", () => {
     expect(fieldValue("Left")).toBe(10); expect(fieldValue("Width")).toBe(50);
     expect((screen.getByRole("checkbox", { name: "Include application audio" }) as HTMLInputElement).checked).toBe(true);
     fireEvent.click(tab("Screen")); await waitFor(() => expect(preview().disabled).toBe(false));
-    expect(screen.getByRole("status", { name: "Selected display" }).textContent).toContain("Display 10");
+    expect(screen.getByRole("status", { name: "Selected screen" }).textContent).toContain("Generated screen");
     expect(screen.queryByRole("spinbutton")).toBeNull();
     view.rerender(<NdiInputPanel input={source} onClose={onClose} open={false}/>);
     view.rerender(<NdiInputPanel input={source} onClose={onClose}/>);
@@ -154,7 +164,10 @@ describe("one private source chooser", () => {
     expect(tab("Screen").getAttribute("aria-selected")).toBe("true");
     fireEvent.click(tab("NDI")); await screen.findByRole("option", { name: "Generated NDI" });
     expect((screen.getByRole("combobox", { name: "NDI source" }) as HTMLSelectElement).value).toBe("Generated NDI");
-    expect(source.startCapture).not.toHaveBeenCalled(); expect(source.start).not.toHaveBeenCalled();
+    // Only the pick started anything: the picker's Share click is the go-ahead for that one preview.
+    expect(source.startCapture).toHaveBeenCalledTimes(1);
+    expect(source.startCapture).toHaveBeenCalledWith(expect.objectContaining({ choice: "0123456789abcdef0123456789abcdef", kind: "screen" }));
+    expect(source.start).not.toHaveBeenCalled();
     expect(source.cancelPreview).not.toHaveBeenCalled(); expect(source.share).not.toHaveBeenCalled();
   });
 
@@ -162,6 +175,7 @@ describe("one private source chooser", () => {
     const source = input(); render(<NdiInputPanel input={source} onClose={vi.fn()}/>);
     fireEvent.click(tab(mode));
     if (mode === "Window") fireEvent.click(await screen.findByRole("button", { name: /Window 501$/ }));
+    else if (mode === "Screen") await chooseScreen();
     else await chooseDisplay(10);
     const panel = screen.getByRole("tabpanel", { name: mode });
     expect(panel.contains(preview())).toBe(false);
@@ -171,7 +185,8 @@ describe("one private source chooser", () => {
     const audio = screen.getByRole("checkbox", { name: mode === "Window" ? "Include application audio" : "Include system audio" });
     expect(audio.closest(".cp-ndi-input-footer")).not.toBeNull();
     if (mode === "Region") expect(panel.contains(screen.getByRole("spinbutton", { name: "Width" }))).toBe(true);
-    expect(source.startCapture).not.toHaveBeenCalled();
+    // A Screen pick starts its own preview; choosing a window or region does not.
+    expect(source.startCapture).toHaveBeenCalledTimes(mode === "Screen" ? 1 : 0);
   });
 
   it("allows tab navigation during startup without a late candidate changing the tab or closing settings", async () => {
@@ -262,21 +277,22 @@ describe("one private source chooser", () => {
     expect(tab("NDI").getAttribute("aria-selected")).toBe("true"); expect(source.startCapture).not.toHaveBeenCalled();
   });
 
-  it("opens a full Screen's Edit as a full-sized Region draft without changing capture or sharing", async () => {
+  // An OBS capture of a whole display (from before Screen moved to macOS's picker) opens on Region.
+  it("opens a full-display capture's Edit as a full-sized Region draft without changing capture or sharing", async () => {
     const source = input(), onClose = vi.fn();
     const fullSelection = { ...regionSelection, crop: { x: 0, y: 0, width: 1, height: 1 } };
     const full = candidate("full-screen", fullSelection, true);
     source.snapshot.published = full; source.program = { ...full, local: true, ownerId: "generated" };
     const view = render(<NdiInputPanel input={source} onClose={onClose}/>);
     await waitFor(() => expect(preview().disabled).toBe(false));
-    expect(tab("Screen").getAttribute("aria-selected")).toBe("true");
+    expect(tab("Region").getAttribute("aria-selected")).toBe("true");
     view.rerender(<NdiInputPanel input={source} onClose={onClose} editRequest={{ sourceId: full.id, serial: 1 }}/>);
     expect(tab("Region").getAttribute("aria-selected")).toBe("true");
     await screen.findByRole("spinbutton", { name: "Left" });
     expect(fieldValue("Left")).toBe(0); expect(fieldValue("Top")).toBe(0);
     expect(fieldValue("Width")).toBe(100); expect(fieldValue("Height")).toBe(100);
     changeField("Width", 50);
-    expect(full.capture?.crop.width).toBe(1);
+    expect(full.capture && "crop" in full.capture ? full.capture.crop.width : null).toBe(1);
     expect(source.startCapture).not.toHaveBeenCalled(); expect(source.share).not.toHaveBeenCalled();
     expect(source.cancelPreview).not.toHaveBeenCalled(); expect(onClose).not.toHaveBeenCalled();
   });

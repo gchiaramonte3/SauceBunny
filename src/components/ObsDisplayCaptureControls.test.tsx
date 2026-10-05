@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ObsDisplayChoice } from "../bindings/ObsDisplayChoice";
 import type { ObsDisplaySelection } from "../bindings/ObsDisplaySelection";
 import type { ObsSelection } from "../bindings/ObsSelection";
-import { ObsCaptureControls } from "./ObsCaptureControls";
+// Screen now runs on macOS's sharing picker (ProgramCaptureControls); these test the
+// display chooser itself, which Region still uses until it moves to the picker too.
+import { ObsDisplayCaptureControls as ObsCaptureControls } from "./ObsDisplayCaptureControls";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));

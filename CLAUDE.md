@@ -606,6 +606,7 @@ All sidecars are bundled binaries invoked through `tauri-plugin-shell`. Each lon
 | llama-server | Local LLM chat for the AI Summary tab | `npm run build:llama` (builds llama.cpp from source, static + Metal) |
 | saucebunny-dictate | Live on-device dictation for review comments (Apple Speech, partial results while you speak) | `npm run build:dictate` (builds from `swift-sidecar/`) |
 | saucebunny-capture | ScreenCaptureKit engine for co-review screen sharing (display list + capture) | `npm run build:capture` (builds from `swift-sidecar/`) |
+| Sauce Bunny Capture.app (saucebunny-program-capture) | Preview ▸ Source capture through macOS's own sharing picker (no Screen Recording permission, no monthly alert), H.264/AAC fMP4 into the Preview's program ring, system audio by Core Audio process tap. A nested app in `Contents/Helpers`, not an `externalBin`: the picker's filter lives only in the process that showed it. Replaces the embedded OBS helper (docs/PROGRAM-CAPTURE.md) | `npm run build:program-capture` (builds from `swift-sidecar/`, signs, copied by `build-app-with-ndi.sh`) |
 | saucebunny-audio-analysis | Optional local-file sound evidence (system AVFoundation + SoundAnalysis, no capture); used by the feature-flagged Advanced Intelligence preview, not a calibrated music verdict | `npm run build:audio-analysis` (resource helper under `audio-runtime/`) |
 | saucebunny-aaf | AAF inspection, timeline-aligned PCM extraction and waveforms (inputs read-only), plus `write-edit` (and `write-edits`, a batch from one run): a new, self-verified, metadata-only AAF of an edit for Media Composer, copying a group's mobs from a cached pack after the first export | `npm run build:aaf` (freezes `aaf-sidecar/` with pinned pyaaf2 and a bundled Python runtime) |
 
@@ -767,7 +768,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and nineteen rules in this file are checked by a test rather than remembered. If you
+One hundred and twenty-one rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -930,6 +931,8 @@ written after finding the rule already broken somewhere.
 | `voiceprint-contract` | Voiceprints (the voice check's 256-number description of each mic owner's voice, accuracy spec phase 4) are biometric data: written only under `app_data_dir()/voiceprints`, never under Documents, never read by the context layer that answers assistants or by the co-review wire, never in a command's answer or the ownership cache. Only the labels they settle travel |
 | `main-thread-contract` | No NEW `#[tauri::command]` runs on the main thread: it is `async fn` or `#[tauri::command(async)]`. A plain `fn` command runs on the thread that draws the window, so one `exists()` on Avid NEXIS under daytime load froze the app, and a read the volume never answered put it past Force Quit. The 76 left there touch nothing a network volume can hold up (settings, keychain, app data); the list is shrink-only. Tauri's own `asset://` handler had the same flaw and is replaced (`asset_protocol.rs`, pinned by `asset-scope-contract`) |
 | `string-outs-pipeline-contract` | Every String Outs file calls the app through `pipelineInvoke` (lib/pipeline), never Tauri's `invoke` directly. String Outs hung with nothing in any log: the backend journals its own operations, but a call the page made and never got back, or one that is not a backend operation at all (the undo log, an export, Ask), left no trace. The traced call says so while it waits, at 2, 10, 30 and 60 s, into the journal on disk, so a hang that ends in Force Quit is still there on relaunch |
+| `program-capture-picker-contract` | The Preview capture helper chooses only through macOS's sharing picker: it never calls `SCShareableContent`, `SCScreenshotManager`, `CGPreflight/RequestScreenCaptureAccess`, `CGWindowList*` or `CGDisplay*` capture. Any one of them needs Screen Recording permission and brings back macOS 15/26's monthly "bypass the system private window picker" alert for every user, while capture keeps working, so nothing else would notice. It fired on its first run, at a colour-matrix constant borrowed from `CGDisplayStream` |
+| `program-capture-protocol-contract` | The capture helper (Swift) and its supervisor (`obs/picked.rs`) agree: every status code the helper sends has its own words in the app, the ops Rust sends are exactly the ops Swift parses, and the status fields Rust reads (it rejects unknown or missing ones) are exactly the ones Swift writes. Two languages with no compiler between them |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:

@@ -80,6 +80,14 @@ let package = Package(
       name: "saucebunny-dictate",
       path: "Sources/saucebunny-dictate"
     ),
+    // Preview source capture (Screen, Window, Region) on ScreenCaptureKit and
+    // macOS's own sharing picker, replacing the embedded OBS helper. Pure
+    // protocol and geometry live in ProgramCaptureCore so `swift test` covers
+    // them without capture permissions. See docs/PROGRAM-CAPTURE.md.
+    .target(name: "ProgramCaptureCore", path: "Sources/ProgramCaptureCore"),
+    .testTarget(name: "ProgramCaptureCoreTests", dependencies: ["ProgramCaptureCore"], path: "Tests/ProgramCaptureCoreTests"),
+    .executableTarget(name: "saucebunny-program-capture", dependencies: ["ProgramCaptureCore"],
+                      path: "Sources/saucebunny-program-capture"),
     // Screen-share capture engine — ScreenCaptureKit windows/displays/portion
     // + system audio. NO external dependencies (system SCK/AVFoundation only).
     .executableTarget(

@@ -32,6 +32,8 @@ fn start_message(selection: &ObsSelection, slot: usize, generation: u64) -> serd
             if value.audio { message["audioPolicy"] = serde_json::json!(1); }
             message
         },
+        // obs_start refuses a pick before it can reach this service.
+        ObsSelection::Picked(_) => serde_json::json!({"op":"stop","slot":slot,"generation":generation}),
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
