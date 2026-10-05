@@ -12,7 +12,12 @@ sources at the end. They are other people's benchmarks, some self-reported;
 **phase 0 exists so that no default changes until it wins on the owner's own
 footage.**
 
-**Status (2026-10-04):** written, nothing built.
+**Status (2026-10-04):** phases 1 to 4 are built and tested; phase 0's
+scorer is built and waits for the owner's four scenes; phase 5's harness is
+the scorer's `--hyp` input, and running the candidates waits on those scenes
+and on decision 3. Each phase's Status line says what was built and what was
+measured. Decision 1 is built as recommended (easy to change); decisions 2
+and 3 are not built; decision 4 is built as recommended.
 
 **Rules that hold in every phase:**
 - **Local first.** Every model runs on the Mac. No new cloud call.
@@ -103,6 +108,24 @@ Read from the code (paths relative to the repo):
 
 Nothing below changes a default without a number from here.
 
+**Status: scorer built, scenes not yet chosen.** `sauce-bunny --eval [dir]`
+(`src-tauri/src/eval.rs`, a mode of the app's own executable) scores every
+scene in `~/Documents/Sauce Bunny Eval/` against the app's current
+transcript and bleed labels: WER on owner words with S/D/I, cast names right
+and false swaps, word-start error (mean, 90th percentile, share within one
+frame), owner words wrongly hidden, bleed left showing, off-mic flagged.
+`--eval-template <document> <from> <to> <out.csv> [tracks]` writes the
+current transcript of those mics as the CSV to correct by hand, and a
+scene's `"tracks"` limits scoring to the mics labelled (one minute of AFF
+BANK 1 is 1,493 rows across 20 mics, 412 for two). A round trip on a real
+minute scores itself perfectly. The CSV format is a word per row: track,
+start, end (sequence seconds), text, who said it, owner/bleed/offmic. What
+stands in for the synthetic CI scenes: the resolver, the orchestration and
+the scorer are unit-tested on generated levels and words (`bleed.rs`,
+`ownership.rs`, `eval.rs`); building scenes from public clips with added
+reverb was not needed to test the logic and would add audio fixtures to the
+repo.
+
 1. **The owner picks four scenes**, each 3 to 5 minutes, from real shows: a
    dinner argument (overtalk), a car (close, noisy), outdoors (wind, distance),
    a confessional (one voice, clean). At least eight mics in two of them.
@@ -136,6 +159,14 @@ fixtures run in `npm run verify`.
 
 The cheapest accuracy win: Parakeet already measured these times.
 
+**Status: built (7b90dbb).** As written, with two measured differences.
+Parakeet's token END times overlap the next token by up to about 80 ms on
+real speech ("We" 0.00-0.24 s, "drove" 0.16-0.48 s), so a word now ends where
+the next begins. The batch is eight windows (sixteen minutes of audio) per
+model load. Item 5's review mark is a dotted underline on the word in the
+AAF Audio reader (`MultitrackCueText`), since a cue-level note would not say
+which word.
+
 1. **Words travel with cues.** `AafCue` gains an optional
    `words: Vec<AafWord>` with `{text, start_sample, end_sample, confidence}`
    (`#[serde(default)]`, ts-rs regenerated), so documents written before this
@@ -167,6 +198,26 @@ stored words.
 
 ## Phase 2: Parakeet Ultra and cast names
 
+**Status: built (7b90dbb, f7d07ba).** FluidAudio 0.15.3 -> 0.17.5 (Ultra is
+`AsrModelVersion.ultra` from 0.17.3); the installed v3 model already had
+every file 0.17.5 expects. 0.17.5 also links text-processing-rs's
+NemoTextProcessing (Apache-2.0, statically, opt-out only from a Swift 6.2
+manifest), recorded in THIRD-PARTY-LICENSES. Ultra is offered first in AAF
+Audio's picker with its own cancellable download, not in Settings, since
+that is where it is used. Cast names are an opt-in "Spell cast names" (the
+mic owners' names), **off by default**, because the first real run showed
+why: on Parakeet v3 at the cautious similarity, FluidAudio's rescorer fixed
+"Siomara" to "Xiomara" and also turned "it was funny" into "it Saoirse". A
+replacement is now taken only when it is a respelling (at most two words,
+60% of letters shared), applied to the measured words so their times
+survive; the same clip then reads "Xiomara ... it was funny" ("Sersha" stays
+as heard). Whisper large-v3-turbo (multilingual, 1.62 GB at the pinned
+commit) is offered and AAF Audio picks the most accurate installed Whisper.
+Whisper's stock inventions and loops are labelled on the cue (`suspect`),
+never removed. The "on a mic with no activity under it" half is not built:
+it needs the mic's level at the moment a cue is saved, which transcription
+does not have, so the label is text-only for now.
+
 1. **Upgrade FluidAudio** from 0.15.3 to the first release that carries
    Parakeet Ultra (0.17.3 per FluidAudio's model list; confirm on upgrade),
    re-running the diarizer and dictation tests, since both depend on it.
@@ -194,6 +245,18 @@ picker lists Ultra first and still runs v3.
 ---
 
 ## Phase 3: the bleed resolver
+
+**Status: built (6ca5e2f).** 3a and 3c as written; 3b runs inside Check
+voices (phase 4), because both need short clips of real audio and the
+overviews 3a reads are levels only. Levels are compared against each mic's
+own floor (Boakye's normalisation), which equalises gain without the
+separate calibration step 1 describes. Two rules were tightened by tests:
+bleed needs the same words on the louder mic (a quiet copy with different
+words stays visible as unsure), and overtalk needs this mic within 10 dB of
+the loudest (a misheard copy 20 dB down is not someone talking over). The
+editor's call is per cue rather than per word, from the right-click menu
+("Rosa, on their own mic" / "Bleed from Dev's mic" / "Use the automatic
+call"). The ablation and the 1% ceiling wait on phase 0's scenes.
 
 Every person is heard loudest and first on their own lav. A neighbour's lav
 a metre or two away hears them about 15 to 20 dB quieter and a few
@@ -258,6 +321,23 @@ a break-test that removes the duplicate-text check; the ablation (level, then
 
 ## Phase 4: voiceprints
 
+**Status: built (6ca5e2f).** `saucebunny-diarize --embed` returns one
+voiceprint per span from FluidAudio's WeSpeaker model; its embeddings were
+measured NOT to be unit length despite the doc comment (a voice against
+itself dotted to about 13), so the sidecar normalises them. On clean
+synthetic speech the same voice scores about 0.75 and different voices about
+0.0, so 0.5 with a 0.1 margin has room; bleed will narrow it. Check voices
+learns each owner from the best ten-minute window of dominant stretches
+(and, on sequences over half an hour, a second window from the other half
+of the day, which is how a mic swap shows), then listens to up to 600 unsure
+words in clips of at most a minute, and when the voice cannot decide, asks
+which mic heard the word first (cross-correlation within 20 ms; the owner
+leads by 2 ms or more). A word in another cast member's voice is labelled
+`other` ("Sounds like Ellie") and stays visible. Mic swaps are warned about
+rather than split into periods, and that mic decides nothing by voice;
+splitting the day is the next step if the warnings prove common.
+`voiceprint-contract` pins where voiceprints may go.
+
 A speaker-embedding model turns 2 to 3 seconds of speech into 256 numbers
 that capture what a voice sounds like (the shape of the vocal tract, the pitch
 range): the "frequency or sound each person has". The app already ships one
@@ -299,6 +379,13 @@ layer.
 ---
 
 ## Phase 5: engine and aligner bake-off
+
+**Status: harness ready, not run.** Any engine's words can be scored with
+`sauce-bunny --eval --hyp words.json`, a JSON list of
+`{ "track", "start", "end", "text" }` in sequence seconds, so a candidate run
+outside the app (mlx-qwen3-asr, transcribe.cpp for Granite) is compared on
+the same scenes and metrics. Running them needs the scenes (phase 0) and
+several gigabytes of models (decision 3), so nothing is installed or shipped.
 
 Run through phase 0's scorer, against Parakeet Ultra with phase 1's times.
 

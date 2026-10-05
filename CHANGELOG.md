@@ -8,6 +8,26 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [0.6.0] - 2026-09-29
 
 ### Added
+- **More accurate AAF Audio transcripts.** Parakeet's own word times are
+  kept instead of being guessed from word length, words it was unsure of are
+  underlined, and captions break at sentence ends. **Parakeet Ultra**, a
+  more accurate drop-in for v3, is offered first in AAF Audio's model picker
+  with its own download, and Parakeet now loads once per sixteen minutes of
+  audio instead of every two. Whisper adds **large-v3-turbo**, and its stock
+  inventions on silence ("Thank you for watching") are flagged.
+- **Bleed is labelled.** Measure mics compares every lav's level, against its
+  own noise floor, and finds the same words on a louder mic: those copies are
+  dimmed on their own tab ("Heard on Rosa's mic") and left out of All
+  voices, search, String Outs' source pane and the assistants' answers.
+  Nothing is deleted, and right-click gives you the final say on any line.
+- **Check voices** learns each mic owner's voice from the sequence itself and
+  settles the lines the levels could not, warns when two people sound too
+  alike or a mic seems to have changed hands, and keeps the voiceprints on
+  this Mac (Settings ▸ Transcription ▸ Voiceprints deletes them).
+- **Spell cast names** (off by default) tells the recognizer the mic owners'
+  names; a respelling is only taken when it looks like the word it replaces.
+- `sauce-bunny --eval` scores hand-checked scenes, so changes to the
+  defaults can be measured on real footage.
 - **String Outs cuts like an editing timeline.** V splices at the record In
   mark, else the playhead (with Snap on, in the gap between words), instead
   of at the text caret, which started at the first word. The playhead parks

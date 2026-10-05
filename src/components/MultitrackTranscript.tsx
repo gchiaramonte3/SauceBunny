@@ -42,7 +42,7 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
   // together (All voices, search, AI search), dimmed on the mic's own tab.
   const hideBleed = !showBleed && selected === "all";
   const rows = useMemo(() => labelled.filter((row) => !(hideBleed && row.owned.bleed)), [labelled, hideBleed]);
-  const hiddenBleed = labelled.length - rows.length;
+  const bleedLines = labelled.filter((row) => row.owned.bleed).length;
   const untimed = useMemo(() => untimedTranscriptRows(scoped), [scoped]);
   const passages = useMemo(() => [
     ...rows.filter((row) => showBleed || !row.owned.bleed).map((row) => ({ key: passageKey("cue", row.trackId, row.id), text: `${row.owner}: ${row.text}` })),
@@ -74,7 +74,7 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
       </div>
       {enabled && <p className="cp-multitrack-note" role={result.phase === "error" ? "alert" : "status"}>{result.message || "Local AI. Press Enter to search."}</p>}
     </form>
-    <MultitrackBleedBar ownership={ownership.ownership} hidden={hiddenBleed} show={showBleed} onShow={setShowBleed} measuring={ownership.measuring} onMeasure={() => { void ownership.measure(); }} checking={ownership.checking} onCheckVoices={() => { void ownership.checkVoices(); }} onCancel={ownership.cancel} error={ownership.error} />
+    <MultitrackBleedBar ownership={ownership.ownership} bleed={bleedLines} hidden={hideBleed} show={showBleed} onShow={setShowBleed} measuring={ownership.measuring} onMeasure={() => { void ownership.measure(); }} checking={ownership.checking} onCheckVoices={() => { void ownership.checkVoices(); }} onCancel={ownership.cancel} error={ownership.error} />
     {runInfo}
     <div id={panelId} className="cp-multitrack-transcript-body" role="tabpanel" aria-label={person?.name ?? "All voices"} tabIndex={0}>
       {!rows.length && !untimed.length ? <div className="cp-multitrack-transcript-empty"><h3>{loading ? "Waiting for the first completed track" : report && !report.saved ? "No new transcript was saved" : scoped.transcripts.length ? "No speech found in completed tracks" : person ? `No transcript for ${person.name} yet` : "Read each mic in context"}</h3><p>{report?.failures.length ? "Open Transcript info (i) for the failed tracks, then check those tracks and generate again." : "Check tracks, choose an engine, then generate. Saved results appear here."}</p></div>

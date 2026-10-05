@@ -6,8 +6,9 @@ import type { AafOwnership } from "../bindings/AafOwnership";
  * measuring the mics (their levels) and checking voices (who said the words
  * the levels could not settle).
  */
-export function MultitrackBleedBar({ ownership, hidden, show, onShow, measuring, onMeasure, checking, onCheckVoices, onCancel, error }: {
-  ownership: AafOwnership | null; hidden: number; show: boolean; onShow: (show: boolean) => void;
+export function MultitrackBleedBar({ ownership, bleed, hidden, show, onShow, measuring, onMeasure, checking, onCheckVoices, onCancel, error }: {
+  /** Bleed lines in the view; `hidden` says whether the view hides them (All voices) or dims them (a person's tab). */
+  ownership: AafOwnership | null; bleed: number; hidden: boolean; show: boolean; onShow: (show: boolean) => void;
   measuring: boolean; onMeasure: () => void; checking: boolean; onCheckVoices: () => void; onCancel: () => void; error: string | null;
 }) {
   const missing = ownership?.missing.length ?? 0;
@@ -20,7 +21,8 @@ export function MultitrackBleedBar({ ownership, hidden, show, onShow, measuring,
       {measuring ? "Measuring each mic's level. This reads the media once."
         : checking ? "Listening to each owner's voice and the lines the levels could not settle."
           : !ready ? "Measure the mics to tell each person's lines from the bleed of their neighbours."
-            : show ? "Bleed is shown, dimmed." : hidden ? `${hidden} ${hidden === 1 ? "line" : "lines"} heard on another mic hidden.` : "No bleed found."}
+            : !bleed ? "No bleed found." : show ? "Bleed is shown, dimmed."
+              : `${bleed} ${bleed === 1 ? "line" : "lines"} heard on another mic ${hidden ? "hidden" : "dimmed"}.`}
       {!busy && ready && missing > 0 && ` ${missing} ${missing === 1 ? "mic is" : "mics are"} not measured yet.`}
       {!busy && ready && (ownership?.voices ?? 0) > 0 && ` Voices checked for ${ownership?.voices} people.`}
     </span>

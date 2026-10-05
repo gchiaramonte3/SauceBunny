@@ -47,6 +47,7 @@ it("keeps the bleed line on its own mic's tab, dimmed, and lets the editor overr
   render(<MultitrackTranscript document={fixture()} frame={0} solo={new Set()} onSeek={vi.fn()} />);
   fireEvent.click(await screen.findByRole("tab", { name: /Sam/ }));
   const line = await waitFor(() => screen.getByRole("button", { name: /Heard on Alex's mic/ }));
+  expect(screen.getByText("1 line heard on another mic dimmed.")).toBeTruthy();
   expect(line.className).toContain("is-bleed");
   fireEvent.contextMenu(line, { clientX: 20, clientY: 20 });
   fireEvent.click(screen.getByRole("menuitem", { name: "Sam, on their own mic" }));

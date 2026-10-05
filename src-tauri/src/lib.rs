@@ -20,6 +20,7 @@ mod speech;
 mod bleed;
 pub mod context;
 pub mod mcp;
+pub mod eval;
 pub use error::AppError;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};

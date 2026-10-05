@@ -216,7 +216,7 @@ explicitly **LGPL** ffmpeg build (no `--enable-gpl` / `--enable-nonfree`); see
 | `ffprobe` | https://ffmpeg.org ([ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de/) build) | **GPLv3 or later** — `--enable-gpl --enable-version3`; see note above |
 | `whisper-cli` (whisper.cpp) | https://github.com/ggerganov/whisper.cpp | MIT |
 | `llama-server` (llama.cpp) | https://github.com/ggml-org/llama.cpp | MIT |
-| `saucebunny-diarize` | this repo (`swift-sidecar/`) | MIT — links SpeakerKit ([argmax-oss-swift](https://github.com/argmaxinc/argmax-oss-swift), MIT, with Apache-2.0 swift-transformers portions) and [FluidAudio](https://github.com/FluidInference/FluidAudio) (Apache-2.0) |
+| `saucebunny-diarize` | this repo (`swift-sidecar/`) | MIT — links SpeakerKit ([argmax-oss-swift](https://github.com/argmaxinc/argmax-oss-swift), MIT, with Apache-2.0 swift-transformers portions) and [FluidAudio](https://github.com/FluidInference/FluidAudio) (Apache-2.0), which statically links [text-processing-rs](https://github.com/FluidInference/text-processing-rs)'s NemoTextProcessing (Apache-2.0) |
 
 ## Frontend libraries (npm)
 
@@ -253,6 +253,12 @@ license, which the user accepts by downloading it:
   and [ggml-org/whisper-vad](https://huggingface.co/ggml-org/whisper-vad) (MIT).
 - **Speaker-diarization models** (SpeakerKit / FluidAudio, pyannote-derived) —
   fetched by the diarizer on first run; see their upstream repos for terms.
+  The voice check uses FluidAudio's segmentation and WeSpeaker embedding
+  models from the same set.
+- **Parakeet speech models**, as FluidAudio's Core ML builds: Parakeet TDT
+  0.6B v3 (NVIDIA) and Parakeet Ultra (Moondream's post-train of v3), both
+  CC-BY-4.0, and, for "Spell cast names", Parakeet CTC 110M (NVIDIA,
+  CC-BY-4.0). Downloaded when the user asks for them.
 - **LLM GGUF models** for the AI Summary tab (e.g. Qwen, Llama 3.2, Gemma) —
   each governed by its own model license (Apache-2.0, the Llama Community
   License, the Gemma Terms of Use, etc.). Review the model card before use.

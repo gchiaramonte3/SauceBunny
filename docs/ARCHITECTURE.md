@@ -523,6 +523,36 @@ renames and the media link of single-file transcripts, a moved Transcripts
 library unless `--library` names it). Changes and live state are phase 4 of
 the spec and go through the app, so the undo log keeps one writer.
 
+## Multitrack transcript accuracy: words, bleed, voices
+
+Built from `docs/TRANSCRIPT-ACCURACY-SPEC-2026-10-04.md`. Four layers, each
+usable without the next:
+
+- **Measured words.** `saucebunny-diarize --asr` writes each word's time and
+  confidence beside the SRT (`--words`); `aaf/transcribe.rs` attaches them
+  to their cue (`AafCue.words`) when they spell it exactly, and
+  `speech.rs` uses them, snapping each boundary within 40 ms. `--batch` runs
+  up to eight two-minute windows on one model load; `--asr-model ultra`
+  picks Parakeet Ultra; `--vocabulary` spells cast names through
+  FluidAudio's CTC rescorer, guarded so a replacement must be a respelling.
+- **The bleed resolver.** `src-tauri/src/bleed.rs` is pure: each mic's level
+  in 20 ms frames against its own floor, from the waveform overviews, and
+  the same words on a louder mic. `aaf/ownership.rs` runs it over a document
+  (`aaf_ownership`), applies the voice check's calls to unsure words and the
+  editor's per-cue calls over everything, and caches the answer in
+  `app_data_dir()/ownership/`. The AAF Audio reader hides bleed from All
+  voices and search, String Outs reads it via `use-edit-sources`, and the
+  context layer marks `bleed_from` on lines for assistants.
+- **The voice check.** `aaf/voices.rs` (`aaf_check_voices`) learns each
+  owner's voiceprint from the stretches their mic dominates
+  (`saucebunny-diarize --embed`, FluidAudio's WeSpeaker model, normalised in
+  the sidecar), settles unsure words by voice and then by which mic heard
+  them first, and warns of look-alikes and mic swaps. Voiceprints are kept in
+  `app_data_dir()/voiceprints/` and nowhere else (`voiceprint-contract`).
+- **The scorer.** `src-tauri/src/eval.rs`, `sauce-bunny --eval`, scores
+  hand-checked scenes against the app's transcript and labels, or any
+  engine's words (`--hyp`), so no default changes on anyone's say-so.
+
 ## Local AI: one transcript ingestion, shared by every feature
 
 `llama-server` runs as a sidecar and the AI Summary, the auto-chapters and the

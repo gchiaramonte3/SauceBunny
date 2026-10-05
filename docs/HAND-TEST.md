@@ -1103,6 +1103,36 @@ the acceptance test for whenever the verdict UI gets built.
 3. **Nothing changes.** With Sauce Bunny open on a string out, ask Claude to
    change it: it says it can only read. History shows no new step.
 
+### Transcript accuracy (AAF Audio, needs a transcribed multi-mic AAF)
+
+1. **Parakeet Ultra.** In AAF Audio, Engine Parakeet, Model "Parakeet Ultra
+   (not downloaded)": Download Parakeet Ultra. Cancel mid-way stops it with no
+   error; Download again finishes. Generate two mics: their words follow the
+   speech to the frame when you click them in String Outs, and words the
+   recognizer was unsure of are underlined.
+2. **Measure mics.** With the mics transcribed, Measure mics (it reads the
+   media once; Stop works). All voices then says how many lines heard on
+   another mic are hidden; a person's own tab shows them dimmed, "Heard on X's
+   mic". Pick a line you know is someone else's leaning into a mic and check
+   it is labelled; pick a line said by the mic's owner while a neighbour
+   talks over them and check it is NOT hidden.
+3. **Your call wins.** Right-click a dimmed line ▸ "Name, on their own mic":
+   it shows normally everywhere; right-click ▸ "Use the automatic call" puts
+   it back. Reopen the AAF: the call is still there.
+4. **Check voices** (with some lines still unsure): it runs, says how many
+   voices it checked, and any warnings make sense (two people who really
+   sound alike; a mic you know was swapped). Settings ▸ Transcription ▸
+   Voiceprints shows the count; Delete all, confirmed, empties it.
+5. **Spell cast names.** On a scene with unusual names, generate with the
+   box off, then on: names are spelled as on the mics, and read the rest of
+   the scene for any word wrongly turned into a name.
+6. **String Outs and assistants.** In String Outs' source pane, All voices
+   reads each line once. Cutting a line no longer warns about overtalk from
+   its own bleed copies. Ask "where does X say Y": no bleed copy is cited.
+7. **Score a scene** (phase 0): `--eval-template` a scene of two mics,
+   correct the CSV by listening, then `--eval`; the report has WER, names,
+   timing and bleed numbers.
+
 ### Ask with tools (String Outs, needs a Claude or OpenAI key, or a Qwen model)
 
 1. In a string out made from AFF BANK 1, set Ask's model to Claude. Ask

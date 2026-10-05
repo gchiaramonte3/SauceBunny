@@ -362,14 +362,26 @@ final acceptance evidence and the unchanged packaged-app testing boundary.
 Detected microphone names are editable and can be associated with the existing
 Cast roster. A microphone assignment identifies the source of the recording;
 it is not proof of who spoke every line. Nearby voices, applause, and quiet
-recordings can produce bleed or hallucinated text. No automatic cross-track
-deletion, “loudest microphone wins” rule, or confident speaker attribution is
-introduced here.
+recordings can produce bleed or hallucinated text.
 
-Recognition timing is estimated. The reader's source-to-sequence mapping and
-an ASR engine's ability to hear and time words are separate contracts. Raw
-Whisper VAD token timestamps are not used: local testing found compacted-time
-tokens that did not match the original audio coordinate system.
+**Since October 4 (docs/TRANSCRIPT-ACCURACY-SPEC-2026-10-04.md) bleed is
+labelled, never deleted.** Measure mics compares every mic's level against
+its own floor over each word and looks for the same words on a louder mic;
+a word with both is bleed, shown dimmed on its own mic's tab ("Heard on
+Rosa's mic") and left out of All voices, search and AI search unless Show
+bleed is on. A quieter copy whose words differ stays visible as unsure, and
+the editor's right-click call wins over every automatic label. Check voices
+learns each mic owner's voice from this sequence and settles unsure words by
+voice, then by which mic heard them first; it warns of look-alike voices and
+mics that changed hands. The voiceprints stay in the app's support folder.
+
+Recognition timing: Parakeet's own word times are kept since October 4
+(about 80 ms accurate, each snapped within 40 ms to the quietest point);
+Whisper's words are still placed by length within their cue. The reader's
+source-to-sequence mapping and an ASR engine's ability to hear and time
+words are separate contracts. Raw Whisper VAD token timestamps are not used:
+local testing found compacted-time tokens that did not match the original
+audio coordinate system.
 
 ## Work ownership and persistence
 
