@@ -1,10 +1,11 @@
-import { invoke } from "@tauri-apps/api/core";
+import { pipelineInvoke } from "../lib/pipeline";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useRef, useState } from "react";
 import { exportEdits } from "../lib/edit-export";
 import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
 import { IconDownload } from "./Icons";
+const invoke = pipelineInvoke("String Outs");
 
 type Props = { editIds: string[]; titleOf: (id: string) => string };
 

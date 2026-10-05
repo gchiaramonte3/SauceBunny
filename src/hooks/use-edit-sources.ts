@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { measure, pipelineInvoke } from "../lib/pipeline";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { AafOwnership } from "../bindings/AafOwnership";
@@ -14,6 +14,7 @@ import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
 import { cueLabels, ownershipIndex, type OwnershipIndex } from "../lib/multitrack-ownership";
 import { useBleedHidden } from "./use-bleed-hidden";
+const invoke = pipelineInvoke("String Outs");
 
 export type EditSourceData = {
   documents: Map<string, AafDocument>;
@@ -234,7 +235,7 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
     const words: TimelineWord[] = [];
     const audible = new Map<string, [number, number][]>();
     const heard = new Set(tracked.split("\n"));
-    for (const [pair, speech] of loaded.speech) {
+    measure("String Outs", `Turning ${loaded.speech.size} mics' speech into words`, () => { for (const [pair, speech] of loaded.speech) {
       const [source, lane] = pair.split(":");
       // A word marked as heard on another mic leaves All voices and the
       // crosstalk report, so it is marked only when the editor hides bleed
@@ -246,7 +247,7 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
       });
       words.push(...wordsFromSpeech(speech, source, lane, heardOn));
       if (heard.has(lane)) audible.set(source, [...(audible.get(source) ?? []), ...audibleSpans(speech)]);
-    }
+    } });
     // Complete only when every mic on a track has its measured words: not
     // while they are still being read, and not when a sequence or a mic
     // failed to load, whose missing spans would read as silence.

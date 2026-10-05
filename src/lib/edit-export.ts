@@ -1,6 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
+import { pipelineInvoke } from "./pipeline";
 import type { EditExportOutcome } from "../bindings/EditExportOutcome";
 import type { EditExportResult } from "../bindings/EditExportResult";
+const invoke = pipelineInvoke("String Outs");
 
 /**
  * How a group clip is written. "V" (the default) keeps picture groups whole,

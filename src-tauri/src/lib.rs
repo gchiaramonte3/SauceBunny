@@ -262,6 +262,9 @@ pub fn run() {
             commands::aaf_sequences,
             commands::aaf_diagnostics,
             commands::aaf_clear_diagnostics,
+            commands::pipeline_log,
+            commands::pipeline_heartbeat,
+            commands::pipeline_health,
             commands::aaf_resolve_media,
             commands::aaf_open,
             commands::aaf_list,
@@ -427,6 +430,9 @@ pub fn run() {
             commands::session_cancel_fetch,
         ])
         .setup(|app| {
+            // The Pipeline's watchdog: the main thread and the page, both of
+            // which go quiet in a hang and cannot report it themselves.
+            commands::start_pipeline_watchdog(app.handle().clone());
             // Native menus, panels and subsequent windows must not inherit a
             // light system appearance while the web content is always dark.
             app.set_theme(Some(tauri::Theme::Dark));

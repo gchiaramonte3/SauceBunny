@@ -4875,12 +4875,12 @@ export default function App() {
           {/* The Transcript Editor owns its audio (edit-audio.ts) and its undo
               log on disk; kept mounted so leaving it never drops an open edit. */}
           <div ref={editorViewRef} tabIndex={-1} className="cp-view cp-view-editor" hidden={activeView !== "editor"}>
-            <EditPage active={activeView === "editor"} aiModelId={defaults.llmSummarizationModel} openRequest={editorOpenRequest}
+            <EditPage active={activeView === "editor"} aiModelId={defaults.llmSummarizationModel} openRequest={editorOpenRequest} pipelineOpen={logsOpen} onPipelineOpen={setLogsOpen}
               onOpenSettings={(tab) => { setSettingsInitialTab(tab); setSettingsOpen(true); }} />
           </div>
           <div ref={multitrackViewRef} tabIndex={-1} className="cp-view cp-view-multitrack" hidden={activeView !== "multitrack"}>
             <MultitrackPage
-              openRequest={multitrackOpenRequest}
+              openRequest={multitrackOpenRequest} pipelineOpen={logsOpen} onPipelineOpen={setLogsOpen}
               onOpenInStringOuts={(documentId, marks) => { setEditorOpenRequest((previous) => ({ documentId, marks, tick: (previous?.tick ?? 0) + 1 })); setActiveView("editor"); }}
               active={activeView === "multitrack"}
               aiModelId={defaults.llmSummarizationModel}

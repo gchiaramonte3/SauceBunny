@@ -3,6 +3,8 @@
 mod audio;
 mod diagnostics;
 pub use diagnostics::*;
+mod health;
+pub use health::*;
 mod pcm;
 mod peaks;
 mod linked;

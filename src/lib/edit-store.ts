@@ -1,8 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
+import { pipelineInvoke } from "./pipeline";
 import type { EditDocument } from "../bindings/EditDocument";
 import type { EditHead } from "../bindings/EditHead";
 import type { EditHistory } from "../bindings/EditHistory";
 import type { EditSummary } from "../bindings/EditSummary";
+const invoke = pipelineInvoke("String Outs");
 
 /**
  * The Transcript Editor's edits and their undo history, kept by Rust in

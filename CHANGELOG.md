@@ -81,6 +81,17 @@ All notable changes to Sauce Bunny. Format loosely follows
   mics right after their own track, in AAF Audio and String Outs. Each tab
   starts with its track.
 
+### Added
+- **The Pipeline on String Outs**, the same log AAF Audio has, at the foot of
+  the page; ⌘\ opens and closes it on every page. Every call String Outs
+  makes is timed: one still running says so at 2, 10, 30 and 60 seconds,
+  while it waits, and one that failed or ran long gets a row when it ends. A
+  watchdog notices when the window or the page stops answering, says so in
+  the log, and records what the app was stuck on. The log is on disk, so after
+  a Force Quit it is still there. Export diagnostics adds the app's memory,
+  mounted volumes (NEXIS included), what the string out was doing and how
+  every kind of call has performed. No transcript text or names are in it.
+
 ### Fixed
 - **The app could freeze past Force Quit on Avid NEXIS.** Video, audio and
   posters were read off disk on the app's main thread, by the media loader

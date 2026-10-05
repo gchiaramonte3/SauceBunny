@@ -140,6 +140,31 @@ pub fn log(app: &AppHandle, job: &str, level: &str, stage: &str, message: &str) 
     record(app, job, level, stage, message, None);
 }
 
+/// A row the page reports about itself: String Outs' calls that waited, failed
+/// or ran long, its stalls and its uncaught errors. Written into the same
+/// journal as the backend's own, so the Pipeline is one timeline.
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct PipelineRow {
+    pub job_id: String,
+    pub level: String,
+    pub stage: String,
+    pub message: String,
+}
+
+/// The most rows one call may write: a page that floods cannot push the
+/// backend's own history out faster than this.
+const ROWS_PER_CALL: usize = 200;
+
+#[tauri::command]
+pub async fn pipeline_log(app: AppHandle, rows: Vec<PipelineRow>) -> Result<(), AppError> {
+    for row in rows.into_iter().take(ROWS_PER_CALL) {
+        let level = match row.level.as_str() { "ok" | "warn" | "err" => row.level.as_str(), _ => "info" };
+        record(&app, &row.job_id, level, &row.stage, &row.message, None);
+    }
+    Ok(())
+}
+
 /// What a Stop keeps depends on what was stopped. Every cancelled operation
 /// used to say transcripts were retained, including relinks, auditions and
 /// waveform builds that have nothing to do with transcripts.

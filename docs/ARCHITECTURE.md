@@ -256,12 +256,24 @@ PCM windows; no full-file transcode or new library is required.
 Empty audio-mapping headers are not successful persistent cache entries and are
 reported separately from an actual UMID mismatch. Both standard and legacy Sound
 data definitions are recognized. Per-file header start/end events, elapsed times,
-validation timings and memory/disk cache-hit totals appear in Multitrack Pipeline.
+validation timings and memory/disk cache-hit totals appear in the Pipeline.
 
 Source files have no arbitrary size ceiling. AAF and MXF fingerprints use
 64-bit seeks and two 64 KiB reads regardless of total size. Graph/header bounds,
 PCM window sizes and corruption checks remain independent resource safeguards.
-`MultitrackPipeline` reuses the Clip `LogsPanel`, including before import succeeds.
+`PipelinePanel` reuses the Clip `LogsPanel` at the foot of AAF Audio and String
+Outs (one open state, App's `logsOpen`, toggled by ⌘\ on every page), including
+before an import succeeds. It is one log for the app: the page writes its own
+rows into the same journal (`pipeline_log`), from `lib/pipeline.ts`, whose
+`pipelineInvoke` times every call String Outs makes (rows when one waits past
+2/10/30/60 s, fails or runs past a second; a per-command table for the export),
+whose `measure` times calculations on the page's thread, and whose `watchPage`
+logs page stalls and uncaught errors and sends a heartbeat. `aaf/health.rs` is
+the watchdog thread: it pings the main thread every half second and watches the
+heartbeat, writes a row when either goes quiet (and again when it answers), and
+runs `/usr/bin/sample` once per main-thread hang. `pipeline_health` adds memory,
+running processes, mounted volumes (local or network, `MNT_NOWAIT` so a stalled
+NEXIS cannot hold the export) and the newest hang sample to Export diagnostics.
 Native `aaf-diagnostic` events record job boundaries, subprocess stages/timings,
 candidate paths/sizes, validation failures and media-resolution totals. The local
 journal retains 1,500 recent rows in memory and two rolling 1 MiB files under

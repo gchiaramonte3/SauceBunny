@@ -52,6 +52,12 @@ impl JobRegistry {
             g.insert(id, child);
         }
     }
+    /// The job ids with a process registered right now, for the Pipeline's health report.
+    pub(crate) fn running(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.children.lock().map(|children| children.keys().cloned().collect()).unwrap_or_default();
+        ids.sort();
+        ids
+    }
     pub(crate) fn take(&self, id: &str) -> Option<CommandChild> {
         self.children.lock().ok()?.remove(id)
     }
@@ -1594,7 +1600,7 @@ pub fn default_export_path(app: AppHandle) -> Result<String, crate::AppError> {
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-10-05-hide-bleed";
+pub const BACKEND_BUILD_ID: &str = "2026-10-05-pipeline";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

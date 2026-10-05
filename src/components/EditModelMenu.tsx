@@ -1,8 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
+import { pipelineInvoke } from "../lib/pipeline";
 import { useEffect, useState } from "react";
 import type { LlmModel } from "../bindings/LlmModel";
 import { hasApiKey, type CloudProvider } from "../lib/ai-provider";
 import { CLOUD_NAMES, type StringOutModel } from "../lib/string-out-model";
+const invoke = pipelineInvoke("String Outs");
 
 type Props = { value: StringOutModel; appLocalModelId: string | null | undefined; disabled: boolean; onChange: (model: StringOutModel) => void; onSettings: () => void };
 

@@ -1103,6 +1103,25 @@ the acceptance test for whenever the verdict UI gets built.
 3. **Nothing changes.** With Sauce Bunny open on a string out, ask Claude to
    change it: it says it can only read. History shows no new step.
 
+### The Pipeline on String Outs (what to send when it hangs)
+
+1. In String Outs, press ⌘\: the Pipeline opens at the foot of the page with
+   room to read, and ⌘\ closes it. It opens the same way on AAF Audio.
+2. Open a large string out (AFF BANK 1). The log says when it started reading
+   every mic's words and how long that took. Anything that took more than a
+   second, waited, or failed has a row; fast calls do not.
+3. Export diagnostics: the file has HEALTH (memory, main thread, running
+   processes, volumes with NEXIS marked network), PAGE (the string out in
+   counts and ids, no titles or words), IN FLIGHT NOW, CALLS SINCE LAUNCH
+   (per command: calls, failures, average, longest) and the log. Read it for
+   any transcript text, title or person's name: there must be none.
+4. When String Outs hangs next: wait 15 seconds, then Force Quit if you must.
+   Relaunch and open the Pipeline: rows written DURING the hang ("Still
+   waiting on …", "The app's main thread has not answered for …", "String
+   Outs has not answered for …") are there, and, if macOS allowed it, a
+   "Recorded what every thread was doing" row with a hang file in the log
+   folder. Export diagnostics and send that file.
+
 ### Media on Avid NEXIS during the working day (the freeze past Force Quit)
 
 The app used to read every chunk of a playing clip on its main thread, so a

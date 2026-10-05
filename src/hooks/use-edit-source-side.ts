@@ -4,6 +4,7 @@ import type { EditDocument } from "../bindings/EditDocument";
 import type { AskCitation } from "../lib/edit-ask";
 import { placeWords, type TimelineWord } from "../lib/edit-model";
 import { ALL_VOICES, firstSpeaker, sourceOrder, sourcePeople } from "../lib/edit-source-view";
+import { measure } from "../lib/pipeline";
 import { alternativeLane } from "../lib/multitrack-graph";
 import type { EditSourceInfo } from "../components/EditSourcePane";
 import { useEditPlayback } from "./use-edit-playback";
@@ -54,10 +55,10 @@ export function useEditSourceSide({ document, sources, documents, words, colors,
   const frames = source ? Math.round(source.duration * fps) : 0;
   const whole: EditDocument = useMemo(() => ({ ...document, segments: source && frames > 0 ? [{ kind: "source", id: "whole", source: source.id, in_frame: 0, out_frame: frames }] : [], mutes: [], markers: [] }),
     [document, source, frames]);
-  const own = useMemo(() => source ? placeWords(words, { segments: [{ id: "whole", source: source.id, srcIn: 0, srcOut: source.duration }], mutes: [] }) : [], [words, source]);
+  const own = useMemo(() => source ? measure("String Outs", `Placing the source's words (of ${words.length.toLocaleString("en-US")})`, () => placeWords(words, { segments: [{ id: "whole", source: source.id, srcIn: 0, srcOut: source.duration }], mutes: [] })) : [], [words, source]);
   const people = useMemo(() => source ? sourcePeople(document.tracks, source.id, colors, aaf) : [], [document.tracks, source, colors, aaf]);
   const tab = source ? tabs[source.id] ?? firstSpeaker(people, own) : ALL_VOICES;
-  const shown = useMemo(() => sourceOrder(own, tab), [own, tab]);
+  const shown = useMemo(() => measure("String Outs", `Ordering ${own.length.toLocaleString("en-US")} source words for ${tab === ALL_VOICES ? "All voices" : "one person"}`, () => sourceOrder(own, tab)), [own, tab]);
   const rangeKey = source ? `${source.id}\n${tab}` : "";
   const range = ranges[rangeKey] ?? null;
   const chosenWords = useMemo(() => range ? shown.slice(range[0], range[1] + 1).map((item) => item.word) : [], [range, shown]);

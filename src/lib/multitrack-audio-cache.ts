@@ -1,7 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
+import { pipelineInvoke } from "./pipeline";
 import type { AafAudioAsset } from "../bindings/AafAudioAsset";
 import { assetUrl } from "./asset-url";
 import { newJobId } from "./job-id";
+const invoke = pipelineInvoke("Audio");
 
 /** Two five-second decoded windows, two native reads at a time. Pausing cancels
  * unfinished work but retains completed buffers for instant warm resumes. */

@@ -83,6 +83,18 @@ plays on (absent: every patched lane). Neither needed a schema bump, since
 an older build reading a newer file ignores neither in a way that loses
 work: it would play a one-person clip on every track, not drop it.
 
+**The Pipeline journal (2026-10-05).** `app_log_dir()/multitrack.jsonl` and
+its `.previous.jsonl`, two rolling 1 MiB files, 1,500 rows kept in memory. It
+began as AAF Audio's import log and is now the app's: the backend's operations,
+the page's own rows (`pipeline_log`, from `lib/pipeline.ts`) and the watchdog's
+(`aaf/health.rs`). Diagnostic retention, not data: Clear in the Pipeline
+removes both files, and nothing reads them but the Pipeline and its export.
+Written on purpose BEFORE anything is known to be wrong, so a hang that ends in
+Force Quit is still there on relaunch. Beside it, `hang-<unix ms>.txt`: macOS
+`sample` output for every thread, taken once per main-thread hang, newest five
+kept, older ones removed by the watchdog (only files it named itself). No
+transcript text, titles, prompts or names are written to either.
+
 **Transcript accuracy (2026-10-04).** Two derived stores, both keyed by AAF
 Audio document id, both safe to delete:
 

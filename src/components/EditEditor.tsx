@@ -3,6 +3,7 @@ import type { EditHead } from "../bindings/EditHead";
 import type { EditHistory } from "../bindings/EditHistory";
 import { useEditEditorKeys } from "../hooks/use-edit-editor-keys";
 import { useEditPlayback } from "../hooks/use-edit-playback";
+import { useEditPipeline } from "../hooks/use-edit-pipeline";
 import { useEditSourceSide, type EditSourceMarks } from "../hooks/use-edit-source-side";
 import type { EditChange } from "../hooks/use-edit-session";
 import type { EditSourceData } from "../hooks/use-edit-sources";
@@ -65,6 +66,7 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
   const soloed = useMemo(() => new Set([...solo].filter((id) => heard.has(id))), [solo, heard]);
   const audible = lanes.filter((lane) => (soloed.size ? soloed.has(lane.id) : !mute.has(lane.id))).map((lane) => lane.id);
   const playback = useEditPlayback({ document: head.document, audible, active, sourceFrames, joinFade: audio.crossfade / fps });
+  useEditPipeline({ editId, head, history, data, waveforms, inSource, playback });
   const playhead = playback.frame / fps, seek = (seconds: number) => void playback.seek(Math.max(0, Math.round(seconds * fps)));
   const tc = (seconds: number) => editTc(seconds, fps, recordStart);
   const sourceTc = (source: string, seconds: number) => editTc(seconds, fps, infos.find((info) => info.id === source)?.startFrames ?? 0);

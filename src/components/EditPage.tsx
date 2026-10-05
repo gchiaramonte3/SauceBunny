@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { pipelineInvoke } from "../lib/pipeline";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { EditSummary } from "../bindings/EditSummary";
@@ -13,8 +13,10 @@ import { EditNewPanel } from "./EditNewPanel";
 import { EditWorkspace } from "./EditWorkspace";
 import { IconPlus } from "./Icons";
 import { IconStringOut } from "./IconStringOut";
+import { PipelinePanel } from "./PipelinePanel";
 import { TabStrip } from "./TabStrip";
 import type { EditSourceMarks } from "../hooks/use-edit-source-side";
+const invoke = pipelineInvoke("String Outs");
 
 /** The string outs open as tabs, in the order they were opened. */
 const TABS_KEY = "saucebunny.stringOuts.tabs";
@@ -30,6 +32,8 @@ type Props = {
   active: boolean; aiModelId?: string | null; onOpenSettings: (tab: "ai-apis") => void;
   /** AAF Audio asked to open this sequence here. */
   openRequest?: { documentId: string; tick: number; marks?: { in: number | null; out: number | null } | null } | null;
+  /** The Pipeline at the foot of the page: one open/closed state for every page, toggled by ⌘\. */
+  pipelineOpen?: boolean; onPipelineOpen?: (open: boolean) => void;
 };
 
 /**
@@ -44,7 +48,7 @@ type Props = {
  * deletes anything. Only the chosen tab is mounted (its editor and sources
  * load again when chosen), as in Neo's and Premiere's timelines.
  */
-export function EditPage({ active, aiModelId, onOpenSettings, openRequest }: Props) {
+export function EditPage({ active, aiModelId, onOpenSettings, openRequest, pipelineOpen = false, onPipelineOpen = () => undefined }: Props) {
   const [editId, setEditId] = useState<string | null>(() => recallLast(LAST_STRING_OUT));
   const [tabs, setTabs] = useState<string[]>(() => {
     const saved = loadTabs(), last = recallLast(LAST_STRING_OUT);
@@ -136,5 +140,7 @@ export function EditPage({ active, aiModelId, onOpenSettings, openRequest }: Pro
         <button type="button" className="btn btn-ghost" onClick={() => setCreating(true)}>New string out…</button>
         <span>Local processing · Your AAF sequences stay untouched</span></div>}
     </div>
+    <PipelinePanel page="String Outs" active={active} open={pipelineOpen} onOpenChange={onPipelineOpen} error={opening}
+      emptyMessage="Nothing logged yet. Calls that wait, fail or run long appear here as they happen; Export diagnostics adds what the string out is doing and how every call has performed." />
   </main>;
 }

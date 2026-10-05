@@ -11,6 +11,7 @@ import {
   moveParagraph, muteWords, overwrite, paragraphs, placementKey, placeWords, programDuration, removeDeadSpace, restoreRange, seamList, segmentStarts,
   snapToGap, spliceIn, unmuteWords, type DeleteResult, type Ghost, type Timeline, type TimelineLane, type TimelineWord,
 } from "../lib/edit-model";
+import { measure } from "../lib/pipeline";
 import type { EditChange } from "./use-edit-session";
 
 type Commit = (label: string, change: (open: OpenEdit) => EditChange, group?: string | null) => Promise<boolean>;
@@ -70,8 +71,8 @@ export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, du
       const timeline = next(state.timeline);
       return !timeline || timeline === state.timeline ? null : { timeline, markers: rippleMarkers(state.timeline, timeline, state.markers) };
     }, group);
-  const placed = useMemo(() => placeWords(words, edit), [words, edit]);
-  const paras = useMemo(() => paragraphs(placed), [placed]);
+  const placed = useMemo(() => measure("String Outs", `Placing ${words.length.toLocaleString("en-US")} words on the record`, () => placeWords(words, edit)), [words, edit]);
+  const paras = useMemo(() => measure("String Outs", `Laying out ${placed.length.toLocaleString("en-US")} record words as paragraphs`, () => paragraphs(placed)), [placed]);
   const seams = useMemo(() => seamList(edit, words), [edit, words]);
   const ghosts = useMemo(() => ghostLines(edit, words, durations), [edit, words, durations]);
   const total = programDuration(edit), starts = segmentStarts(edit), count = placed.length;

@@ -390,3 +390,44 @@ test("the left column is Ask, Inspector, History, with a plain prompt", async ({
   await page.keyboard.press("Meta+y");
   await expect(tabs.nth(2)).toHaveAttribute("aria-selected", "true");
 });
+
+test("⌘\\ opens the Pipeline on String Outs, and its export says what the string out was doing and how every call went", async ({ page }) => {
+  await boot(page);
+  await page.addInitScript(() => {
+    const app = window as unknown as { __diagnostics?: string; __TAURI_INTERNALS__: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> } };
+    const original = app.__TAURI_INTERNALS__.invoke;
+    app.__TAURI_INTERNALS__.invoke = (command, args = {}) => {
+      if (command === "plugin:dialog|save") return Promise.resolve("/fixtures/string-outs-diagnostics.txt");
+      if (command === "write_text_to_path") { app.__diagnostics = args.text as string; return Promise.resolve(); }
+      return original(command, args);
+    };
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "String Outs", exact: true }).click();
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.locator(".cp-te-doc")).toContainText("Sam answers the door.");
+  const main = page.getByRole("main", { name: "String Outs" });
+  // The header (and Export diagnostics in it) shows collapsed too; ⌘\ opens the log under it.
+  const pipeline = main.getByRole("button", { name: "Pipeline log" });
+  const exportButton = main.getByRole("button", { name: "Export diagnostics" });
+  await expect(pipeline).toHaveAttribute("aria-expanded", "false");
+  await page.keyboard.press("ControlOrMeta+Backslash");
+  await expect(pipeline).toHaveAttribute("aria-expanded", "true");
+  // Open means room to read it: the page's own layout must give the log its height, not squeeze it under the timeline.
+  await expect.poll(() => main.locator(".cp-logs-body").evaluate((body) => body.getBoundingClientRect().height)).toBeGreaterThan(120);
+  await page.screenshot({ path: test.info().outputPath("string-outs-pipeline.png") });
+  await exportButton.click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __diagnostics?: string }).__diagnostics ?? "")).toContain("PAGE · String Outs");
+  const report = await page.evaluate(() => (window as unknown as { __diagnostics: string }).__diagnostics);
+  expect(report).toMatch(/String out \w{8} · history state \d+/);
+  expect(report).toContain("Sources: 1 (AAF Audio");
+  expect(report).toContain("Record: 1 clip, 0 mutes, 0 markers");
+  expect(report).toMatch(/CALLS SINCE LAUNCH[\s\S]*edit_create · 1 · 0 ·/);
+  // The editor's own words never leave in a report.
+  expect(report).not.toContain("Sam answers the door");
+  await page.keyboard.press("ControlOrMeta+Backslash");
+  await expect(pipeline).toHaveAttribute("aria-expanded", "false");
+});

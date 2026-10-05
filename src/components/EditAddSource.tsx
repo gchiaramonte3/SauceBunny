@@ -1,9 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
+import { pipelineInvoke } from "../lib/pipeline";
 import { useEffect, useMemo, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { AafDocumentSummary } from "../bindings/AafDocumentSummary";
 import { formatError } from "../lib/error-format";
 import { sequenceLabels } from "../lib/multitrack";
+const invoke = pipelineInvoke("String Outs");
 
 type Props = { exclude: string[]; onAdd: (document: AafDocument) => void; onError: (message: string) => void };
 
