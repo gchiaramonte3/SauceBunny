@@ -210,7 +210,7 @@ pub async fn aaf_speech(app: AppHandle, document_id: String, track_id: String, b
     let document = store::load(&store::root(&app)?, &document_id)?;
     let cues: Vec<crate::speech::CueInput> = document.transcripts.iter().filter(|transcript| transcript.track_id == track_id)
         .flat_map(|transcript| transcript.cues.iter())
-        .map(|cue| crate::speech::CueInput { id: &cue.id, start_sample: cue.start_sample, end_sample: cue.end_sample, text: &cue.text })
+        .map(|cue| crate::speech::CueInput { id: &cue.id, start_sample: cue.start_sample, end_sample: cue.end_sample, text: &cue.text, words: cue.words.as_deref() })
         .collect();
     store::track(&document, &track_id)?;
     let path = peaks::overview_path(&app, &document, &track_id)?;

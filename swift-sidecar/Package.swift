@@ -34,12 +34,14 @@ let package = Package(
       from: "1.0.0"
     ),
     // FluidAudio — diarizer fallback AND the Parakeet ASR engine (r90).
-    // Pinned EXACT: the ASR API (AsrManager.transcribe(_:decoderState:)) is
-    // 0.15.x and the 0.x line churns, so we lock the version and re-verify on
-    // any bump. Diarizer result-parsing uses Mirror reflection to stay robust.
+    // Pinned EXACT: the 0.x line churns, so we lock the version and re-verify
+    // on any bump. 0.17.3 is the first with Parakeet Ultra (`.ultra`, same
+    // tokenizer and API as v3); 0.15.5 replaced DownloadUtils with ModelHub,
+    // which this package never called. Diarizer result-parsing uses Mirror
+    // reflection to stay robust.
     .package(
       url: "https://github.com/FluidInference/FluidAudio.git",
-      exact: "0.15.3"
+      exact: "0.17.5"
     ),
   ],
   targets: [

@@ -59,6 +59,12 @@ export function audioTrackLabel(document: AafDocument, trackId: string): string 
 /** Filter only empty ASR output, not uncertain speech or sound annotations.
  * Normalize for comparison only: saved text, cue IDs and timing stay intact.
  * Shared by the reader, timeline and every multitrack export format. */
+/**
+ * Below this a recognized word is marked for checking (accuracy spec, phase
+ * 1). A starting point: phase 0's hand-checked scenes are what should set it.
+ */
+export const UNSURE_CONFIDENCE = 0.5;
+
 export function hasTranscriptContent(text: string): boolean {
   const words = text.normalize("NFKC").replace(/[\p{P}\p{Z}\p{C}\s]+/gu, " ").trim();
   return !!words && !/^(?:blank audio)(?: blank audio)*$/i.test(words);

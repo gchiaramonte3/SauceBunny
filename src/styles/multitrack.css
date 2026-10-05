@@ -25,6 +25,15 @@
 .cp-multitrack-sequence-head h2 { margin: 0; color: var(--fg-1); font-weight: var(--weight-semibold); line-height: var(--leading-snug); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cp-multitrack-sequence-head p { margin: 4px 0 0; color: var(--fg-3); font-size: var(--text-base); font-variant-numeric: tabular-nums; }
 .cp-multitrack-note { color: var(--fg-3); font-size: var(--text-base); line-height: var(--leading-normal); }
+/* A word the recognizer was unsure of: dotted, not coloured, so it reads as
+   "check me" without competing with selection or the current cue. Longhands,
+   per text-decoration-contract. */
+.cp-multitrack-word-unsure {
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--fg-4);
+  text-underline-offset: 3px;
+}
 .cp-multitrack-timeline { flex: 1; display: flex; flex-direction: column; }
 .cp-multitrack-timeline-tools { display: flex; align-items: center; gap: 12px; color: var(--fg-3); font-size: var(--text-base); }
 .cp-multitrack-zoom { display: flex; align-items: center; gap: 4px; }

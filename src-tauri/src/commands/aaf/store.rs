@@ -455,7 +455,7 @@ mod tests {
     fn run(start: i64, duration: i64, cues: &[(&str, i64, i64)], issues: &[(&str, i64)]) -> AafTrackTranscript {
         AafTrackTranscript { track_id: "10".into(), start_frame: start, duration_frames: duration, engine: AafEngine::Parakeet, model_id: "m".into(),
             status: AafTranscriptStatus::Completed, sample_rate: ASR_RATE as u32, warnings: vec![], gaps: None,
-            cues: cues.iter().map(|(id, a, b)| AafCue { id: (*id).into(), start_sample: *a, end_sample: *b, text: (*id).into(), boundary_review: false }).collect(),
+            cues: cues.iter().map(|(id, a, b)| AafCue { id: (*id).into(), start_sample: *a, end_sample: *b, text: (*id).into(), boundary_review: false, words: None }).collect(),
             timing_issues: issues.iter().map(|(id, frame)| AafTimingIssue { id: (*id).into(), text: "t".into(), reported_timing: "x".into(), chunk_start_frame: *frame, reason: "r".into() }).collect() }
     }
     #[test]
@@ -524,7 +524,7 @@ mod tests {
         create(&root, &doc).unwrap();
         let transcript = AafTrackTranscript { track_id: "10".into(), start_frame: 24, duration_frames: 48,
             engine: AafEngine::Parakeet, model_id: "test".into(), status: AafTranscriptStatus::Review,
-            sample_rate: 16000, cues: vec![AafCue { id: "cue".into(), start_sample: 16016, end_sample: 24024, text: "Hello, Café".into(), boundary_review: false }], timing_issues: vec![AafTimingIssue { id: "untimed".into(), text: "Kept without invented timing".into(), reported_timing: "00:00:10,000 --> 00:00:10,000".into(), chunk_start_frame: 24, reason: "Empty time range".into() }], warnings: vec![], gaps: None };
+            sample_rate: 16000, cues: vec![AafCue { id: "cue".into(), start_sample: 16016, end_sample: 24024, text: "Hello, Café".into(), boundary_review: false, words: None }], timing_issues: vec![AafTimingIssue { id: "untimed".into(), text: "Kept without invented timing".into(), reported_timing: "00:00:10,000 --> 00:00:10,000".into(), chunk_start_frame: 24, reason: "Empty time range".into() }], warnings: vec![], gaps: None };
         save_transcript(&root, &doc, transcript).unwrap();
         let updated = labels(&root, &doc.id, vec![AafTrackLabel { track_id: "10".into(), owner_name: "かが Élodie".into(), cast_member_id: None, color: None, gender: None, marker_color: None }]).unwrap();
         assert_eq!(updated.transcripts.len(), 1);

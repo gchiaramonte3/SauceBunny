@@ -106,6 +106,26 @@ pub struct AafCue {
     pub text: String,
     #[serde(default)]
     pub boundary_review: bool,
+    /// Each word with the time the recognizer measured for it, when the
+    /// engine reports one (Parakeet does). Absent on documents written before
+    /// it was kept and on Whisper runs, whose words are still placed by
+    /// length (docs/TRANSCRIPT-ACCURACY-SPEC-2026-10-04.md, phase 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub words: Option<Vec<AafCueWord>>,
+}
+
+/// A recognized word: sequence-relative 16 kHz samples, like its cue, and the
+/// recognizer's confidence (0 to 1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafCueWord {
+    pub text: String,
+    #[ts(type = "number")]
+    pub start_sample: i64,
+    #[ts(type = "number")]
+    pub end_sample: i64,
+    pub confidence: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

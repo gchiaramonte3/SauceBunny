@@ -1,12 +1,28 @@
 import type { WhisperModel } from "../bindings/WhisperModel";
 import type { MultitrackModelChoice } from "../hooks/use-multitrack-transcription";
+import type { useParakeetModels } from "../hooks/use-parakeet-models";
+import { PARAKEET_MODELS, type ParakeetModelId } from "../lib/parakeet-models";
 
-export function MultitrackModelPicker({ choice, models, disabled, onChange }: {
-  choice: MultitrackModelChoice; models: WhisperModel[]; disabled?: boolean; onChange: (choice: MultitrackModelChoice) => void;
+type Parakeet = Pick<ReturnType<typeof useParakeetModels>, "ready" | "downloading" | "downloadError" | "download" | "cancel">;
+
+export function MultitrackModelPicker({ choice, models, disabled, onChange, parakeet }: {
+  choice: MultitrackModelChoice; models: WhisperModel[]; disabled?: boolean; onChange: (choice: MultitrackModelChoice) => void; parakeet?: Parakeet;
 }) {
+  const parakeetModel = choice.parakeetModel ?? PARAKEET_MODELS[0].id;
+  const chosen = PARAKEET_MODELS.find((model) => model.id === parakeetModel) ?? PARAKEET_MODELS[0];
+  const missing = choice.engine === "parakeet" && parakeet && !parakeet.ready[parakeetModel];
   return <><label><span>Engine</span><select className="cp-select" value={choice.engine} onChange={(event) => onChange({ ...choice, engine: event.target.value as MultitrackModelChoice["engine"] })} disabled={disabled}><option value="parakeet">Parakeet</option><option value="whisper">Whisper</option></select></label>
-    <label><span>Model</span><select className="cp-select" value={choice.engine === "parakeet" ? "parakeet-tdt-0.6b-v3" : choice.modelId} onChange={(event) => onChange({ ...choice, modelId: event.target.value })} disabled={disabled || choice.engine === "parakeet" || !models.length}>
-      {choice.engine === "parakeet" ? <option value="parakeet-tdt-0.6b-v3">Parakeet TDT 0.6B v3</option> : models.length ? models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>) : <option value="medium.en">No installed models</option>}</select></label>
+    <label><span>Model</span>{choice.engine === "parakeet"
+      ? <select className="cp-select" value={parakeetModel} onChange={(event) => onChange({ ...choice, parakeetModel: event.target.value as ParakeetModelId })} disabled={disabled}>
+        {PARAKEET_MODELS.map((model) => <option key={model.id} value={model.id}>{model.name}{parakeet && !parakeet.ready[model.id] ? " (not downloaded)" : ""}</option>)}</select>
+      : <select className="cp-select" value={choice.modelId} onChange={(event) => onChange({ ...choice, modelId: event.target.value })} disabled={disabled || !models.length}>
+        {models.length ? models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>) : <option value="medium.en">No installed models</option>}</select>}</label>
+    {missing && <div className="cp-multitrack-model-download">
+      {parakeet.downloading === parakeetModel
+        ? <><span role="status">Downloading {chosen.name}. It reports no progress while it transfers.</span><button type="button" className="btn btn-ghost" onClick={parakeet.cancel}>Cancel download</button></>
+        : <button type="button" className="btn btn-ghost" disabled={disabled || !!parakeet.downloading} onClick={() => { void parakeet.download(parakeetModel); }}>Download {chosen.name} ({chosen.size})</button>}
+      {parakeet.downloadError && <span role="alert">{parakeet.downloadError}</span>}
+    </div>}
     {choice.engine === "whisper" && <details className="cp-multitrack-asr-options">
       <summary>Options · {choice.fast ? "Fast" : "Accurate"}{choice.speechOnly ? " · Speech filter" : ""}</summary>
       <div><label><span>Decoding</span><select className="cp-select" value={choice.fast ? "fast" : "accurate"} disabled={disabled} onChange={event => onChange({ ...choice, fast: event.target.value === "fast" })}><option value="accurate">Accurate</option><option value="fast">Fast</option></select></label>

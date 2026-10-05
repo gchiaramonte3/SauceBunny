@@ -3,6 +3,7 @@ import type { AafDocument } from "../bindings/AafDocument";
 import { hasTranscriptContent, sequenceTimecode, transcriptRows, untimedTranscriptRows } from "../lib/multitrack";
 import { multitrackPeople, multitrackScope } from "../lib/multitrack-person";
 import { MultitrackTranscriptTabs } from "./MultitrackTranscriptTabs";
+import { MultitrackCueText } from "./MultitrackCueText";
 import { MultitrackExport } from "./MultitrackExport";
 import { MultitrackRunInfo } from "./MultitrackRunInfo";
 import { MultitrackRunDetails } from "./MultitrackRunDetails";
@@ -64,7 +65,7 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
       {!rows.length && !untimed.length ? <div className="cp-multitrack-transcript-empty"><h3>{loading ? "Waiting for the first completed track" : report && !report.saved ? "No new transcript was saved" : scoped.transcripts.length ? "No speech found in completed tracks" : person ? `No transcript for ${person.name} yet` : "Read each mic in context"}</h3><p>{report?.failures.length ? "Open Transcript info (i) for the failed tracks, then check those tracks and generate again." : "Check tracks, choose an engine, then generate. Saved results appear here."}</p></div>
         : !filtered.length && !filteredUntimed.length ? <p className="cp-multitrack-note">{enabled && result.phase !== "ready" ? "No matching passages found so far." : "No matching transcript text."}</p>
           : visible.map((cue) => <button className={`cp-multitrack-cue${(!solo.size || solo.has(cue.trackId)) && frame >= cue.startFrame && frame < cue.endFrame ? " is-current" : ""}`} key={`${cue.trackId}:${cue.id}`} onClick={() => onSeek(cue.startFrame, cue.trackId)}>
-            <span className="cp-multitrack-cue-meta"><strong>{cue.owner}</strong><span>{cue.timecode}</span></span><span className="cp-multitrack-cue-text">{cue.text}</span>{cue.boundary_review && <span className="cp-multitrack-note">Check processing boundary</span>}
+            <span className="cp-multitrack-cue-meta"><strong>{cue.owner}</strong><span>{cue.timecode}</span></span><MultitrackCueText text={cue.text} words={cue.words} />{cue.boundary_review && <span className="cp-multitrack-note">Check processing boundary</span>}
           </button>)}
       {filtered.length > limit && <button className="btn btn-ghost cp-multitrack-more" onClick={() => setLimit(limit + 200)}>Show more ({filtered.length - limit} remaining)</button>}
       {filteredUntimed.length > 0 && <section className="cp-multitrack-untimed" aria-label="Text needing timing review"><h3>Timing needs review</h3>{visibleUntimed.map((cue) => <article key={`${cue.trackId}:${cue.id}`}><strong>{cue.owner}</strong><p>{cue.text}</p><details><summary>Timing details</summary>{cue.reason}<br />Reported: {cue.reported_timing}<br />Audio segment starts at {cue.timecode}</details></article>)}

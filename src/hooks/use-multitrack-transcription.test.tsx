@@ -124,7 +124,8 @@ describe("multitrack jobs", () => {
     let work!: Promise<void>;
     act(() => { work = result.current.start(["track-1", "track-2"], 120, 240); });
     const call = mocks.invoke.mock.calls.find(([command]) => command === "aaf_transcribe_track")!;
-    expect(call[1]).toMatchObject({ startFrame: 120, durationFrames: 240, trackId: "track-1" });
+    // Both models installed: the best one, Ultra, is what runs.
+    expect(call[1]).toMatchObject({ startFrame: 120, durationFrames: 240, trackId: "track-1", engine: "parakeet", modelId: "parakeet-ultra" });
     expect(typeof call[1].jobId).toBe("string");
     act(() => result.current.stop());
     expect(mocks.invoke).toHaveBeenCalledWith("cancel_job", { jobId: call[1].jobId });

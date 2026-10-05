@@ -12,9 +12,10 @@
 //! * REACTIONS: bursts at least 18 dB over the floor that no transcribed word
 //!   covers. A laugh, a gasp, a door. In a reality scene those are content,
 //!   and dead-space removal must keep them;
-//! * word boundaries inside a transcript cue. Cues are sentence-level machine
-//!   estimates; words are first spread across the cue by length, then each
-//!   boundary between two words moves to the quietest point within 80 ms, which
+//! * word boundaries inside a transcript cue. When the recognizer measured its
+//!   words (Parakeet), those times are used and each boundary moves to the
+//!   quietest point within 40 ms. Otherwise words are spread across the cue by
+//!   length and each boundary moves to the quietest point within 80 ms, which
 //!   is where a cut between them does least harm.
 //!
 //! Levels are peak dBFS per bucket, as Auto-Editor and most silence removers
@@ -29,6 +30,9 @@ pub const BRIDGE_SECONDS: f64 = 0.250;
 pub const FLOOR_BLOCK_SECONDS: f64 = 60.0;
 pub const FLOOR_PERCENTILE: f64 = 0.15;
 pub const WORD_SNAP_SECONDS: f64 = 0.080;
+/// Half the reach for words the recognizer timed itself: they start close to
+/// right, so the snap only finds the gap, it does not go looking for one.
+pub const MEASURED_SNAP_SECONDS: f64 = 0.040;
 /// Silence is not -inf: this is below any real mic's self-noise.
 const SILENT_DB: f32 = -96.0;
 
@@ -142,9 +146,33 @@ pub fn place_words(text: &str, start: usize, end: usize, levels: &[f32], bucket_
         bounds.push(start + length * sum / total);
     }
     bounds.push(end);
-    // Move each inner boundary to the quietest bucket within reach, never past
-    // its neighbours, so words stay in order and non-empty.
-    let reach = (WORD_SNAP_SECONDS / bucket_seconds).round() as usize;
+    snap(&mut bounds, levels, (WORD_SNAP_SECONDS / bucket_seconds).round() as usize);
+    words.iter().enumerate().map(|(index, word)| (word.to_string(), Span { start: bounds[index], end: bounds[index + 1] })).collect()
+}
+
+/// Place words the recognizer timed: each inner boundary starts in the gap
+/// between two measured words (or where they meet) and snaps to the quietest
+/// bucket within 40 ms. Spans stay contiguous and cover the cue, as estimated
+/// ones do, so everything downstream treats both alike.
+pub fn place_measured(words: &[(String, usize, usize)], start: usize, end: usize, levels: &[f32], bucket_seconds: f64) -> Vec<(String, Span)> {
+    if words.is_empty() || end <= start {
+        return vec![];
+    }
+    let mut bounds = vec![start];
+    for pair in words.windows(2) {
+        let (gap_from, gap_to) = (pair[0].2.min(pair[1].1), pair[1].1);
+        let inner = (gap_from + gap_to) / 2;
+        let floor = bounds.last().copied().unwrap_or(start);
+        bounds.push(inner.clamp(floor, end));
+    }
+    bounds.push(end);
+    snap(&mut bounds, levels, (MEASURED_SNAP_SECONDS / bucket_seconds).round() as usize);
+    words.iter().enumerate().map(|(index, (text, _, _))| (text.clone(), Span { start: bounds[index], end: bounds[index + 1] })).collect()
+}
+
+/// Move each inner boundary to the quietest bucket within reach, never past
+/// its neighbours, so words stay in order and non-empty.
+fn snap(bounds: &mut [usize], levels: &[f32], reach: usize) {
     for index in 1..bounds.len() - 1 {
         let low = bounds[index - 1] + 1;
         let high = bounds[index + 1].saturating_sub(1);
@@ -164,7 +192,6 @@ pub fn place_words(text: &str, start: usize, end: usize, levels: &[f32], bucket_
         }
         bounds[index] = best;
     }
-    words.iter().enumerate().map(|(index, word)| (word.to_string(), Span { start: bounds[index], end: bounds[index + 1] })).collect()
 }
 
 /// One track's analysis, in the 16 kHz sample units transcript cues use.
@@ -195,14 +222,29 @@ pub struct AafWord {
     pub start_sample: i64,
     #[ts(type = "number")]
     pub end_sample: i64,
+    /// The recognizer's confidence, 0 to 1, when it measured this word. Absent
+    /// for words placed by length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub confidence: Option<f32>,
 }
 
-/// A cue as the analysis needs it: id, 16 kHz start and end, text.
+/// A cue as the analysis needs it: id, 16 kHz start and end, text, and the
+/// words the recognizer timed, if it did.
 pub struct CueInput<'a> {
     pub id: &'a str,
     pub start_sample: i64,
     pub end_sample: i64,
     pub text: &'a str,
+    pub words: Option<&'a [crate::commands::aaf::model::AafCueWord]>,
+}
+
+/// The cue's measured words when they still spell its text; None sends it to
+/// the length estimate (a cue edited after recognition, or a Whisper run).
+fn measured<'a>(cue: &CueInput<'a>) -> Option<&'a [crate::commands::aaf::model::AafCueWord]> {
+    let words = cue.words.filter(|words| !words.is_empty())?;
+    let spelled = words.iter().map(|word| word.text.as_str()).collect::<Vec<_>>().join(" ");
+    (spelled == cue.text.split_whitespace().collect::<Vec<_>>().join(" ")).then_some(words)
 }
 
 const ASR_HZ: f64 = 16_000.0;
@@ -217,9 +259,21 @@ pub fn analyse(track_id: &str, pairs: &[[i16; 2]], hz: u32, bucket: u64, cues: &
     let mut words = Vec::new();
     let mut spans = Vec::new();
     for cue in cues {
-        for (text, span) in place_words(cue.text, to_bucket(cue.start_sample), to_bucket(cue.end_sample), &levels, bucket_seconds) {
+        let (start, end) = (to_bucket(cue.start_sample), to_bucket(cue.end_sample));
+        let (placed, confidences): (Vec<(String, Span)>, Vec<Option<f32>>) = match measured(cue) {
+            Some(timed) => {
+                let input: Vec<(String, usize, usize)> = timed.iter().map(|word| (word.text.clone(), to_bucket(word.start_sample), to_bucket(word.end_sample))).collect();
+                (place_measured(&input, start, end, &levels, bucket_seconds), timed.iter().map(|word| Some(word.confidence)).collect())
+            }
+            None => {
+                let placed = place_words(cue.text, start, end, &levels, bucket_seconds);
+                let none = vec![None; placed.len()];
+                (placed, none)
+            }
+        };
+        for ((text, span), confidence) in placed.into_iter().zip(confidences) {
             spans.push(span);
-            words.push(AafWord { cue_id: cue.id.to_string(), text, start_sample: to_sample(span.start), end_sample: to_sample(span.end) });
+            words.push(AafWord { cue_id: cue.id.to_string(), text, start_sample: to_sample(span.start), end_sample: to_sample(span.end), confidence });
         }
     }
     let pair = |span: &Span| (to_sample(span.start), to_sample(span.end));
@@ -244,8 +298,16 @@ pub fn unmeasured(track_id: &str, cues: &[CueInput]) -> AafSpeech {
     for cue in cues {
         // One bucket per 16 kHz sample, and no levels, so nothing moves.
         let (start, end) = (cue.start_sample.max(0) as usize, cue.end_sample.max(0) as usize);
+        if let Some(timed) = measured(cue) {
+            // Measured times need no waveform: they are used as they came.
+            let input: Vec<(String, usize, usize)> = timed.iter().map(|word| (word.text.clone(), word.start_sample.max(0) as usize, word.end_sample.max(0) as usize)).collect();
+            for ((text, span), word) in place_measured(&input, start, end, &[], 1.0 / ASR_HZ).into_iter().zip(timed) {
+                words.push(AafWord { cue_id: cue.id.to_string(), text, start_sample: span.start as i64, end_sample: span.end as i64, confidence: Some(word.confidence) });
+            }
+            continue;
+        }
         for (text, span) in place_words(cue.text, start, end, &[], 1.0 / ASR_HZ) {
-            words.push(AafWord { cue_id: cue.id.to_string(), text, start_sample: span.start as i64, end_sample: span.end as i64 });
+            words.push(AafWord { cue_id: cue.id.to_string(), text, start_sample: span.start as i64, end_sample: span.end as i64, confidence: None });
         }
     }
     AafSpeech { track_id: track_id.to_string(), floor_db: SILENT_DB, activity: vec![], reactions: vec![], words, measured: false }
@@ -325,7 +387,7 @@ mod tests {
     fn analyse_reports_in_asr_samples_and_keeps_worded_speech_out_of_reactions() {
         // 48 kHz, 256-sample buckets: 0.4 s quiet, 0.3 s loud (a word), 0.4 s quiet, 0.3 s loud (a laugh).
         let pairs = signal(&[(75, 33), (56, 16000), (75, 33), (56, 16000), (75, 33)]);
-        let cue = CueInput { id: "c1", start_sample: 6_400, end_sample: 11_200, text: "Hi" };
+        let cue = CueInput { id: "c1", start_sample: 6_400, end_sample: 11_200, text: "Hi", words: None };
         let speech = analyse("t", &pairs, 48_000, 256, &[cue]);
         assert_eq!(speech.words.len(), 1);
         assert!((speech.words[0].start_sample - 6_400).abs() <= 90);
@@ -338,8 +400,8 @@ mod tests {
     #[test]
     fn unmeasured_words_split_each_cue_by_length_and_claim_no_activity() {
         let cues = [
-            CueInput { id: "c1", start_sample: 16_000, end_sample: 32_000, text: "Okay everybody" },
-            CueInput { id: "c2", start_sample: 40_000, end_sample: 48_000, text: "go" },
+            CueInput { id: "c1", start_sample: 16_000, end_sample: 32_000, text: "Okay everybody", words: None },
+            CueInput { id: "c2", start_sample: 40_000, end_sample: 48_000, text: "go", words: None },
         ];
         let speech = unmeasured("t", &cues);
         assert!(!speech.measured);
@@ -360,5 +422,40 @@ mod tests {
         let many = place_words("a b c d e f", 0, 3, &[0.0; 3], BUCKET);
         assert_eq!(many.len(), 6);
         assert!(many.windows(2).all(|pair| pair[0].1.end <= pair[1].1.start || pair[0].1.end == pair[1].1.start));
+    }
+
+    fn timed(text: &str, start: i64, end: i64) -> crate::commands::aaf::model::AafCueWord {
+        crate::commands::aaf::model::AafCueWord { text: text.into(), start_sample: start, end_sample: end, confidence: 0.75 }
+    }
+
+    #[test]
+    fn measured_words_are_used_as_timed_not_spread_by_length() {
+        // "a" is short and "wonderful" long: by length "a" would get a sliver;
+        // measured, it got a whole second.
+        let words = [timed("a", 0, 16_000), timed("wonderful", 16_000, 20_000)];
+        let cue = CueInput { id: "c", start_sample: 0, end_sample: 20_000, text: "a wonderful", words: Some(&words) };
+        let out = unmeasured("t", &[cue]);
+        assert_eq!(out.words.iter().map(|w| (w.start_sample, w.end_sample)).collect::<Vec<_>>(), [(0, 16_000), (16_000, 20_000)]);
+        assert_eq!(out.words[0].confidence, Some(0.75));
+        // An edited cue no longer matches its words: back to the estimate.
+        let edited = CueInput { id: "c", start_sample: 0, end_sample: 20_000, text: "a marvellous", words: Some(&words) };
+        let out = unmeasured("t", &[edited]);
+        assert_ne!(out.words[0].end_sample, 16_000);
+        assert_eq!(out.words[0].confidence, None);
+    }
+
+    #[test]
+    fn a_measured_boundary_snaps_to_the_quiet_gap_within_forty_milliseconds() {
+        // 5 ms buckets: speech, a 20 ms dip at buckets 103..107, speech again.
+        let mut levels = vec![-20.0f32; 300];
+        for level in &mut levels[103..107] { *level = -70.0; }
+        let words = vec![("one".to_string(), 0, 100), ("two".to_string(), 100, 300)];
+        let placed = place_measured(&words, 0, 300, &levels, BUCKET);
+        assert!((103..107).contains(&placed[0].1.end), "{placed:?}");
+        assert_eq!(placed[0].1.end, placed[1].1.start);
+        // A dip 100 ms away is out of reach: the measured boundary stands.
+        let mut far = vec![-20.0f32; 300];
+        for level in &mut far[120..124] { *level = -70.0; }
+        assert_eq!(place_measured(&words, 0, 300, &far, BUCKET)[0].1.end, 100);
     }
 }

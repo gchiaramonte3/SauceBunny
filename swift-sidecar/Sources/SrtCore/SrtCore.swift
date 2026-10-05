@@ -15,11 +15,72 @@ public struct CueToken: Equatable {
   public let token: String
   public let startTime: Double
   public let endTime: Double
-  public init(token: String, startTime: Double, endTime: Double) {
+  /// The decoder's confidence in this token, 0 to 1. Tokens built without one
+  /// (tests, older callers) count as certain.
+  public let confidence: Float
+  public init(token: String, startTime: Double, endTime: Double, confidence: Float = 1) {
     self.token = token
     self.startTime = startTime
     self.endTime = endTime
+    self.confidence = confidence
   }
+}
+
+/// One spoken word with the time the recognizer measured for it, written
+/// beside the SRT so the app stops estimating word positions from their
+/// length (docs/TRANSCRIPT-ACCURACY-SPEC-2026-10-04.md, phase 1). Times are
+/// seconds from the start of the file the recognizer was given.
+public struct TimedWord: Codable, Equatable {
+  public let text: String
+  public let start: Double
+  public let end: Double
+  /// Mean confidence of the word's tokens, 0 to 1.
+  public let confidence: Float
+}
+
+func startsWord(_ tok: CueToken) -> Bool {
+  tok.token.hasPrefix(" ") || tok.token.hasPrefix("\u{2581}")
+}
+
+/// Group sub-word tokens into words, by the same rule `tokensToSrt` breaks
+/// on: a word begins at a token with a leading space (or U+2581) and runs
+/// until the next one. So "3.14", "U.S." and a trailing comma stay inside
+/// the word they belong to, and a cue's words are exactly its text split on
+/// spaces.
+public func tokensToWords(_ tokens: [CueToken]) -> [TimedWord] {
+  var words: [TimedWord] = []
+  var run: [CueToken] = []
+  func flush() {
+    let text = run.map(\.token).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+    if let first = run.first, let last = run.last, !text.isEmpty {
+      let confidence = run.map(\.confidence).reduce(0, +) / Float(run.count)
+      words.append(TimedWord(text: text, start: first.startTime, end: max(last.endTime, first.startTime), confidence: confidence))
+    }
+    run = []
+  }
+  for tok in tokens {
+    if startsWord(tok) && !run.isEmpty { flush() }
+    run.append(tok)
+  }
+  flush()
+  // Parakeet's token END times are estimates and overlap the next token by up
+  // to about 80 ms on real speech ("We" 0.00-0.24, "drove" 0.16-0.48). A word
+  // ends where the next one starts, never after it.
+  for i in words.indices.dropLast() where words[i].end > words[i + 1].start && words[i + 1].start > words[i].start {
+    let w = words[i]
+    words[i] = TimedWord(text: w.text, start: w.start, end: words[i + 1].start, confidence: w.confidence)
+  }
+  return words
+}
+
+/// A sentence ends here, and the word before it is not an abbreviation whose
+/// period belongs to the word ("U.S.", "e.g.", "Mr.").
+func endsSentence(_ text: String) -> Bool {
+  guard let last = text.last, ".?!".contains(last) else { return false }
+  let word = text.split(separator: " ").last.map(String.init) ?? text
+  if word.range(of: #"^([A-Za-z]\.)+$"#, options: .regularExpression) != nil { return false }
+  let titles: Set<String> = ["mr.", "mrs.", "ms.", "dr.", "st.", "vs.", "jr.", "sr.", "mt."]
+  return !titles.contains(word.lowercased())
 }
 
 /// Soft cap: roughly two overlay lines.
@@ -73,9 +134,6 @@ public func tokensToSrt(_ tokens: [CueToken]) -> String {
     guard let first = toks.first, let last = toks.last, !t.isEmpty else { return }
     cues.append((start: first.startTime, end: last.endTime, text: t))
   }
-  func startsWord(_ tok: CueToken) -> Bool {
-    tok.token.hasPrefix(" ") || tok.token.hasPrefix("\u{2581}")
-  }
   /// Index of the last token that begins a word, past the first token.
   func lastWordStart(_ toks: [CueToken]) -> Int? {
     for i in stride(from: toks.count - 1, through: 1, by: -1) where startsWord(toks[i]) { return i }
@@ -83,6 +141,17 @@ public func tokensToSrt(_ tokens: [CueToken]) -> String {
   }
 
   for tok in tokens {
+    // A sentence that has ended breaks the cue at the next word, once the cue
+    // is long enough not to fragment (`cueSentenceMin`). Checked BEFORE the
+    // token joins, and only at a word start, so "3.14" can never split: its
+    // "14" does not start a word.
+    if startsWord(tok), !cur.isEmpty {
+      let before = textOf(cur[...])
+      if before.count >= cueSentenceMin && endsSentence(before) {
+        emit(cur[...])
+        cur = []
+      }
+    }
     cur.append(tok)
     let text = textOf(cur[...])
 

@@ -197,4 +197,57 @@ final class CueBreakTests: XCTestCase {
     XCTAssertEqual(srtTimecode(-5), "00:00:00,000", "negative time must clamp, not format garbage")
     XCTAssertEqual(srtTimecode(3661.5), "01:01:01,500")
   }
+
+  // ── Words (accuracy spec, phase 1) ──
+
+  /// A word is every token from one word start to the next, so a number, an
+  /// abbreviation and trailing punctuation stay inside the word, and the words
+  /// of a transcript are exactly its text split on spaces.
+  func testWordsAreTheTextSplitOnSpacesWithTheirOwnTimes() {
+    let s = "Sales across the U.S. landed at 3.14 times, she said."
+    let tokens = tokenize(s)
+    let words = tokensToWords(tokens)
+    XCTAssertEqual(words.map(\.text), s.split(separator: " ").map(String.init))
+    let number = words.first { $0.text == "3.14" }!
+    // "3.14" is several tokens here, none starting a word, and keeps all their time.
+    XCTAssertLessThan(number.start, number.end)
+    XCTAssertTrue(zip(words, words.dropFirst()).allSatisfy { $0.end <= $1.start }, "words overlap or run backwards")
+  }
+
+  func testAWordsConfidenceIsTheMeanOfItsTokens() {
+    let tokens = [CueToken(token: " hel", startTime: 0, endTime: 0.1, confidence: 0.9),
+                  CueToken(token: "lo", startTime: 0.1, endTime: 0.2, confidence: 0.5),
+                  CueToken(token: " you", startTime: 0.3, endTime: 0.4, confidence: 0.2)]
+    let words = tokensToWords(tokens)
+    XCTAssertEqual(words.map(\.text), ["hello", "you"])
+    XCTAssertEqual(words[0].confidence, 0.7, accuracy: 0.0001)
+    XCTAssertEqual(words[0].start, 0); XCTAssertEqual(words[0].end, 0.2)
+    XCTAssertEqual(tokensToWords([]), [])
+  }
+
+  /// Measured on Parakeet v3: token end times overlap the next token's start.
+  func testAWordEndsWhereTheNextBegins() {
+    let tokens = [CueToken(token: " We", startTime: 0, endTime: 0.24), CueToken(token: " drove", startTime: 0.16, endTime: 0.48),
+                  CueToken(token: " out", startTime: 0.48, endTime: 0.64)]
+    let words = tokensToWords(tokens)
+    XCTAssertEqual(words.map(\.end), [0.16, 0.48, 0.64])
+  }
+
+  /// The constant always said cues break on a sentence end; nothing did.
+  func testACueBreaksAtASentenceEndOnceItIsLongEnough() {
+    let s = "We drove out to the lake before sunrise. Nobody else was awake yet."
+    let texts = cueTexts(tokensToSrt(tokenize(s)))
+    XCTAssertEqual(texts, ["We drove out to the lake before sunrise.", "Nobody else was awake yet."])
+    // Too short to stand alone: kept with what follows.
+    XCTAssertEqual(cueTexts(tokensToSrt(tokenize("Okay. We drove out."))), ["Okay. We drove out."])
+  }
+
+  func testAnAbbreviationOrATitleIsNotASentenceEnd() {
+    let s = "The interview was recorded across the whole U.S. market and then Mr. Smith left the room."
+    let texts = cueTexts(tokensToSrt(tokenize(s)))
+    for t in texts {
+      XCTAssertFalse(t.hasSuffix("U.S."), "broke after an abbreviation: \(texts)")
+      XCTAssertFalse(t.hasSuffix("Mr."), "broke after a title: \(texts)")
+    }
+  }
 }

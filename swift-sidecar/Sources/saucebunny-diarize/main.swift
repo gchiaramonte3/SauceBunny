@@ -147,6 +147,18 @@ struct Args {
   var asr: Bool = false              // transcribe --input WAV → --output SRT
   var prepareAsrModels: Bool = false // download/cache the Parakeet model + exit
   var modelsDir: String?             // where the Parakeet Core ML model lives
+  var words: String?                 // also write the measured words as JSON here
+  var batch: String?                 // JSON list of {input, output, words}: one model load for all
+  var asrModel: ParakeetVersion = .v3
+}
+
+/// Which Parakeet the app asked for. Ultra (FluidAudio 0.17.3+) is a
+/// post-trained v3 with the same tokenizer and API; v3 stays the default so an
+/// older caller gets what it always got.
+enum ParakeetVersion: String {
+  case v3, ultra
+  var fluid: AsrModelVersion { self == .ultra ? .ultra : .v3 }
+  var label: String { self == .ultra ? "Parakeet Ultra" : "Parakeet" }
 }
 
 func parseArgs(_ argv: [String]) -> Args {
@@ -169,6 +181,14 @@ func parseArgs(_ argv: [String]) -> Args {
       a.prepareAsrModels = true
     case "--models-dir":
       i += 1; if i < argv.count { a.modelsDir = argv[i] }
+    case "--words":
+      i += 1; if i < argv.count { a.words = argv[i] }
+    case "--batch":
+      i += 1; if i < argv.count { a.batch = argv[i] }
+    case "--asr-model":
+      i += 1
+      if i < argv.count, let v = ParakeetVersion(rawValue: argv[i].lowercased()) { a.asrModel = v }
+      else { FileHandle.standardError.write(Data("Unknown --asr-model; use v3 or ultra\n".utf8)) }
     case "--backend":
       i += 1
       if i < argv.count, let b = Backend(rawValue: argv[i].lowercased()) {
@@ -212,7 +232,7 @@ func emitStatus(_ obj: [String: Any], emit: Bool) {
 
 let SAUCEBUNNY_DIARIZE_VERSION = "0.3.0"
 let SPEAKERKIT_PACKAGE_VERSION = "1.0.x"
-let FLUIDAUDIO_PACKAGE_VERSION = "0.15.3"
+let FLUIDAUDIO_PACKAGE_VERSION = "0.17.5"
 
 func printVersion() {
   print("saucebunny-diarize \(SAUCEBUNNY_DIARIZE_VERSION) (SpeakerKit \(SPEAKERKIT_PACKAGE_VERSION) + FluidAudio \(FLUIDAUDIO_PACKAGE_VERSION))")
@@ -226,6 +246,9 @@ func printHelp() {
   USAGE:
       saucebunny-diarize --input <audio.wav> --output <turns.json> [options]
       saucebunny-diarize --prepare-models [options]
+      saucebunny-diarize --asr --input <audio.wav> --output <cues.srt> [--words <words.json>]
+      saucebunny-diarize --asr --batch <items.json>
+      saucebunny-diarize --prepare-asr-models
       saucebunny-diarize --version
       saucebunny-diarize --help
 
@@ -239,6 +262,12 @@ func printHelp() {
       --min-speakers N      Lower bound on estimated speaker count.
       --max-speakers N      Upper bound on estimated speaker count.
       --prepare-models      Download/load Core ML models and exit (no diarize).
+      --asr                 Transcribe with Parakeet instead of diarizing.
+      --asr-model v3|ultra  Which Parakeet (default v3).
+      --models-dir DIR      Where the Parakeet Core ML models live.
+      --words FILE          Also write each word's measured time and confidence.
+      --batch FILE          JSON list of {input, output, words}; one model load.
+      --prepare-asr-models  Download the chosen Parakeet and exit.
   """
   print(help)
 }
@@ -446,57 +475,93 @@ func asrModelsDirURL(_ args: Args) -> URL? {
 }
 
 func prepareAsrModelsOnly(args: Args) async {
-  emitStatus(["phase": "prepare", "message": "Downloading Parakeet model (~0.5 GB, first run only)…", "backend": "parakeet"], emit: args.emitProgress)
+  let size = args.asrModel == .ultra ? "~0.6 GB" : "~0.5 GB"
+  emitStatus(["phase": "prepare", "message": "Downloading \(args.asrModel.label) model (\(size), first run only)…", "backend": "parakeet"], emit: args.emitProgress)
   do {
-    _ = try await AsrModels.download(to: asrModelsDirURL(args), version: .v3)
+    _ = try await AsrModels.download(to: asrModelsDirURL(args), version: args.asrModel.fluid)
   } catch {
-    eprintln("error: Parakeet model download failed: \(error)")
+    eprintln("error: \(args.asrModel.label) model download failed: \(error)")
     exit(2)
   }
-  emitStatus(["phase": "done", "message": "Parakeet model ready."], emit: args.emitProgress)
+  emitStatus(["phase": "done", "message": "\(args.asrModel.label) model ready."], emit: args.emitProgress)
   exit(0)
 }
 
+/// One file to transcribe: the SRT goes to `output`, the measured words (when
+/// asked for) to `words`.
+struct AsrItem: Decodable {
+  let input: String
+  let output: String
+  let words: String?
+}
+
 func runAsrMode(args: Args) async {
-  guard let inPath = args.input, let outPath = args.output else {
-    eprintln("error: --asr needs --input <wav> and --output <srt>")
-    exit(1)
+  // Either one file (--input/--output, the single-file transcript path) or a
+  // batch manifest (multitrack windows), which loads the model ONCE: loading
+  // it per two-minute window was most of the time on a long mic.
+  let items: [AsrItem]
+  let batch = args.batch != nil
+  if let manifest = args.batch {
+    guard let data = FileManager.default.contents(atPath: manifest),
+          let list = try? JSONDecoder().decode([AsrItem].self, from: data), !list.isEmpty else {
+      eprintln("error: --batch needs a JSON list of {input, output, words}")
+      exit(1)
+    }
+    items = list
+  } else {
+    guard let inPath = args.input, let outPath = args.output else {
+      eprintln("error: --asr needs --input <wav> and --output <srt>")
+      exit(1)
+    }
+    items = [AsrItem(input: inPath, output: outPath, words: args.words)]
   }
-  guard FileManager.default.fileExists(atPath: inPath) else {
-    eprintln("error: input file not found: \(inPath)")
+  for item in items where !FileManager.default.fileExists(atPath: item.input) {
+    eprintln("error: input file not found: \(item.input)")
     exit(1)
   }
   let started = Date()
+  let label = args.asrModel.label
   do {
-    emitStatus(["phase": "prepare", "message": "Loading Parakeet model…", "backend": "parakeet"], emit: args.emitProgress)
+    emitStatus(["phase": "prepare", "message": "Loading \(label) model…", "backend": "parakeet"], emit: args.emitProgress)
     // Load from the app-managed dir (offline). If absent, the model wasn't
     // downloaded yet — surface a clear error so the UI prompts a download.
     let models: AsrModels
     if let dir = asrModelsDirURL(args) {
-      models = try await AsrModels.load(from: dir, version: .v3)
+      models = try await AsrModels.load(from: dir, version: args.asrModel.fluid)
     } else {
-      models = try await AsrModels.downloadAndLoad(version: .v3)
+      models = try await AsrModels.downloadAndLoad(version: args.asrModel.fluid)
     }
     let asr = AsrManager(config: .default)
     try await asr.loadModels(models)
 
-    emitStatus(["phase": "process", "message": "Transcribing with Parakeet…", "backend": "parakeet"], emit: args.emitProgress)
-    // TdtDecoderState() is a throwing initializer in FluidAudio 0.15.x.
-    var state = try TdtDecoderState()
-    let result = try await asr.transcribe(URL(fileURLWithPath: inPath), decoderState: &state)
-    let srt = tokensToSrt((result.tokenTimings ?? []).map {
-      CueToken(token: $0.token, startTime: Double($0.startTime), endTime: Double($0.endTime))
-    })
-    if srt.isEmpty {
-      eprintln("error: Parakeet produced no transcript (no token timings)")
-      exit(3)
+    for (index, item) in items.enumerated() {
+      emitStatus(["phase": "process", "message": "Transcribing with \(label)…", "backend": "parakeet",
+                  "item": index + 1, "items": items.count], emit: args.emitProgress)
+      // TdtDecoderState() is a throwing initializer; a fresh state per file,
+      // since the files are separate windows, not one stream.
+      var state = try TdtDecoderState()
+      let result = try await asr.transcribe(URL(fileURLWithPath: item.input), decoderState: &state)
+      let tokens = (result.tokenTimings ?? []).map {
+        CueToken(token: $0.token, startTime: Double($0.startTime), endTime: Double($0.endTime), confidence: $0.confidence)
+      }
+      let srt = tokensToSrt(tokens)
+      if srt.isEmpty && !batch {
+        eprintln("error: Parakeet produced no transcript (no token timings)")
+        exit(3)
+      }
+      // In a batch an empty window is an answer ("nothing said here"), not a
+      // failure: it gets an empty file so the caller can tell it from a crash.
+      try srt.write(to: URL(fileURLWithPath: item.output), atomically: true, encoding: .utf8)
+      if let wordsPath = item.words {
+        let data = try JSONEncoder().encode(tokensToWords(tokens))
+        try data.write(to: URL(fileURLWithPath: wordsPath), options: .atomic)
+      }
     }
-    try srt.write(to: URL(fileURLWithPath: outPath), atomically: true, encoding: .utf8)
   } catch {
-    eprintln("error: Parakeet transcription failed: \(error)")
+    eprintln("error: \(label) transcription failed: \(error)")
     exit(3)
   }
-  emitStatus(["phase": "done", "message": "Parakeet transcript ready.",
+  emitStatus(["phase": "done", "message": "\(label) transcript ready.",
               "wall_clock_seconds": Date().timeIntervalSince(started)], emit: args.emitProgress)
   exit(0)
 }

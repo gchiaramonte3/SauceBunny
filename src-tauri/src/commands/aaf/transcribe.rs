@@ -4,7 +4,7 @@ use crate::{commands::JobRegistry, AppError};
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 
-struct EngineConfig { engine: AafEngine, model_id: String, model_path: String, language: String, fast: bool, vad_model: Option<String> }
+struct EngineConfig { engine: AafEngine, model_id: String, model_path: String, language: String, fast: bool, vad_model: Option<String>, parakeet: &'static str }
 // Enforce the limit natively too: a second window or overlapping IPC must not
 // turn a group expansion into dozens of recognizer processes.
 static RECOGNIZER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
@@ -22,14 +22,16 @@ fn engine_config(app: &AppHandle, engine: AafEngine, model_id: &str, language: &
             (model.id, model.path.ok_or_else(|| AppError::not_found("Whisper model path is unavailable"))?)
         }
         AafEngine::Parakeet => {
-            if !crate::commands::transcript::parakeet_model_downloaded(app.clone()) {
-                return Err(AppError::not_found("Download Parakeet in Settings before transcribing"));
+            let model = crate::commands::transcript::parakeet_model(Some(model_id))?;
+            if !crate::commands::transcript::parakeet_ready(app, model) {
+                return Err(AppError::not_found(format!("Download {} before transcribing", model.label)));
             }
             let models = app.path().app_data_dir().map_err(|e| AppError::internal(e.to_string()))?.join("models").join("parakeet");
-            ("parakeet-tdt-0.6b-v3".into(), models.to_string_lossy().into_owned())
+            (model.id.into(), models.to_string_lossy().into_owned())
         }
     };
-    Ok(EngineConfig { engine, model_id, model_path, language, fast, vad_model: None })
+    let parakeet = crate::commands::transcript::parakeet_model(matches!(engine, AafEngine::Parakeet).then_some(model_id.as_str())).map(|model| model.arg).unwrap_or("v3");
+    Ok(EngineConfig { engine, model_id, model_path, language, fast, vad_model: None, parakeet })
 }
 
 #[derive(Debug)]
@@ -93,7 +95,31 @@ fn cue_range(start: &str, end: &str, available: i64) -> Result<(i64, i64), Strin
     Ok((start, end.min(available)))
 }
 
-pub fn parse_cues(text: &str, chunk: &Chunk, rate: &AafRate, track: &str) -> Result<ParsedCues, AppError> {
+/// One word as the Parakeet sidecar writes it (`--words`): seconds from the
+/// start of the window file it was given.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct RawWord { pub text: String, pub start: f64, pub end: f64, pub confidence: f32 }
+
+/// The measured words inside one cue, in sequence samples, or None when they
+/// do not spell the cue exactly (a word the engine timed but a cue that says
+/// something else would put text on the wrong sound). Each word is clipped to
+/// the cue, and an empty or reversed one makes the whole set untrustworthy.
+fn cue_words(words: &[RawWord], offset: i64, start: i64, end: i64, text: &str) -> Option<Vec<AafCueWord>> {
+    let sample = |seconds: f64| seconds.is_finite().then(|| offset + (seconds * ASR_RATE as f64).round() as i64);
+    let mut out = Vec::new();
+    for word in words {
+        let (Some(from), Some(to)) = (sample(word.start), sample(word.end)) else { return None };
+        let middle = (from + to) / 2;
+        if middle < start || middle >= end { continue; }
+        let (from, to) = (from.clamp(start, end), to.clamp(start, end));
+        if to <= from { return None; }
+        out.push(AafCueWord { text: word.text.clone(), start_sample: from, end_sample: to, confidence: word.confidence.clamp(0.0, 1.0) });
+    }
+    let spelled = out.iter().map(|word| word.text.as_str()).collect::<Vec<_>>().join(" ");
+    (!out.is_empty() && spelled == text.split_whitespace().collect::<Vec<_>>().join(" ")).then_some(out)
+}
+
+pub fn parse_cues(text: &str, chunk: &Chunk, rate: &AafRate, track: &str, words: Option<&[RawWord]>) -> Result<ParsedCues, AppError> {
     let text = text.trim_start_matches('\u{feff}').replace("\r\n", "\n");
     if text.trim().is_empty() { return Ok(ParsedCues { cues: Vec::new(), timing_issues: Vec::new() }); }
     let offset = frame_samples(chunk.extract_start, rate)?;
@@ -144,9 +170,10 @@ pub fn parse_cues(text: &str, chunk: &Chunk, rate: &AafRate, track: &str) -> Res
         // chunks. Midpoint ownership can discard BOTH versions. Preserve an
         // intersecting cue and flag it, rather than silently deleting words.
         if absolute_end <= owner_start || absolute_start >= owner_end { continue; }
+        let words = words.and_then(|words| cue_words(words, offset, absolute_start, absolute_end, &text));
         cues.push(AafCue { id: format!("{track}-{}-{index}", chunk.start),
             start_sample: absolute_start, end_sample: absolute_end, text,
-            boundary_review: absolute_start < owner_start || absolute_end > owner_end });
+            boundary_review: absolute_start < owner_start || absolute_end > owner_end, words });
     }
     Ok(ParsedCues { cues, timing_issues })
 }
@@ -155,6 +182,23 @@ pub fn parse_cues(text: &str, chunk: &Chunk, rate: &AafRate, track: &str) -> Res
 // their audio: each SRT retains its own origin and the existing boundary context.
 // Four windows bound scratch space and cancellation latency without a new server.
 const WHISPER_BATCH_SIZE: usize = 4;
+// Parakeet loads its model once per batch (`--batch`), so a batch is sixteen
+// minutes of audio for one load instead of one load per two-minute window.
+// Bounded for the same reasons: scratch space and how long Stop waits.
+const PARAKEET_BATCH_SIZE: usize = 8;
+
+/// The Parakeet sidecar's arguments for a batch: one manifest of
+/// {input, output, words}, one model load, words written beside each SRT.
+fn parakeet_batch_args(config: &EngineConfig, files: &[(&Path, &Path)]) -> Result<(Vec<String>, std::path::PathBuf, String), AppError> {
+    let Some((_, first)) = files.first() else { return Err(AppError::invalid("No audio chunks to transcribe")); };
+    if files.len() > PARAKEET_BATCH_SIZE { return Err(AppError::invalid("Too many recognition chunks")); }
+    let items: Vec<serde_json::Value> = files.iter().map(|(wav, output)| serde_json::json!({
+        "input": wav.to_string_lossy(), "output": output.with_extension("srt").to_string_lossy(),
+        "words": output.with_extension("words.json").to_string_lossy() })).collect();
+    let manifest = first.with_extension("batch.json");
+    Ok((vec!["--asr".into(), "--asr-model".into(), config.parakeet.into(), "--batch".into(), manifest.to_string_lossy().into_owned(),
+        "--models-dir".into(), config.model_path.clone(), "--emit-progress".into()], manifest, serde_json::to_string(&items)?))
+}
 
 fn whisper_batch_args(config: &EngineConfig, files: &[(&Path, &Path)]) -> Result<Vec<String>, AppError> {
     let Some((wav, output)) = files.first() else { return Err(AppError::invalid("No audio chunks to transcribe")); };
@@ -172,7 +216,7 @@ fn whisper_batch_args(config: &EngineConfig, files: &[(&Path, &Path)]) -> Result
     Ok(args)
 }
 
-async fn run_batch(app: &AppHandle, job: &str, config: &EngineConfig, files: &[(&Path, &Path)]) -> Result<Vec<String>, AppError> {
+async fn run_batch(app: &AppHandle, job: &str, config: &EngineConfig, files: &[(&Path, &Path)]) -> Result<Vec<(String, Option<Vec<RawWord>>)>, AppError> {
     let _permit = loop {
         process::check_cancelled(app, job)?;
         tokio::select! {
@@ -184,10 +228,9 @@ async fn run_batch(app: &AppHandle, job: &str, config: &EngineConfig, files: &[(
     let (name, args) = match config.engine {
         AafEngine::Whisper => ("whisper-cli", whisper_batch_args(config, files)?),
         AafEngine::Parakeet => {
-            let [(wav, output)] = files else { return Err(AppError::invalid("Parakeet requires one audio chunk")); };
-            ("saucebunny-diarize", vec!["--asr".into(), "--input".into(), wav.to_string_lossy().into_owned(),
-                "--output".into(), output.with_extension("srt").to_string_lossy().into_owned(),
-                "--models-dir".into(), config.model_path.clone(), "--emit-progress".into()])
+            let (args, manifest, items) = parakeet_batch_args(config, files)?;
+            std::fs::write(manifest, items)?;
+            ("saucebunny-diarize", args)
         },
     };
     // Keep the existing per-window budget on slower Macs. Batching must not
@@ -205,7 +248,14 @@ async fn run_batch(app: &AppHandle, job: &str, config: &EngineConfig, files: &[(
             if std::fs::metadata(&path)?.len() > 8 * 1024 * 1024 { return Err(AppError::invalid("Speech output exceeded its safety limit")); }
             Some(std::fs::read_to_string(path)?)
         } else { None };
-        output_text(&config.engine, result.code, &result.stderr, text)
+        let text = output_text(&config.engine, result.code, &result.stderr, text)?;
+        // Words are a refinement: a missing or unreadable file costs the
+        // measured times, never the transcript, which falls back to estimates.
+        let words = output.with_extension("words.json");
+        let words = (matches!(config.engine, AafEngine::Parakeet) && words.is_file()
+            && std::fs::metadata(&words).is_ok_and(|meta| meta.len() <= 32 * 1024 * 1024))
+            .then(|| std::fs::read(&words).ok().and_then(|bytes| serde_json::from_slice::<Vec<RawWord>>(&bytes).ok())).flatten();
+        Ok((text, words))
     }).collect()
 }
 
@@ -229,7 +279,7 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
         else if whisper && speech_only { "Speech detector unavailable. Full audio was used; no download was started." }
         else { "Full audio used. Only timeline gaps and digital silence are skipped." };
     super::diagnostics::log(app, job, if whisper && speech_only && config.vad_model.is_none() { "warn" } else { "info" }, "asr-options", speech_note);
-    let batch_size = if whisper { WHISPER_BATCH_SIZE } else { 1 };
+    let batch_size = if whisper { WHISPER_BATCH_SIZE } else { PARAKEET_BATCH_SIZE };
     let chunks = chunks(duration, &document.manifest.edit_rate)?;
     super::diagnostics::log(app, job, "info", "asr-options", &format!("{} windows · up to {batch_size} per model load · one recognizer · {} decoding", chunks.len(), if fast && whisper { "fast" } else { "accurate" }));
     let mut cues = Vec::new();
@@ -256,9 +306,9 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
             super::diagnostics::log(app, job, "info", "asr-batch", &format!("{} audio windows · sequence frames {} to {}", prepared.len(), start + batch[0].start, start + batch[batch.len()-1].end));
             let files = prepared.iter().map(|(_, _, wav, output)| (wav.as_path(), output.as_path())).collect::<Vec<_>>();
             let texts = run_batch(app, job, &config, &files).await?;
-            for ((chunk, _, _, _), text) in prepared.iter().zip(texts) {
+            for ((chunk, _, _, _), (text, words)) in prepared.iter().zip(texts) {
                 process::check_cancelled(app, job)?;
-                let parsed = parse_cues(&text, chunk, &document.manifest.edit_rate, track)?;
+                let parsed = parse_cues(&text, chunk, &document.manifest.edit_rate, track, words.as_deref())?;
                 cues.extend(parsed.cues);
                 timing_issues.extend(parsed.timing_issues);
             }
@@ -272,7 +322,8 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
         model_id: config.model_id, status: if !timing_issues.is_empty() { AafTranscriptStatus::Review } else if cues.is_empty() { AafTranscriptStatus::Empty } else { AafTranscriptStatus::Completed },
         sample_rate: ASR_RATE as u32, cues, timing_issues,
         warnings: vec!["Names identify microphone owners. Nearby voices and recognition mistakes may appear on any track.".into(),
-            "Cue times are machine estimates, not verified word boundaries. No diarization or cross-track deletion was performed.".into(),
+            if whisper { "Cue times are machine estimates, not verified word boundaries. No diarization or cross-track deletion was performed.".into() }
+            else { "Word times are the recognizer's own measurements, accurate to about 80 ms. No diarization or cross-track deletion was performed.".into() },
             "Cues marked for boundary review can repeat across processing chunks. Both are kept so differing segmentation cannot silently remove words.".into(),
             "Recognition uses bounded audio chunks with one second of context.".into(),
             speech_note.into(), format!("Decoding: {}. Model reuse: up to {batch_size} windows per load.", if fast && whisper { "Fast" } else { "Accurate" })], gaps: None };
@@ -288,7 +339,7 @@ mod tests {
     use super::*;
     fn config(fast: bool, vad: bool) -> EngineConfig {
         EngineConfig { engine: AafEngine::Whisper, model_id: "medium.en".into(), model_path: "model with spaces.bin".into(),
-            language: "en".into(), fast, vad_model: vad.then(|| "installed-vad.bin".into()) }
+            language: "en".into(), fast, vad_model: vad.then(|| "installed-vad.bin".into()), parakeet: "v3" }
     }
     #[test]
     fn batch_reuses_one_model_and_keeps_each_input_output_pair_separate() {
@@ -335,7 +386,7 @@ mod tests {
         for (index, out) in outputs.iter().enumerate() {
             let text = output_text(&AafEngine::Whisper, result.status.code(), &stderr, Some(std::fs::read_to_string(out.with_extension("srt")).unwrap())).unwrap();
             let chunk = Chunk { start: index as i64 * 2880, end: (index as i64 + 1) * 2880, extract_start: index as i64 * 2880, extract_end: (index as i64 + 1) * 2880 };
-            let parsed = parse_cues(&text, &chunk, &rate, "test-mic").unwrap();
+            let parsed = parse_cues(&text, &chunk, &rate, "test-mic", None).unwrap();
             // Model timing mistakes remain review items, not manufactured cues.
             assert!(parsed.timing_issues.iter().all(|issue| issue.chunk_start_frame == chunk.extract_start));
             assert!(!parsed.cues.is_empty());
@@ -350,14 +401,14 @@ mod tests {
         let rate = AafRate { numerator: 24000, denominator: 1001 };
         let chunk = Chunk { start: 0, end: 240, extract_start: 0, extract_end: 240 };
         let output = "1\n00:00:01,000 --> 00:00:02,000\nValid first\n\n2\n00:00:03,000 --> 00:00:03,000\nZero length\n\n3\n00:00:04,000 --> 00:00:03,000\nReversed\n\n4\n00:00:09,000 --> 00:00:30,000\nPast end\n\n5\n00:00:06,000 --> 00:00:07,000\nValid last\n\n6\n00:60:00,000 --> 00:61:00,000\nMalformed clock\n";
-        let parsed = parse_cues(output, &chunk, &rate, "10").unwrap();
+        let parsed = parse_cues(output, &chunk, &rate, "10", None).unwrap();
         assert_eq!(parsed.cues.iter().map(|c|c.text.as_str()).collect::<Vec<_>>(), ["Valid first", "Valid last"]);
         assert_eq!(parsed.timing_issues.len(), 4);
         assert_eq!(parsed.timing_issues[0].reported_timing, "00:00:03,000 --> 00:00:03,000");
         assert!(parsed.cues.iter().all(|c| c.start_sample < c.end_sample && c.end_sample <= 160160));
-        let empty = parse_cues("1\n00:00:10,010 --> 00:00:12,000\nUnplaced words\n", &chunk, &rate, "10").unwrap();
+        let empty = parse_cues("1\n00:00:10,010 --> 00:00:12,000\nUnplaced words\n", &chunk, &rate, "10", None).unwrap();
         assert!(empty.cues.is_empty()); assert_eq!(empty.timing_issues[0].text, "Unplaced words");
-        let rounded = parse_cues("1\n00:00:09,900 --> 00:00:10,100\nSmall endpoint rounding\n", &chunk, &rate, "10").unwrap();
+        let rounded = parse_cues("1\n00:00:09,900 --> 00:00:10,100\nSmall endpoint rounding\n", &chunk, &rate, "10", None).unwrap();
         assert_eq!(rounded.cues[0].end_sample, 160160); assert!(rounded.timing_issues.is_empty());
     }
     #[test]
@@ -373,23 +424,73 @@ mod tests {
     fn cue_times_keep_real_gaps_and_sequence_offset() {
         let rate = AafRate { numerator: 24_000, denominator: 1001 };
         let chunk = Chunk { start: 24_000, end: 25_000, extract_start: 24_000, extract_end: 25_000 };
-        let cues = parse_cues("1\n00:00:05,000 --> 00:00:06,000\nFirst\n\n2\n00:00:30,000 --> 00:00:31,000\nSecond\n", &chunk, &rate, "12").unwrap().cues;
+        let cues = parse_cues("1\n00:00:05,000 --> 00:00:06,000\nFirst\n\n2\n00:00:30,000 --> 00:00:31,000\nSecond\n", &chunk, &rate, "12", None).unwrap().cues;
         assert_eq!(cues.len(), 2);
         assert_eq!(cues[0].start_sample, 16_096_000);
         assert_eq!(cues[1].start_sample - cues[0].start_sample, 25 * ASR_RATE);
-        assert!(parse_cues("not a transcript", &chunk, &rate, "12").is_err());
+        assert!(parse_cues("not a transcript", &chunk, &rate, "12", None).is_err());
     }
     #[test]
     fn a_blank_line_inside_a_cue_keeps_the_run_and_the_text() {
         let rate = AafRate { numerator: 24_000, denominator: 1001 };
         let chunk = Chunk { start: 0, end: 240, extract_start: 0, extract_end: 240 };
-        let parsed = parse_cues("1\n00:00:01,000 --> 00:00:02,000\n♪\n\n♪\n\n2\n00:00:03,000 --> 00:00:04,000\nNext\n", &chunk, &rate, "10").unwrap();
+        let parsed = parse_cues("1\n00:00:01,000 --> 00:00:02,000\n♪\n\n♪\n\n2\n00:00:03,000 --> 00:00:04,000\nNext\n", &chunk, &rate, "10", None).unwrap();
         assert_eq!(parsed.cues.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), ["♪ ♪", "Next"]);
         assert!(parsed.timing_issues.is_empty());
-        let leading = parse_cues("Stray words\n\n1\n00:00:01,000 --> 00:00:02,000\nTimed\n", &chunk, &rate, "10").unwrap();
+        let leading = parse_cues("Stray words\n\n1\n00:00:01,000 --> 00:00:02,000\nTimed\n", &chunk, &rate, "10", None).unwrap();
         assert_eq!(leading.cues[0].text, "Timed");
         assert_eq!(leading.timing_issues[0].text, "Stray words");
     }
+    fn raw(text: &str, start: f64, end: f64) -> RawWord { RawWord { text: text.into(), start, end, confidence: 0.9 } }
+
+    #[test]
+    fn measured_words_travel_with_their_cue_in_sequence_samples() {
+        let rate = AafRate { numerator: 24, denominator: 1 };
+        // A window that starts 10 s into the sequence: words are relative to it.
+        let chunk = Chunk { start: 240, end: 480, extract_start: 240, extract_end: 480 };
+        let srt = "1\n00:00:01,000 --> 00:00:02,000\nHello there.\n\n2\n00:00:03,000 --> 00:00:04,000\nBye now\n";
+        let words = [raw("Hello", 1.0, 1.4), raw("there.", 1.4, 2.0), raw("Bye", 3.0, 3.3), raw("now", 3.3, 4.0)];
+        let cues = parse_cues(srt, &chunk, &rate, "10", Some(&words)).unwrap().cues;
+        let first = cues[0].words.as_ref().unwrap();
+        assert_eq!(first.iter().map(|w| w.text.as_str()).collect::<Vec<_>>(), ["Hello", "there."]);
+        assert_eq!((first[0].start_sample, first[0].end_sample), (16_000 * 11, 16_000 * 11 + 6_400));
+        assert_eq!(first[1].end_sample, cues[0].end_sample);
+        assert_eq!(cues[1].words.as_ref().unwrap().len(), 2);
+        assert!((first[0].confidence - 0.9).abs() < 1e-6);
+        // Without a words file the cue is unchanged and estimated later.
+        assert!(parse_cues(srt, &chunk, &rate, "10", None).unwrap().cues[0].words.is_none());
+    }
+
+    #[test]
+    fn words_that_do_not_spell_the_cue_are_not_trusted() {
+        let rate = AafRate { numerator: 24, denominator: 1 };
+        let chunk = Chunk { start: 0, end: 240, extract_start: 0, extract_end: 240 };
+        let srt = "1\n00:00:01,000 --> 00:00:02,000\nHello there\n";
+        let wrong = [raw("Hello", 1.0, 1.4), raw("where", 1.4, 2.0)];
+        assert!(parse_cues(srt, &chunk, &rate, "10", Some(&wrong)).unwrap().cues[0].words.is_none());
+        let reversed = [raw("Hello", 1.0, 1.4), raw("there", 1.9, 1.5)];
+        assert!(parse_cues(srt, &chunk, &rate, "10", Some(&reversed)).unwrap().cues[0].words.is_none());
+        let broken = [raw("Hello", f64::NAN, 1.4), raw("there", 1.4, 2.0)];
+        assert!(parse_cues(srt, &chunk, &rate, "10", Some(&broken)).unwrap().cues[0].words.is_none());
+    }
+
+    #[test]
+    fn parakeet_batches_windows_into_one_model_load_and_writes_words_beside_each_srt() {
+        let mut config = config(false, false);
+        config.engine = AafEngine::Parakeet;
+        config.parakeet = "ultra";
+        let files = [(Path::new("/w/one.wav"), Path::new("/w/one/transcript")), (Path::new("/w/two.wav"), Path::new("/w/two/transcript"))];
+        let (args, manifest, items) = parakeet_batch_args(&config, &files).unwrap();
+        assert!(args.windows(2).any(|pair| pair == ["--asr-model", "ultra"]));
+        assert!(args.windows(2).any(|pair| pair[0] == "--batch" && pair[1] == manifest.to_string_lossy()));
+        let items: Vec<serde_json::Value> = serde_json::from_str(&items).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1]["output"], "/w/two/transcript.srt");
+        assert_eq!(items[1]["words"], "/w/two/transcript.words.json");
+        assert!(parakeet_batch_args(&config, &[files[0]; PARAKEET_BATCH_SIZE + 1]).is_err());
+        assert!(parakeet_batch_args(&config, &[]).is_err());
+    }
+
     #[test]
     fn bounded_chunks_cover_fractional_rate_without_drifting() {
         let rate = AafRate { numerator: 24_000, denominator: 1001 };
@@ -405,8 +506,8 @@ mod tests {
         let first = Chunk { start: 0, end: 2880, extract_start: 0, extract_end: 2904 };
         let second = Chunk { start: 2880, end: 5760, extract_start: 2856, extract_end: 5760 };
         // A midpoint policy drops BOTH: first midpoint is after120s, second before120s.
-        let a = parse_cues("1\n00:01:59,800 --> 00:02:00,600\nBoundary phrase\n", &first, &rate, "10").unwrap().cues;
-        let b = parse_cues("1\n00:00:00,400 --> 00:00:01,200\nBoundary phrase\n", &second, &rate, "10").unwrap().cues;
+        let a = parse_cues("1\n00:01:59,800 --> 00:02:00,600\nBoundary phrase\n", &first, &rate, "10", None).unwrap().cues;
+        let b = parse_cues("1\n00:00:00,400 --> 00:00:01,200\nBoundary phrase\n", &second, &rate, "10", None).unwrap().cues;
         assert_eq!(a.len(), 1); assert_eq!(b.len(), 1);
         assert!(a[0].boundary_review && b[0].boundary_review);
     }
