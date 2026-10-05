@@ -17,6 +17,7 @@ mod edit_export;
 mod edit_log;
 // Per-mic speech analysis from the waveform overview (Transcript Editor).
 mod speech;
+mod bleed;
 pub mod context;
 pub mod mcp;
 pub use error::AppError;
@@ -288,6 +289,11 @@ pub fn run() {
             commands::review_code,
             commands::session_kick,
             commands::aaf_speech,
+            commands::aaf_ownership,
+            commands::aaf_set_cue_ownership,
+            commands::aaf_check_voices,
+            commands::voiceprints_summary,
+            commands::delete_voiceprints,
             commands::aaf_export_edit,
             commands::aaf_export_edits,
             commands::mcp_setup,

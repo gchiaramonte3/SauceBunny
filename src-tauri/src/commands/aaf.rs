@@ -12,6 +12,8 @@ mod linked_audio;
 mod local_read;
 mod mxf_header;
 pub mod model;
+pub mod ownership;
+pub mod voices;
 mod process;
 pub(crate) mod store;
 mod transcribe;
@@ -45,7 +47,7 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String, sequence_i
         cast_member_id: None, color: None, gender: None, marker_color: None,
     }).collect();
     let id = blake3::hash(crate::stream_proxy::mint_token()?.as_bytes()).to_hex().to_string();
-    let document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, id,
+    let document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, ownership: None, id,
         source_path: source.to_string_lossy().into_owned(), source_size: metadata.len(),
         source_modified_ms: store::modified_ms(&metadata), manifest, labels, transcripts: Vec::new() };
     store::source_ready(&document)?;
@@ -227,6 +229,60 @@ pub async fn aaf_speech(app: AppHandle, document_id: String, track_id: String, b
     }).await
 }
 
+/// Owner, bleed or overtalk for every transcribed word in the document
+/// (accuracy spec, phase 3). With `build` false, mics with no waveform yet are
+/// left unlabelled rather than read again; with it true they are measured.
+#[tauri::command]
+pub async fn aaf_ownership(app: AppHandle, document_id: String, build: bool, job_id: String) -> Result<ownership::AafOwnership, AppError> {
+    diagnostics::operation(&app, &job_id, "ownership", &format!("Bleed labels · document {document_id} · build {build}"), async {
+        let _job = process::JobGuard::begin(&app, &job_id)?;
+        ownership::resolve(&app, &document_id, build, &job_id).await
+    }).await
+}
+
+/// Learn each mic owner's voice and settle the words the bleed resolver was
+/// unsure of (accuracy spec, phase 4). Reads short clips of the mics, so it
+/// runs only when asked; Stop reaches it through the job id.
+#[tauri::command]
+pub async fn aaf_check_voices(app: AppHandle, document_id: String, job_id: String) -> Result<ownership::AafOwnership, AppError> {
+    diagnostics::operation(&app, &job_id, "voices", &format!("Voice check · document {document_id}"), async {
+        let _job = process::JobGuard::begin(&app, &job_id)?;
+        voices::check(&app, &document_id, &job_id).await
+    }).await
+}
+
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct VoiceprintSummary { pub documents: u32, pub voices: u32 }
+
+/// How many voiceprints are kept, for Settings.
+#[tauri::command]
+pub fn voiceprints_summary(app: AppHandle) -> Result<VoiceprintSummary, AppError> {
+    let app_data = app.path().app_data_dir().map_err(|e| AppError::internal(e.to_string()))?;
+    let (documents, voices) = voices::summary(&app_data);
+    Ok(VoiceprintSummary { documents, voices })
+}
+
+/// Delete every learned voice. The labels they settled go with them: each
+/// document's bleed labels are computed again without them on next open.
+#[tauri::command]
+pub fn delete_voiceprints(app: AppHandle) -> Result<(), AppError> {
+    let app_data = app.path().app_data_dir().map_err(|e| AppError::internal(e.to_string()))?;
+    let dir = voices::dir(&app_data);
+    if dir.exists() { std::fs::remove_dir_all(&dir)?; }
+    Ok(())
+}
+
+/// The editor's own call on one cue (Owner or Bleed), or None to go back to
+/// the resolver's. Stored in the document and wins over the resolver.
+#[tauri::command]
+pub async fn aaf_set_cue_ownership(app: AppHandle, document_id: String, track_id: String, cue_id: String,
+    label: Option<crate::bleed::AafOwnershipLabel>, heard_on: Option<String>) -> Result<AafDocument, AppError> {
+    let document = store::set_ownership(&store::root(&app)?, &document_id, &track_id, &cue_id, label, heard_on)?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+    Ok(document)
+}
+
 /// Write an edit's head as a new AAF for Media Composer (`write-edit`). The
 /// sidecar re-reads what it wrote and compares every frame before publishing,
 /// and never overwrites a file.
@@ -371,7 +427,7 @@ mod native_reader_tests {
         let manifest: AafManifest = serde_json::from_slice(&result.stdout).unwrap();
         validate_manifest(&manifest).unwrap();
         let metadata = std::fs::metadata(&source).unwrap();
-        store::source_ready(&AafDocument { schema_version: 1, shoot_date_override: None, id: "f".repeat(64), source_path: source.clone(),
+        store::source_ready(&AafDocument { schema_version: 1, shoot_date_override: None, ownership: None, id: "f".repeat(64), source_path: source.clone(),
             source_size: metadata.len(), source_modified_ms: store::modified_ms(&metadata),
             manifest: manifest.clone(), labels: Vec::new(), transcripts: Vec::new() }).unwrap();
         let track = manifest.tracks.first().expect("test must inspect at least one track");

@@ -28,6 +28,9 @@ pub fn cache(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(path)
 }
 
+/// The document's file, for callers that need its modification time.
+pub fn document_file(root: &Path, id: &str) -> Result<PathBuf, AppError> { document_path(root, id) }
+
 fn document_path(root: &Path, id: &str) -> Result<PathBuf, AppError> {
     if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(AppError::invalid("Invalid multitrack document ID"));
@@ -190,6 +193,33 @@ pub fn labels(root: &Path, id: &str, labels: Vec<AafTrackLabel>) -> Result<AafDo
         { return Err(AppError::invalid("Invalid microphone track label")); }
     }
     document.labels = labels;
+    write(root, &document)?;
+    Ok(document)
+}
+
+/// Record (or, with None, clear) the editor's call on who said one cue. Only
+/// Owner and Bleed can be said by hand; the cue must exist, and a bleed call
+/// names a real track as the source.
+pub fn set_ownership(root: &Path, id: &str, track_id: &str, cue_id: &str, label: Option<crate::bleed::AafOwnershipLabel>, heard_on: Option<String>) -> Result<AafDocument, AppError> {
+    use crate::bleed::AafOwnershipLabel;
+    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
+    let mut document = load(root, id)?;
+    if !document.transcripts.iter().any(|transcript| transcript.track_id == track_id && transcript.cues.iter().any(|cue| cue.id == cue_id)) {
+        return Err(AppError::not_found("That line is no longer in this transcript"));
+    }
+    let entry = match label {
+        None => None,
+        Some(AafOwnershipLabel::Owner) => Some(AafCueOwnership { track_id: track_id.into(), cue_id: cue_id.into(), label: AafOwnershipLabel::Owner, heard_on: None }),
+        Some(AafOwnershipLabel::Bleed) => {
+            let source = heard_on.filter(|source| source != track_id && document.manifest.tracks.iter().any(|track| &track.id == source));
+            Some(AafCueOwnership { track_id: track_id.into(), cue_id: cue_id.into(), label: AafOwnershipLabel::Bleed, heard_on: source })
+        }
+        Some(_) => return Err(AppError::invalid("Mark a line as its mic owner's or as bleed")),
+    };
+    let mut list = document.ownership.take().unwrap_or_default();
+    list.retain(|item| !(item.track_id == track_id && item.cue_id == cue_id));
+    list.extend(entry);
+    document.ownership = (!list.is_empty()).then_some(list);
     write(root, &document)?;
     Ok(document)
 }
@@ -504,7 +534,7 @@ mod tests {
         assert_eq!(merge_transcript(Some(before), run(0, 100, &[], &[]), &rate).unwrap().gaps, None);
     }
     fn fixture() -> AafDocument {
-        AafDocument { schema_version: 1, shoot_date_override: None, id: "a".repeat(64), source_path: "/tmp/source.aaf".into(),
+        AafDocument { schema_version: 1, shoot_date_override: None, ownership: None, id: "a".repeat(64), source_path: "/tmp/source.aaf".into(),
             source_size: 1, source_modified_ms: 0,
             manifest: AafManifest { schema_version: 1, graph: None, recording_dates: None, name: "Test".into(), source_fingerprint: "b".repeat(64),
                 edit_rate: AafRate { numerator: 24000, denominator: 1001 }, start_frame: 0, duration_frames: 240,
@@ -514,6 +544,30 @@ mod tests {
                     source_start_sample: None, sample_rate: None, warnings: vec![] }], warnings: vec![] }], warnings: vec![] },
             labels: vec![AafTrackLabel { track_id: "10".into(), owner_name: "Café".into(), cast_member_id: None, color: None, gender: None, marker_color: None }],
             transcripts: vec![] }
+    }
+
+    #[test]
+    fn the_editors_call_on_a_cue_is_stored_replaced_and_cleared() {
+        use crate::bleed::AafOwnershipLabel::{Bleed, Overtalk, Owner};
+        let root = std::env::temp_dir().join(format!("aaf-ownership-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let doc = fixture();
+        create(&root, &doc).unwrap();
+        let transcript = AafTrackTranscript { track_id: "10".into(), start_frame: 0, duration_frames: 48, engine: AafEngine::Parakeet, model_id: "test".into(),
+            status: AafTranscriptStatus::Completed, sample_rate: 16000, cues: vec![AafCue { id: "cue".into(), start_sample: 0, end_sample: 8000, text: "Hello".into(), boundary_review: false, words: None }],
+            timing_issues: vec![], warnings: vec![], gaps: None };
+        save_transcript(&root, &doc, transcript).unwrap();
+        let stored = set_ownership(&root, &doc.id, "10", "cue", Some(Owner), None).unwrap();
+        assert_eq!(stored.ownership.as_ref().unwrap()[0].label, Owner);
+        // One call per cue: a second replaces the first. A bleed source must be another real track.
+        let stored = set_ownership(&root, &doc.id, "10", "cue", Some(Bleed), Some("10".into())).unwrap();
+        let calls = stored.ownership.unwrap();
+        assert_eq!((calls.len(), calls[0].label, calls[0].heard_on.clone()), (1, Bleed, None));
+        assert!(load(&root, &doc.id).unwrap().ownership.is_some(), "the call did not reach disk");
+        assert!(set_ownership(&root, &doc.id, "10", "cue", None, None).unwrap().ownership.is_none());
+        assert!(set_ownership(&root, &doc.id, "10", "gone", Some(Owner), None).is_err(), "a cue that does not exist took a call");
+        assert!(set_ownership(&root, &doc.id, "10", "cue", Some(Overtalk), None).is_err(), "only owner and bleed are said by hand");
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

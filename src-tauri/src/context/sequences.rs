@@ -171,10 +171,22 @@ pub fn detail(ctx: &Context, wanted: &str) -> Result<SequenceDetail, AppError> {
     })
 }
 
+/// A cue's bleed words, and how many came from each source mic.
+type BleedTally<'a> = (usize, std::collections::HashMap<&'a str, usize>);
+
 /// Every transcribed line of a sequence, in time order (then track order),
 /// with the string outs that play each.
 pub(crate) fn all_lines(ctx: &Context, document: &AafDocument) -> Result<Vec<(i64, String, Line)>, AppError> {
     let uses = string_outs::uses(ctx, &document.id)?;
+    // A cue is bleed when most of its words are, the rule the app's reader uses.
+    let mut bleed: std::collections::HashMap<(&str, &str), BleedTally> = std::collections::HashMap::new();
+    let ownership = ctx.ownership(&document.id);
+    for word in ownership.iter().flat_map(|answer| answer.words.iter()) {
+        if word.label != crate::bleed::AafOwnershipLabel::Bleed { continue; }
+        let entry = bleed.entry((word.track_id.as_str(), word.cue_id.as_str())).or_default();
+        entry.0 += 1;
+        if let Some(source) = &word.heard_on { *entry.1.entry(source.as_str()).or_default() += 1; }
+    }
     let mut out = Vec::new();
     for (order, track) in ordered(document).into_iter().enumerate() {
         let Some(transcript) = document.transcripts.iter().find(|item| item.track_id == track.id) else { continue };
@@ -185,8 +197,12 @@ pub(crate) fn all_lines(ctx: &Context, document: &AafDocument) -> Result<Vec<(i6
             let middle = (from + to) / 2;
             let mut in_string_outs: Vec<String> = uses.iter().filter(|item| item.track == track.id && item.from <= middle && middle < item.to).map(|item| item.string_out.clone()).collect();
             in_string_outs.dedup();
+            let words = cue.text.split_whitespace().count().max(1);
+            let bleed_from = bleed.get(&(track.id.as_str(), cue.id.as_str())).filter(|(count, _)| *count as f64 / words as f64 >= 0.6)
+                .map(|(_, sources)| sources.iter().max_by_key(|(_, count)| **count).map(|(source, _)| *source)
+                    .and_then(|source| document.manifest.tracks.iter().find(|item| item.id == source)).map(|source| owner(document, source)).unwrap_or_else(|| "another mic".into()));
             out.push(((from, order), track.id.clone(), Line { line: Address::Line { sequence: document.id.clone(), track: track.id.clone(), cue: cue.id.clone() }.to_string(),
-                who: who.clone(), track: label.clone(), tc_in: tc(document, from), tc_out: tc(document, to), text: cue.text.trim().to_string(), in_string_outs }));
+                who: who.clone(), track: label.clone(), tc_in: tc(document, from), tc_out: tc(document, to), text: cue.text.trim().to_string(), in_string_outs, bleed_from }));
         }
     }
     out.sort_by_key(|(key, _, _)| *key);
@@ -253,7 +269,7 @@ fn words(text: &str) -> Vec<String> {
 /// Lines that hold every word of the query (a word also matches the start of
 /// a longer one, so "tire" finds "tired"), or the exact phrase when it is in
 /// quotes. Case-insensitive; local and instant.
-pub fn search(ctx: &Context, query: &str, people_filter: &[String], sequences: &[String], limit: usize) -> Result<Search, AppError> {
+pub fn search(ctx: &Context, query: &str, people_filter: &[String], sequences: &[String], limit: usize, include_bleed: bool) -> Result<Search, AppError> {
     let phrase = query.trim().strip_prefix('"').and_then(|rest| rest.strip_suffix('"')).map(str::to_lowercase);
     let wanted = words(query);
     if wanted.is_empty() { return Err(AppError::invalid("Search needs at least one word.")); }
@@ -268,6 +284,8 @@ pub fn search(ctx: &Context, query: &str, people_filter: &[String], sequences: &
         };
         for (frame, _, line) in all_lines(ctx, &document)? {
             if allowed.as_ref().is_some_and(|names| !names.contains(&line.who)) { continue; }
+            // A bleed copy repeats its owner's line: one hit, from the mic it was said into.
+            if line.bleed_from.is_some() && !include_bleed { continue; }
             let score = match &phrase {
                 Some(phrase) => usize::from(line.text.to_lowercase().contains(phrase.as_str())) * 2 * wanted.len(),
                 None => {

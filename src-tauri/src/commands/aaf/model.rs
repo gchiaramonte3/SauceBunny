@@ -191,6 +191,24 @@ pub struct AafDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub shoot_date_override: Option<String>,
+    /// The editor's own calls on who said a cue, which win over the bleed
+    /// resolver's (accuracy spec, phase 3). Keyed by cue, so a regenerated
+    /// transcript, whose cue ids are new, starts from the resolver again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ownership: Option<Vec<AafCueOwnership>>,
+}
+
+/// "This cue is Rosa's" or "this cue is bleed from Dev's mic", said by the editor.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafCueOwnership {
+    pub track_id: String,
+    pub cue_id: String,
+    pub label: crate::bleed::AafOwnershipLabel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub heard_on: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

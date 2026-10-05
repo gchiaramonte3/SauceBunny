@@ -65,6 +65,12 @@ pub struct Line {
     /// The string outs that play this line, by address; omitted when none.
     #[serde(rename = "in", skip_serializing_if = "Vec::is_empty")]
     pub in_string_outs: Vec<String>,
+    /// Bleed: this mic picked the line up, but it was spoken into this
+    /// person's mic (the app's bleed resolver, accuracy spec phase 3). The
+    /// same words are that person's line; omitted when the line is the mic
+    /// owner's own, or when the mics were never measured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bleed_from: Option<String>,
 }
 
 /// The stores, with AAF Audio documents kept parsed between calls (one can
@@ -78,6 +84,18 @@ impl Context {
     pub fn new(roots: Roots) -> Self { Self { roots, documents: Mutex::new(HashMap::new()) } }
 
     /// An AAF Audio document by id, re-read only when its file has changed.
+    /// The bleed resolver's answer for a document, from the app's cache in its
+    /// support folder (beside `timelines.sqlite`), when it was computed from the
+    /// document as it is now. A cache from an older document (new transcripts,
+    /// so new cue ids) is ignored rather than trusted.
+    pub fn ownership(&self, id: &str) -> Option<crate::commands::aaf::ownership::AafOwnership> {
+        let app_data = self.roots.timelines.parent()?;
+        let answer: crate::commands::aaf::ownership::AafOwnership = crate::commands::aaf::store::read_json(&crate::commands::aaf::ownership::cache_file(app_data, id)).ok()?;
+        let document = std::fs::metadata(self.roots.multitrack.join(format!("{id}.json"))).ok()?;
+        let stamp = crate::commands::aaf::store::modified_ms(&document).to_string();
+        (answer.stamp.split(':').next() == Some(stamp.as_str())).then_some(answer)
+    }
+
     pub fn document(&self, id: &str) -> Result<Arc<AafDocument>, AppError> {
         let path = self.roots.multitrack.join(format!("{id}.json"));
         let modified = std::fs::metadata(&path).and_then(|meta| meta.modified())

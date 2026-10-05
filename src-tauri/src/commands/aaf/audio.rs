@@ -225,6 +225,25 @@ pub fn inspect_wav(path: &Path) -> Result<WavInfo, AppError> {
     Ok(WavInfo { sample_count: (size / 2) as i64, digital_silence })
 }
 
+/// A prepared 16 kHz mono WAV's samples, -1 to 1, after `inspect_wav` has
+/// vouched for its format (accuracy spec, phase 4: the voice check reads
+/// short windows of two mics to see which heard a word first).
+pub fn read_wav(path: &Path) -> Result<Vec<f32>, AppError> {
+    inspect_wav(path)?;
+    let bytes = std::fs::read(path)?;
+    let mut at = 12;
+    while at + 8 <= bytes.len() {
+        let size = u32::from_le_bytes([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]]) as usize;
+        let body = at + 8;
+        if &bytes[at..at + 4] == b"data" {
+            let end = body.saturating_add(size).min(bytes.len());
+            return Ok(bytes[body..end].chunks_exact(2).map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0).collect());
+        }
+        at = body.saturating_add(size + size % 2);
+    }
+    Err(AppError::invalid("Prepared WAV has no audio data"))
+}
+
 #[cfg(test)]
 mod tests {
     #[tokio::test]

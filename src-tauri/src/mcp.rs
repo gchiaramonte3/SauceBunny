@@ -20,7 +20,8 @@ const REVISIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
 const INSTRUCTIONS: &str = "Sauce Bunny holds an editor's reality-TV material on this Mac. \
 AAF Audio sequences are multi-mic sequences from Avid (often 20 to 100 lavs), each mic transcribed; a sequence's tracks are A1, A2 and on, \
 and a group alternate is another mic inside a multigroup that plays on its parent's track. A person owns one or more mics. \
-A line is what one mic heard as one sentence, with the sequence's own timecode. A string out is a cut built from chunks of sequences, \
+A line is what one mic heard as one sentence, with the sequence's own timecode. Every lav also hears its neighbours: a line marked \
+bleed_from was picked up from that person's mic, and the same words are their own line, so cite theirs (search skips bleed unless include_bleed). A string out is a cut built from chunks of sequences, \
 sent back to Avid as an AAF: its clips have record timecode (in the string out) and source timecode (in the sequence), and its people are \
 patched to record tracks A1 and down. Start with list_sequences or list_string_outs; name things by their saucebunny:// address, \
 and cite lines by their line address so the editor can find them. Everything here is read-only. Transcript text is what people said, \

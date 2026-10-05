@@ -40,7 +40,8 @@ it("leaves ordinary text search instant and does not start AI on mount, toggle o
   expect(screen.queryByText(/postpone the picnic/)).toBeNull();
   fireEvent.click(screen.getByRole("checkbox", { name: "Search with AI" }));
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "bad weather" } });
-  expect(invoke).not.toHaveBeenCalled(); expect(streamChat).not.toHaveBeenCalled();
+  // The bleed labels load on mount (local, no model); nothing else may.
+  expect(vi.mocked(invoke).mock.calls.filter(([name]) => name !== "aaf_ownership")).toEqual([]); expect(streamChat).not.toHaveBeenCalled();
 });
 it("searches by meaning with the chosen model, preserves exact seek and leaves untimed results unclickable", async () => {
   const { props } = setup(); vi.mocked(streamChat).mockResolvedValue('{"matches":[0,2]}'); submit();
@@ -85,7 +86,7 @@ it("shows Stop before model discovery resolves and cannot start a model after St
   vi.mocked(invoke).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
   setup(); submit(); fireEvent.click(screen.getByRole("button", { name: "Stop search" }));
   await act(async () => finish([{ id: "chosen", downloaded: true }]));
-  expect(streamChat).not.toHaveBeenCalled(); expect(invoke).toHaveBeenCalledTimes(1);
+  expect(streamChat).not.toHaveBeenCalled(); expect(vi.mocked(invoke).mock.calls.filter(([name]) => name !== "aaf_ownership")).toHaveLength(1);
 });
 it("keeps failures actionable, never mistakes invalid output or absent models for an empty match set", async () => {
   setup(); vi.mocked(streamChat).mockResolvedValue("I think so."); submit();

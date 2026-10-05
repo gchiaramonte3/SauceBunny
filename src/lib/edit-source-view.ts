@@ -3,6 +3,7 @@ import type { AafPictureClip } from "../bindings/AafPictureClip";
 import type { EditTrack } from "../bindings/EditTrack";
 import type { PlacedWord } from "./edit-model";
 import { micOrder, micTrack, type MultitrackPerson } from "./multitrack-person";
+import { BLEED_SHARE } from "./multitrack-ownership";
 
 /**
  * How the SOURCE side of String Outs reads one sequence: a tab per person,
@@ -71,7 +72,11 @@ export function sourceOrder(placed: PlacedWord[], tab: string): PlacedWord[] {
     const key = cueOf(item), cue = cues.get(key);
     if (cue) cue.push(item); else cues.set(key, [item]);
   }
+  // A line that is mostly bleed is the same speech as its owner's copy on
+  // another mic: All voices reads it once, from the mic it was said into.
+  // The person's own tab still shows it.
   return [...cues.values()]
+    .filter((cue) => cue.filter((item) => item.word.heardOn).length / cue.length < BLEED_SHARE)
     .sort((a, b) => a[0].programStart - b[0].programStart || a[0].word.track.localeCompare(b[0].word.track))
     .flat();
 }

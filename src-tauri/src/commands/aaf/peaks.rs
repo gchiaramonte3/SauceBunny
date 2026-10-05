@@ -6,7 +6,7 @@ use crate::AppError;
 use std::{fs::File, io::{Read, Seek, SeekFrom, Write}, path::{Path, PathBuf}};
 use tauri::AppHandle;
 
-const BASE: u64 = 256;
+pub(super) const BASE: u64 = 256;
 const POINTS: u64 = 2048;
 const HEADER: u64 = 32;
 /// Two overview builds at a time, shared by native and linked media. With a

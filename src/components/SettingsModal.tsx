@@ -38,6 +38,7 @@ import { formatError } from "../lib/error-format";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { YouTubeSettings } from "./YouTubeSettings";
 import { AiApiSettings } from "./AiApiSettings";
+import { VoiceprintSettings } from "./VoiceprintSettings";
 import { NdiAttribution, PremiereSetup } from "./PremiereSetup";
 import type { NdiTelemetry } from "../bindings/NdiTelemetry";
 import { useModalFocus } from "../hooks/use-modal-focus";
@@ -1756,6 +1757,10 @@ export function SettingsModal(props: Props) {
                       Reset
                     </button>
                   </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection id="tx-voiceprints" label="Voiceprints" open={sectionOpen("tx-voiceprints")} onToggle={() => toggleSection("tx-voiceprints")}>
+                  <VoiceprintSettings />
                 </CollapsibleSection>
 
                 <CollapsibleSection id="tx-dictation" label="Dictation microphone" open={sectionOpen("tx-dictation")} onToggle={() => toggleSection("tx-dictation")}>

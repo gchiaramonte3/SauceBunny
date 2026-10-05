@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
+import type { AafOwnership } from "../bindings/AafOwnership";
 import type { AafSpeech } from "../bindings/AafSpeech";
 import type { AafWaveform } from "../bindings/AafWaveform";
 import type { EditDocument } from "../bindings/EditDocument";
@@ -11,6 +12,7 @@ import type { TimelineWord } from "../lib/edit-model";
 import { loadSpeech } from "../lib/edit-speech";
 import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
+import { cueLabels, ownershipIndex, type OwnershipIndex } from "../lib/multitrack-ownership";
 
 export type EditSourceData = {
   documents: Map<string, AafDocument>;
@@ -31,7 +33,8 @@ export type EditSourceData = {
   errors: string[];
 };
 
-type Loaded = { documents: Map<string, AafDocument>; speech: Map<string, AafSpeech>; peaks: Map<string, [number, number][]>; errors: string[] };
+/** `ownership`: per source, the bleed resolver's labels (accuracy spec, phase 3), from Rust's cache. */
+type Loaded = { documents: Map<string, AafDocument>; speech: Map<string, AafSpeech>; peaks: Map<string, [number, number][]>; ownership: Map<string, OwnershipIndex>; errors: string[] };
 type Lane = { pair: string; source: string; documentId: string; trackId: string; label: string; frames: number };
 
 /**
@@ -82,7 +85,7 @@ async function cachedPeaks(lane: Lane, jobId: string): Promise<[number, number][
  * Every backend job holds its id from the start, and leaving cancels them.
  */
 export function useEditSources(document: EditDocument | null, waveforms = false): EditSourceData {
-  const [loaded, setLoaded] = useState<Loaded>({ documents: new Map(), speech: new Map(), peaks: new Map(), errors: [] });
+  const [loaded, setLoaded] = useState<Loaded>({ documents: new Map(), speech: new Map(), peaks: new Map(), ownership: new Map(), errors: [] });
   const [loading, setLoading] = useState(false);
   const [read, setRead] = useState<{ done: number; total: number } | null>(null);
   const [measuring, setMeasuring] = useState(false);
@@ -96,6 +99,7 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
   // One lane loads at a time, so at most one speech job and one waveform job
   // are ever in flight per pass; these hold them for the cleanup's cancel.
   const wordsJob = useRef<string | null>(null);
+  const ownershipJob = useRef<string | null>(null);
   const measureSpeechJob = useRef<string | null>(null), measureWaveJob = useRef<string | null>(null);
   const key = keyOf(document);
   // Who is on a track changes without changing what is read: a person given
@@ -113,7 +117,7 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
     let live = true;
     setLoading(true);
     void (async () => {
-      const next: Loaded = { documents: new Map(), speech: new Map(), peaks: new Map(), errors: [] };
+      const next: Loaded = { documents: new Map(), speech: new Map(), peaks: new Map(), ownership: new Map(), errors: [] };
       for (const source of document.sources) {
         try {
           const aaf = await invoke<AafDocument>("aaf_open", { documentId: source.document_id });
@@ -121,7 +125,18 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
           next.documents.set(source.id, aaf);
         } catch (cause) {
           next.errors.push(`${source.name}: ${formatError(cause)}`);
+          continue;
         }
+        // Bleed labels never measure a mic here (that reads media): what is
+        // not measured yet is simply unlabelled, and every word stays.
+        const jobId = newJobId();
+        ownershipJob.current = jobId;
+        try {
+          const answer = await invoke<AafOwnership | null>("aaf_ownership", { documentId: source.document_id, build: false, jobId });
+          if (!live) return;
+          if (answer && Array.isArray(answer.words)) next.ownership.set(source.id, ownershipIndex(answer));
+        } catch { /* labels are a refinement; the words load without them */ }
+        finally { ownershipJob.current = null; }
       }
       // Words are shown as they arrive, a mic at a time (at most a few times a
       // second, since every publish re-reads every word): on a 20-mic sequence
@@ -145,8 +160,10 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
     })();
     return () => {
       live = false;
-      if (wordsJob.current) void invoke("cancel_job", { jobId: wordsJob.current }).catch(() => undefined);
-      wordsJob.current = null;
+      for (const held of [wordsJob, ownershipJob]) {
+        if (held.current) void invoke("cancel_job", { jobId: held.current }).catch(() => undefined);
+        held.current = null;
+      }
     };
     // The key captures what matters; `document` itself changes on every step.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -217,7 +234,12 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
     const heard = new Set(tracked.split("\n"));
     for (const [pair, speech] of loaded.speech) {
       const [source, lane] = pair.split(":");
-      words.push(...wordsFromSpeech(speech, source, lane));
+      const labels = loaded.ownership.get(source);
+      const heardOn = labels && ((cue: string, index: number) => {
+        const word = cueLabels(labels, speech.track_id, cue)?.get(index);
+        return word?.label === "bleed" ? word.heard_on ?? undefined : undefined;
+      });
+      words.push(...wordsFromSpeech(speech, source, lane, heardOn));
       if (heard.has(lane)) audible.set(source, [...(audible.get(source) ?? []), ...audibleSpans(speech)]);
     }
     // Complete only when every mic on a track has its measured words: not

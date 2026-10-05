@@ -748,7 +748,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and sixteen rules in this file are checked by a test rather than remembered. If you
+One hundred and seventeen rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -908,6 +908,7 @@ written after finding the rule already broken somewhere.
 | `text-decoration-contract` | A `text-decoration` shorthand names only the line. WebKit reads its style and colour parts only from Safari 26.2, and macOS 14 can run Safari 17, where `underline dotted` is dropped whole and the underline vanishes. Style and colour go in their longhands |
 | `mark-shape-contract` | A stem in the marker colour draws the chevron wing: every `border-left`/`-right` or inset side shadow in `var(--marker)` belongs to a class with a `--mark-wing-*` wing, or is one of two named regions that sit under winged marks. AAF Audio's and String Outs' rulers drew a flat violet band with no wing, and nothing at all for a lone In or Out, beside Clip's chevrons; both now draw `RulerMarks` (marks.css). The design catalog's stylesheets are scanned too: they load after production's and win |
 | `mark-keys-contract` | AAF Audio and String Outs bind the same seven marking keys to the same meanings, Avid's: I and O mark, G clears both, D clears In, F clears Out, Q and W go to the marks. They drifted apart in separate files: AAF Audio cleared with G while String Outs used ⌥X and ignored G, and neither had D or F |
+| `voiceprint-contract` | Voiceprints (the voice check's 256-number description of each mic owner's voice, accuracy spec phase 4) are biometric data: written only under `app_data_dir()/voiceprints`, never under Documents, never read by the context layer that answers assistants or by the co-review wire, never in a command's answer or the ownership cache. Only the labels they settle travel |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:

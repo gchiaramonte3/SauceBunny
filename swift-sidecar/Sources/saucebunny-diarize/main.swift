@@ -150,6 +150,9 @@ struct Args {
   var words: String?                 // also write the measured words as JSON here
   var batch: String?                 // JSON list of {input, output, words}: one model load for all
   var asrModel: ParakeetVersion = .v3
+  // ── Voiceprints (accuracy spec, phase 4) ──
+  var embed: Bool = false            // one voiceprint per span of --input
+  var spans: String?                 // JSON list of [start, end] seconds
 }
 
 /// Which Parakeet the app asked for. Ultra (FluidAudio 0.17.3+) is a
@@ -185,6 +188,10 @@ func parseArgs(_ argv: [String]) -> Args {
       i += 1; if i < argv.count { a.words = argv[i] }
     case "--batch":
       i += 1; if i < argv.count { a.batch = argv[i] }
+    case "--embed":
+      a.embed = true
+    case "--spans":
+      i += 1; if i < argv.count { a.spans = argv[i] }
     case "--asr-model":
       i += 1
       if i < argv.count, let v = ParakeetVersion(rawValue: argv[i].lowercased()) { a.asrModel = v }
@@ -268,6 +275,9 @@ func printHelp() {
       --words FILE          Also write each word's measured time and confidence.
       --batch FILE          JSON list of {input, output, words}; one model load.
       --prepare-asr-models  Download the chosen Parakeet and exit.
+      --embed               One voiceprint per span of --input (16 kHz mono):
+                            --spans FILE ([[start, end], ...] seconds) and
+                            --output FILE (a list of 256 numbers, or null).
   """
   print(help)
 }
@@ -566,6 +576,57 @@ func runAsrMode(args: Args) async {
   exit(0)
 }
 
+// ── Voiceprints (accuracy spec, phase 4) ────────────────────────────
+//
+// A WeSpeaker embedding per span: 256 numbers that describe what a voice
+// sounds like, scaled to unit length, so the cosine of two is their dot product. The
+// app learns each mic owner's voice from stretches where that mic clearly
+// dominates and compares unsure words against them. Nothing here is stored:
+// Rust keeps the voiceprints, in the app's support folder, never Documents.
+
+/// Shorter than this a voiceprint says more about the room than the voice.
+let embedMinSeconds = 0.5
+
+func runEmbedMode(args: Args) async {
+  guard let inPath = args.input, let spansPath = args.spans, let outPath = args.output else {
+    eprintln("error: --embed needs --input <wav>, --spans <json> and --output <json>")
+    exit(1)
+  }
+  guard let data = FileManager.default.contents(atPath: spansPath),
+        let spans = try? JSONDecoder().decode([[Double]].self, from: data) else {
+    eprintln("error: --spans must be a JSON list of [start, end] seconds")
+    exit(1)
+  }
+  do {
+    emitStatus(["phase": "prepare", "message": "Loading the voice model…", "backend": "fluidaudio"], emit: args.emitProgress)
+    let samples = try loadWavAsFloatArray(path: inPath)
+    let manager = DiarizerManager()
+    manager.initialize(models: try await DiarizerModels.downloadIfNeeded())
+    emitStatus(["phase": "process", "message": "Listening to \(spans.count) stretches…", "backend": "fluidaudio"], emit: args.emitProgress)
+    var out: [[Float]?] = []
+    for span in spans {
+      guard span.count == 2, span[0].isFinite, span[1].isFinite, span[1] - span[0] >= embedMinSeconds else { out.append(nil); continue }
+      let from = max(0, Int(span[0] * 16_000)), to = min(samples.count, Int(span[1] * 16_000))
+      // The embedding model reads at most ten seconds.
+      guard to - from >= Int(embedMinSeconds * 16_000) else { out.append(nil); continue }
+      let clip = Array(samples[from..<min(to, from + 160_000)])
+      // Measured: FluidAudio 0.17.5's embeddings are NOT unit length (a voice
+      // against itself dots to about 13), whatever its doc comment says.
+      // Normalised here, so a cosine is a plain dot product downstream.
+      guard let raw = try? manager.extractSpeakerEmbedding(from: clip) else { out.append(nil); continue }
+      let norm = raw.reduce(0) { $0 + $1 * $1 }.squareRoot()
+      out.append(norm > 0 && norm.isFinite ? raw.map { $0 / norm } : nil)
+    }
+    let json = try JSONEncoder().encode(out)
+    try json.write(to: URL(fileURLWithPath: outPath), options: .atomic)
+  } catch {
+    eprintln("error: voiceprints failed: \(error)")
+    exit(3)
+  }
+  emitStatus(["phase": "done", "message": "Voiceprints ready."], emit: args.emitProgress)
+  exit(0)
+}
+
 // ── Main ────────────────────────────────────────────────────────────
 
 @main
@@ -581,6 +642,7 @@ struct Main {
     // Parakeet ASR (r90) — separate modes from diarization; each exits.
     if args.prepareAsrModels { await prepareAsrModelsOnly(args: args) }
     if args.asr { await runAsrMode(args: args) }
+    if args.embed { await runEmbedMode(args: args) }
 
     guard let inPath = args.input, let outPath = args.output else {
       eprintln("error: --input and --output are required (try --help)")

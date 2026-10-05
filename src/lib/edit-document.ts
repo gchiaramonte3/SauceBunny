@@ -102,11 +102,24 @@ export function toDocument(base: EditDocument, timeline: Timeline, markers: Time
  * are the EDIT's ids. Cue positions are 16 kHz samples from the sequence
  * start, so seconds are samples / 16000.
  */
-export function wordsFromSpeech(speech: AafSpeech, source: string, track: string): TimelineWord[] {
-  return speech.words.map((word, index) => ({
-    id: `${source}:${track}:${word.cue_id}:${index}`, source, track, text: word.text,
-    start: word.start_sample / 16_000, end: word.end_sample / 16_000, cue: word.cue_id,
-  }));
+/**
+ * A mic's analysed words as String Outs words. `heardOn` answers, for a word's
+ * cue and its place in that cue, which mic the bleed resolver says it was
+ * really spoken into (accuracy spec, phase 3); the resolver indexes words
+ * within their cue the same way.
+ */
+export function wordsFromSpeech(speech: AafSpeech, source: string, track: string, heardOn?: (cue: string, index: number) => string | undefined): TimelineWord[] {
+  const inCue = new Map<string, number>();
+  return speech.words.map((word, index) => {
+    const at = inCue.get(word.cue_id) ?? 0;
+    inCue.set(word.cue_id, at + 1);
+    const heard = heardOn?.(word.cue_id, at);
+    return {
+      id: `${source}:${track}:${word.cue_id}:${index}`, source, track, text: word.text,
+      start: word.start_sample / 16_000, end: word.end_sample / 16_000, cue: word.cue_id,
+      ...(heard ? { heardOn: heard } : {}),
+    };
+  });
 }
 
 /** Where a mic is audible, in source seconds, for dead-space detection. */
