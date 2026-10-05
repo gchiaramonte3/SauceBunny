@@ -96,6 +96,13 @@ impl Context {
         (answer.stamp.split(':').next() == Some(stamp.as_str())).then_some(answer)
     }
 
+    /// The editor's Hide bleed switch. Off (the default), search returns a
+    /// bleed copy, still marked `bleed_from`, because the label may be wrong
+    /// and a line left out is one nobody knows to look for.
+    pub fn hides_bleed(&self) -> bool {
+        self.roots.timelines.parent().is_some_and(crate::commands::aaf::ownership::hides_bleed)
+    }
+
     pub fn document(&self, id: &str) -> Result<Arc<AafDocument>, AppError> {
         let path = self.roots.multitrack.join(format!("{id}.json"));
         let modified = std::fs::metadata(&path).and_then(|meta| meta.modified())

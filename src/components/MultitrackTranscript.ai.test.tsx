@@ -10,6 +10,8 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 vi.mock("../lib/ai-chat", () => ({ streamChat: vi.fn() }));
 const server = { base_url: "http://127.0.0.1:1234", api_key: "test", model_id: "chosen", ctx: 8192 };
+/** What the reader reads from this Mac on mount: the bleed labels and the Hide bleed switch. */
+const local = new Set(["aaf_ownership", "bleed_hidden"]);
 beforeEach(() => {
   vi.mocked(streamChat).mockReset(); vi.mocked(streamChat).mockResolvedValue('{"matches":[0]}');
   vi.mocked(invoke).mockReset(); vi.mocked(invoke).mockImplementation(async (command) => {
@@ -40,8 +42,8 @@ it("leaves ordinary text search instant and does not start AI on mount, toggle o
   expect(screen.queryByText(/postpone the picnic/)).toBeNull();
   fireEvent.click(screen.getByRole("checkbox", { name: "Search with AI" }));
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "bad weather" } });
-  // The bleed labels load on mount (local, no model); nothing else may.
-  expect(vi.mocked(invoke).mock.calls.filter(([name]) => name !== "aaf_ownership")).toEqual([]); expect(streamChat).not.toHaveBeenCalled();
+  // The bleed labels and the Hide bleed switch load on mount (local, no model); nothing else may.
+  expect(vi.mocked(invoke).mock.calls.filter(([name]) => !local.has(name))).toEqual([]); expect(streamChat).not.toHaveBeenCalled();
 });
 it("searches by meaning with the chosen model, preserves exact seek and leaves untimed results unclickable", async () => {
   const { props } = setup(); vi.mocked(streamChat).mockResolvedValue('{"matches":[0,2]}'); submit();
@@ -86,7 +88,7 @@ it("shows Stop before model discovery resolves and cannot start a model after St
   vi.mocked(invoke).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
   setup(); submit(); fireEvent.click(screen.getByRole("button", { name: "Stop search" }));
   await act(async () => finish([{ id: "chosen", downloaded: true }]));
-  expect(streamChat).not.toHaveBeenCalled(); expect(vi.mocked(invoke).mock.calls.filter(([name]) => name !== "aaf_ownership")).toHaveLength(1);
+  expect(streamChat).not.toHaveBeenCalled(); expect(vi.mocked(invoke).mock.calls.filter(([name]) => !local.has(name))).toHaveLength(1);
 });
 it("keeps failures actionable, never mistakes invalid output or absent models for an empty match set", async () => {
   setup(); vi.mocked(streamChat).mockResolvedValue("I think so."); submit();

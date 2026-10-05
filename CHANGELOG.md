@@ -17,9 +17,12 @@ All notable changes to Sauce Bunny. Format loosely follows
   inventions on silence ("Thank you for watching") are flagged.
 - **Bleed is labelled.** Measure mics compares every lav's level, against its
   own noise floor, and finds the same words on a louder mic: those copies are
-  dimmed on their own tab ("Heard on Rosa's mic") and left out of All
-  voices, search, String Outs' source pane and the assistants' answers.
-  Nothing is deleted, and right-click gives you the final say on any line.
+  dimmed and labelled ("Heard on Rosa's mic"). **Hide bleed** (off by
+  default, under AAF Audio's search box and in Settings ▸ Transcription ▸
+  Bleed) also leaves them out of All voices, search, String Outs' source
+  pane and the assistants' answers; off, nothing is left out anywhere, since
+  a line wrongly called bleed would vanish with nothing saying so. Nothing is
+  deleted either way, and right-click gives you the final say on any line.
 - **Check voices** learns each mic owner's voice from the sequence itself and
   settles the lines the levels could not, warns when two people sound too
   alike or a mic seems to have changed hands, and keeps the voiceprints on

@@ -255,6 +255,20 @@ pub async fn aaf_check_voices(app: AppHandle, document_id: String, job_id: Strin
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct VoiceprintSummary { pub documents: u32, pub voices: u32 }
 
+/// Whether bleed is left out of All voices, String Outs and an assistant's
+/// search. Off until the editor turns it on.
+#[tauri::command]
+pub fn bleed_hidden(app: AppHandle) -> Result<bool, AppError> {
+    let app_data = app.path().app_data_dir().map_err(|e| AppError::internal(e.to_string()))?;
+    Ok(ownership::hides_bleed(&app_data))
+}
+
+#[tauri::command]
+pub fn set_bleed_hidden(app: AppHandle, hide: bool) -> Result<(), AppError> {
+    let app_data = app.path().app_data_dir().map_err(|e| AppError::internal(e.to_string()))?;
+    ownership::set_hides_bleed(&app_data, hide)
+}
+
 /// How many voiceprints are kept, for Settings.
 #[tauri::command]
 pub fn voiceprints_summary(app: AppHandle) -> Result<VoiceprintSummary, AppError> {

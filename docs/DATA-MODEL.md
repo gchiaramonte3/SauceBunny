@@ -94,6 +94,11 @@ Audio document id, both safe to delete:
   context layer read it; the context layer trusts it only when the stamp's
   first part matches the document as it is now (new transcripts mean new
   cue ids).
+- `bleed.json`: the Hide bleed switch, `{ "hide": bool }`, one per Mac.
+  Absent or unreadable means off, which leaves nothing out. Here rather than
+  in WebView storage because `sauce-bunny --mcp` answers assistants without
+  the app and has to honour it; the renderer reads and writes it through
+  `bleed_hidden` / `set_bleed_hidden` (atomic write).
 - `voiceprints/<id>.json`: each mic owner's learned voice (unit-length, 256
   numbers, early and possibly late in the day) and the calls it settled.
   Biometric data, and the reason it is here and not in Documents; never sent

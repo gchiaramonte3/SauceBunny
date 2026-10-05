@@ -55,6 +55,28 @@ pub fn overviews_in(cache: &Path, document: &AafDocument) -> Vec<(String, PathBu
     document.manifest.tracks.iter().map(|track| (track.id.clone(), peaks::overview_in(cache, document, &track.id))).filter(|(_, path)| path.is_file()).collect()
 }
 
+/// The editor's Hide bleed switch (Settings ▸ Transcription ▸ Bleed, and the
+/// checkbox under AAF Audio's search box). OFF unless the file says it is on:
+/// the thresholds were tuned on one scene, and a line wrongly called bleed
+/// would leave All voices, String Outs and an assistant's search with nothing
+/// saying it had gone. Off, labels are still made and shown; nothing is left
+/// out. Kept here rather than in WebView storage because the MCP server,
+/// which answers assistants without the app, has to honour it too.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct BleedSettings { #[serde(default)] hide: bool }
+
+pub fn settings_file(app_data: &Path) -> PathBuf { app_data.join("bleed.json") }
+
+pub fn hides_bleed(app_data: &Path) -> bool {
+    store::read_json::<BleedSettings>(&settings_file(app_data)).map(|settings| settings.hide).unwrap_or(false)
+}
+
+pub fn set_hides_bleed(app_data: &Path, hide: bool) -> Result<(), AppError> {
+    std::fs::create_dir_all(app_data)?;
+    crate::commands::system::write_bytes_impl(&settings_file(app_data).to_string_lossy(), &serde_json::to_vec(&BleedSettings { hide })?, false, false, true)?;
+    Ok(())
+}
+
 pub fn cache_file(app_data: &Path, document_id: &str) -> PathBuf {
     app_data.join("ownership").join(format!("{document_id}.json"))
 }
@@ -240,6 +262,19 @@ mod tests {
         assert_eq!((dev.label, dev.manual), (AafOwnershipLabel::Owner, true));
         assert_eq!(answer.counts.bleed, 0);
         assert_eq!(answer.missing, ["x"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn bleed_is_shown_until_the_editor_hides_it_and_a_damaged_setting_shows_it() {
+        let dir = std::env::temp_dir().join(format!("ownership-{}", uuid::Uuid::new_v4()));
+        assert!(!hides_bleed(&dir), "a fresh install hid bleed");
+        set_hides_bleed(&dir, true).unwrap();
+        assert!(hides_bleed(&dir));
+        set_hides_bleed(&dir, false).unwrap();
+        assert!(!hides_bleed(&dir));
+        std::fs::write(settings_file(&dir), b"{not json").unwrap();
+        assert!(!hides_bleed(&dir), "a damaged setting hid bleed");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -5,6 +5,8 @@ import type { AafSpeech } from "../bindings/AafSpeech";
 import type { EditDocument } from "../bindings/EditDocument";
 import { multitrackFixture, multitrackGroupFixture } from "../test/multitrack-fixture";
 import { useEditSources } from "./use-edit-sources";
+import type { AafOwnership } from "../bindings/AafOwnership";
+import { setBleedHidden } from "../lib/bleed-hidden";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -32,11 +34,13 @@ function deferred<T>() {
 }
 
 let built: Set<string>;
+let labels: AafOwnership | undefined;
 beforeEach(() => {
-  vi.clearAllMocks(); built = new Set();
+  vi.clearAllMocks(); built = new Set(); labels = undefined;
   mocks.invoke.mockImplementation((command: string, args: Record<string, unknown>) => {
     const track = args?.trackId as string;
     if (command === "aaf_open") return Promise.resolve(multitrackFixture());
+    if (command === "aaf_ownership") return Promise.resolve(labels);
     if (command === "aaf_speech") {
       if (args.build) built.add(track);
       return Promise.resolve(speech(track, built.has(track)));
@@ -157,4 +161,19 @@ it("giving someone a track mid-build measures them next without cancelling the b
   await act(async () => pending.resolve(speech("track-1", true)));
   await waitFor(() => expect(result.current.measured).toBe(true));
   expect(calls("aaf_speech", true).map(([, args]) => args.trackId)).toEqual(["track-1", "track-2"]);
+});
+
+it("marks Sam's copy of Rosa's word as hers only while the editor hides bleed", async () => {
+  labels = { document_id: "sequence-test", measured: ["track-1", "track-2"], missing: [], stamp: "s", warnings: [], voices: 0,
+    counts: { owner: 0, bleed: 1, overtalk: 0, offmic: 0, unsure: 0, other: 0 },
+    words: [{ track_id: "track-2", cue_id: "track-2-c", index: 0, label: "bleed", heard_on: "track-1", delta_db: -12, manual: false }] };
+  const { result } = renderHook(() => useEditSources(document));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  const sams = () => result.current.words.find((word) => word.track === "sam");
+  // Off, the default: String Outs reads every mic as it was heard.
+  expect(sams()?.heardOn).toBeUndefined();
+  await act(() => setBleedHidden(true));
+  expect(sams()?.heardOn).toBe("track-1");
+  await act(() => setBleedHidden(false));
+  expect(sams()?.heardOn).toBeUndefined();
 });

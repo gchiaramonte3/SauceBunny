@@ -258,6 +258,7 @@ fn cache_bleed(f: &Fixture, stamp_matches: bool) {
 fn a_bleed_line_names_who_really_said_it_and_search_returns_it_once() {
     let f = fixture();
     cache_bleed(&f, true);
+    crate::commands::aaf::ownership::set_hides_bleed(f.ctx.roots.timelines.parent().unwrap(), true).unwrap();
     let found = call(&f.ctx, "search_transcripts", json!({ "query": "tired", "people": ["P2"], "sequences": [BANK] }));
     assert!(found["matches"].as_array().unwrap().iter().all(|hit| !hit["line"].as_str().unwrap().ends_with("/t2-c0")), "the bleed copy was returned: {found}");
     let all = call(&f.ctx, "search_transcripts", json!({ "query": "tired", "people": ["P2"], "sequences": [BANK], "include_bleed": true }));
@@ -266,6 +267,19 @@ fn a_bleed_line_names_who_really_said_it_and_search_returns_it_once() {
     // The owner's own lines carry no mark at all.
     let page = call(&f.ctx, "read_transcript", json!({ "sequence": BANK, "person": "P1", "limit": 3 }));
     assert!(page["lines"].as_array().unwrap().iter().all(|line| line.get("bleed_from").is_none()));
+}
+
+/// Off is the default: nothing is left out of a search, and the copy says
+/// whose mic it came from, because the label may be wrong.
+#[test]
+fn with_bleed_not_hidden_search_returns_the_copy_marked() {
+    let f = fixture();
+    cache_bleed(&f, true);
+    let found = call(&f.ctx, "search_transcripts", json!({ "query": "tired", "people": ["P2"], "sequences": [BANK] }));
+    let copy = found["matches"].as_array().unwrap().iter().find(|hit| hit["line"].as_str().unwrap().ends_with("/t2-c0")).expect("the copy was left out with bleed not hidden");
+    assert_eq!(copy["bleed_from"], "P1");
+    let none = call(&f.ctx, "search_transcripts", json!({ "query": "tired", "people": ["P2"], "sequences": [BANK], "include_bleed": false }));
+    assert!(none["matches"].as_array().unwrap().iter().all(|hit| !hit["line"].as_str().unwrap().ends_with("/t2-c0")));
 }
 
 #[test]

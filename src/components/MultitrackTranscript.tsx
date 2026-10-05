@@ -3,6 +3,9 @@ import type { AafDocument } from "../bindings/AafDocument";
 import { hasTranscriptContent, sequenceTimecode, trackOwner, transcriptRows, untimedTranscriptRows } from "../lib/multitrack";
 import { cueLabels, cueOwnership } from "../lib/multitrack-ownership";
 import { useMultitrackOwnership } from "../hooks/use-multitrack-ownership";
+import { useBleedHidden } from "../hooks/use-bleed-hidden";
+import { setBleedHidden } from "../lib/bleed-hidden";
+import { formatError } from "../lib/error-format";
 import { MultitrackBleedBar } from "./MultitrackBleedBar";
 import { MultitrackCueMenu, type CueMenuTarget } from "./MultitrackCueMenu";
 import { multitrackPeople, multitrackScope } from "../lib/multitrack-person";
@@ -33,26 +36,27 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
   const person = people.find((item) => item.id === selected), panelId = useId();
   const scoped = useMemo(() => multitrackScope(document, person?.trackIds), [document, person]);
   const ownership = useMultitrackOwnership(document, active);
-  const [showBleed, setShowBleed] = useState(false), [cueMenu, setCueMenu] = useState<CueMenuTarget | null>(null);
+  const hide = useBleedHidden(), [switchError, setSwitchError] = useState<string | null>(null), [cueMenu, setCueMenu] = useState<CueMenuTarget | null>(null);
   const labelled = useMemo(() => transcriptRows(scoped).map((row) => {
     const labels = cueLabels(ownership.index, row.trackId, row.id);
     return { ...row, labels, owned: cueOwnership(labels, row.text.split(/\s+/).filter(Boolean).length) };
   }), [scoped, ownership.index]);
-  // Bleed is a line heard on the wrong mic: hidden where every voice is read
-  // together (All voices, search, AI search), dimmed on the mic's own tab.
-  const hideBleed = !showBleed && selected === "all";
+  // Bleed is a line heard on the wrong mic. With Hide bleed on (lib/bleed-hidden)
+  // it is left out where every voice is read together (All voices, search, AI
+  // search); otherwise, and always on the mic's own tab, it is only dimmed.
+  const hideBleed = hide && selected === "all";
   const rows = useMemo(() => labelled.filter((row) => !(hideBleed && row.owned.bleed)), [labelled, hideBleed]);
   const bleedLines = labelled.filter((row) => row.owned.bleed).length;
   const untimed = useMemo(() => untimedTranscriptRows(scoped), [scoped]);
   const passages = useMemo(() => [
-    ...rows.filter((row) => showBleed || !row.owned.bleed).map((row) => ({ key: passageKey("cue", row.trackId, row.id), text: `${row.owner}: ${row.text}` })),
+    ...rows.filter((row) => !hide || !row.owned.bleed).map((row) => ({ key: passageKey("cue", row.trackId, row.id), text: `${row.owner}: ${row.text}` })),
     ...untimed.map((row) => ({ key: passageKey("untimed", row.trackId, row.id), text: `${row.owner}: ${row.text}` })),
-  ], [rows, untimed, showBleed]);
+  ], [rows, untimed, hide]);
   const search = useAiTranscriptSearch(passages, active, aiModelId);
   const { query, enabled, result } = search;
-  const filtered = useMemo(() => rows.filter((row) => !(query.trim() && !showBleed && row.owned.bleed) && (enabled
+  const filtered = useMemo(() => rows.filter((row) => !(query.trim() && hide && row.owned.bleed) && (enabled
     ? !result.matches || result.matches.has(passageKey("cue", row.trackId, row.id))
-    : `${row.owner} ${row.text}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))), [rows, query, enabled, result.matches, showBleed]);
+    : `${row.owner} ${row.text}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))), [rows, query, enabled, result.matches, hide]);
   const filteredUntimed = useMemo(() => untimed.filter((row) => enabled
     ? !result.matches || result.matches.has(passageKey("untimed", row.trackId, row.id))
     : `${row.owner} ${row.text}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [untimed, query, enabled, result.matches]);
@@ -74,7 +78,7 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
       </div>
       {enabled && <p className="cp-multitrack-note" role={result.phase === "error" ? "alert" : "status"}>{result.message || "Local AI. Press Enter to search."}</p>}
     </form>
-    <MultitrackBleedBar ownership={ownership.ownership} bleed={bleedLines} hidden={hideBleed} show={showBleed} onShow={setShowBleed} measuring={ownership.measuring} onMeasure={() => { void ownership.measure(); }} checking={ownership.checking} onCheckVoices={() => { void ownership.checkVoices(); }} onCancel={ownership.cancel} error={ownership.error} />
+    <MultitrackBleedBar ownership={ownership.ownership} bleed={bleedLines} hidden={hideBleed} hide={hide} onHide={(next) => { setSwitchError(null); setBleedHidden(next).catch((cause) => setSwitchError(formatError(cause))); }} measuring={ownership.measuring} onMeasure={() => { void ownership.measure(); }} checking={ownership.checking} onCheckVoices={() => { void ownership.checkVoices(); }} onCancel={ownership.cancel} error={ownership.error ?? switchError} />
     {runInfo}
     <div id={panelId} className="cp-multitrack-transcript-body" role="tabpanel" aria-label={person?.name ?? "All voices"} tabIndex={0}>
       {!rows.length && !untimed.length ? <div className="cp-multitrack-transcript-empty"><h3>{loading ? "Waiting for the first completed track" : report && !report.saved ? "No new transcript was saved" : scoped.transcripts.length ? "No speech found in completed tracks" : person ? `No transcript for ${person.name} yet` : "Read each mic in context"}</h3><p>{report?.failures.length ? "Open Transcript info (i) for the failed tracks, then check those tracks and generate again." : "Check tracks, choose an engine, then generate. Saved results appear here."}</p></div>

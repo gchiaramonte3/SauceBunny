@@ -184,7 +184,7 @@ overviews. What it found, and what changed because of it:
   open); off-mic needs the word faint on every mic that heard it. The
   answer carries the document's separation and the reader says when it is
   under 3 dB. On the whole document: owner 8.6%, bleed 2.7%, overtalk 18.6%,
-  off-mic 4.4%, unsure 65.8%; All voices hides 6 of 9,597 lines.
+  off-mic 4.4%, unsure 65.8%; with Hide bleed on, All voices hides 6 of 9,597 lines.
 - **Known answers, real voices** (Tom and Kacy): owner words wrongly hidden
   0 in every mix; bleed hidden about 90% at -12 dB, 98 to 100% at -18 dB, 93
   to 95% at -24 dB in turns (half to three quarters at -12 dB talking over
@@ -349,14 +349,24 @@ subtracted first.
 
 ### 3c. Where the labels show
 
-- **AAF Audio:** bleed is dimmed on the mic's own tab with "heard on Rosa's
-  mic"; All voices and search skip it (decision 1). A word's label can be
-  changed from its context menu, and the change is stored and wins.
-- **String Outs:** the source pane's All voices skips bleed; `deleteWords`'s
-  `crosstalk` list uses the labels instead of time overlap alone.
-- **Assistants:** the context layer's lines carry `heard_on`, and search
-  skips bleed unless asked, so Ask and `sauce-bunny --mcp` stop citing the
-  same line twice.
+- **AAF Audio:** bleed is dimmed with "heard on Rosa's mic"; with Hide
+  bleed on, All voices and search skip it (decision 1). A word's label can
+  be changed from its context menu, and the change is stored and wins.
+- **String Outs:** with Hide bleed on, the source pane's All voices skips
+  bleed and `deleteWords`'s `crosstalk` list leaves out bleed copies.
+- **Assistants:** the context layer's lines carry `bleed_from`; with Hide
+  bleed on, search skips bleed unless asked, so Ask and
+  `sauce-bunny --mcp` stop citing the same line twice.
+
+**Hide bleed is one switch, and it is OFF by default (2026-10-05).** The
+thresholds were tuned on one scene (AFF BANK 1) with no hand-checked
+answers, on mics about 1 dB apart, and a line wrongly called bleed would
+vanish from every place above with nothing saying it had gone: a duplicate
+line costs a glance, a missing bite costs the bite. Off, labels are still
+made and AAF Audio dims them, and nothing is left out anywhere. The switch
+sits under AAF Audio's search box and in Settings ▸ Transcription ▸ Bleed,
+and lives in `app_data_dir()/bleed.json` so the MCP server reads it too.
+Turning it on by default is a decision for after the spot check.
 
 **Done when:** on phase 0's scenes, owner words wrongly hidden stay under a
 set ceiling (start at 1%) while most duplicates are labelled; the synthetic

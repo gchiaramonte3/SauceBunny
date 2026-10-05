@@ -293,6 +293,8 @@ pub fn run() {
             commands::aaf_ownership,
             commands::aaf_set_cue_ownership,
             commands::aaf_check_voices,
+            commands::bleed_hidden,
+            commands::set_bleed_hidden,
             commands::voiceprints_summary,
             commands::delete_voiceprints,
             commands::aaf_export_edit,

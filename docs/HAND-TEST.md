@@ -1112,10 +1112,12 @@ the acceptance test for whenever the verdict UI gets built.
    recognizer was unsure of are underlined.
 2. **Measure mics.** With the mics transcribed, Measure mics (it reads the
    media once; Stop works). All voices then says how many lines heard on
-   another mic are hidden; a person's own tab shows them dimmed, "Heard on X's
-   mic". Pick a line you know is someone else's leaning into a mic and check
-   it is labelled; pick a line said by the mic's owner while a neighbour
-   talks over them and check it is NOT hidden.
+   another mic are dimmed, "Heard on X's mic", and Hide bleed is OFF: every
+   line is still there. Pick a line you know is someone else's leaning into
+   a mic and check it is labelled; pick a line said by the mic's owner while
+   a neighbour talks over them and check it is NOT labelled. Tick Hide
+   bleed: All voices now says the lines are hidden, and Settings ▸
+   Transcription ▸ Bleed shows the switch on. Quit and reopen: still on.
 3. **Your call wins.** Right-click a dimmed line ▸ "Name, on their own mic":
    it shows normally everywhere; right-click ▸ "Use the automatic call" puts
    it back. Reopen the AAF: the call is still there.
@@ -1123,17 +1125,19 @@ the acceptance test for whenever the verdict UI gets built.
    end: its parts were measured, the in-app loop was not). The bar first
    says these mics hear each other almost equally. Check voices runs (one
    mic and ten minutes at a time; Stop works), says how many voices it
-   checked, and All voices then hides more than the handful levels alone
-   did. Listen to five newly hidden lines: each should be a copy of someone
+   checked, and (with Hide bleed on) All voices then hides more than the
+   handful levels alone did. Listen to five newly hidden lines: each should be a copy of someone
    else's line. Any warnings make sense (two people who really sound alike;
    a mic you know was swapped). Settings ▸ Transcription ▸ Voiceprints
    shows the count; Delete all, confirmed, empties it.
 5. **Spell cast names.** On a scene with unusual names, generate with the
    box off, then on: names are spelled as on the mics, and read the rest of
    the scene for any word wrongly turned into a name.
-6. **String Outs and assistants.** In String Outs' source pane, All voices
-   reads each line once. Cutting a line no longer warns about overtalk from
-   its own bleed copies. Ask "where does X say Y": no bleed copy is cited.
+6. **String Outs and assistants.** With Hide bleed on: in String Outs'
+   source pane, All voices reads each line once; cutting a line no longer
+   warns about overtalk from its own bleed copies; Ask "where does X say Y"
+   cites no bleed copy. Turn it off: All voices shows the copies again, and
+   an assistant's search returns them (marked as heard on the owner's mic).
 7. **Score a scene** (phase 0): `--eval-template` a scene of two mics,
    correct the CSV by listening, then `--eval`; the report has WER, names,
    timing and bleed numbers.

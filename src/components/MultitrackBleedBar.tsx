@@ -1,14 +1,15 @@
 import type { AafOwnership } from "../bindings/AafOwnership";
 
 /**
- * Under the search box: how much bleed the reader is hiding, the switch to
- * show it, and the two actions that read media, each only when asked:
- * measuring the mics (their levels) and checking voices (who said the words
- * the levels could not settle).
+ * Under the search box: how much bleed the reader is hiding or dimming, the
+ * Hide bleed switch (the same one Settings holds, so it reaches String Outs
+ * and the assistants too), and the two actions that read media, each only
+ * when asked: measuring the mics (their levels) and checking voices (who said
+ * the words the levels could not settle).
  */
-export function MultitrackBleedBar({ ownership, bleed, hidden, show, onShow, measuring, onMeasure, checking, onCheckVoices, onCancel, error }: {
-  /** Bleed lines in the view; `hidden` says whether the view hides them (All voices) or dims them (a person's tab). */
-  ownership: AafOwnership | null; bleed: number; hidden: boolean; show: boolean; onShow: (show: boolean) => void;
+export function MultitrackBleedBar({ ownership, bleed, hidden, hide, onHide, measuring, onMeasure, checking, onCheckVoices, onCancel, error }: {
+  /** Bleed lines in the view; `hidden` says whether the view hides them (All voices with `hide` on) or dims them. */
+  ownership: AafOwnership | null; bleed: number; hidden: boolean; hide: boolean; onHide: (hide: boolean) => void;
   measuring: boolean; onMeasure: () => void; checking: boolean; onCheckVoices: () => void; onCancel: () => void; error: string | null;
 }) {
   const missing = ownership?.missing.length ?? 0;
@@ -16,12 +17,12 @@ export function MultitrackBleedBar({ ownership, bleed, hidden, show, onShow, mea
   const unsure = ownership?.counts.unsure ?? 0;
   const busy = measuring || checking;
   return <div className="cp-multitrack-bleed">
-    <label><input type="checkbox" checked={show} disabled={!ready} onChange={(event) => onShow(event.target.checked)} />Show bleed</label>
+    <label title="Leaves lines heard on another mic out of All voices here and in String Outs, and out of an assistant's search. A person's own tab still shows them, dimmed. The same switch is in Settings ▸ Transcription ▸ Bleed."><input type="checkbox" checked={hide} disabled={!ready} onChange={(event) => onHide(event.target.checked)} />Hide bleed</label>
     <span className="cp-multitrack-note" role="status">
       {measuring ? "Measuring each mic's level. This reads the media once."
         : checking ? "Listening to each owner's voice and the lines the levels could not settle."
           : !ready ? "Measure the mics to tell each person's lines from the bleed of their neighbours."
-            : !bleed ? "No bleed found." : show ? "Bleed is shown, dimmed."
+            : !bleed ? "No bleed found."
               : `${bleed} ${bleed === 1 ? "line" : "lines"} heard on another mic ${hidden ? "hidden" : "dimmed"}.`}
       {!busy && ready && missing > 0 && ` ${missing} ${missing === 1 ? "mic is" : "mics are"} not measured yet.`}
       {!busy && ready && (ownership?.voices ?? 0) > 0 && ` Voices checked for ${ownership?.voices} people.`}

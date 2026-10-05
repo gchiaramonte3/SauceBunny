@@ -540,9 +540,12 @@ usable without the next:
   the same words on a louder mic. `aaf/ownership.rs` runs it over a document
   (`aaf_ownership`), applies the voice check's calls to unsure words and the
   editor's per-cue calls over everything, and caches the answer in
-  `app_data_dir()/ownership/`. The AAF Audio reader hides bleed from All
-  voices and search, String Outs reads it via `use-edit-sources`, and the
-  context layer marks `bleed_from` on lines for assistants.
+  `app_data_dir()/ownership/`. The AAF Audio reader dims bleed, String Outs
+  reads it via `use-edit-sources`, and the context layer marks `bleed_from`
+  on lines for assistants. Leaving it OUT (All voices, search, String Outs'
+  crosstalk report, an assistant's search) follows one switch, Hide bleed
+  (`lib/bleed-hidden.ts`, kept in `app_data_dir()/bleed.json` so the MCP
+  server honours it too), which is off by default.
 - **The voice check.** `aaf/voices.rs` (`aaf_check_voices`) learns each
   owner's voiceprint from the stretches their mic dominates
   (`saucebunny-diarize --embed`, FluidAudio's WeSpeaker model, normalised in

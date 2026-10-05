@@ -39,6 +39,7 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import { YouTubeSettings } from "./YouTubeSettings";
 import { AiApiSettings } from "./AiApiSettings";
 import { VoiceprintSettings } from "./VoiceprintSettings";
+import { BleedSettings } from "./BleedSettings";
 import { NdiAttribution, PremiereSetup } from "./PremiereSetup";
 import type { NdiTelemetry } from "../bindings/NdiTelemetry";
 import { useModalFocus } from "../hooks/use-modal-focus";
@@ -1763,6 +1764,10 @@ export function SettingsModal(props: Props) {
                       Reset
                     </button>
                   </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection id="tx-bleed" label="Bleed" open={sectionOpen("tx-bleed")} onToggle={() => toggleSection("tx-bleed")}>
+                  <BleedSettings />
                 </CollapsibleSection>
 
                 <CollapsibleSection id="tx-voiceprints" label="Voiceprints" open={sectionOpen("tx-voiceprints")} onToggle={() => toggleSection("tx-voiceprints")}>

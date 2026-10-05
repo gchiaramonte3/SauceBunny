@@ -13,6 +13,7 @@ import { loadSpeech } from "../lib/edit-speech";
 import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
 import { cueLabels, ownershipIndex, type OwnershipIndex } from "../lib/multitrack-ownership";
+import { useBleedHidden } from "./use-bleed-hidden";
 
 export type EditSourceData = {
   documents: Map<string, AafDocument>;
@@ -87,6 +88,7 @@ async function cachedPeaks(lane: Lane, jobId: string): Promise<[number, number][
 export function useEditSources(document: EditDocument | null, waveforms = false): EditSourceData {
   const [loaded, setLoaded] = useState<Loaded>({ documents: new Map(), speech: new Map(), peaks: new Map(), ownership: new Map(), errors: [] });
   const [loading, setLoading] = useState(false);
+  const hide = useBleedHidden();
   const [read, setRead] = useState<{ done: number; total: number } | null>(null);
   const [measuring, setMeasuring] = useState(false);
   // Bumped each time the words pass lands, so the waveform pass starts from it.
@@ -234,7 +236,10 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
     const heard = new Set(tracked.split("\n"));
     for (const [pair, speech] of loaded.speech) {
       const [source, lane] = pair.split(":");
-      const labels = loaded.ownership.get(source);
+      // A word marked as heard on another mic leaves All voices and the
+      // crosstalk report, so it is marked only when the editor hides bleed
+      // (lib/bleed-hidden). Off, String Outs reads every mic as it was heard.
+      const labels = hide ? loaded.ownership.get(source) : undefined;
       const heardOn = labels && ((cue: string, index: number) => {
         const word = cueLabels(labels, speech.track_id, cue)?.get(index);
         return word?.label === "bleed" ? word.heard_on ?? undefined : undefined;
@@ -253,5 +258,5 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
     return { documents: loaded.documents, words, audible, peaks: loaded.peaks, durations, loading, read: loading ? read ?? { done: 0, total: 0 } : null, measured, measuring, errors: loaded.errors };
     // `key` and `tracked` say everything the document contributes here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, loading, read, measuring, key, tracked]);
+  }, [loaded, loading, read, measuring, key, tracked, hide]);
 }
