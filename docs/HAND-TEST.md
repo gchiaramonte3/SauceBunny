@@ -1128,11 +1128,33 @@ the acceptance test for whenever the verdict UI gets built.
 6. Export diagnostics during a co-review session: HEALTH says "Co-review
    session: hosting" (or joined); outside one, "none open".
 
+### October 5: String Outs tools, Add sequence, dividers (items 9, 12, 13)
+
+1. Open a string out at the narrowest window. The timeline's tool row is one
+   line of tools: no Play, no RECORD or SOURCE timecode, no status text. The
+   record pane has Go to start and Play beside its scrub bar and timecode, as
+   the source pane does, and Space still plays. Lift a range: "Lifted …"
+   appears as a quiet line under the string out's words.
+2. Hide the source text, then switch the timeline to Source (the corner
+   switch, or ⇧T): the source pane comes back, with its own Play.
+3. Add sequence opens a menu under itself, to the left, about 420 pixels wide
+   on the 2560-pixel screen, newest first: eight, then "Show N more". Hover a
+   row and press ×, or arrow to one and press Delete: it leaves the list.
+   Clear list empties it; "Show N hidden sequences" puts them back. Hide one,
+   save that sequence again in AAF Audio: it is listed again. New string out ▸
+   Start from leaves out what is hidden and offers to show it. Nothing is
+   deleted from AAF Audio.
+4. Drag the line between the source and the record: it moves, and the source
+   text's scrollbar is not grabbed. Drag the line beside Ask and the one above
+   the timeline. Tab to a divider: the arrows nudge it, Shift for bigger steps;
+   Home and a double-click reset it. Relaunch: the sizes are kept. Narrow the
+   window to its minimum: the record pane keeps its room, the source gives way.
+
 ### The Pipeline on String Outs (what to send when it hangs)
 
 1. In String Outs, press ⌘\: the Pipeline opens at the foot of the page with
    room to read, and ⌘\ closes it. It opens the same way on AAF Audio.
-2. Open a large string out (AFF BANK 1). The log says when it started reading
+2. Open a large string out (dozens of mics). The log says when it started reading
    every mic's words and how long that took. Anything that took more than a
    second, waited, or failed has a row; fast calls do not.
 3. Export diagnostics: the file has HEALTH (memory, main thread, running

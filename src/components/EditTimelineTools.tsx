@@ -8,10 +8,6 @@ export type EditTimelineView = { waveforms: boolean; speakerColours: boolean; he
 export type EditTimelineAudio = { crossfade: 0 | 1 | 2 | 4 };
 
 type Props = {
-  /** Play and the Record/Source readouts, which lead the row. */
-  transport?: ReactNode;
-  /** The last thing the editor did ("Lifted 2.40 s."), announced politely. */
-  status?: string;
   marks: { in: number | null; out: number | null };
   /** Clear both marks (G), drawn as a × on the ruler's marked range rather than in this row. */
   onClearMarks?: () => void;
@@ -71,9 +67,11 @@ function Radio({ checked, onChoose, children }: { checked: boolean; onChoose: ()
 }
 
 /**
- * The timeline's one row of tools. Icons with tooltips, no heading and no
- * prose: every item names its shortcut in the tooltip, and the display
- * options live behind two menus so the row stays short.
+ * The timeline's one row of tools, and only tools: the owner asked for "just
+ * timeline tools" (October 5). Play, the timecodes and the editor's status
+ * live in the panes above. Icons with tooltips, no heading and no prose:
+ * every item names its shortcut in the tooltip, and the display options live
+ * behind two menus so the row stays short. No people here, ever.
  */
 export function EditTimelineTools(props: Props) {
   const { marks, view, audio } = props;
@@ -81,7 +79,6 @@ export function EditTimelineTools(props: Props) {
   // Only In and Out act on the source, as in Avid's source monitor; the rest edit the record.
   const record = props.sourceSide ? { hint: "Switch the timeline to Record to use it", off: true } : { hint: undefined, off: false };
   return <div className="cp-te-tl-tools" role="toolbar" aria-label="Timeline tools">
-    {props.transport && <>{props.transport}<span className="cp-te-tl-sep" aria-hidden="true" /></>}
     <div className="cp-te-tl-group">
       <Tool label="Add edit at playhead" keys="⌘B" hint={record.hint} disabled={record.off || !props.canMark} onClick={props.onAddEdit}><IconScissors size={15} /></Tool>
       <Tool label="Mark in" keys="I" pressed={marks.in != null} onClick={props.onMarkIn}><IconMarkIn size={15} /></Tool>
@@ -103,7 +100,6 @@ export function EditTimelineTools(props: Props) {
       <Tool label="Previous edit" keys="A" hint={record.hint} disabled={record.off || !props.hasPrevious} onClick={props.onPrevious}><IconPrevEdit /></Tool>
       <Tool label="Next edit" keys="S" hint={record.hint} disabled={record.off || !props.hasNext} onClick={props.onNext}><IconNextEdit /></Tool>
     </div>
-    <p className="cp-te-status" role="status" aria-live="polite">{props.status}</p>
     <div className="cp-te-tl-end">
       <Menu label="View">{() => <>
         <Check checked={view.waveforms} onChange={() => props.onView({ ...view, waveforms: !view.waveforms })}>{props.measuring ? "Waveforms (building)" : "Waveforms"}</Check>

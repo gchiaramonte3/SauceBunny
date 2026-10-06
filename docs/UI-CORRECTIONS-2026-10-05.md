@@ -15,8 +15,9 @@ change the owner can see comes before the one they cannot ("prioritize the UI
 changes"). One item jumps the queue: **1** is a data-loss hazard found while
 reading the Transcripts page, and it is a few lines.
 
-**Status (2026-10-05):** items 1 to 8 are built (pull request A). The rest are
-taken one at a time in this order, each as its own pull request.
+**Status (2026-10-05):** items 1 to 8 are built (pull request A), and 9, 12
+and 13 (pull request B). The rest are taken one at a time in this order, each
+as its own pull request.
 
 | # | Item | What it is | Effort | PR |
 |---|---|---|---|---|
@@ -178,6 +179,12 @@ The long name is what makes the row wrap below about 1,260px.
 **Done when:** the e2e reads the record timecode from the record pane, the row
 has no readout or status, and nothing wraps at 1100px.
 
+**As built (B):** as above, with three details. The status line has no rule
+above it: the source footer beside it wraps to two lines in a narrow pane, and
+two rules at two heights looked like a mistake. Switching the timeline to
+Source (the corner switch or ⇧T) shows the source pane if it was hidden, since
+that is where the source's Play and timecode now are. `EditTransport` is gone.
+
 ## 10. One bleed-label pass after a run, not two
 
 **Found:** `aaf_transcribe_track` emits `saucebunny:multitrack-changed` before
@@ -243,6 +250,12 @@ reads the list once per mount.
   hidden at, under `saucebunny.stringOuts.hiddenSequences`).
 - It refreshes when AAF Audio saves (`saucebunny:multitrack-changed`).
 
+**As built (B):** without the search field. A text field inside an ARIA menu
+either loses its letters to the menu's type-ahead or breaks the role, and with
+Clear list the list stays short; the rest are behind **Show N more**. Both
+pickers offer **Show N hidden sequences**, so nothing hidden is out of reach
+(`lib/sequence-shelf.ts`, `EditAddSource`).
+
 ## 13. String Outs: dividers you can drag
 
 **Seen:** "the center divider is not really movable."
@@ -258,6 +271,14 @@ source, the source and the record, and above the timeline (`usePaneWidth`,
 source 280–640px, side 260–480px, timeline 160px to 60% of the page;
 double-click resets. The source scrollbar moves inside the pane's padding. The
 dead `.cp-te.is-dragging` rule and orphaned divider comments go.
+
+**As built (B):** `EditSplits`, on the shared `usePaneWidth`, which learned a
+pane docked at the bottom (sized by height, Up grows it) and to start a drag
+from the size as drawn. CSS keeps the record pane at least 360px wide: past
+that the source gives way, and the side too at the narrowest windows. Nothing
+is stored until a divider moves, so the timeline keeps its share of the page
+until then, and Home or a double-click forgets the size again. A divider's
+Home no longer also sends the playhead to the start.
 
 ## 14. AAF Audio's Transcript panel says less
 

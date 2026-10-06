@@ -75,7 +75,8 @@ export function useEditKeys(root: RefObject<HTMLElement | null>, active: boolean
       if (key === "b" && !event.shiftKey) return act(run.overwrite);
       if (!event.shiftKey && MARKS[key]) return act(() => MARKS[key](run, on));
       if (on === "pane") return;
-      if (event.key === "Home") return act(run.start);
+      // A divider's Home puts the divider back; everywhere else Home goes to the start.
+      if (event.key === "Home" && !target.closest("[role=separator]")) return act(run.start);
       if (event.key === "End") return act(run.end);
       if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !target.closest(".cp-te-doc, [role=slider], [role=tablist], [role=separator], [role=radiogroup]")) {
         return act(() => run.step((event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 10 : 1)));

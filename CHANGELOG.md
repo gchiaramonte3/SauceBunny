@@ -15,6 +15,19 @@ All notable changes to Sauce Bunny. Format loosely follows
 - **An offline AAF says so once.** Instead of "Waveform unavailable" on every
   lane and a Pipeline row per lane, one line says the AAF can't be read, with
   Retry.
+- **String Outs' tool row holds tools only.** Play and Go to start are in the
+  record pane beside its timecode, as the source pane has them; the status
+  line is a quiet line under the string out; the RECORD and SOURCE readouts
+  are gone. The row fits on one line at the narrowest window.
+- **Add sequence is a short menu you can clear.** It opens to the left under
+  its button, newest first, with the eight most recent and "Show N more".
+  Remove one (× or Delete) or Clear list: that hides it from Add sequence and
+  Start from and deletes nothing, and a hidden sequence comes back by itself
+  when it is saved again in AAF Audio.
+- **String Outs' dividers move.** Drag the lines beside Ask, between the source
+  and the record, and above the timeline, or use the arrow keys; double-click
+  or Home resets, and the sizes are kept. The record pane keeps its room at
+  the narrowest window.
 
 ### Fixed
 - **The Transcripts page can no longer rename or delete AAF Audio's store.**

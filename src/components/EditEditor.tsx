@@ -16,11 +16,12 @@ import { laneColors, pictureBlocks } from "../lib/edit-source-view";
 import { SPEAKER_PALETTE } from "./transcript/helpers";
 import { EditExportButton } from "./EditExportButton";
 import { EditLower } from "./EditLower";
-import { EditOvertalkPrompt } from "./EditOvertalkPrompt";
 import { EditRecordPane } from "./EditRecordPane";
+import { EditRecordPrompts } from "./EditRecordPrompts";
 import { EditSendTo } from "./EditSendTo";
 import { EditSidePanel, type EditSideTab } from "./EditSidePanel";
 import { EditSourceHost } from "./EditSourceHost";
+import { EditSplits } from "./EditSplits";
 import { EditStripSilence } from "./EditStripSilence";
 import type { EditTextStyle } from "./EditTextSettings";
 import type { EditTimelineAudio } from "./EditTimelineTools";
@@ -80,8 +81,10 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
   const current = ws.placed.find((item) => item.programStart <= playhead && playhead < item.programEnd);
   const focusDoc = () => requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(".cp-te-doc")?.focus());
   const previous = [...ws.seams].reverse().find((item) => item.at < playhead - 1e-3), next = ws.seams.find((item) => item.at > playhead + 1e-3);
+  // The source's Play and timecode are in its pane, so showing the source in the timeline shows the pane too.
+  const switchMode = (mode: "source" | "record") => { if (mode === "source") setShowSource(true); side.setMode(mode); };
   useEditEditorKeys({ root, active, fps, ws, side, playback, undo, redo, onHistory: () => { setShowSide(true); setSideTab("history"); }, loop, onLoop: () => setLoop((value) => !value),
-    onZoom: setZoom, onSnap: () => setSnap((value) => !value), place: placeFromSource, previous: previous?.index ?? null, next: next?.index ?? null });
+    onZoom: setZoom, onSnap: () => setSnap((value) => !value), place: placeFromSource, previous: previous?.index ?? null, next: next?.index ?? null, onMode: switchMode });
   const pictureOf = useMemo(() => pictureBlocks(document.sources, data.documents, fps), [document.sources, data.documents, fps]);
   /** A cited line: selected and played in the string out when it is there, otherwise opened in the source, ready to cut in. */
   const jumpTo = (line: AskCitation) => {
@@ -119,6 +122,7 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
       </div>}
       <div className={`cp-te-pane cp-te-pane-record${showSource && (inSource || side.mode === "source") ? " is-idle" : " is-active"}`}>
         <EditRecordPane playhead={playhead} total={ws.total} tc={tc(playhead)} totalTc={tc(ws.total)} marks={ws.seams.map((item) => item.at)}
+          playing={playback.playing} busy={playback.busy} onToggle={() => void playback.toggle()} onStart={() => seek(0)} status={ws.message}
           onScrub={seek} onScrubStart={playback.pause} onScrubEnd={() => undefined} text={text.edit} onText={(style) => setText((state) => ({ ...state, edit: style }))}>
           {data.loading && !ws.placed.length ? <p className="cp-te-doc-empty" role="status">Reading each microphone's words…</p>
             : <EditTranscript hasCut={ws.total > 0} speakers={lanes} colors={colors} fps={fps} recordStart={recordStart} paragraphs={ws.paras} placed={ws.placed} selection={ws.selection} current={current ? `${current.segment}:${current.word.id}` : null}
@@ -126,18 +130,14 @@ export function EditEditor({ editId, head, open, history, data, active, waveform
               corrections={{}} editing={null} onCorrect={() => undefined}
               onSelect={(selection, seekTo) => { ws.setSelection(selection); if (seekTo) seek(selection.anchor < ws.count ? ws.placed[selection.anchor].programStart : ws.total); }}
               onDelete={ws.remove} onScrub={seek} onMove={ws.move} onEdit={() => ws.setMessage("Correct words in AAF Audio's transcript; the string out follows it.")} />}
-          {ws.prompt && <EditOvertalkPrompt title={`${ws.names(ws.prompt.result.crosstalk.map((word) => word.track))} talks under this.`}
-            body={`Silenced ${ws.names(ws.prompt.who)} only. Cutting for everyone also removes ${ws.prompt.result.crosstalk.length === 1 ? "one word" : `${ws.prompt.result.crosstalk.length} words`} of ${ws.names(ws.prompt.result.crosstalk.map((word) => word.track))}'s.`}
-            keep="Keep" other="Cut for everyone" onKeep={() => { ws.setPrompt(null); focusDoc(); }} onDismiss={() => { ws.setPrompt(null); focusDoc(); }} onOther={() => ws.prompt && ws.applyDelete(ws.prompt.keys, ws.prompt.count)} />}
-          {ws.extractGuard && <EditOvertalkPrompt title={`${ws.names(ws.extractGuard.who)} ${ws.extractGuard.who.length > 1 ? "talk" : "talks"} in this range.`}
-            body={`Extract closes the range up on every track, so ${ws.extractGuard.count === 1 ? "one word" : `${ws.extractGuard.count} words`} on a track that is not selected would go too. Lift takes it off the selected tracks only.`}
-            keep="Lift selected tracks" other="Extract anyway" onKeep={() => ws.takeMarked(false)} onDismiss={() => { ws.setExtractGuard(null); focusDoc(); }} onOther={() => ws.takeMarked(true, true)} />}
+          <EditRecordPrompts ws={ws} onDone={focusDoc} />
         </EditRecordPane>
       </div>
+      <EditSplits side={showSide} source={showSource} />
     </div>
-    <EditLower ws={ws} side={side} people={people} solo={soloed} mute={mute} onSolo={(id) => setSolo((state) => toggled(state, id))} onMute={(id) => setMute((state) => toggled(state, id))} onUntrack={ws.untrack} onMarker={(id) => { ws.setMarker(id); const at = ws.markers.find((item) => item.id === id)?.at; if (at != null) seek(at); setShowSide(true); setSideTab("inspector"); }} lanes={lanes} colors={colors} fps={fps} recordStart={recordStart} playhead={playhead} playing={playback.playing} busy={playback.busy}
-      onToggle={() => void playback.toggle()} onSeek={seek} onScrubStart={playback.pause} onScrubEnd={() => undefined}
-      tc={tc} sourceTc={sourceTc} sourceName={sourceName} onStripSilence={() => setStripping(true)}
+    <EditLower ws={ws} side={side} people={people} solo={soloed} mute={mute} onSolo={(id) => setSolo((state) => toggled(state, id))} onMute={(id) => setMute((state) => toggled(state, id))} onUntrack={ws.untrack} onMarker={(id) => { ws.setMarker(id); const at = ws.markers.find((item) => item.id === id)?.at; if (at != null) seek(at); setShowSide(true); setSideTab("inspector"); }} lanes={lanes} colors={colors} fps={fps} recordStart={recordStart} playhead={playhead}
+      onSeek={seek} onScrubStart={playback.pause} onScrubEnd={() => undefined}
+      sourceName={sourceName} onMode={switchMode} onStripSilence={() => setStripping(true)}
       sourceLanes={sourceLanes} peaksOf={(source, lane) => data.peaks.get(`${source}:${lane}`)} durationOf={(source) => data.durations[source] ?? 0} pictureOf={pictureOf}
       waveforms={waveforms} onWaveforms={onWaveforms} measured={data.measured} measuring={data.measuring} stalled={waveforms && !data.loading && !data.measuring && !data.measured}
       audio={audio} onAudio={setAudio} zoom={zoom} onZoom={setZoom} snap={snap} onSnap={() => setSnap((value) => !value)} follow={follow} onFollow={() => setFollow((value) => !value)} loop={loop} onLoop={() => setLoop((value) => !value)} />

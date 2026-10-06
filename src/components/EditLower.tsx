@@ -1,11 +1,10 @@
 import type { EditSourceSide } from "../hooks/use-edit-source-side";
 import type { useEditWorkspace } from "../hooks/use-edit-workspace";
-import { isGap, programToSource, type TimelineLane } from "../lib/edit-model";
+import type { TimelineLane } from "../lib/edit-model";
 import { trackOwner } from "../lib/multitrack";
 import { EditSourceTimeline, sourceRows } from "./EditSourceTimeline";
 import { EditTimeline } from "./EditTimeline";
 import { EditTimelineMode } from "./EditTimelineMode";
-import { EditTransport } from "./EditTransport";
 
 type Workspace = ReturnType<typeof useEditWorkspace>;
 type Props = {
@@ -18,8 +17,10 @@ type Props = {
   onMarker: (id: string) => void;
   /** Audio ▸ Strip Silence…: Media Composer's, on the selected record tracks. */
   onStripSilence: () => void;
-  playhead: number; playing: boolean; busy: boolean; onToggle: () => void; onSeek: (seconds: number) => void; onScrubStart: () => void; onScrubEnd: () => void;
-  tc: (seconds: number) => string; sourceTc: (source: string, seconds: number) => string; sourceName: (id: string) => string;
+  playhead: number; onSeek: (seconds: number) => void; onScrubStart: () => void; onScrubEnd: () => void;
+  sourceName: (id: string) => string;
+  /** The corner's Source/Record switch. Showing the source here also shows its pane, where its Play and timecode are. */
+  onMode: (mode: "source" | "record") => void;
   sourceLanes: Record<string, string[]>; peaksOf: (source: string, lane: string) => [number, number][] | undefined; durationOf: (source: string) => number;
   pictureOf?: React.ComponentProps<typeof EditTimeline>["pictureOf"];
   waveforms: boolean; onWaveforms: (on: boolean) => void;
@@ -35,7 +36,7 @@ type Props = {
 const none = new Set<string>();
 
 /**
- * Transport over the magnetic timeline: the bottom of the editor. The corner
+ * The magnetic timeline and its tool row: the bottom of the editor. The corner
  * switches the timeline between Record (the string out) and Source (the
  * loaded sequence, every mic), as Avid's Toggle Source/Record in Timeline
  * does; the tool row is the same in both, and its record-only edits rest
@@ -43,18 +44,11 @@ const none = new Set<string>();
  */
 export function EditLower(props: Props) {
   const { ws, side, playhead, fps } = props;
-  const at = ws.placed.length || ws.edit.segments.length ? programToSource(ws.edit, playhead) : null;
-  const segment = at ? ws.edit.segments[at.segment] : null;
-  const source = segment && !isGap(segment) ? segment.source : null;
   const previous = [...ws.seams].reverse().find((item) => item.at < playhead - 1e-3) ?? null;
   const next = ws.seams.find((item) => item.at > playhead + 1e-3) ?? null;
-  const corner = <EditTimelineMode mode={side.mode} onMode={side.setMode} />;
+  const corner = <EditTimelineMode mode={side.mode} onMode={props.onMode} />;
   const shown = side.mode === "source" ? side.source : null, aaf = side.aaf;
-  const transport = shown ? <EditTransport playing={side.playback.playing} busy={side.playback.busy} onToggle={() => void side.playback.toggle()} onStart={() => void side.playback.seek(0)}
-    record={props.tc(playhead)} total={props.tc(ws.total)} source={props.sourceTc(shown.id, side.playhead)} sourceName={shown.short} />
-    : <EditTransport playing={props.playing} busy={props.busy} onToggle={props.onToggle} onStart={() => props.onSeek(0)}
-      record={props.tc(playhead)} total={props.tc(ws.total)} source={source && at ? props.sourceTc(source, at.source) : null} sourceName={source ? props.sourceName(source) : ""} />;
-  const tools = { transport, status: ws.message, marks: shown ? side.marks : ws.marks, canMark: ws.edit.segments.length > 0, snap: props.snap, follow: props.follow, loop: props.loop,
+  const tools = { marks: shown ? side.marks : ws.marks, canMark: ws.edit.segments.length > 0, snap: props.snap, follow: props.follow, loop: props.loop,
     hasPrevious: !!previous, hasNext: !!next, sourceSide: !!shown,
     onAddEdit: ws.cutHere, onMarkIn: shown ? side.markIn : ws.markIn, onMarkClip: ws.markClip, onFindDead: () => (ws.dead ? ws.setDead(null) : ws.findDead()), finding: !!ws.dead,
     // Dead space is where no mic is audible. A mic with no waveform has no
