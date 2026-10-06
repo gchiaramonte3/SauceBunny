@@ -10,7 +10,12 @@ import { stringoutsFor } from "../lib/edit-stringout";
 import { editStore, newEditId } from "../lib/edit-store";
 import { formatError } from "../lib/error-format";
 import { sequenceLabels } from "../lib/multitrack";
+import { plural } from "../lib/plural";
+import { hiddenCount, loadHiddenSequences, sequenceShelf, showHiddenSequences } from "../lib/sequence-shelf";
 const invoke = pipelineInvoke("String Outs");
+
+/** The Start from entry that puts hidden sequences back; never a document id, which is 64 hex digits. */
+const SHOW_HIDDEN = "show-hidden";
 
 type Props = { onOpen: (id: string) => void; onCancel: (() => void) | null; appLocalModelId?: string | null };
 
@@ -25,7 +30,10 @@ const emptyEdit = (title: string): EditDocument => ({ schema_version: EDIT_SCHEM
  */
 export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
   const [saved, setSaved] = useState<AafDocumentSummary[]>([]);
+  // The same list as Add sequence: what was cleared there is not offered here either, until it is saved again.
+  const [hidden, setHidden] = useState(loadHiddenSequences);
   const labels = useMemo(() => sequenceLabels(saved), [saved]);
+  const shelf = useMemo(() => sequenceShelf(saved, hidden), [saved, hidden]), hiddenNow = hiddenCount(saved, hidden);
   const [title, setTitle] = useState("");
   const [from, setFrom] = useState("");
   // Empty by default, as a new sequence is in Avid: the cut is built from chunks of the source.
@@ -34,7 +42,12 @@ export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    invoke<AafDocumentSummary[]>("aaf_list").then((items) => { if (live) { setSaved(items); if (items.length === 1) setFrom(items[0].id); } }).catch(() => undefined);
+    invoke<AafDocumentSummary[]>("aaf_list").then((items) => {
+      if (!live) return;
+      setSaved(items);
+      const listed = sequenceShelf(items, loadHiddenSequences());
+      if (listed.length === 1) setFrom(listed[0].id);
+    }).catch(() => undefined);
     return () => { live = false; };
   }, []);
   const create = async () => {
@@ -66,9 +79,11 @@ export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
     <h2 className="cp-te-picker-head">New string out</h2>
     <form className="cp-te-picker-new" onSubmit={(event) => { event.preventDefault(); void create(); }}>
       <label className="cp-te-set-label">Title<input className="cp-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Rosa, first pass" /></label>
-      <label className="cp-te-set-label">Start from<select className="cp-select" value={from} onChange={(event) => setFrom(event.target.value)}>
+      <label className="cp-te-set-label">Start from<select className="cp-select" value={from}
+        onChange={(event) => { if (event.target.value === SHOW_HIDDEN) setHidden(showHiddenSequences()); else setFrom(event.target.value); }}>
         <option value="">An empty timeline</option>
-        {saved.map((item) => <option key={item.id} value={item.id}>{labels.get(item.id) ?? item.name}</option>)}
+        {shelf.map((item) => <option key={item.id} value={item.id}>{labels.get(item.id) ?? item.name}</option>)}
+        {hiddenNow > 0 && <option value={SHOW_HIDDEN}>Show {plural(hiddenNow, "hidden sequence", "hidden sequences")}</option>}
       </select></label>
       {from && <label className="cp-te-picker-check"><input type="checkbox" checked={whole} onChange={(event) => setWhole(event.target.checked)} />Start with the whole sequence</label>}
       <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "Creating…" : "Create"}</button>

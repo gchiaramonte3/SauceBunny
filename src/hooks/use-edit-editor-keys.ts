@@ -12,6 +12,8 @@ type Options = {
   /** What the source has marked, spliced in (V), appended, or laid over the record (B). */
   place: (how: "insert" | "append" | "overwrite") => void;
   previous: number | null; next: number | null;
+  /** Toggle Source/Record in Timeline (⇧T), through the same path as the corner switch. */
+  onMode: (mode: "source" | "record") => void;
 };
 
 /** How far J steps back: the engine plays forward only, so J is a step back that repeats while it is held. */
@@ -24,7 +26,7 @@ const J_STEP_SECONDS = 1;
  * markers, edit-to-edit) rest while the timeline shows Source, exactly as
  * their buttons do. Loop loops the side shown.
  */
-export function useEditEditorKeys({ root, active, fps, ws, side, playback, undo, redo, onHistory, loop, onLoop, onZoom, onSnap, place, previous, next }: Options) {
+export function useEditEditorKeys({ root, active, fps, ws, side, playback, undo, redo, onHistory, loop, onLoop, onZoom, onSnap, place, previous, next, onMode }: Options) {
   const sourceShown = side.mode === "source";
   const onSource = (on: EditKeySide) => on === "pane" || sourceShown;
   const monitor = (on: EditKeySide) => onSource(on) ? side.playback : playback;
@@ -44,7 +46,7 @@ export function useEditEditorKeys({ root, active, fps, ws, side, playback, undo,
     start: () => void looped.seek(0), end: () => void looped.seek(Math.round(length * fps)),
     step: (frames) => void looped.seek(Math.max(0, looped.frame + frames), false),
     cutHere: record(ws.cutHere), loop: onLoop, zoomIn: () => onZoom((zoom) => Math.min(32, zoom * 2)), zoomOut: () => onZoom((zoom) => Math.max(1, zoom / 2)), zoomFit: () => onZoom(() => 1),
-    mode: () => side.setMode((mode) => mode === "source" ? "record" : "source"),
+    mode: () => onMode(side.mode === "source" ? "record" : "source"),
     escape: () => {
       if (ws.dead) { ws.setDead(null); return true; }
       if (ws.prompt) { ws.setPrompt(null); return true; }

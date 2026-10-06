@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { EditTimelineTools } from "./EditTimelineTools";
 
@@ -46,4 +46,15 @@ it("Audio ▸ Strip Silence… opens Media Composer's settings, and rests while 
   render(<EditTimelineTools {...props({ onStripSilence, sourceSide: true })} />);
   fireEvent.click(screen.getByRole("button", { name: "Audio" }));
   expect((screen.getByRole("menuitem", { name: "Strip Silence…" }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it("holds tools only: no Play, no timecode readout and no status line", () => {
+  render(<EditTimelineTools {...props()} />);
+  const row = screen.getByRole("toolbar", { name: "Timeline tools" });
+  // The population first, so an empty row cannot pass.
+  expect(within(row).getAllByRole("button").length).toBeGreaterThan(10);
+  expect(within(row).queryByRole("button", { name: /^(Play|Pause|Go to start)$/ })).toBeNull();
+  expect(within(row).queryByRole("group", { name: "Transport" })).toBeNull();
+  expect(within(row).queryByRole("status")).toBeNull();
+  expect(row.textContent).not.toMatch(/Record|Source|\d\d:\d\d:\d\d/);
 });

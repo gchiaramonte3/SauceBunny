@@ -119,8 +119,23 @@ test("an edit from a sequence shows its words, and a delete is one undoable step
   const moved = page.locator(".cp-te-doc [data-index]", { hasText: "moved" }).first();
   await expect(moved).toBeVisible();
   await expect(page.locator(".cp-te-doc")).toContainText("Sam answers the door.");
-  // Play and the readouts lead the timeline's tool row; there is no line of their own.
-  await expect(page.getByRole("toolbar", { name: "Timeline tools" }).getByRole("group", { name: "Transport" })).toBeVisible();
+  // The tool row holds tools only. Play and the timecode are the record pane's
+  // own, as the source pane's are, and what the editor did is at its foot.
+  const row = page.getByRole("toolbar", { name: "Timeline tools" });
+  await expect(row.getByRole("button", { name: "Lift in to out on selected tracks" })).toBeVisible();
+  await expect(row.getByRole("group", { name: "Transport" })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: /^(Play|Pause|Go to start)$/ })).toHaveCount(0);
+  await expect(row.getByRole("status")).toHaveCount(0);
+  const recordPane = page.getByRole("region", { name: "Record", exact: true });
+  await expect(recordPane.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+  await expect(recordPane.getByRole("button", { name: "Go to start", exact: true })).toBeVisible();
+  await expect(recordPane.locator(".cp-te-record-foot").getByRole("status")).toHaveCount(1);
+  // One line at the window's minimum width: every item's middle on one height.
+  await page.setViewportSize({ width: 1100, height: 740 });
+  const middles = await row.evaluate((element) => [...element.children].map((child) => { const box = child.getBoundingClientRect(); return box.top + box.height / 2; }));
+  expect(middles.length).toBeGreaterThan(5);
+  expect(Math.max(...middles) - Math.min(...middles)).toBeLessThan(2);
+  await page.screenshot({ path: test.info().outputPath("string-outs-1100.png") });
   // Undo and redo side by side, and every person's name whole in its track header.
   const [undoBox, redoBox] = await Promise.all([page.locator(".cp-te-undo button").first().boundingBox(), page.locator(".cp-te-undo button").last().boundingBox()]);
   expect(Math.abs(undoBox!.y - redoBox!.y)).toBeLessThan(1);
@@ -161,7 +176,7 @@ test("Insert splices at the record playhead, as Avid's V does, and Overwrite (B)
   await expect.poll(async () => (await lines()).map((text) => /moved/.test(text) ? "alex" : /door/.test(text) ? "sam" : /Rosa/.test(text) ? "rosa" : "?")).toEqual(["alex", "sam", "sam", "rosa"]);
   await expect(page.getByRole("button", { name: /^Undo Insert 4 Words/ })).toBeEnabled();
   // B lays the same line over what follows the new clip: the cut keeps its length.
-  const total = page.locator(".cp-te-transport .cp-te-readout-of").first();
+  const total = page.locator(".cp-te-record .cp-te-tools-of");
   const before = await total.textContent();
   await page.keyboard.press("b");
   await expect(page.getByRole("button", { name: "Undo Overwrite" })).toBeEnabled();
@@ -177,7 +192,7 @@ test("marks clear the Avid way on both sides: G, D and F, and the × on the mark
   await expect(page.locator(".cp-te-doc")).toContainText("Then Rosa called me.");
   const ruler = page.locator(".cp-te-tl-ruler"), box = (await ruler.boundingBox())!;
   const range = ruler.locator(".cp-te-tl-marked");
-  const record = page.locator(".cp-te-transport .cp-te-readout-tc").first();
+  const record = page.locator(".cp-te-record .cp-te-tools-tc");
   // Park the playhead, and wait for it to land before marking there.
   const park = async (fraction: number) => {
     const before = await record.textContent();
@@ -437,4 +452,80 @@ test("⌘\\ opens the Pipeline on String Outs, and its export says what the stri
   expect(report).not.toContain("Sam answers the door");
   await page.keyboard.press("ControlOrMeta+Backslash");
   await expect(pipeline).toHaveAttribute("aria-expanded", "false");
+});
+
+test("Add sequence is a short menu that opens to the left, and its list clears without deleting anything", async ({ page }) => {
+  await boot(page);
+  // The owner's display: a menu sized to the window would run across all of it.
+  await page.setViewportSize({ width: 2560, height: 1080 });
+  await page.getByRole("main", { name: "String Outs" }).getByRole("button", { name: "New string out…" }).last().click();
+  await page.getByLabel("Title").fill("Picks");
+  await page.getByLabel("Start from").selectOption({ label: "An empty timeline" });
+  await page.getByRole("button", { name: "Create" }).click();
+  const trigger = page.getByRole("button", { name: "Add sequence", exact: true });
+  await trigger.click();
+  const menu = page.getByRole("menu", { name: "Add a sequence" });
+  await expect(menu.getByRole("menuitem", { name: /Interview/ })).toBeFocused();
+  const button = (await trigger.boundingBox())!, box = (await menu.boundingBox())!;
+  expect(box.width).toBeLessThanOrEqual(420);
+  // Right edges together: it opens leftward from its button, under it.
+  expect(Math.abs(box.x + box.width - (button.x + button.width))).toBeLessThan(1);
+  expect(box.y).toBeGreaterThanOrEqual(button.y + button.height);
+  await page.screenshot({ path: test.info().outputPath("add-sequence-menu.png") });
+  await menu.getByRole("menuitem", { name: "Clear list" }).click();
+  await expect(menu.getByRole("menuitem", { name: /Interview/ })).toHaveCount(0);
+  await menu.getByRole("menuitem", { name: "Show 1 hidden sequence" }).click();
+  await menu.getByRole("menuitem", { name: /Interview/ }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add all of Interview" })).toBeVisible();
+});
+
+test("the dividers drag and nudge, are remembered, and never squeeze the record pane out", async ({ page }) => {
+  await boot(page);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Interview" });
+  await page.getByLabel(/whole sequence/i).check();
+  await page.getByRole("button", { name: "Create" }).click();
+  const source = page.locator(".cp-te-pane-source"), record = page.locator(".cp-te-pane-record"), lower = page.locator(".cp-te-lower");
+  const width = async (locator: typeof source) => Math.round((await locator.boundingBox())!.width);
+  const divider = page.getByRole("separator", { name: "Resize the source" });
+  const pane = (await source.boundingBox())!, grip = (await divider.boundingBox())!;
+  // On the boundary itself, not on the source text's scrollbar.
+  expect(Math.abs(grip.x + grip.width / 2 - (pane.x + pane.width))).toBeLessThan(2);
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + 120);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + grip.width / 2 + 120, grip.y + 120, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(() => width(source)).toBe(Math.round(pane.width) + 120);
+  await divider.focus();
+  await page.keyboard.press("Home");
+  await expect.poll(() => width(source)).toBe(340);
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect.poll(() => width(source)).toBe(372);
+  // Above the timeline: dragging up makes it taller.
+  const timeline = page.getByRole("separator", { name: "Resize the timeline" });
+  const tall = Math.round((await lower.boundingBox())!.height), bar = (await timeline.boundingBox())!;
+  await page.mouse.move(bar.x + 600, bar.y + bar.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bar.x + 600, bar.y + bar.height / 2 - 80, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(async () => Math.round((await lower.boundingBox())!.height)).toBe(tall + 80);
+  await divider.hover();
+  await page.screenshot({ path: test.info().outputPath("string-outs-dividers.png") });
+  // A relaunch keeps both.
+  await page.reload();
+  await page.getByRole("button", { name: "String Outs", exact: true }).click();
+  await page.getByRole("combobox", { name: "Open saved string out" }).selectOption({ label: "Interview" });
+  await expect.poll(() => width(source)).toBe(372);
+  await expect.poll(async () => Math.round((await lower.boundingBox())!.height)).toBe(tall + 80);
+  // At the narrowest window a wide source gives way, and nothing scrolls sideways.
+  await page.setViewportSize({ width: 1100, height: 740 });
+  await divider.focus();
+  for (let step = 0; step < 10; step += 1) await page.keyboard.press("Shift+ArrowRight");
+  expect(await width(record)).toBeGreaterThanOrEqual(359);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+  const squeezed = (await source.boundingBox())!, moved = (await divider.boundingBox())!;
+  expect(Math.abs(moved.x + moved.width / 2 - (squeezed.x + squeezed.width))).toBeLessThan(2);
+  await page.screenshot({ path: test.info().outputPath("string-outs-dividers-1100.png") });
 });

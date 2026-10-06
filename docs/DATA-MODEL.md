@@ -222,11 +222,18 @@ Not all of these are preferences. Sorted by what losing them would cost:
 - **Identity**: `installId`, `review.author`, `review.authorColor`.
 - **Genuine preference**: layout, widths, open/closed, `keybindings.v1`,
   `playbackRate`, `streamRungPref`, `streamKeep`, `mediaDevices`, the
-  `*Dismissed*` flags, `welcomed`, `onboarding`, and String Outs' open tabs,
-  last open string out and Ask model (`stringOuts.tabs`, `editor.lastEdit`,
-  `stringOuts.model`), and the string out Open in String Outs made for each
-  AAF Audio sequence (`stringOuts.forSequence`, so asking again reuses it). A tab only names a string out; closing one, or losing
-  the key, never touches the edit, which lives in `timelines.sqlite`.
+  `*Dismissed*` flags, `welcomed`, `onboarding`, and String Outs' Ask model
+  (`stringOuts.model`), its pane sizes (`stringOuts.sideWidth`,
+  `stringOuts.sourceWidth`, `stringOuts.timelineHeight`, stored only once a
+  divider has been moved), the sequences hidden from Add sequence and Start
+  from (`stringOuts.hiddenSequences`: each one's save time when it was hidden,
+  so a later save in AAF Audio lists it again; hiding deletes nothing), and the
+  string out Open in String Outs made for each AAF Audio sequence
+  (`stringOuts.forSequence`, so asking again reuses it). Neither String Outs
+  nor AAF Audio remembers what was open: both open clear at launch, and the
+  retired `stringOuts.tabs`, `editor.lastEdit` and `aafAudio.lastDocument`
+  are ignored where an older build left them. The edits themselves live in
+  `timelines.sqlite`.
 - **Cache**: `panelSnapshot` (the panel's synchronous boot seed),
   `lastUpdateCheck`, `ytdlpVersion`, `diarizerModelsReady`.
 
