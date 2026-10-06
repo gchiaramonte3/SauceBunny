@@ -18,21 +18,55 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { pathKey } from "./repath";
 import type { TranscriptFile } from "../bindings/TranscriptFile";
 import { getHistory, type TranscriptHistoryEntry } from "./transcript-history";
-import { withoutHidden } from "./library-hidden";
+import { isHidden, withoutHidden } from "./library-hidden";
+import { sequenceLabels } from "./multitrack";
+import type { TranscriptSort } from "./transcript-organize";
 import type { AafDocumentSummary } from "../bindings/AafDocumentSummary";
 
 /** Managed documents are not SRTs: their ID opens the authoritative AAF store. */
 export type MultitrackLibraryEntry = { kind: "multitrack"; id: string; title: string; summary: AafDocumentSummary };
 export type TranscriptLibraryEntry = LibraryTranscript | MultitrackLibraryEntry;
 
+/**
+ * An AAF Audio document's key among the Transcripts page's rows, where every
+ * other key is a file path. It can be dragged and hidden like a path; it is
+ * never one, so nothing that reaches the disk may take it (`documentOfKey`).
+ */
+export const documentKey = (id: string) => `aaf:${id}`;
+export const documentOfKey = (key: string) => (key.startsWith("aaf:") ? key.slice(4) : null);
+
+/**
+ * Where each AAF Audio transcript shows on the Transcripts page: in the
+ * project it is filed in, when that project's group is on screen, and
+ * otherwise in the AAF Audio group. While searching, every match shows in the
+ * AAF Audio group, as transcript matches all show in one results group. Sorted
+ * as the page sorts transcripts; "size" is how much of it is transcribed.
+ */
+export function layoutDocuments(entries: readonly MultitrackLibraryEntry[], projects: readonly { folder: string; documents: string[] }[],
+  shownFolders: ReadonlySet<string>, searching: boolean, sort: TranscriptSort) {
+  const by = (a: MultitrackLibraryEntry, b: MultitrackLibraryEntry) => {
+    const recent = (b.summary.modified_ms ?? 0) - (a.summary.modified_ms ?? 0);
+    if (sort === "oldest") return -recent || a.id.localeCompare(b.id);
+    if (sort === "name") return a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
+    if (sort === "size") return b.summary.transcribed_tracks - a.summary.transcribed_tracks || recent;
+    return recent || a.id.localeCompare(b.id);
+  };
+  const filed = new Map<string, MultitrackLibraryEntry[]>(), unfiled: MultitrackLibraryEntry[] = [];
+  for (const entry of [...entries].sort(by)) {
+    const folder = searching ? undefined : projects.find((project) => project.documents.includes(entry.id))?.folder;
+    if (folder !== undefined && shownFolders.has(folder)) filed.set(folder, [...(filed.get(folder) ?? []), entry]);
+    else unfiled.push(entry);
+  }
+  return { filed, unfiled };
+}
+
+/** Transcribed documents, named as every sequence menu names them, newest first, less those removed from Transcripts. */
 export function multitrackLibraryEntries(documents: AafDocumentSummary[]): MultitrackLibraryEntry[] {
-  const completed = documents.filter(doc => doc.transcribed_tracks > 0);
-  const name = (doc: AafDocumentSummary) => pathKey(doc.source_path).split("/").pop() || doc.name;
-  return completed.map(summary => ({ kind: "multitrack" as const, id: summary.id, summary,
-    title: name(summary) + (completed.filter(other => name(other) === name(summary)).length > 1 ? ` · ${summary.id.slice(0, 8)}` : "") }))
+  const completed = documents.filter(doc => doc.transcribed_tracks > 0 && !isHidden(documentKey(doc.id)));
+  const labels = sequenceLabels(completed);
+  return completed.map(summary => ({ kind: "multitrack" as const, id: summary.id, summary, title: labels.get(summary.id) ?? summary.name }))
     .sort((a, b) => (b.summary.modified_ms ?? 0) - (a.summary.modified_ms ?? 0) || a.id.localeCompare(b.id));
 }
 

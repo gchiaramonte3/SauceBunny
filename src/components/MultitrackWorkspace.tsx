@@ -6,7 +6,7 @@ import { useMultitrackAudition } from "../hooks/use-multitrack-audition";
 import { useMultitrackTranscription } from "../hooks/use-multitrack-transcription";
 import { useMultitrackKeyboard } from "../hooks/use-multitrack-keyboard";
 import { useMultitrackDetail } from "../hooks/use-multitrack-detail";
-import { sequenceFps, sequenceRate, sequenceTimecode, trackOwner } from "../lib/multitrack";
+import { documentName, sequenceFps, sequenceRate, sequenceTimecode, trackOwner } from "../lib/multitrack";
 import { GenerateButton } from "./GenerateButton";
 import { MultitrackTimeline } from "./MultitrackTimeline";
 import { MultitrackTransport } from "./MultitrackTransport";
@@ -136,7 +136,7 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
   return <div ref={workspace} className="cp-multitrack-workspace" style={{ "--multitrack-transcript-width": `${Math.min(pane.width, paneMax)}px` } as CSSProperties}>
     <div className="cp-multitrack-editor">
       <div className="cp-multitrack-editor-content">
-      <div className="cp-multitrack-sequence-head"><h2 title={document.manifest.name}>{document.manifest.name}</h2><span className="cp-multitrack-note">{sequenceFps(document.manifest).toFixed(3).replace(/\.?0+$/, "")} fps</span><span className="cp-multitrack-note" role="status">{labelStatus}</span>{labelStatus === "Labels not saved" && onRetryLabels && <button className="btn btn-ghost" onClick={onRetryLabels}>Retry saving labels</button>}</div>
+      <div className="cp-multitrack-sequence-head"><h2 title={document.title?.trim() ? `Sequence ${document.manifest.name}` : document.manifest.name}>{documentName(document)}</h2><span className="cp-multitrack-note">{sequenceFps(document.manifest).toFixed(3).replace(/\.?0+$/, "")} fps</span><span className="cp-multitrack-note" role="status">{labelStatus}</span>{labelStatus === "Labels not saved" && onRetryLabels && <button className="btn btn-ghost" onClick={onRetryLabels}>Retry saving labels</button>}</div>
       <MultitrackMediaStatus document={document} resolving={resolvingMedia} disabled={transcription.loading || relinkers.settings} onBusy={onStripBusy} onDetails={onOpenMedia} />
       <MultitrackCast document={document} active={active} onRename={onRename} editTrack={castTrack} onCloseEdit={() => setCastTrack(null)} />
       <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={waveformErrors} waveformsOffline={waveformsOffline} onRetryWaveform={onRetryWaveform} onReviewTiming={askTranscript} onTranscriptInfo={() => askTranscript(null, true)} selected={selected} onSelect={toggleTrack} onRename={onRename} onOwnerMenu={setCastTrack} onView={onView} detail={{ ...view, peaks: detail }}

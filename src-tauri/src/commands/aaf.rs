@@ -51,7 +51,7 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String, sequence_i
         cast_member_id: None, color: None, gender: None, marker_color: None,
     }).collect();
     let id = blake3::hash(crate::stream_proxy::mint_token()?.as_bytes()).to_hex().to_string();
-    let document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, ownership: None, id,
+    let document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, ownership: None, title: None, id,
         source_path: source.to_string_lossy().into_owned(), source_size: metadata.len(),
         source_modified_ms: store::modified_ms(&metadata), manifest, labels, transcripts: Vec::new() };
     store::source_ready(&document)?;
@@ -126,6 +126,15 @@ pub async fn aaf_list(app: AppHandle) -> Result<Vec<AafDocumentSummary>, AppErro
 #[tauri::command]
 pub async fn aaf_save_labels(app: AppHandle, document_id: String, labels: Vec<AafTrackLabel>) -> Result<AafDocument, AppError> {
     let document = store::labels(&store::root(&app)?, &document_id, labels)?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+    Ok(document)
+}
+
+/// Name a document for the editor, or with None go back to the sequence's
+/// own name. Every page that lists documents hears the change.
+#[tauri::command]
+pub async fn aaf_rename(app: AppHandle, document_id: String, title: Option<String>) -> Result<AafDocument, AppError> {
+    let document = store::retitle(&store::root(&app)?, &document_id, title)?;
     let _ = app.emit("saucebunny:multitrack-changed", &document_id);
     Ok(document)
 }
@@ -445,7 +454,7 @@ mod native_reader_tests {
         let manifest: AafManifest = serde_json::from_slice(&result.stdout).unwrap();
         validate_manifest(&manifest).unwrap();
         let metadata = std::fs::metadata(&source).unwrap();
-        store::source_ready(&AafDocument { schema_version: 1, shoot_date_override: None, ownership: None, id: "f".repeat(64), source_path: source.clone(),
+        store::source_ready(&AafDocument { schema_version: 1, shoot_date_override: None, ownership: None, title: None, id: "f".repeat(64), source_path: source.clone(),
             source_size: metadata.len(), source_modified_ms: store::modified_ms(&metadata),
             manifest: manifest.clone(), labels: Vec::new(), transcripts: Vec::new() }).unwrap();
         let track = manifest.tracks.first().expect("test must inspect at least one track");

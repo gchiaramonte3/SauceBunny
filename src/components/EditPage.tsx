@@ -14,6 +14,7 @@ import { IconPlus } from "./Icons";
 import { IconStringOut } from "./IconStringOut";
 import { PipelinePanel } from "./PipelinePanel";
 import { TabStrip } from "./TabStrip";
+import { documentName } from "../lib/multitrack";
 import type { EditSourceMarks } from "../hooks/use-edit-source-side";
 const invoke = pipelineInvoke("String Outs");
 
@@ -90,7 +91,7 @@ export function EditPage({ active, aiModelId, onOpenSettings, openRequest, pipel
         if (existing && (await editStore.list()).some((item) => item.id === existing)) { open(existing); return; }
         const sequence = await invoke<AafDocument>("aaf_open", { documentId });
         const id = newEditId();
-        await editStore.create(id, editFromSequence(sequence, sequence.manifest.name, false));
+        await editStore.create(id, editFromSequence(sequence, documentName(sequence), false));
         saveJson(FOR_SEQUENCE_KEY, { ...made, [documentId]: id });
         setEdits(await editStore.list());
         open(id);

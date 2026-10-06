@@ -91,10 +91,17 @@
 .cp-multitrack-date-controls label { display: grid; gap: 4px; }
 .cp-multitrack-date-controls input { min-height: 30px; color: var(--fg-1); background: var(--bg-0); border: 1px solid var(--line-2); border-radius: var(--r-md); padding: 4px 8px; font: inherit; }
 .cp-multitrack-reader > .cp-multitrack-transcript { flex: 1; min-height: 0; width: auto; }
-.cp-multitrack-reader-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px; border-bottom: 1px solid var(--line-1); }
-.cp-multitrack-reader-head > span { min-width: 0; overflow-wrap: anywhere; }
-.cp-multitrack-reader-head .btn { flex-shrink: 0; }
-.cp-multitrack-library-heading { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+/* Transcripts' summary of an AAF Audio transcript: name, then the facts in a
+   wrapping row, then where it opens. */
+.cp-multitrack-reader-head { display: grid; gap: 8px; padding: 12px; border-bottom: 1px solid var(--line-1); }
+.cp-multitrack-reader-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.cp-multitrack-reader-title h2 { margin: 0; font-size: var(--text-xl); line-height: var(--leading-tight); overflow-wrap: anywhere; }
+.cp-multitrack-reader-title span { color: var(--fg-3); font-size: var(--text-base); overflow-wrap: anywhere; }
+.cp-multitrack-reader-facts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: var(--text-base); }
+.cp-multitrack-reader-facts div { display: flex; gap: 6px; min-width: 0; }
+.cp-multitrack-reader-facts dt { color: var(--fg-3); }
+.cp-multitrack-reader-facts dd { margin: 0; color: var(--fg-1); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cp-multitrack-reader-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .cp-multitrack-cast { margin-top: 8px; font-size: var(--text-base); color: var(--fg-3); }
 .cp-multitrack-cast summary { cursor: pointer; }
 .cp-multitrack-cast-actions { display: flex; align-items: center; gap: 8px; }

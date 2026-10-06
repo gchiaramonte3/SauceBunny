@@ -30,7 +30,8 @@ the app is allowed to do to the data without asking.
 
 ```
 Transcripts/
-  projects.json            project metadata (titles, posters, colours)
+  projects.json            project metadata (titles, posters, colours, and the
+                           AAF Audio documents filed in each, by id; version 2)
   <Project>/               a project folder, or
   YYYY-MM/                 the date-organized default
     *.srt / *.vtt          the transcripts themselves
@@ -117,11 +118,15 @@ Audio document id, both safe to delete:
   anywhere, never in a command's answer (`voiceprint-contract`). Deleting it
   reverts those calls to unsure. Settings shows the count and deletes all.
 
-The AAF Audio document itself gained three optional fields, so the schema
-stays 2 and an older build reads a newer document: a cue's `words` (each
-word's measured time and confidence, from Parakeet) and `suspect` (why a
-Whisper cue may be invented), and the document's `ownership` (the editor's
-own per-cue calls, which win over the resolver).
+The AAF Audio document itself gained optional fields without a schema bump,
+so an older build reads a newer document: a cue's `words` (each word's
+measured time and confidence, from Parakeet) and `suspect` (why a Whisper cue
+may be invented), the document's `ownership` (the editor's own per-cue calls,
+which win over the resolver), and its `title` (the name the editor gave it in
+Transcripts, `aaf_rename`; the manifest's sequence name, which re-imports find
+a document by, is never overwritten). An older build drops a field it does
+not know on its next save of that document. Every page names a document with
+`documentName`: the title, else the sequence's name.
 
 ### `app_cache_dir()` — three named directories
 
@@ -272,8 +277,19 @@ below, one step further.
 
 **The directories are the truth about what a project is.** `projects.json`
 only decorates them; `reconcileProjects` re-derives the list from disk on
-every scan, so deleting the file costs posters and titles, nothing more.
-That is deliberate and it is why a display string is tolerable as the key.
+every scan, so deleting the file costs posters and titles, and puts every
+filed AAF Audio document back under AAF Audio. That is deliberate and it is
+why a display string is tolerable as the key.
+
+**AAF Audio documents join a project by reference.** A document lives in AAF
+Audio's store by id, not in the project's folder, so `projects.json` lists
+the ids filed in each project (`documents`), one project per document at
+most; nothing moves on disk. That list exists nowhere else, so the file went
+to version 2 (`PROJECTS_SCHEMA_VERSION`): a version-1 build would read it,
+drop the field it does not know and write the shelf back without it, and
+stamped 2 it refuses to write instead. An id that no longer names a listed
+document is ignored, not removed, so a document that comes back finds its
+project.
 
 **Facts stored twice.** Only one, and it is intentional: a speaker override
 lives under the SRT path AND under a content fingerprint

@@ -19,6 +19,8 @@
 
 /** A month bucket the app made, not a project someone named. */
 const MONTH_FOLDER = /^\d{4}-\d{2}$/;
+/** An AAF Audio document's id, as its store names its file. */
+const DOCUMENT_ID = /^[0-9a-f]{64}$/;
 
 export type TranscriptProject = {
   /** Directory name under the library root. The identity — never renamed in
@@ -38,10 +40,17 @@ export type TranscriptProject = {
   /** Accent for the group header. Null = the neutral default. */
   color: string | null;
   createdMs: number;
+  /**
+   * AAF Audio documents filed here, by id. They are not files in this folder
+   * (they live in AAF Audio's store, by id), so unlike transcripts they belong
+   * by reference, and this list is the only record of it. A document is in
+   * one project at most.
+   */
+  documents: string[];
 };
 
 export function makeProject(folder: string, now: number): TranscriptProject {
-  return { folder, title: folder, posterPath: null, posterFrom: null, color: null, createdMs: now };
+  return { folder, title: folder, posterPath: null, posterFrom: null, color: null, createdMs: now, documents: [] };
 }
 
 /**
@@ -80,6 +89,7 @@ export function parseProjects(raw: unknown): TranscriptProject[] {
       posterFrom: typeof o.posterFrom === "string" && o.posterFrom ? o.posterFrom : null,
       color: typeof o.color === "string" && o.color ? o.color : null,
       createdMs: typeof o.createdMs === "number" && o.createdMs > 0 ? o.createdMs : 0,
+      documents: Array.isArray(o.documents) ? [...new Set(o.documents.filter((id): id is string => typeof id === "string" && DOCUMENT_ID.test(id)))] : [],
     });
   }
   return out;
@@ -101,6 +111,23 @@ export function reconcileProjects(
   const real = foldersOnDisk.filter(isProjectFolder);
   const byFolder = new Map(stored.map((p) => [p.folder, p]));
   return real.map((f) => byFolder.get(f) ?? makeProject(f, now));
+}
+
+/**
+ * File AAF Audio documents in a project, or with null take them out of every
+ * project. Moving is the only verb: a document is in one project at most.
+ */
+export function fileDocuments(projects: readonly TranscriptProject[], ids: readonly string[], folder: string | null): TranscriptProject[] {
+  return projects.map((p) => {
+    const kept = p.documents.filter((id) => !ids.includes(id));
+    const documents = p.folder === folder ? [...kept, ...ids.filter((id) => !kept.includes(id))] : kept;
+    return documents.length === p.documents.length && documents.every((id, i) => id === p.documents[i]) ? p : { ...p, documents };
+  });
+}
+
+/** The project an AAF Audio document is filed in, if any. */
+export function projectOfDocument(projects: readonly TranscriptProject[], id: string): TranscriptProject | null {
+  return projects.find((p) => p.documents.includes(id)) ?? null;
 }
 
 /** The project for a folder, or null when it is a month bucket or unknown. */

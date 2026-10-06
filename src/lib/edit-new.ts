@@ -4,7 +4,7 @@ import type { EditTrack } from "../bindings/EditTrack";
 import { EDIT_SCHEMA_VERSION } from "./edit-document";
 import type { TimelineLane } from "./edit-model";
 import { alternativeLane } from "./multitrack-graph";
-import { trackOwner } from "./multitrack";
+import { documentName, trackOwner } from "./multitrack";
 
 /**
  * Building an edit's frame from AAF Audio sequences: one lane per person
@@ -47,7 +47,7 @@ const hourOf = (document: AafDocument) => hourOne(document.manifest.timecode_fps
 export function editFromSequence(document: AafDocument, title: string, whole: boolean): EditDocument {
   const rate = document.manifest.edit_rate;
   const empty: EditDocument = {
-    schema_version: EDIT_SCHEMA_VERSION, title: title.trim() || document.manifest.name, edit_rate: { numerator: rate.numerator, denominator: rate.denominator },
+    schema_version: EDIT_SCHEMA_VERSION, title: title.trim() || documentName(document), edit_rate: { numerator: rate.numerator, denominator: rate.denominator },
     start_timecode_frames: hourOf(document), sources: [], tracks: [], segments: [], mutes: [], markers: [],
   };
   const edit = addSource(empty, document);
@@ -70,7 +70,7 @@ export function addSource(target: EditDocument, document: AafDocument): EditDocu
   const edit = target.sources.length || target.segments.length ? target
     : { ...target, edit_rate: { numerator: rate.numerator, denominator: rate.denominator }, start_timecode_frames: hourOf(document) };
   if (edit.sources.length && (rate.numerator * edit.edit_rate.denominator !== edit.edit_rate.numerator * rate.denominator)) {
-    throw new Error(`${document.manifest.name} runs at a different frame rate from this edit, so it cannot be cut into it.`);
+    throw new Error(`${documentName(document)} runs at a different frame rate from this edit, so it cannot be cut into it.`);
   }
   if (edit.sources.some((source) => source.document_id === document.id)) return target;
   const id = sourceId(edit);
@@ -96,7 +96,7 @@ export function addSource(target: EditDocument, document: AafDocument): EditDocu
     tracks.push(lane);
     byName.set(name, lane);
   }
-  return { ...edit, sources: [...edit.sources, { id, name: document.manifest.name, document_id: document.id }], tracks };
+  return { ...edit, sources: [...edit.sources, { id, name: documentName(document), document_id: document.id }], tracks };
 }
 
 /** Whether a lane is patched to a record track (absent: patched, as every lane was before patching). */

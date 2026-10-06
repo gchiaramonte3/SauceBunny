@@ -1224,11 +1224,11 @@ export function SettingsModal(props: Props) {
                   </div>
                   <div className="cp-pane-row">
                     <div className="k">
-                      Clips removed from the Library
+                      Removed from the Library or Transcripts
                       <span className="desc">
-                        Remove from Library takes a clip off the shelf and leaves the file
-                        alone, so the only trace is here. This puts them all back. It does not
-                        touch anything you moved to the Trash.
+                        Remove from Library, and Remove from Transcripts, take an item off the
+                        shelf and leave the file alone, so the only trace is here. This puts
+                        them all back. It does not touch anything you moved to the Trash.
                       </span>
                     </div>
                     <div className="v">

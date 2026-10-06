@@ -15,7 +15,8 @@ it("reconciles committed results after each native save and after reopening", as
   await act(async () => {}); expect(result.current.entries).toHaveLength(0);
   disk.transcripts.push({ ...multitrackTranscript(), status: "empty", cues: [] });
   await act(async () => mocks.changed?.());
-  expect(result.current.entries[0].title).toBe("Interview.aaf");
+  // Named as AAF Audio and String Outs name it: by its sequence, not its file.
+  expect(result.current.entries[0].title).toBe("Interview");
   act(() => result.current.select(disk.id));
   await waitFor(() => expect(result.current.document?.transcripts).toHaveLength(1));
   rerender({ visible: false }); disk.transcripts.push(multitrackTranscript("track-2"));

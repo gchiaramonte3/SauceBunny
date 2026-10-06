@@ -239,6 +239,34 @@ describe("the project store", () => {
   });
 });
 
+describe("AAF Audio documents filed in a project", () => {
+  const id = "d".repeat(64);
+  it("are written as version 2, read back, and follow a renamed project", async () => {
+    const s = await store();
+    await s.hydrateProjects(LIB, ["Show"]);
+    s.fileDocuments([id], "Show");
+    await vi.advanceTimersByTimeAsync(1000);
+    const written = JSON.parse(h.writes.at(-1)!.text);
+    expect(written.version).toBe(2);
+    expect(written.projects[0].documents).toEqual([id]);
+    s.renameProject("Show", "Season Two");
+    expect(s.getProjects()[0].documents).toEqual([id]);
+    await vi.advanceTimersByTimeAsync(1000);
+    s.__resetProjectStore();
+    h.fileText = h.writes.at(-1)!.text;
+    await s.hydrateProjects(LIB, ["Season Two"]);
+    expect(s.getProjects()[0].documents).toEqual([id]);
+  });
+
+  it("does not write when nothing moved", async () => {
+    const s = await store();
+    await s.hydrateProjects(LIB, ["Show"]);
+    s.fileDocuments([id], null);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(h.writes).toEqual([]);
+  });
+});
+
 describe("renaming a project keeps what was decorated onto it", () => {
   it("carries the poster and colour to the new folder", async () => {
     // Without the carry-over the folder key stops matching disk, so
