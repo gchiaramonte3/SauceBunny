@@ -561,3 +561,9 @@ first:
 - **One transport, one readout per monitor, no status prose on screen.**
 
 Needs: the owner's go-ahead on which of these to take, and a prototype first.
+
+**Spec:** [STRING-OUTS-DOCUMENT-SPEC-2026-10-06.md](STRING-OUTS-DOCUMENT-SPEC-2026-10-06.md)
+sets out each of the four on its own (what it means, cost, risk), what does
+not change, the three decisions, a recommendation (take 1, 3 and 4; prototype
+the library before deciding on it, since it undoes the September 30 Source and
+Record choice) and the prototype and production phases.
