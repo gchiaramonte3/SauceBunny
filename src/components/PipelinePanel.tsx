@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { copyText } from "../lib/clipboard";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type Event } from "@tauri-apps/api/event";
@@ -11,6 +11,7 @@ import { mergeMultitrackLogs } from "../lib/multitrack-diagnostics";
 import { callStats, inFlight, pipelineActivity, pipelineContext, subscribePipelineActivity, watchPage } from "../lib/pipeline";
 import { pipelineReport } from "../lib/pipeline-report";
 import { formatError } from "../lib/error-format";
+import type { ClientLog } from "../types";
 import { LogsPanel } from "./LogsPanel";
 
 /** The pages that carry a Pipeline, and the file name their export takes. */
@@ -18,6 +19,12 @@ export type PipelinePage = "AAF Audio" | "String Outs";
 const FILE_PREFIX: Record<PipelinePage, string> = { "AAF Audio": "aaf-audio-diagnostics", "String Outs": "string-outs-diagnostics" };
 /** The most AAF Audio documents one export describes (each context carries a whole manifest). */
 const MAX_CONTEXTS = 4;
+/**
+ * One clock for every row. `toLocaleTimeString` builds a new formatter on each
+ * call and the panel formats every row it holds: 54 ms for 2,400 rows in
+ * WebKit, paid on every render. The same options, so the same text.
+ */
+const ROW_TIME = new Intl.DateTimeFormat([], { hour: "numeric", minute: "numeric", second: "numeric", hour12: false });
 
 const validHealth = (value: unknown): value is PipelineHealth => !!value && typeof value === "object"
   && Array.isArray((value as PipelineHealth).volumes) && Array.isArray((value as PipelineHealth).running_jobs)
@@ -138,10 +145,16 @@ export function PipelinePanel({ page, active, open, onOpenChange, documentId, er
       if (mounted.current) setRows(snapshot.events);
     } catch (cause) { add(`Could not clear diagnostics: ${formatError(cause)}`, "err"); }
   };
+  // Built when the rows change, not when the activity pill does: String Outs
+  // opened a string out with 121 calls in a row and paid for every row twice
+  // a call, which was most of its 28 seconds.
+  const lines = useMemo(() => rows.map((row, index): ClientLog => ({ id: index, ts: ROW_TIME.format(row.timestamp_ms),
+    tag: row.level === "err" ? "err" : row.level === "warn" ? "warn" : row.level === "ok" ? "ok" : "info",
+    source: row.stage === "health" ? "HEALTH" : row.stage === "String Outs" || row.stage === "AAF Audio" ? "PAGE" : "AAF", message: `${row.stage} · ${row.message}` })), [rows]);
   const busy = loading || jobs.size > 0 || activity.busy;
   return <LogsPanel open={open} onToggle={() => onOpenChange(!open)} status={busy ? "fetching" : error ? "error" : documentId ? "loaded" : "empty"} progress={0}
     activityLabel={activity.waiting ? "WAITING" : busy ? "WORKING" : undefined} actionsDisabled={saving}
     emptyMessage={emptyMessage ?? "Nothing logged yet. Export diagnostics includes the app's health, what the page is waiting on, and every recent operation."}
-    lines={rows.map((row, index) => ({ id: index, ts: new Date(row.timestamp_ms).toLocaleTimeString([], { hour12: false }), tag: row.level === "err" ? "err" : row.level === "warn" ? "warn" : row.level === "ok" ? "ok" : "info", source: row.stage === "health" ? "HEALTH" : row.stage === "String Outs" || row.stage === "AAF Audio" ? "PAGE" : "AAF", message: `${row.stage} · ${row.message}` }))}
+    lines={lines}
     onExportDiagnostics={() => void exportReport()} onCopy={() => void copy()} onClear={() => void clear()} />;
 }

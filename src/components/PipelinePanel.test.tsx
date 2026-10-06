@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AafDiagnosticEvent } from "../bindings/AafDiagnosticEvent";
 import type { AafDiagnostics } from "../bindings/AafDiagnostics";
 import { useState } from "react";
-import { setPipelineContext } from "../lib/pipeline";
+import { pipelineInvoke, setPipelineContext } from "../lib/pipeline";
 import { PipelinePanel, type PipelinePage } from "./PipelinePanel";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn(), save: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -72,6 +72,27 @@ it("applies a burst of ordinary rows in one batch rather than one render per eve
   expect(screen.queryByText(/checked mic 49/)).toBeNull();
   await waitFor(() => expect(screen.getByText(/checked mic 49/)).toBeTruthy());
   expect(screen.getAllByText(/checked mic/)).toHaveLength(50);
+});
+it("formats each row's time once, not again for every call a page makes", async () => {
+  // String Outs opening a string out: 121 calls in a row, each re-rendering
+  // the pill. Every render used to rebuild every row with toLocaleTimeString.
+  const rows: AafDiagnosticEvent[] = Array.from({ length: 300 }, (_, index) => ({ ...event, id: `row-${index}`, level: "info", message: `row ${index}`, active: null }));
+  mocks.invoke.mockImplementation((command: string) => Promise.resolve(command === "aaf_diagnostics" ? { ...snapshot, events: rows } : "ok"));
+  // ECMA-402 makes `format` a getter on the prototype; TypeScript types it as a method.
+  const formats = vi.spyOn(Intl.DateTimeFormat.prototype as unknown as { format: unknown }, "format", "get");
+  const perRow = vi.spyOn(Date.prototype, "toLocaleTimeString");
+  render(<MultitrackPipeline page="String Outs" />);
+  fireEvent.click(screen.getByLabelText("Pipeline log"));
+  await waitFor(() => expect(screen.getByText(/row 299/)).toBeTruthy());
+  const hydrated = formats.mock.calls.length;
+  expect(hydrated).toBeGreaterThanOrEqual(rows.length);
+  const call = pipelineInvoke("String Outs");
+  for (let index = 0; index < 20; index++) await act(async () => { await call("aaf_speech", { documentId: "d", trackId: String(index) }); });
+  expect(screen.getByText("WORKING")).toBeTruthy();
+  await waitFor(() => expect(screen.queryByText("WORKING")).toBeNull());
+  expect(formats.mock.calls.length).toBe(hydrated);
+  expect(perRow).not.toHaveBeenCalled();
+  formats.mockRestore(); perRow.mockRestore();
 });
 it("exports String Outs with what the string out is doing and every AAF Audio document it reads", async () => {
   mocks.save.mockResolvedValue("/chosen/string-outs.txt");

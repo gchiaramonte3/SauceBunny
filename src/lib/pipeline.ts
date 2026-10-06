@@ -79,7 +79,26 @@ export function callStats(): CallStat[] {
   return [...stats.values()].sort((a, b) => b.totalMs - a.totalMs);
 }
 
+/**
+ * How long nothing must be in flight before the pill says so. String Outs
+ * reads a string out's mics one call after another (121 for eight sequences),
+ * and the pill went idle and busy again between every two of them: two
+ * renders of the whole Pipeline per call.
+ */
+const IDLE_AFTER_MS = 150;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
 function changed() {
+  if (inflight.size === 0 && activity.busy) {
+    // Going idle waits a moment, and a call that starts meanwhile cancels it.
+    if (idleTimer === null) idleTimer = setTimeout(() => { idleTimer = null; publish(); }, IDLE_AFTER_MS);
+    return;
+  }
+  if (idleTimer !== null) { clearTimeout(idleTimer); idleTimer = null; }
+  publish();
+}
+
+function publish() {
   const waiting = inFlight().find((call) => call.warned)?.label ?? null;
   const next = { busy: inflight.size > 0, waiting };
   // Only a change the pill can show notifies: a page making hundreds of calls must not re-render the log for each.

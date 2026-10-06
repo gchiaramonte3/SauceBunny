@@ -57,6 +57,14 @@ All notable changes to Sauce Bunny. Format loosely follows
   the narrowest window.
 
 ### Fixed
+- **String Outs opens a string out in seconds, not half a minute.** Opening
+  one reads every mic with a call apiece, one after another (121 for eight
+  sequences), and each call re-rendered the Pipeline at the foot of the page
+  twice, re-formatting every row it held each time: about 28 s on a
+  production string out whose reads took half a second. The Pipeline now
+  builds its rows only when they change, and its WORKING label stays on
+  across calls made back to back. AAF Audio, which shows the same Pipeline,
+  gains the same.
 - **One bleed-label pass after a transcription run, not two.** The run's
   result and its change event each re-read the sequence and each ran the
   bleed labels again (about 600 ms apiece on a 20-mic sequence). Renaming a
