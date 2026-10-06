@@ -238,7 +238,7 @@ pub async fn aaf_speech(app: AppHandle, document_id: String, track_id: String, b
 pub async fn aaf_ownership(app: AppHandle, document_id: String, build: bool, job_id: String) -> Result<ownership::AafOwnership, AppError> {
     diagnostics::operation(&app, &job_id, "ownership", &format!("Bleed labels · document {document_id} · build {build}"), async {
         let _job = process::JobGuard::begin(&app, &job_id)?;
-        ownership::resolve(&app, &document_id, build, &job_id).await
+        ownership::resolve(&app, &document_id, build, &job_id).await.map(ownership::for_page)
     }).await
 }
 
@@ -249,7 +249,7 @@ pub async fn aaf_ownership(app: AppHandle, document_id: String, build: bool, job
 pub async fn aaf_check_voices(app: AppHandle, document_id: String, job_id: String) -> Result<ownership::AafOwnership, AppError> {
     diagnostics::operation(&app, &job_id, "voices", &format!("Voice check · document {document_id}"), async {
         let _job = process::JobGuard::begin(&app, &job_id)?;
-        voices::check(&app, &document_id, &job_id).await
+        voices::check(&app, &document_id, &job_id).await.map(ownership::for_page)
     }).await
 }
 

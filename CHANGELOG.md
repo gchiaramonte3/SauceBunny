@@ -46,6 +46,11 @@ All notable changes to Sauce Bunny. Format loosely follows
   the narrowest window.
 
 ### Fixed
+- **One bleed-label pass after a transcription run, not two.** The run's
+  result and its change event each re-read the sequence and each ran the
+  bleed labels again (about 600 ms apiece on a 20-mic sequence). Renaming a
+  mic owner or a relink checkpoint no longer runs them at all, and the page
+  is no longer sent the words the labels were unsure of, which it never drew.
 - **The Transcripts page can no longer rename or delete AAF Audio's store.**
   It showed as a project called "Multitrack"; renaming it took every AAF Audio
   document out of AAF Audio and String Outs.

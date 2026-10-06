@@ -96,6 +96,39 @@ export function mergeTrackTranscript(document: AafDocument, transcript: AafTrack
   return { ...document, transcripts: [...document.transcripts.filter((item) => item.track_id !== transcript.track_id), transcript] };
 }
 
+/**
+ * One saved run, whether it reached the page as a run's result or in a
+ * re-read. Cues are compared by what places a word (id, extent, text); a
+ * word's own times change only with its cue's run.
+ */
+export function sameTranscript(a: AafTrackTranscript, b: AafTrackTranscript): boolean {
+  if (a === b) return true;
+  if (a.track_id !== b.track_id || a.start_frame !== b.start_frame || a.duration_frames !== b.duration_frames || a.engine !== b.engine
+    || a.model_id !== b.model_id || a.status !== b.status || a.cues.length !== b.cues.length || a.timing_issues.length !== b.timing_issues.length) return false;
+  return a.cues.every((cue, index) => {
+    const other = b.cues[index];
+    return cue.id === other.id && cue.start_sample === other.start_sample && cue.end_sample === other.end_sample && cue.text === other.text;
+  });
+}
+
+/**
+ * A re-read, keeping the page's own tracks, transcripts and cue calls wherever
+ * they did not change. A label save, a shoot date and every relink checkpoint
+ * re-read the whole document; with new arrays each time, everything keyed on
+ * them (the bleed pass, the reader's rows, every visible waveform request)
+ * ran again over words that had not moved.
+ */
+export function keepUnchanged(saved: AafDocument, page: AafDocument): AafDocument {
+  const tracks = JSON.stringify(saved.manifest.tracks) === JSON.stringify(page.manifest.tracks) ? page.manifest.tracks : saved.manifest.tracks;
+  const kept = saved.transcripts.map((transcript) => {
+    const held = page.transcripts.find((item) => item.track_id === transcript.track_id);
+    return held && sameTranscript(held, transcript) ? held : transcript;
+  });
+  const transcripts = kept.length === page.transcripts.length && kept.every((transcript, index) => transcript === page.transcripts[index]) ? page.transcripts : kept;
+  const ownership = JSON.stringify(saved.ownership ?? null) === JSON.stringify(page.ownership ?? null) ? page.ownership : saved.ownership;
+  return { ...saved, manifest: { ...saved.manifest, tracks }, transcripts, ownership };
+}
+
 /** One min/max vertical stroke per pixel bin, retaining quiet detail when zoomed. */
 export function waveformPath(peaks: number[][], from = 0, to = 1, bins = 800): string {
   if (!peaks.length || to <= from) return "";

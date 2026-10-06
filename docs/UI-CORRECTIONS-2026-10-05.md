@@ -203,6 +203,20 @@ in flight; `reconcile` does not retry for the result it was told about;
 second caller waits for the first and reads its cache. The answer leaves out
 "unsure" words the page does not draw.
 
+**As built (F):** the page reads the document once after a run. The run's
+result is the one change a re-read may overlap without reading again (it was
+committed before the event), so `reconcile` adopts a read that already holds
+it, and a result the event's read delivered first is not merged twice. A
+re-read keeps the page's own tracks, transcripts and cue calls wherever they
+did not change (`keepUnchanged`), and the bleed pass is keyed on those two
+arrays, with one pass in flight; a label save, a shoot date or a relink
+checkpoint no longer runs it, and saving the editor's call leaves the reload
+to the document it changes. In Rust, `resolve` claims the document's cache
+file (the overview claim, by another path) before it reads the cache, reads
+the document's time before the document, and `for_page` leaves out
+non-manual unsure words from what `aaf_ownership` and `aaf_check_voices`
+send; the cache, which the assistants read, keeps them.
+
 ## 11. Models download in Settings, never on a page
 
 **Seen:** "Parakeet Ultra does not download where everything else downloads in

@@ -12,12 +12,29 @@ import type { AafProgress } from "../bindings/AafProgress";
 import { alternativeLane, laneReady, mediaRevision } from "../lib/multitrack-graph";
 import { formatError, isAppError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
-import { mergeTrackTranscript } from "../lib/multitrack";
+import { keepUnchanged, mergeTrackTranscript, sameTranscript } from "../lib/multitrack";
 
 /** Overview builds at once; the native gate (peaks.rs BUILD) allows the same. */
 const WAVEFORM_BUILDS = 2;
 /** One track's overview at one media revision. */
 const waveformSlot = (entry: { id: string; key: string }) => `${entry.id}\n${entry.key}`;
+/** The page as `acceptTranscript` made it: the page before, and the run's result. */
+type Accepted = WeakMap<AafDocument, { from: AafDocument; transcript: AafTrackTranscript }>;
+
+/**
+ * Whether every change between `before` and `page` is a run's result that
+ * `saved` already holds. Anything else (a label edit, another re-read) means
+ * the read may be older than the page.
+ */
+function holdsAccepted(saved: AafDocument, page: AafDocument, before: AafDocument, accepted: Accepted): boolean {
+  for (let at = page; at !== before;) {
+    const step = accepted.get(at);
+    const held = step && saved.transcripts.find((transcript) => transcript.track_id === step.transcript.track_id);
+    if (!step || !held || !sameTranscript(held, step.transcript)) return false;
+    at = step.from;
+  }
+  return true;
+}
 
 export function useMultitrackDocument(active: boolean) {
   const [document, setDocument] = useState<AafDocument | null>(null);
@@ -45,6 +62,7 @@ export function useMultitrackDocument(active: boolean) {
     setWaveformsFor(prior => on ? documentId : prior === documentId ? null : prior), []);
   const [waveformsBuilding, setWaveformsBuilding] = useState<string[]>([]);
   const current = useRef(document); current.current = document;
+  const accepted = useRef<Accepted>(new WeakMap());
   const importJob = useRef<string | null>(null);
   const revision = useRef(0);
   const saves = useRef(new Map<string, Promise<void>>());
@@ -129,6 +147,10 @@ export function useMultitrackDocument(active: boolean) {
 
   // Read only after queued owner writes. Never apply a resolver's old snapshot
   // over a newer label edit, transcript commit, or different open document.
+  // A run's own result is the one change a read may overlap without reading
+  // again: the run committed before it said so, so a read that holds the
+  // result is no older than the page. Reading again was the second `aaf_open`
+  // (and, with a new document, the second bleed pass) after every run.
   const reconcile = useCallback(async (id: string, token: number) => {
     for (;;) {
       const pending = saves.current.get(id);
@@ -136,12 +158,13 @@ export function useMultitrackDocument(active: boolean) {
       const before = current.current;
       if (!mounted.current || token !== revision.current || before?.id !== id) return;
       const saved = await invoke<AafDocument>("aaf_open", { documentId: id });
-      if (!mounted.current || token !== revision.current || current.current?.id !== id) return;
-      if (pending !== saves.current.get(id) || current.current !== before) continue;
-      // Preserve track-array identity for graph-only checkpoints: other lanes
-      // becoming available must not restart every visible waveform request.
-      const tracks = JSON.stringify(saved.manifest.tracks) === JSON.stringify(before.manifest.tracks) ? before.manifest.tracks : saved.manifest.tracks;
-      const next = { ...saved, manifest: { ...saved.manifest, tracks } };
+      const page = current.current;
+      if (!mounted.current || token !== revision.current || page?.id !== id) return;
+      if (pending !== saves.current.get(id) || (page !== before && !holdsAccepted(saved, page, before, accepted.current))) continue;
+      // Unchanged parts keep their identity: other lanes becoming available
+      // must not restart every visible waveform request, nor a label save the
+      // bleed pass.
+      const next = keepUnchanged(saved, page);
       current.current = next; setDocument(next); return;
     }
   }, []);
@@ -305,7 +328,12 @@ export function useMultitrackDocument(active: boolean) {
   const acceptTranscript = useCallback((transcript: AafTrackTranscript) => {
     const before = current.current;
     if (!before) return;
-    const next = mergeTrackTranscript(before, transcript); current.current = next; setDocument(next);
+    // The run's change event can deliver it first: a re-read that already
+    // holds it needs no second copy, and a second copy is a second bleed pass.
+    const held = before.transcripts.find((item) => item.track_id === transcript.track_id);
+    if (held && sameTranscript(held, transcript)) return;
+    const next = mergeTrackTranscript(before, transcript); accepted.current.set(next, { from: before, transcript });
+    current.current = next; setDocument(next);
   }, []);
   return { document, saved, loading, resolving, mediaProgress, stopResolution, error, labelStatus, waveforms, waveformErrors, sourceOffline, retrySource, setWaveformsOn, waveformsBuilding, load, cancelImport, rename, retryLabels, retryWaveform, acceptTranscript, showTracks,
     sequenceChoices, chooseSequence: (id: string) => { if (sequenceChoices) void load(undefined, sequenceChoices.path, id); }, cancelChoice: () => setSequenceChoices(null) };

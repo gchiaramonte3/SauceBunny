@@ -20,6 +20,8 @@ pub(super) static BUILD: tokio::sync::Semaphore = tokio::sync::Semaphore::const_
 /// DIFFERENT tracks: the same track asked for twice at once (AAF Audio's
 /// overview while String Outs measures that mic) waits for the first build
 /// and reads its result, rather than reading every file again over NEXIS.
+/// Bleed labels being computed are claimed here too, by THEIR cache file
+/// (ownership.rs), which no overview path can equal.
 static BUILDING: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 /// This request's claim on building one overview, released when dropped.
@@ -34,11 +36,11 @@ pub(super) async fn claim(app: &AppHandle, job: &str, path: &Path) -> Result<Cla
     claim_until(path, || process::check_cancelled(app, job)).await
 }
 
-async fn claim_until(path: &Path, check: impl Fn() -> Result<(), AppError>) -> Result<Claim, AppError> {
+pub(super) async fn claim_until(path: &Path, check: impl Fn() -> Result<(), AppError>) -> Result<Claim, AppError> {
     loop {
         check()?;
         {
-            let mut held = BUILDING.lock().map_err(|_| AppError::internal("Waveform builds are unavailable"))?;
+            let mut held = BUILDING.lock().map_err(|_| AppError::internal("Waveform and bleed-label builds are unavailable"))?;
             if !held.iter().any(|other| other == path) { held.push(path.to_path_buf()); return Ok(Claim(path.to_path_buf())); }
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;

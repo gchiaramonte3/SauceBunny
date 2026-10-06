@@ -85,6 +85,10 @@ fn modified(path: &Path) -> u64 { std::fs::metadata(path).map(|meta| store::modi
 
 pub async fn resolve(app: &AppHandle, document_id: &str, build: bool, job: &str) -> Result<AafOwnership, AppError> {
     let root = store::root(app)?;
+    // The document's time is read BEFORE the document: a save landing in
+    // between then makes the stamp older than the answer (computed again next
+    // time) rather than newer (an answer about the old words, trusted).
+    let document_time = modified(&store::document_file(&root, document_id)?);
     let document = store::load(&root, document_id)?;
     let transcribed: HashSet<&str> = document.transcripts.iter().map(|transcript| transcript.track_id.as_str()).collect();
     let wanted: Vec<&AafTrack> = document.manifest.tracks.iter().filter(|track| transcribed.contains(track.id.as_str())).collect();
@@ -106,18 +110,40 @@ pub async fn resolve(app: &AppHandle, document_id: &str, build: bool, job: &str)
     let voiceprints = super::voices::file(&app_data, document_id);
     // The document's time comes FIRST: the context layer trusts a cache only
     // when that part matches the document as it is now.
-    let stamp = format!("{}:{}:voices={}", modified(&store::document_file(&root, document_id)?),
+    let stamp = format!("{document_time}:{}:voices={}",
         overviews.iter().map(|(id, path)| format!("{id}={}", modified(path))).collect::<Vec<_>>().join(","), modified(&voiceprints));
-    let cached = cache_file(&app_data, document_id);
-    if let Ok(previous) = store::read_json::<AafOwnership>(&cached) {
+    once(&cache_file(&app_data, document_id), stamp, || process::check_cancelled(app, job), move |stamp| {
+        let voices = store::read_json::<super::voices::Voiceprints>(&voiceprints).ok();
+        compute(&document, &overviews, missing, stamp, voices.as_ref())
+    }).await
+}
+
+/// The cached answer when it describes `stamp`, or a new one, written for the
+/// next caller. One caller per document at a time: a transcription run used
+/// to start two passes at once (its change event and its own result each
+/// re-read the document), both missed the cache the commit had just outdated,
+/// and each spent ~600 ms computing the same answer. The second now waits,
+/// cancellably, and reads what the first wrote.
+async fn once(cached: &Path, stamp: String, check: impl Fn() -> Result<(), AppError>,
+    work: impl FnOnce(String) -> Result<AafOwnership, AppError> + Send + 'static) -> Result<AafOwnership, AppError> {
+    let _claim = peaks::claim_until(cached, check).await?;
+    if let Ok(previous) = store::read_json::<AafOwnership>(cached) {
         if previous.stamp == stamp { return Ok(previous); }
     }
-    let voices = store::read_json::<super::voices::Voiceprints>(&voiceprints).ok();
-    let answer = tauri::async_runtime::spawn_blocking(move || compute(&document, &overviews, missing, stamp, voices.as_ref())).await
+    let answer = tauri::async_runtime::spawn_blocking(move || work(stamp)).await
         .map_err(|e| AppError::internal(e.to_string()))??;
     if let Some(dir) = cached.parent() { std::fs::create_dir_all(dir)?; }
     crate::commands::system::write_bytes_impl(&cached.to_string_lossy(), &serde_json::to_vec(&answer)?, false, false, true)?;
     Ok(answer)
+}
+
+/// The answer as a page is sent it (AAF Audio's reader, String Outs): words
+/// the resolver was unsure of are left out, because neither draws them, and
+/// their count stays (it is what offers the voice check). The cache keeps
+/// every word, for the assistants. The editor's own calls always go.
+pub fn for_page(mut answer: AafOwnership) -> AafOwnership {
+    answer.words.retain(|word| word.label != AafOwnershipLabel::Unsure || word.manual);
+    answer
 }
 
 /// What the resolver saw and said: every channel's level, every placed word,
@@ -262,6 +288,47 @@ mod tests {
         assert_eq!((dev.label, dev.manual), (AafOwnershipLabel::Owner, true));
         assert_eq!(answer.counts.bleed, 0);
         assert_eq!(answer.missing, ["x"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn answer(stamp: String, words: Vec<AafWordOwnership>) -> AafOwnership {
+        AafOwnership { document_id: "d".repeat(64), measured: vec!["rosa".into(), "dev".into()], missing: vec![], words, counts: AafOwnershipCounts::default(),
+            stamp, warnings: vec![], voices: 0, separation_db: None }
+    }
+
+    #[test]
+    fn the_page_is_not_sent_unsure_words_but_is_still_told_how_many_there_are() {
+        let word = |index: u32, label: AafOwnershipLabel, manual: bool| AafWordOwnership { track_id: "dev".into(), cue_id: "dev-1".into(), index, label,
+            heard_on: None, delta_db: 0.0, manual };
+        let mut full = answer("s".into(), vec![word(0, AafOwnershipLabel::Bleed, false), word(1, AafOwnershipLabel::Unsure, false),
+            word(2, AafOwnershipLabel::Unsure, true), word(3, AafOwnershipLabel::Overtalk, false)]);
+        full.counts.unsure = 2;
+        let page = for_page(full);
+        // The editor's own call stays whatever it says.
+        assert_eq!(page.words.iter().map(|word| (word.index, word.label)).collect::<Vec<_>>(),
+            [(0, AafOwnershipLabel::Bleed), (2, AafOwnershipLabel::Unsure), (3, AafOwnershipLabel::Overtalk)]);
+        assert_eq!(page.counts.unsure, 2, "the count is what offers the voice check");
+    }
+
+    #[tokio::test]
+    async fn two_passes_over_one_document_compute_once_and_a_changed_document_computes_again() {
+        let dir = std::env::temp_dir().join(format!("ownership-{}", uuid::Uuid::new_v4()));
+        let cached = dir.join("ownership").join("d.json");
+        let runs = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let pass = |stamp: &str| {
+            let runs = runs.clone();
+            once(&cached, stamp.to_string(), || Ok(()), move |stamp| {
+                runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                // Long enough that the second caller arrives while this one computes.
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                Ok(answer(stamp, vec![]))
+            })
+        };
+        let (first, second) = tokio::join!(pass("1:a=1:voices=0"), pass("1:a=1:voices=0"));
+        assert_eq!((first.unwrap().stamp, second.unwrap().stamp), ("1:a=1:voices=0".to_string(), "1:a=1:voices=0".to_string()));
+        assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1, "the second caller computed the same answer again");
+        assert_eq!(pass("2:a=1:voices=0").await.unwrap().stamp, "2:a=1:voices=0");
+        assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 2, "a changed document read the old answer");
         std::fs::remove_dir_all(&dir).ok();
     }
 
