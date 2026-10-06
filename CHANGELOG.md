@@ -40,6 +40,17 @@ All notable changes to Sauce Bunny. Format loosely follows
   Ultra beside TDT v3, each with Download, Cancel and Delete. AAF Audio no
   longer downloads anything: it says which model is missing, with Download
   in Settings…, and notices when Settings installs it.
+- **AAF Audio transcripts can be organized in Transcripts.** Right-click one
+  to rename it, move it to a project, open it in AAF Audio or String Outs,
+  reveal its AAF in Finder or remove it from the page; drag it onto a project
+  heading to file it there, and onto the AAF Audio heading to take it out.
+  Renaming changes the name Sauce Bunny shows everywhere, never the
+  sequence's name in the AAF. Selecting one shows its file, tracks, people,
+  shoot date and length above the transcript, with Open in AAF Audio and
+  Open in String Outs. AAF Audio transcripts are now named as AAF Audio and
+  String Outs name them, by sequence rather than by file.
+- **Dragging several selected transcripts onto a project moves them all.**
+  Only the first one moved before.
 - **String Outs' dividers move.** Drag the lines beside Ask, between the source
   and the record, and above the timeline, or use the arrow keys; double-click
   or Home resets, and the sizes are kept. The record pane keeps its room at

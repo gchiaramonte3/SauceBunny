@@ -204,6 +204,21 @@ pub fn labels(root: &Path, id: &str, labels: Vec<AafTrackLabel>) -> Result<AafDo
     Ok(document)
 }
 
+/// Name the document for the editor (Transcripts' Rename), or with None or a
+/// blank name go back to the sequence's own. Only the title changes: the
+/// manifest's name is what a re-import finds the document by.
+pub fn retitle(root: &Path, id: &str, title: Option<String>) -> Result<AafDocument, AppError> {
+    let title = title.map(|title| title.trim().to_string()).filter(|title| !title.is_empty());
+    if title.as_ref().is_some_and(|title| title.chars().count() > 200 || title.chars().any(char::is_control)) {
+        return Err(AppError::invalid("Use a name of up to 200 characters, on one line"));
+    }
+    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
+    let mut document = load(root, id)?;
+    document.title = title;
+    write(root, &document)?;
+    Ok(document)
+}
+
 /// Record (or, with None, clear) the editor's call on who said one cue. Only
 /// Owner and Bleed can be said by hand; the cue must exist, and a bleed call
 /// names a real track as the source.
@@ -358,14 +373,14 @@ fn summarize_with_identity(root: &Path, id: &str, path: &Path) -> Result<(AafDoc
     #[derive(serde::Deserialize)]
     struct Manifest { name: String, tracks: Vec<serde::de::IgnoredAny>, #[serde(default)] source_fingerprint: String, #[serde(default)] duration_frames: i64 }
     #[derive(serde::Deserialize)]
-    struct Summary { schema_version: u32, id: String, source_path: String, manifest: Manifest, transcripts: Vec<serde::de::IgnoredAny> }
+    struct Summary { schema_version: u32, id: String, source_path: String, manifest: Manifest, transcripts: Vec<serde::de::IgnoredAny>, #[serde(default)] title: Option<String> }
     let document: Summary = read_json(&document_path(root, id)?)?;
     if !(1..=DOCUMENT_SCHEMA_VERSION).contains(&document.schema_version) {
         return Err(AppError::invalid("This multitrack document was saved by an unsupported version. Update Sauce Bunny."));
     }
     if document.id != id { return Err(AppError::invalid("AAF Audio document identity does not match its filename")); }
     let identity = (document.manifest.source_fingerprint, document.manifest.duration_frames);
-    Ok((AafDocumentSummary { id: document.id, name: document.manifest.name,
+    Ok((AafDocumentSummary { id: document.id, name: document.manifest.name, title: document.title,
         track_count: document.manifest.tracks.len() as u32,
         transcribed_tracks: document.transcripts.len() as u32, source_path: document.source_path,
         modified_ms: Some(modified_ms(&std::fs::metadata(path)?)) }, identity))
@@ -598,7 +613,7 @@ mod tests {
         assert_eq!(merge_transcript(Some(before), run(0, 100, &[], &[]), &rate).unwrap().gaps, None);
     }
     fn fixture() -> AafDocument {
-        AafDocument { schema_version: 1, shoot_date_override: None, ownership: None, id: "a".repeat(64), source_path: "/tmp/source.aaf".into(),
+        AafDocument { schema_version: 1, shoot_date_override: None, ownership: None, title: None, id: "a".repeat(64), source_path: "/tmp/source.aaf".into(),
             source_size: 1, source_modified_ms: 0,
             manifest: AafManifest { schema_version: 1, graph: None, recording_dates: None, name: "Test".into(), source_fingerprint: "b".repeat(64),
                 edit_rate: AafRate { numerator: 24000, denominator: 1001 }, start_frame: 0, duration_frames: 240,
@@ -608,6 +623,27 @@ mod tests {
                     source_start_sample: None, sample_rate: None, warnings: vec![] }], warnings: vec![] }], warnings: vec![] },
             labels: vec![AafTrackLabel { track_id: "10".into(), owner_name: "Café".into(), cast_member_id: None, color: None, gender: None, marker_color: None }],
             transcripts: vec![] }
+    }
+
+    #[test]
+    fn a_title_names_the_document_and_leaves_its_sequence_name_alone() {
+        let root = std::env::temp_dir().join(format!("aaf-title-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let doc = fixture();
+        create(&root, &doc).unwrap();
+        let named = retitle(&root, &doc.id, Some("  Day 3, kitchen  ".into())).unwrap();
+        assert_eq!((named.title.as_deref(), named.manifest.name.as_str()), (Some("Day 3, kitchen"), "Test"));
+        let listed = list(&root).unwrap();
+        assert_eq!((listed[0].title.as_deref(), listed[0].name.as_str()), (Some("Day 3, kitchen"), "Test"));
+        // A blank name goes back to the sequence's; a long or two-line one is refused.
+        assert!(retitle(&root, &doc.id, Some("   ".into())).unwrap().title.is_none());
+        assert!(retitle(&root, &doc.id, Some("x".repeat(201))).is_err());
+        assert!(retitle(&root, &doc.id, Some("two\nlines".into())).is_err());
+        // Importing the same AAF again finds the document by its sequence and keeps the name.
+        retitle(&root, &doc.id, Some("Kept".into())).unwrap();
+        let again = import(&root, AafDocument { id: "c".repeat(64), ..fixture() }).unwrap();
+        assert_eq!((again.id.as_str(), again.title.as_deref()), (doc.id.as_str(), Some("Kept")));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

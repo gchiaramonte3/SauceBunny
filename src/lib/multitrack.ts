@@ -173,6 +173,16 @@ export function exportMultitrack(document: AafDocument, format: "csv" | "txt"): 
 }
 
 /**
+ * A document's own name: the title the editor gave it in Transcripts, else
+ * its sequence's name. Every page that names a document asks here; the
+ * Transcripts page used the AAF's filename and the sequence menus the
+ * sequence's name, so one document went by two names.
+ */
+export function documentName(item: AafDocumentSummary | AafDocument): string {
+  return item.title?.trim() || ("manifest" in item ? item.manifest.name : item.name);
+}
+
+/**
  * What a sequence picker shows for each saved sequence: its name, and where
  * two share a name (Avid exports are often all "Sequence.Exported.01") the
  * file it came from too, then when it was saved if even that is shared.
@@ -183,9 +193,12 @@ export function sequenceLabels(items: AafDocumentSummary[]): Map<string, string>
     for (const item of items) counts.set(label(item), (counts.get(label(item)) ?? 0) + 1);
     return counts;
   };
-  const names = tally((item) => item.name);
-  const withFile = (item: AafDocumentSummary) => (names.get(item.name) ?? 0) > 1 ? `${item.name} · ${item.source_path.split("/").pop() || item.source_path}` : item.name;
+  const names = tally(documentName);
+  const withFile = (item: AafDocumentSummary) => (names.get(documentName(item)) ?? 0) > 1 ? `${documentName(item)} · ${item.source_path.split("/").pop() || item.source_path}` : documentName(item);
   const files = tally(withFile);
   const when = (ms: number) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return new Map(items.map((item) => [item.id, (files.get(withFile(item)) ?? 0) > 1 && item.modified_ms ? `${withFile(item)} · ${when(item.modified_ms)}` : withFile(item)]));
+  const withDate = (item: AafDocumentSummary) => (files.get(withFile(item)) ?? 0) > 1 && item.modified_ms ? `${withFile(item)} · ${when(item.modified_ms)}` : withFile(item);
+  // Two imports of one file saved in the same minute still read differently.
+  const dates = tally(withDate);
+  return new Map(items.map((item) => [item.id, (dates.get(withDate(item)) ?? 0) > 1 ? `${withDate(item)} · ${item.id.slice(0, 8)}` : withDate(item)]));
 }

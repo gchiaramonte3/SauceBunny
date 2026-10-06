@@ -5,6 +5,7 @@ import { useEditSources } from "../hooks/use-edit-sources";
 import { addSource } from "../lib/edit-new";
 import { EditAddSource } from "./EditAddSource";
 import { EditEditor } from "./EditEditor";
+import { documentName } from "../lib/multitrack";
 
 type Props = { editId: string; active: boolean; onClose: () => void; onOpenEdit: (id: string) => void; onSettings: () => void; appLocalModelId: string | null | undefined;
   /** The open edit's title, as it changes, for its tab. */ onTitle?: (title: string) => void;
@@ -35,7 +36,7 @@ export function EditWorkspace({ editId, active, onClose, onOpenEdit, onSettings,
       commit={session.commit} undo={() => void session.undo()} redo={() => void session.redo()} jump={(state) => void session.jump(state)}
       pin={(state, name) => void session.pin(state, name)} onClose={onClose} onOpenEdit={onOpenEdit} onSettings={onSettings} appLocalModelId={appLocalModelId} sourceMarks={sourceMarks}
       addSource={<EditAddSource exclude={document.sources.map((source) => source.document_id)} onError={setAddError}
-        onAdd={(aaf) => { setAddError(null); void session.commit(`Add ${aaf.manifest.name}`, (open) => ({ document: addSource(open.document, aaf) })); }} />} />
+        onAdd={(aaf) => { setAddError(null); void session.commit(`Add ${documentName(aaf)}`, (open) => ({ document: addSource(open.document, aaf) })); }} />} />
     {(session.error || addError) && <p className="cp-te-errors cp-te-session-error" role="alert">{session.error ?? addError}</p>}
   </>;
 }

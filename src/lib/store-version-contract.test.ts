@@ -17,7 +17,7 @@ const {
 const { CAST_SCHEMA_VERSION, __resetCastStore, castsAreReadOnly, getCastError, getCasts, hydrateCastStore, saveCast, flushCasts } =
   await import("./cast-store");
 const { newCast } = await import("./cast");
-const { __resetProjectStore, hydrateProjects, editProject, getProjects } =
+const { PROJECTS_SCHEMA_VERSION, __resetProjectStore, hydrateProjects, editProject, getProjects } =
   await import("./transcript-project-store");
 
 const LIB = "/Users/x/Documents/Sauce Bunny/Transcripts";
@@ -150,7 +150,7 @@ describe("a store file from a newer build is never overwritten", () => {
     invoke.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
       if (cmd === "read_text_file_capped") {
         return JSON.stringify({
-          version: STORE_SCHEMA_VERSION + 1,
+          version: PROJECTS_SCHEMA_VERSION + 1,
           projects: [{ folder: "Doc", title: "Docs", createdMs: 1 }],
         });
       }
@@ -189,7 +189,7 @@ describe("every file store consults the version it writes", () => {
       // STORE_SCHEMA_VERSION the sweep stopped matching anything at all and
       // went green over an empty set - reporting perfect conformance for the
       // very change it should have been checking.
-      const stamps = /version:\s*(\d+|STORE_SCHEMA_VERSION|CAST_SCHEMA_VERSION)\s*[,}]/.test(src)
+      const stamps = /version:\s*(\d+|STORE_SCHEMA_VERSION|CAST_SCHEMA_VERSION|PROJECTS_SCHEMA_VERSION)\s*[,}]/.test(src)
         || /"version":\s*\d+/.test(src);
       if (!stamps) continue;
       stampers.push(name);

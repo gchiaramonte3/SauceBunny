@@ -455,6 +455,30 @@ different ways.
   people, shoot date, duration and the two Open buttons.
 - While here: dropping several selected transcripts moves all of them.
 
+**As built (G):** an AAF Audio document has an optional `title`, set by
+`aaf_rename` (async, emits the change event, trims, a blank goes back to the
+sequence's name, refuses more than 200 characters or a second line);
+re-imports find the document by its sequence and keep the title. Every page
+names a document with `documentName` (title, else sequence name), so the
+Transcripts list now reads as the sequence menus do, with the file, then the
+save time, then the id's start where names collide. `projects.json` is
+version 2 with `documents` per project (`fileDocuments`, one project per
+document, a project made a moment ago can take one before the rescan lists
+it). On the page the AAF Audio group is an ordinary group heading: its fold
+is saved, it is the target that takes a document back out of a project, and
+it starts open. AAF rows carry `aaf:<id>` where transcripts carry a path, so
+they drag onto a project heading (not a month bucket) and are filed there by
+reference; the band selection leaves them out, since every batch verb takes
+paths. Right-click: Rename…, Move to project… (with Create & move), Open in AAF
+Audio, Open in String Outs, Reveal AAF in Finder, Remove from Transcripts (a
+hide by `aaf:<id>`, restored with the Library's removals in Settings ▸
+General). The right pane leads with a summary: the name (and the sequence's,
+when titled), file, tracks and how many are transcribed, people, shoot date,
+duration, and Open in AAF Audio and Open in String Outs. Dropping several
+selected transcripts moves every one, and the ghost counts them. Not done:
+AAF rows join the multi-selection, and the assistants still list sequences by
+the sequence's name.
+
 ## 18. Review full screen, redesigned
 
 **Seen:** a co-review session in full screen sharing an application window.

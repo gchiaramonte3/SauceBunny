@@ -203,6 +203,13 @@ pub struct AafDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub ownership: Option<Vec<AafCueOwnership>>,
+    /// The editor's own name for the document (Transcripts' Rename). The
+    /// sequence's name in the manifest is never overwritten: re-imports find
+    /// their document by it and String Outs keeps it. An older build reads a
+    /// titled document and drops the title on its next save.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
 }
 
 /// "This cue is Rosa's" or "this cue is bleed from Dev's mic", said by the editor.
@@ -221,7 +228,11 @@ pub struct AafCueOwnership {
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct AafDocumentSummary {
     pub id: String,
+    /// The sequence's name. Pages show `title` first (`documentName`).
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub title: Option<String>,
     pub track_count: u32,
     pub transcribed_tracks: u32,
     pub source_path: String,

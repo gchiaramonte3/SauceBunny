@@ -28,7 +28,7 @@ export function MultitrackPage({ active, onOpenSettings, onOpenInStringOuts, aiM
   // copy (reopened from the Library or a string out), so it stays choosable.
   const current = state.document;
   const shelf = useMemo(() => current && !state.saved.some((item) => item.id === current.id)
-    ? [...state.saved, { id: current.id, name: current.manifest.name, track_count: current.manifest.tracks.length, transcribed_tracks: current.transcripts.length, source_path: current.source_path }]
+    ? [...state.saved, { id: current.id, name: current.manifest.name, title: current.title, track_count: current.manifest.tracks.length, transcribed_tracks: current.transcripts.length, source_path: current.source_path }]
     : state.saved, [current, state.saved]);
   const labels = useMemo(() => sequenceLabels(shelf), [shelf]);
   useEffect(() => {

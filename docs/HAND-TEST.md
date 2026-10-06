@@ -1181,6 +1181,27 @@ the acceptance test for whenever the verdict UI gets built.
    the size goes to zero, Waveforms and the bleed labels are still there,
    and Play prepares the audio again.
 
+### October 5: AAF Audio documents in Transcripts (item 17)
+
+1. Open Transcripts with a transcribed AAF Audio sequence. It is listed under
+   AAF Audio by its sequence's name, as AAF Audio's menu names it.
+2. Right-click it: Rename…, Move to project…, Open in AAF Audio, Open in
+   String Outs, Reveal AAF in Finder, Remove from Transcripts, reachable with
+   the arrow keys. Rename it: the new name shows here, in AAF Audio's heading
+   and menu, and in String Outs' Add sequence. Open the AAF in Media Composer
+   (or look at the sequence): its name is unchanged. Rename it to nothing: the
+   sequence's name comes back.
+3. Drag it onto a project heading: it is listed inside the project, and
+   AAF Audio says every transcript is in a project. Quit and reopen: it is
+   still there. Drag it onto the AAF Audio heading: it comes back out. Move to
+   project… does the same from the menu, and Create & move makes a project.
+4. Click it: above the transcript, its file, tracks, people, shoot date and
+   length, with Open in AAF Audio and Open in String Outs. Each opens it.
+5. Remove from Transcripts: it leaves this page only. Settings ▸ General ▸
+   Removed from the Library or Transcripts brings it back.
+6. Select two transcripts with ⌘-click and drag them onto a project: the
+   ghost says "2 transcripts" and both move.
+
 ### October 5: AAF Audio's Transcript panel (item 14)
 
 1. Open a transcribed sequence at the narrowest window. Under the person tabs:
