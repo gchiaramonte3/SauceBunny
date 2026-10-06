@@ -16,8 +16,8 @@ changes"). One item jumps the queue: **1** is a data-loss hazard found while
 reading the Transcripts page, and it is a few lines.
 
 **Status (2026-10-05):** items 1 to 8 are built (pull request A), 9, 12 and
-13 (pull request B), and 11 (pull request C). The rest are taken one at a
-time in this order, each as its own pull request.
+13 (pull request B), 11 (pull request C), and 14 (pull request D). The rest
+are taken one at a time in this order, each as its own pull request.
 
 | # | Item | What it is | Effort | PR |
 |---|---|---|---|---|
@@ -317,6 +317,20 @@ explanation lives in its chip's popover.
 **Done when:** at 1100×700 the first transcript line sits right under the
 search row, every control is reachable by keyboard, and `no-bleed`,
 `target-size` and `accessible-names` stay green.
+
+**As built (D):** the search field carries AI search as a pressed-state
+button at its end (Stop joins it while a search runs; Return searches, so the
+Search button and the "Press Enter" line are gone). One chip row:
+`MultitrackBleedChip` ("Bleed · 2 dimmed", "Bleed not measured", "Measuring
+mics…"), whose popover holds Hide bleed, its one sentence, Measure mics and
+Check voices; "N to review", which switches to All voices and scrolls to the
+passages; and `MultitrackRunChip` ("2 of 3 tracks saved · 1 failed",
+"Generating…"), which opens Transcript info. A bleed error stays visible
+under the chips. The footer is one row: format, Export {person} and a chevron
+(`MultitrackExportMore`) for Export selected, Entire transcript, Avid files
+by mic or person, the SRT note and the shoot date. The three popovers, and
+item 5's, share `AnchoredPopover`. `MultitrackBleedBar` and
+`MultitrackRunInfo` are gone.
 
 ## 15. String Outs: removed lines stop flooding the page
 

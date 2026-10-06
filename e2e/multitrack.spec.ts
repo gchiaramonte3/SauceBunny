@@ -15,6 +15,13 @@ async function chooseTranscript(page: Page, region: Locator, name: string) {
   await page.getByRole("menuitemradio", { name: label }).click();
 }
 
+/** Exports beyond the person on screen sit behind the footer's chevron, in a popover drawn on the page. */
+async function exportMore(page: Page, region: Locator, name: string) {
+  const dialog = page.getByRole("dialog", { name: "More ways to export" });
+  if (!(await dialog.count())) await region.getByRole("button", { name: "More ways to export" }).click();
+  return dialog.getByRole("button", { name, exact: true });
+}
+
 async function boot(page: Page, trackCount = 3, audible = false, grouped = false, pendingMedia = false) {
   const fixture = multitrackFixture();
   fixture.manifest.tracks = Array.from({ length: trackCount }, (_, index) => ({ ...structuredClone(multitrackFixture().manifest.tracks[index % 3]), id: `track-${index + 1}`, name: index < 3 ? multitrackFixture().manifest.tracks[index].name : `Mic ${index + 1}` }));
@@ -200,7 +207,7 @@ test("98 grouped microphones expand without implicit audition or transcription",
   await expect(region.getByRole('status').filter({hasText:'Selected range saved for every track'})).toBeVisible();
   await expect(region.locator('button.cp-multitrack-saved-status')).toHaveCount(98);
   await region.getByRole('combobox',{name:'Transcript export format'}).selectOption('avid');
-  await region.getByRole('button',{name:'Export selected (98)',exact:true}).click();
+  await (await exportMore(page, region, 'Export selected (98)')).click();
   await expect(region.getByRole('status').filter({hasText:'98 files saved in /exports'})).toBeVisible();
   const exports = (await calls()).filter(c => c.command === 'write_text_to_path');
   const markers = exports.filter(c => String(c.args.path).endsWith('.txt'));
@@ -213,7 +220,8 @@ test("98 grouped microphones expand without implicit audition or transcription",
     expect(file.args).toMatchObject({ atomic: true, unique: true });
   }
   expect(exports.at(-1)!.args.text).toContain('one microphone file per parent track');
-  await expect(region.getByRole('button',{name:'Avid files by microphone'})).toBeInViewport();
+  await expect(await exportMore(page, region, 'Avid files by microphone')).toBeInViewport();
+  await page.keyboard.press('Escape');
   expect(await region.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
   // A single alternative's context action remains a named Save As, not a folder.
   await region.getByRole('button',{name:'Track actions for Mic 98'}).click();
@@ -286,10 +294,11 @@ for (const width of [1100, 1680]) {
     if (width === 1100) await page.evaluate(() => document.documentElement.style.zoom = "1.25");
     const region = page.getByRole("region", { name: "AAF Audio", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
-    const selected = region.getByRole("button", { name: "Export selected (3)", exact: true });
-    await expect(selected).toBeDisabled();
+    await expect(await exportMore(page, region, "Export selected (3)")).toBeDisabled();
+    await page.keyboard.press("Escape");
     await region.getByRole("button", { name: "Generate 3 tracks" }).click();
-    await expect(selected).toBeEnabled();
+    await expect(await exportMore(page, region, "Export selected (3)")).toBeEnabled();
+    await page.keyboard.press("Escape");
     await region.getByRole("checkbox", { name: "Select Sam mic", exact: true }).uncheck();
     await chooseTranscript(page, region, "Sam mic");
     await region.getByRole("button", { name: "Solo Sam mic", exact: true }).click();
@@ -297,7 +306,7 @@ for (const width of [1100, 1680]) {
     const format = region.getByRole("combobox", { name: "Transcript export format" });
     for (const kind of ["txt", "csv", "pdf", "avid", "srt", "print"]) {
       await format.selectOption(kind);
-      const button = region.getByRole("button", { name: "Export selected (2)", exact: true });
+      const button = await exportMore(page, region, "Export selected (2)");
       await button.focus(); await button.press("Space");
       await expect(format).toBeEnabled();
       const call = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter(item => ["write_text_to_path", "export_transcript_pdf", "print_transcript"].includes(item.command)).at(-1));
@@ -317,8 +326,8 @@ for (const width of [1100, 1680]) {
     await page.screenshot({ path: test.info().outputPath(`multitrack-selected-export-${width}.png`) });
     await region.getByRole("button", { name: "Select all", exact: true }).click();
     await region.getByRole("button", { name: "Deselect all", exact: true }).click();
-    await expect(region.getByRole("button", { name: "Export selected (0)", exact: true })).toBeDisabled();
-    await expect(region.getByRole("button", { name: "Entire transcript", exact: true })).toBeEnabled();
+    await expect(await exportMore(page, region, "Export selected (0)")).toBeDisabled();
+    await expect(await exportMore(page, region, "Entire transcript")).toBeEnabled();
   });
 }
 
@@ -333,7 +342,7 @@ test("Entire transcript exports every source lane in the selected format despite
   const format = region.getByRole("combobox", { name: "Transcript export format" });
   for (const selected of ["avid", "csv", "txt", "srt", "pdf"]) {
     await format.selectOption(selected);
-    await region.getByRole("button", { name: "Entire transcript", exact: true }).click();
+    await (await exportMore(page, region, "Entire transcript")).click();
     await expect(format).toBeEnabled();
     const call = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter((item) => ["write_text_to_path", "export_transcript_pdf"].includes(item.command)).at(-1));
     const text = String(call!.args[selected === "pdf" ? "html" : "text"]);
@@ -425,9 +434,9 @@ for (const width of [1100, 1680]) {
     await more.focus(); await more.press("Enter");
     await expect(page.getByRole("menu")).toBeVisible();
     await page.keyboard.press("Escape"); await expect(page.getByRole("menu")).toBeHidden(); await expect(more).toBeFocused();
-    const checkbox = region.getByRole("checkbox", { name: "Search with AI" });
-    await checkbox.focus(); await checkbox.press("Space"); await expect(checkbox).toBeChecked();
-    await expect(region.getByRole("button", { name: "Search", exact: true })).toBeDisabled();
+    const toggle = region.getByRole("button", { name: "Search with AI" });
+    await toggle.focus(); await toggle.press("Space"); await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(region.getByRole("searchbox", { name: "Search track transcripts" })).toHaveAttribute("placeholder", "Describe it, then press Return");
     expect(await region.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
     await page.screenshot({ path: test.info().outputPath("multitrack-tab-overflow.png") });
   });
@@ -468,7 +477,7 @@ test("Local AI transcript search uses the existing bar, preserves original resul
   await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
   await region.getByRole("tab", { name: "All voices" }).click();
   const field = region.getByRole("searchbox", { name: "Search track transcripts" });
-  await region.getByRole("checkbox", { name: "Search with AI" }).check();
+  await region.getByRole("button", { name: "Search with AI" }).click();
   await field.fill("opening response"); expect(requests).toHaveLength(0);
   await field.press("Enter");
   await expect(region.getByText("1 matching passage · Local AI")).toBeVisible();
@@ -478,7 +487,7 @@ test("Local AI transcript search uses the existing bar, preserves original resul
   const cue = region.getByRole("button", { name: /This is the first answer/ }); await expect(cue).toHaveCount(1);
   await cue.click(); await expect(cue).toHaveClass(/is-current/);
   await page.screenshot({ path: test.info().outputPath("multitrack-ai-search.png") });
-  await region.getByRole("checkbox", { name: "Search with AI" }).uncheck();
+  await region.getByRole("button", { name: "Search with AI" }).click();
   await expect(region.getByText("No matching transcript text.")).toBeVisible();
   await field.fill("Sam"); await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
   expect(requests).toHaveLength(1);
@@ -767,7 +776,7 @@ test("Person navigation, per-track levels, context regeneration and safe exports
   await expect.poll(() => page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter((call) => call.command === "aaf_transcribe_track").length)).toBe(21);
   const last = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter((call) => call.command === "aaf_transcribe_track").at(-1));
   expect(last!.args).toMatchObject({ trackId: "track-2", engine: "whisper", modelId: "large-v3" });
-  await region.getByRole("button", { name: "Avid files by person" }).click();
+  await (await exportMore(page, region, "Avid files by person")).click();
   await expect(region.getByRole("status").filter({ hasText: "20 files saved in /exports" })).toBeVisible();
   const writes = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter((call) => call.command === "write_text_to_path"));
   expect(writes).toHaveLength(20); expect(writes.every((call) => call.args.unique === true && call.args.atomic === true)).toBe(true);
@@ -936,4 +945,34 @@ test("Full workspace stays usable with enlarged text at 1100px", async ({ page }
     expect(await button.evaluate((element) => { const box = element.getBoundingClientRect(); return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)); })).toBe(true);
   }
   await page.screenshot({ path: test.info().outputPath("multitrack-enlarged-workspace.png") });
+});
+
+test("the Transcript panel says less: one row of chips between the search and the first line, all of it by keyboard", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 700 }); await boot(page);
+  const region = page.getByRole("region", { name: "AAF Audio", exact: true });
+  await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
+  await region.getByRole("button", { name: "Generate 3 tracks" }).click();
+  const cue = region.getByRole("button", { name: /This is the first answer/ }).first();
+  await expect(cue).toBeVisible();
+  const search = (await region.locator(".cp-multitrack-search").boundingBox())!, chips = (await region.locator(".cp-multitrack-chips").boundingBox())!;
+  const first = (await cue.boundingBox())!;
+  // One line of chips, then the transcript: no switches row, no paragraphs.
+  expect(chips.height).toBeLessThan(40);
+  expect(first.y - (search.y + search.height)).toBeLessThan(chips.height + 32);
+  await expect(region.getByText(/Each finished track appears here|Timing review:|The text is preserved/)).toHaveCount(0);
+  // A chip opens its explanation with the keyboard, and Escape hands focus back.
+  const bleed = region.getByRole("button", { name: /^(Bleed|No bleed)/ });
+  await bleed.focus(); await bleed.press("Enter");
+  const popover = page.getByRole("dialog", { name: "Bleed" });
+  await expect(popover.getByRole("button", { name: "Measure mics" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(popover).toHaveCount(0); await expect(bleed).toBeFocused();
+  // The footer is one row, and the rest of the exports open from its chevron the same way.
+  const footer = region.locator(".cp-multitrack-export-current"), row = (await footer.boundingBox())!;
+  expect(row.height).toBeLessThan(40);
+  const more = region.getByRole("button", { name: "More ways to export" });
+  await more.focus(); await more.press("Enter");
+  await expect(page.getByRole("dialog", { name: "More ways to export" }).getByRole("button", { name: "Export selected (3)" })).toBeFocused();
+  await page.keyboard.press("Escape"); await expect(more).toBeFocused();
+  await page.screenshot({ path: test.info().outputPath("multitrack-transcript-panel.png") });
 });

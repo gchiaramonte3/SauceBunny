@@ -84,7 +84,7 @@ const allowedProduction = new Set([
   "src/components/MultitrackZoom", "src/components/RulerMarks",
   // The glyph beside a mic owner and its click-through popover: a portal, the
   // shared dismiss hook and a count formatter. Actions are callbacks it is given.
-  "src/components/MultitrackTrackStatus", "src/lib/plural",
+  "src/components/MultitrackTrackStatus", "src/lib/plural", "src/components/AnchoredPopover",
 ]);
 const pureHelpers = [...allowedProduction].flatMap(path => [".tsx", ".ts"].map(extension => resolve(root, path + extension)).filter(existsSync));
 

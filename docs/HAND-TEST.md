@@ -1150,6 +1150,24 @@ the acceptance test for whenever the verdict UI gets built.
    Home and a double-click reset it. Relaunch: the sizes are kept. Narrow the
    window to its minimum: the record pane keeps its room, the source gives way.
 
+### October 5: AAF Audio's Transcript panel (item 14)
+
+1. Open a transcribed sequence at the narrowest window. Under the person tabs:
+   the search field, one row of chips, then the first line of transcript. No
+   sentence runs across the panel.
+2. Press the sparkle at the end of the search field: it lights, the field
+   asks you to describe what you want, and Return searches with the local
+   model. While it runs, Stop sits beside the sparkle.
+3. The Bleed chip says the state ("Bleed not measured", "Bleed · 2 dimmed").
+   Click it: Hide bleed, one sentence, Measure mics (and Check voices when
+   levels left words unsure). Escape closes it and returns to the chip.
+4. With passages to review, "N to review" switches to All voices and scrolls
+   to them. After a run, "2 of 3 tracks saved · 1 failed" opens Transcript
+   info.
+5. The footer is one row: format, Export {person}, and a chevron with Export
+   selected, Entire transcript, Avid files by mic or person, and the shoot
+   date (Plain text and PDF).
+
 ### October 5: models download in Settings (item 11)
 
 1. Settings ▸ Transcription ▸ Parakeet lists Parakeet Ultra (Recommended) and

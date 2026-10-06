@@ -24,6 +24,11 @@ All notable changes to Sauce Bunny. Format loosely follows
   Remove one (× or Delete) or Clear list: that hides it from Add sequence and
   Start from and deletes nothing, and a hidden sequence comes back by itself
   when it is saved again in AAF Audio.
+- **AAF Audio's Transcript panel says less.** AI search is a button at the
+  end of the search field; bleed, passages to review and the last run are
+  chips under it, each opening its explanation; the export footer is one row
+  with the rest behind a chevron. The first line of transcript now sits right
+  under the search.
 - **Models download in Settings.** Settings ▸ Transcription lists Parakeet
   Ultra beside TDT v3, each with Download, Cancel and Delete. AAF Audio no
   longer downloads anything: it says which model is missing, with Download
