@@ -504,6 +504,36 @@ function sourceWords(words: TimelineWord[], source: string, from: number, to: nu
  * restores, so restoring one line of a longer cut brings back that line and
  * nothing either side of it.
  */
+/** The sentence holding word `index` within its paragraph, as a double-click selects it: back and on to the nearest sentence ends. */
+export function sentenceAround(placed: PlacedWord[], firsts: number[], paragraphs: TimelineParagraph[], index: number): [number, number] {
+  const ends = (text: string) => /[.!?]["”']?$/.test(text);
+  const paragraph = paragraphHolding(firsts, index) ?? -1;
+  const first = firsts[paragraph], last = first + paragraphs[paragraph].words.length - 1;
+  let from = index, to = index;
+  while (from > first && !ends(placed[from - 1].word.text)) from--;
+  while (to < last && !ends(placed[to].word.text)) to++;
+  return [from, to];
+}
+
+/** Each placed word's latest end so far: non-decreasing, though words on two tracks overlap, so a playhead can be found by a binary search. */
+export function runningEnds(placed: PlacedWord[]): number[] {
+  let latest = -Infinity;
+  return placed.map((item) => (latest = Math.max(latest, item.programEnd)));
+}
+
+/** The index of the placed word under program time `at`, or -1: the first word ending after it, when it has started. */
+export function wordUnder(placed: PlacedWord[], ends: number[], at: number): number {
+  const index = firstAbove(ends, at);
+  return index < placed.length && placed[index].programStart <= at ? index : -1;
+}
+
+/** The first index whose value is above `value` in a non-decreasing list, or its length: where a playhead sits among running latest ends. */
+export function firstAbove(sorted: number[], value: number): number {
+  let low = 0, high = sorted.length;
+  while (low < high) { const mid = (low + high) >> 1; if (sorted[mid] > value) high = mid; else low = mid + 1; }
+  return low;
+}
+
 export type Ghost = { id: string; at: number; source: string; track: string; words: TimelineWord[]; from: number; to: number };
 
 /**

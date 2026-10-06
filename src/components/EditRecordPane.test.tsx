@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { EditRecordPane } from "./EditRecordPane";
+import { createFrameStore } from "../lib/frame-store";
 
 afterEach(cleanup);
 
 type Props = React.ComponentProps<typeof EditRecordPane>;
 const props = (overrides: Partial<Props> = {}): Props => ({
-  playhead: 12, total: 29.5, tc: "01:00:12:00", totalTc: "01:00:29:12", marks: [], playing: false, busy: false, onToggle: vi.fn(), onStart: vi.fn(),
+  frames: createFrameStore(288), fps: 24, total: 29.5, tc: (seconds) => `01:00:${String(seconds).padStart(2, "0")}:00`, totalTc: "01:00:29:12", marks: [], playing: false, busy: false, onToggle: vi.fn(), onStart: vi.fn(),
   onScrub: vi.fn(), onScrubStart: vi.fn(), onScrubEnd: vi.fn(), text: { family: "sans", size: 15, leading: "normal" }, onText: vi.fn(), children: <p>The words</p>,
   ...overrides,
 });
@@ -35,4 +36,13 @@ it("says what the editor last did at its foot, and that audio is loading while i
   view.rerender(<EditRecordPane {...props({ status: "Lifted 2.40 s.", busy: true })} />);
   expect(screen.getByRole("status").textContent).toBe("Loading audio…");
   expect(screen.getByRole("button", { name: "Play" }).getAttribute("aria-busy")).toBe("true");
+});
+
+it("follows the playhead without drawing its text again", () => {
+  const frames = createFrameStore(0), drawn = vi.fn(() => <p>The words</p>);
+  function Words() { return drawn(); }
+  render(<EditRecordPane {...props({ frames, children: <Words /> })} />);
+  act(() => { frames.set(48); });
+  expect(screen.getByRole("region", { name: "Record" }).querySelector(".cp-te-tools")?.textContent).toContain("01:00:02:00");
+  expect(drawn).toHaveBeenCalledTimes(1);
 });

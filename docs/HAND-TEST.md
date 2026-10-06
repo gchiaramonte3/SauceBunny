@@ -1150,6 +1150,20 @@ the acceptance test for whenever the verdict UI gets built.
    Home and a double-click reset it. Relaunch: the sizes are kept. Narrow the
    window to its minimum: the record pane keeps its room, the source gives way.
 
+### October 5: String Outs removed lines and playback (items 15 and 19)
+
+1. Build a string out from three short chunks of a long sequence. With Removed
+   lines on, only the cuts between the chunks show, struck through, one line
+   per speaker; nothing from before the first chunk or after the last. Hover
+   one: ↺ appears and restores it on every track. Right-click one: Restore
+   this line.
+2. Open a large string out (a whole sequence of many mics) and play it. The
+   playhead line, the timecode and the highlighted word move smoothly; the
+   window stays responsive (scroll the text and the timeline while it plays).
+   Space pauses at once.
+3. While playing, press I and O, M, ⌘B, and V from the source: each lands
+   where the playhead is when you press it. Loop a marked range: it loops.
+
 ### October 5: AAF Audio's Transcript panel (item 14)
 
 1. Open a transcribed sequence at the narrowest window. Under the person tabs:

@@ -28,7 +28,7 @@ export function EditSourceHost({ side, lanes, colors, fps, used, reading, text, 
     </select>}
     <EditSourcePane source={source} speakers={lanes} colors={colors} fps={fps} placed={side.shown} used={used} corrections={{}}
       people={side.people} tab={side.tab} onTab={side.setTab} reading={reading} range={side.range} onRange={side.setRange} match={null}
-      canInsert={side.take() != null} marks={side.marks} playhead={side.playhead} playing={playback.playing} onPlay={() => void playback.toggle()}
+      canInsert={side.take() != null} marks={side.marks} frames={playback.frames} playing={playback.playing} onPlay={() => void playback.toggle()}
       onScrub={(seconds) => void playback.seek(Math.round(seconds * fps))} onScrubStart={playback.pause} onScrubEnd={() => undefined}
       text={text} onText={onText} onPlace={onPlace} />
   </div>;

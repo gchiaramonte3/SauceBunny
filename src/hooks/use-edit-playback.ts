@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { EditDocument } from "../bindings/EditDocument";
 import { EditAudio, type EditAudioState } from "../lib/edit-audio";
 import { fps } from "../lib/edit-document";
+import { createFrameStore, type FrameStore } from "../lib/frame-store";
 
 export type EditPlaybackOptions = {
   document: EditDocument;
@@ -19,9 +20,17 @@ type Plan = { document: EditDocument; audibleKey: string; framesKey: string };
 const apply = (target: EditAudio, plan: Plan) =>
   target.setDocument(plan.document, plan.audibleKey ? plan.audibleKey.split("|") : [], JSON.parse(plan.framesKey) as Record<string, number>);
 
-/** Edit-list playback for one component: program frames on one audio clock. */
+type Status = Omit<EditAudioState, "frame">;
+
+/**
+ * Edit-list playback for one component: program frames on one audio clock.
+ * The frame goes to `frames`, a store read by what draws it (lib/frame-store),
+ * and only a change of rate, waiting or error is React state, so playing does
+ * not re-render whoever holds the playback.
+ */
 export function useEditPlayback({ document, audible, active, sourceFrames, joinFade }: EditPlaybackOptions) {
-  const [state, setState] = useState<EditAudioState>({ frame: 0, rate: 0, busy: false, error: null });
+  const [state, setState] = useState<Status>({ rate: 0, busy: false, error: null });
+  const [frames] = useState<FrameStore>(() => createFrameStore(0)), sent = useRef(state);
   const [volume, setVolume] = useState(0.8), [muted, setMuted] = useState(false);
   const [levels, setLevels] = useState<Record<string, number>>({});
   const rate = fps(document.edit_rate), audibleKey = audible.join("|"), framesKey = JSON.stringify(sourceFrames ?? {});
@@ -31,12 +40,18 @@ export function useEditPlayback({ document, audible, active, sourceFrames, joinF
   const getEngine = useCallback(() => {
     const current = settings.current;
     if (!engine.current && current.active) {
-      engine.current = new EditAudio(current.rate, setState);
+      engine.current = new EditAudio(current.rate, (next) => {
+        frames.set(next.frame);
+        // Not even a same-value setState: React renders once more to find out it was the same.
+        // Compared with what was last sent, not last rendered, so two changes before a render both land.
+        const prior = sent.current;
+        if (prior.rate !== next.rate || prior.busy !== next.busy || prior.error !== next.error) setState(sent.current = { rate: next.rate, busy: next.busy, error: next.error });
+      });
       apply(engine.current, current); engine.current.setLevel(current.volume, current.muted); engine.current.setJoinFade(current.joinFade);
       for (const [id, level] of Object.entries(current.levels)) engine.current.setTrackLevel(id, level);
     }
     return engine.current;
-  }, []);
+  }, [frames]);
   // A new edit rate is a new clock; leaving the view releases the output.
   useEffect(() => () => { engine.current?.close(); engine.current = null; }, [rate, active]);
   useEffect(() => { if (engine.current) apply(engine.current, settings.current); }, [document, audibleKey, framesKey]);
@@ -48,5 +63,5 @@ export function useEditPlayback({ document, audible, active, sourceFrames, joinF
   const toggle = useCallback(() => getEngine()?.toggle() ?? Promise.resolve(), [getEngine]);
   const scrub = useCallback((frame: number) => getEngine()?.scrub(frame), [getEngine]);
   const setTrackLevel = useCallback((id: string, level: number) => setLevels((prior) => ({ ...prior, [id]: level })), []);
-  return { ...state, playing: state.rate !== 0, seek, pause, toggle, scrub, volume, muted, setVolume, setMuted, levels, setTrackLevel };
+  return { ...state, frames, playing: state.rate !== 0, seek, pause, toggle, scrub, volume, muted, setVolume, setMuted, levels, setTrackLevel };
 }

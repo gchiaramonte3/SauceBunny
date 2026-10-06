@@ -76,8 +76,8 @@ export function useEditSourceSide({ document, sources, documents, words, colors,
   // said the selected words, whatever the record has patched.
   const speaking = chosenWords.map((word) => word.track);
   const audible = solo.size ? [...solo] : [...new Set([...[...laneOf].filter(([mic]) => selected.has(mic)).map(([, lane]) => lane), ...speaking])];
+  // The source's playhead moves in `playback.frames`; what draws it reads it there (use-frame).
   const playback = useEditPlayback({ document: whole, audible, active: active && !!source });
-  const playhead = playback.frame / fps;
   const marks: EditMarks = chosenWords.length ? { in: Math.min(...chosenWords.map((word) => word.start)), out: Math.max(...chosenWords.map((word) => word.end)) }
     : source ? explicit[source.id] ?? NO_MARKS : NO_MARKS;
 
@@ -116,13 +116,13 @@ export function useEditSourceSide({ document, sources, documents, words, colors,
     setRanges((state) => ({ ...state, [rangeKey]: null }));
     setExplicit((state) => ({ ...state, [source.id]: next }));
   };
-  const mark = (edge: "in" | "out", at = playhead) => setMarks(edge === "in"
+  const mark = (edge: "in" | "out", at = playback.frames.get() / fps) => setMarks(edge === "in"
     ? { in: at, out: marks.out != null && marks.out > at ? marks.out : null }
     : { in: marks.in != null && marks.in < at ? marks.in : null, out: at });
   return {
     mode, setMode, source, aaf, sources, choose: (id: string) => { playback.pause(); setChosen(id); },
     people, tab, setTab: (next: string) => source && setTabs((state) => ({ ...state, [source.id]: next })),
-    own, shown, range, setRange, marks, playback, playhead, laneOf, selected, expanded, solo,
+    own, shown, range, setRange, marks, playback, laneOf, selected, expanded, solo,
     markIn: () => mark("in"), markOut: () => mark("out"),
     clearMarks: () => setRange(null),
     clearEdge: (edge: "in" | "out") => setMarks({ ...marks, [edge]: null }),

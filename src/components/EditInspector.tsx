@@ -1,4 +1,6 @@
 import type { useEditWorkspace } from "../hooks/use-edit-workspace";
+import { useMemo } from "react";
+import { useFrame } from "../hooks/use-frame";
 import { deleteWords, isGap, type TimelineLane, type TimelineWord } from "../lib/edit-model";
 import { plural } from "../lib/plural";
 import { EditMarkerInspector } from "./EditMarkerInspector";
@@ -23,10 +25,14 @@ export function EditInspector({ ws, words, lanes, colors, tc, sourceName }: Prop
   const under = [...new Set((dry?.crosstalk ?? []).map((word) => word.track))].map(nameOf);
   const allSilenced = selected.length > 0 && selected.every((item) => item.muted);
   const seam = ws.seam == null ? null : ws.seams.find((item) => item.index === ws.seam) ?? null;
-  const talk: Record<string, number> = {};
-  for (const item of ws.placed) if (!item.muted) talk[item.word.track] = (talk[item.word.track] ?? 0) + item.programEnd - item.programStart;
+  const talk = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const item of ws.placed) if (!item.muted) out[item.word.track] = (out[item.word.track] ?? 0) + item.programEnd - item.programStart;
+    return out;
+  }, [ws.placed]);
   const longest = Math.max(1, ...Object.values(talk));
-  const caret = ws.placed[ws.caret];
+  // The word at the caret, which is wherever the playhead is when nothing is selected: followed a word at a time.
+  const caret = ws.placed[useFrame(ws.frames, (frame) => (ws.selection.collapsed ? Math.min(ws.caretAt(frame), ws.count) : ws.caret))];
   return <aside className="cp-te-inspector" aria-label="Inspector">
     <section className="cp-te-insp-section" aria-labelledby="cp-te-insp-sel">
       <h3 id="cp-te-insp-sel" className="cp-te-insp-title">Selection</h3>
