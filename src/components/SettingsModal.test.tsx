@@ -51,7 +51,8 @@ vi.mock("@tauri-apps/api/core", () => ({
     return Promise.resolve(null);
   },
 }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => {}) }));
+// emit: Settings tells AAF Audio when it installs or deletes a Parakeet model.
+vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => {}), emit: () => Promise.resolve() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 vi.mock("@tauri-apps/api/path", () => ({ appDataDir: () => Promise.resolve("/d"), join: (...p: string[]) => Promise.resolve(p.join("/")) }));
 
