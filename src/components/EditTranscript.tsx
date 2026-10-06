@@ -1,6 +1,7 @@
 import { useMemo, useRef } from "react";
 import { paragraphHolding, paragraphStarts, placementKey, type Ghost, type TimelineParagraph as Paragraph, type PlacedWord, type TimelineLane } from "../lib/edit-model";
-import { EditGhostLine } from "./EditGhostLine";
+import { ghostsAbove, ghostsIn, indexGhosts, paragraphSizes } from "../lib/edit-ghost-index";
+import { EditGhost } from "./EditGhost";
 import { EditParagraph, type EditSeamInfo } from "./EditParagraph";
 import { EditWindowedParagraphs } from "./EditWindowedParagraphs";
 
@@ -38,16 +39,15 @@ export function EditTranscript(props: Props) {
   const { placed, selection } = props;
   const drag = useRef<{ index: number; scrub: boolean } | null>(null);
   const root = useRef<HTMLDivElement>(null);
-  // Drawn a page at a time (EditWindowedParagraphs): a real 20-mic sequence cut in whole is 146k words.
-  const firsts = useMemo(() => paragraphStarts(props.paragraphs), [props.paragraphs]);
-  const sizes = useMemo(() => props.paragraphs.map((paragraph) => paragraph.words.length), [props.paragraphs]);
-  const playing = props.current == null ? null : placed.findIndex((item) => placementKey(item) === props.current);
-  const count = placed.length;
+  // Drawn a page at a time (EditWindowedParagraphs), removed lines included: a real 20-mic sequence cut in whole is 146k words.
+  const firsts = useMemo(() => paragraphStarts(props.paragraphs), [props.paragraphs]), ghosts = useMemo(() => indexGhosts(props.ghosts), [props.ghosts]);
+  const sizes = useMemo(() => paragraphSizes(props.paragraphs, ghosts), [props.paragraphs, ghosts]);
+  const playing = props.current == null ? null : placed.findIndex((item) => placementKey(item) === props.current), count = placed.length;
   const range: [number, number] | null = selection.collapsed ? null
     : [Math.min(selection.anchor, selection.focus), Math.max(selection.anchor, selection.focus)];
   const caret = selection.collapsed ? selection.anchor : null;
   const nameOf = (id: string) => props.speakers.find((speaker) => speaker.id === id)?.name ?? id;
-  const ghostsBetween = (after: number, upTo: number) => props.ghosts?.filter((ghost) => ghost.at > after && ghost.at <= upTo) ?? [];
+  const ghostsBetween = (after: number, upTo: number) => ghostsIn(ghosts, after, upTo);
   const indexOf = (target: EventTarget | null) => {
     const found = (target as HTMLElement | null)?.closest?.("[data-index]");
     return found ? Number(found.getAttribute("data-index")) : null;
@@ -95,7 +95,7 @@ export function EditTranscript(props: Props) {
     if (event.key === "Escape" && range) { event.preventDefault(); return props.onSelect({ anchor: range[0], focus: range[0], collapsed: true }, false); }
     if (event.key.toLowerCase() === "a" && event.metaKey && count) { event.preventDefault(); return props.onSelect({ anchor: 0, focus: count - 1, collapsed: false }, false); }
   };
-  const ghostLine = (ghost: Ghost) => <EditGhostLine key={ghost.id} ghost={ghost} color={props.colors[ghost.track]} name={nameOf(ghost.track)} onRestore={props.onRestore} />;
+  const ghostLine = (ghost: Ghost) => <EditGhost key={ghost.id} ghost={ghost} who={nameOf(ghost.track)} color={props.colors[ghost.track]} onRestore={props.onRestore} line />;
   const lastSegment = placed.length ? placed[placed.length - 1].segment : -1;
   return <div ref={root} className="cp-te-doc" role="region" aria-label="Edit transcript" aria-describedby="cp-te-doc-help" tabIndex={0} onKeyDown={keys}
     onPointerDown={(event) => {
@@ -133,7 +133,7 @@ export function EditTranscript(props: Props) {
       const previousWord = previous?.words[previous.words.length - 1];
       const source = paragraph.words[0].word.source;
       return <div key={paragraph.id} className="cp-te-para-wrap">
-        {ghostsBetween(previousWord?.segment ?? -1, previousWord && previousWord.segment === paragraph.words[0].segment ? -1 : paragraph.words[0].segment).map(ghostLine)}
+        {ghostsAbove(props.paragraphs, ghosts, index).map(ghostLine)}
         <EditParagraph paragraph={paragraph} speaker={speaker} color={props.colors[speaker.id]} fps={props.fps} recordStart={props.recordStart}
           sourceLabel={!previousWord || previousWord.word.source !== source ? props.sourceLabel(source) : null}
           offset={first} range={range} caret={caret} caretAfter={!!selection.after} current={props.current} seams={props.seams}

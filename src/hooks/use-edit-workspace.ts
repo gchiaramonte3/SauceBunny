@@ -74,7 +74,7 @@ export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, du
   const placed = useMemo(() => measure("String Outs", `Placing ${words.length.toLocaleString("en-US")} words on the record`, () => placeWords(words, edit)), [words, edit]);
   const paras = useMemo(() => measure("String Outs", `Laying out ${placed.length.toLocaleString("en-US")} record words as paragraphs`, () => paragraphs(placed)), [placed]);
   const seams = useMemo(() => seamList(edit, words), [edit, words]);
-  const ghosts = useMemo(() => ghostLines(edit, words, durations), [edit, words, durations]);
+  const ghosts = useMemo(() => ghostLines(edit, words, placed), [edit, words, placed]);
   const total = programDuration(edit), starts = segmentStarts(edit), count = placed.length;
   // One record position, as in Avid: a caret is wherever the playhead is, so
   // Insert, Add Edit, markers and the text all mean the same place. A range

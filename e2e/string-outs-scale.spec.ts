@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { EXPECTED_BACKEND_BUILD_ID } from "../src/lib/build-id";
 import { tauriMockInit } from "./tauri-mock";
 
@@ -21,8 +21,7 @@ import { tauriMockInit } from "./tauri-mock";
 
 const MICS = 20, WORDS_PER_MIC = 7_300, SECONDS = 13_000;
 
-test("a 20-mic, 146k-word sequence opens, cuts in whole and scrolls without drawing every word", async ({ page }) => {
-  test.setTimeout(180_000);
+async function boot(page: Page) {
   await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
   await page.addInitScript(({ mics, perMic, seconds }) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
@@ -48,7 +47,13 @@ test("a 20-mic, 146k-word sequence opens, cuts in whole and scrolls without draw
         case "aaf_speech": return Promise.resolve(speech(args.trackId as string, tracks.findIndex((track) => track.id === args.trackId)));
         case "aaf_waveform": return Promise.reject(new Error("not built"));
         case "edit_list": return Promise.resolve([...edits.keys()].map((id) => ({ id, title: "Big scene", created_at: 1, updated_at: 1, head: 1, states: 1 })));
-        case "edit_create": edits.set(args.id as string, { document: args.document }); return Promise.resolve(head(args.id as string));
+        case "edit_create": {
+          // A test can ask for the new string out as a few short pieces with long cuts between them.
+          const document = args.document as { segments: { in_frame: number; out_frame: number; id: string }[] };
+          const pieces = (window as unknown as { __cutInto?: [number, number][] }).__cutInto;
+          if (pieces) document.segments = pieces.map(([from, to], index) => ({ ...document.segments[0], id: `piece-${index}`, in_frame: Math.round(from * 24000 / 1001), out_frame: Math.round(to * 24000 / 1001) }));
+          edits.set(args.id as string, { document }); return Promise.resolve(head(args.id as string));
+        }
         case "edit_head": return Promise.resolve(head(args.id as string));
         case "edit_commit": edits.set(args.id as string, { document: args.document }); return Promise.resolve({ ...head(args.id as string), label: args.label });
         case "edit_history": return Promise.resolve({ head: 1, states: [], next: [] });
@@ -56,6 +61,11 @@ test("a 20-mic, 146k-word sequence opens, cuts in whole and scrolls without draw
       }
     };
   }, { mics: MICS, perMic: WORDS_PER_MIC, seconds: SECONDS });
+}
+
+test("a 20-mic, 146k-word sequence opens, cuts in whole and scrolls without drawing every word", async ({ page }) => {
+  test.setTimeout(180_000);
+  await boot(page);
   await page.goto("/");
   await page.getByRole("button", { name: "String Outs", exact: true }).click();
   await page.getByRole("button", { name: "New string out…" }).first().click();
@@ -90,5 +100,35 @@ test("a 20-mic, 146k-word sequence opens, cuts in whole and scrolls without draw
   expect(await doc.evaluate((element) => element.clientHeight)).toBeLessThan(2_000);
   await doc.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await expect(page.locator(".cp-te-doc [data-index]").last()).toHaveAttribute("data-index", String(MICS * WORDS_PER_MIC - 1), { timeout: 10_000 });
+  expect(await nodes()).toBeLessThan(80_000);
+});
+
+test("a partial string out of it, with Removed lines on, shows only the cuts between its pieces, inside the same budgets", async ({ page }) => {
+  test.setTimeout(180_000);
+  await boot(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "String Outs", exact: true }).click();
+  await page.getByRole("button", { name: "New string out…" }).first().click();
+  await page.getByLabel("Start from").selectOption({ label: "Big scene" });
+  await page.getByLabel(/whole sequence/i).check();
+  // Three one-minute pieces of a 3h36m sequence: two long cuts between them, and the rest never in the string out.
+  await page.evaluate(() => { (window as unknown as { __cutInto: [number, number][] }).__cutInto = [[0, 60], [4_000, 4_060], [9_000, 9_060]]; });
+  const opening = Date.now();
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.locator(".cp-te-doc [data-index]").first()).toBeVisible({ timeout: 60_000 });
+  expect(Date.now() - opening).toBeLessThan(15_000);
+  await expect(page.getByRole("button", { name: "Removed lines" })).toHaveAttribute("aria-pressed", "true");
+  const doc = page.locator(".cp-te-doc");
+  const nodes = () => page.evaluate(() => document.querySelectorAll("*").length);
+  const order = () => doc.evaluate((element) => [...element.querySelectorAll(".cp-te-ghost.is-line, [data-index]")].map((node) => node.classList.contains("cp-te-ghost") ? "ghost" : "word"));
+  // Nothing removed comes before the first word.
+  expect((await order())[0]).toBe("word");
+  // Canary: scrolling a screen at a time reaches the first cut, drawn in its page.
+  for (let step = 0; step < 400 && !(await doc.locator(".cp-te-ghost").count()); step++) await doc.evaluate((element) => { element.scrollTop += 2 * element.clientHeight; });
+  await expect(doc.locator(".cp-te-ghost").first()).toBeVisible();
+  expect(await nodes()).toBeLessThan(80_000);
+  // Nor after the last.
+  await doc.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect.poll(async () => (await order()).at(-1)).toBe("word");
   expect(await nodes()).toBeLessThan(80_000);
 });

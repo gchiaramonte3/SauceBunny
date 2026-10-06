@@ -507,44 +507,120 @@ function sourceWords(words: TimelineWord[], source: string, from: number, to: nu
 export type Ghost = { id: string; at: number; source: string; track: string; words: TimelineWord[]; from: number; to: number };
 
 /**
- * Every removed line next to the edit: the cuts between segments, plus
- * anything trimmed off the head or the tail of a source. Split into lines by
- * track and by long pauses, the same way the edit's paragraphs are.
+ * The removed lines of the edit: the source each cut between two kept pieces
+ * skipped, read as lines, each restorable on its own.
+ *
+ * Only cuts BETWEEN kept pieces. What lies before the first piece or after
+ * the last was never in the string out: counting it as removed showed the
+ * whole rest of a half-hour sequence under a 29-second string out, for every
+ * mic, and was most of what flooded the page
+ * (docs/UI-CORRECTIONS-2026-10-05.md, item 15).
+ *
+ * A line is one speaker's turn: their cues run together until a long pause or
+ * someone else's line. Bleed copies are left out, both the words the resolver
+ * says were heard on another mic and, where it has not run, a cue that says
+ * nearly the same words at the same time as a longer one on another mic. Lines
+ * used to break at every change of track, so interleaved mics drew one row per
+ * word. `placed` is the edit's placement when the caller already has it.
  */
-export function ghostLines(edit: Timeline, words: TimelineWord[], durations: Record<string, number>): Ghost[] {
+export function ghostLines(edit: Timeline, words: TimelineWord[], placed?: PlacedWord[]): Ghost[] {
+  const used = new Set((placed ?? placeWords(words, edit)).map((item) => item.word.id));
+  return ghostsOf(edit, indexBySource(words), used);
+}
+
+/** Each source's words in time order, keyed by their middle, for a binary search per cut. */
+function indexBySource(words: TimelineWord[]) {
+  const out = new Map<string, { words: TimelineWord[]; middles: number[] }>();
+  for (const word of words) {
+    let entry = out.get(word.source);
+    if (!entry) out.set(word.source, entry = { words: [], middles: [] });
+    entry.words.push(word);
+  }
+  for (const entry of out.values()) {
+    entry.words.sort((a, b) => a.start + a.end - b.start - b.end || a.start - b.start);
+    entry.middles = entry.words.map((word) => (word.start + word.end) / 2);
+  }
+  return out;
+}
+
+function between(index: ReturnType<typeof indexBySource>, source: string, from: number, to: number) {
+  const entry = index.get(source);
+  if (!entry) return [];
+  const first = (at: number) => {
+    let low = 0, high = entry.middles.length;
+    while (low < high) { const mid = (low + high) >> 1; if (entry.middles[mid] < at) low = mid + 1; else high = mid; }
+    return low;
+  };
+  return entry.words.slice(first(from), first(to)).sort((a, b) => a.start - b.start);
+}
+
+function ghostsOf(edit: Timeline, index: ReturnType<typeof indexBySource>, used: Set<string>): Ghost[] {
   // Look through gaps: a lifted line sits between the same two stretches of
   // source that a deleted one would, and restores into its gap.
-  const real = edit.segments.map((segment, index) => ({ segment, index })).filter((item) => !isGap(item.segment));
+  const real = edit.segments.map((segment, at) => ({ segment, at })).filter((item) => !isGap(item.segment));
   if (real.length !== edit.segments.length) {
-    const view = ghostLines({ ...edit, segments: real.map((item) => item.segment) }, words, durations);
-    return view.map((ghost) => ({ ...ghost, at: ghost.at >= real.length ? edit.segments.length : real[ghost.at].index }));
+    const view = ghostsOf({ ...edit, segments: real.map((item) => item.segment) }, index, used);
+    return view.map((ghost) => ({ ...ghost, at: ghost.at >= real.length ? edit.segments.length : real[ghost.at].at }));
   }
-  if (!edit.segments.length) return [];
-  const used = new Set(placeWords(words, edit).map((item) => item.word.id));
-  const first = edit.segments[0], last = edit.segments[edit.segments.length - 1];
-  const gaps: { at: number; source: string; from: number; to: number }[] = [
-    { at: 0, source: first.source, from: 0, to: first.srcIn },
-    ...seamList(edit, words).filter((seam) => seam.kind === "cut").map((seam) =>
-      ({ at: seam.index, source: edit.segments[seam.index].source, from: edit.segments[seam.index - 1].srcOut, to: edit.segments[seam.index].srcIn })),
-    { at: edit.segments.length, source: last.source, from: last.srcOut, to: durations[last.source] ?? last.srcOut },
-  ];
   const ghosts: Ghost[] = [];
-  for (const gap of gaps) {
-    const skipped = sourceWords(words, gap.source, gap.from, gap.to);
+  for (let at = 1; at < edit.segments.length; at++) {
+    const before = edit.segments[at - 1], after = edit.segments[at];
+    // A cut is the same source carrying on later; anything else is a jump, and restores nothing.
+    if (before.source !== after.source || after.srcIn - before.srcOut <= 1e-6) continue;
+    const gap = { at, source: after.source, from: before.srcOut, to: after.srcIn };
+    const skipped = between(index, gap.source, gap.from, gap.to);
     if (!skipped.length || skipped.some((word) => used.has(word.id))) continue;
-    const lines: TimelineWord[][] = [];
-    for (const word of skipped) {
-      const line = lines[lines.length - 1], previous = line?.[line.length - 1];
-      if (!line || previous.track !== word.track || word.start - previous.end > PAUSE_BREAK) lines.push([word]);
-      else line.push(word);
-    }
-    lines.forEach((line, index) => {
-      const before = lines[index - 1]?.[lines[index - 1].length - 1], after = lines[index + 1]?.[0];
-      ghosts.push({ id: `g-${line[0].id}`, at: gap.at, source: gap.source, track: line[0].track, words: line,
-        from: before ? (before.end + line[0].start) / 2 : gap.from, to: after ? (line[line.length - 1].end + after.start) / 2 : gap.to });
+    const turns = speakerTurns(skipped);
+    let reached = gap.from;
+    turns.forEach((turn, position) => {
+      const next = turns[position + 1];
+      const from = position === 0 ? gap.from : reached < turn.start ? (reached + turn.start) / 2 : turn.start;
+      const to = !next ? gap.to : next.start > turn.end ? (turn.end + next.start) / 2 : turn.end;
+      reached = Math.max(reached, turn.end);
+      ghosts.push({ id: `g-${turn.words[0].id}`, at: gap.at, source: gap.source, track: turn.track, words: turn.words, from, to: Math.max(from, to) });
     });
   }
   return ghosts;
+}
+
+/** What makes two cues the same speech heard twice: most of the shorter one's words, over most of its time. */
+const COPY_WORDS = 0.6, COPY_TIME = 0.5;
+const wordsOf = (cue: TimelineWord[]) => new Set(cue.map((word) => word.text.toLocaleLowerCase().replace(/[^\p{L}\p{N}']/gu, "")).filter(Boolean));
+
+/** Removed words as speaker turns, bleed copies left out, in time order. */
+function speakerTurns(skipped: TimelineWord[]) {
+  const cues = new Map<string, TimelineWord[]>();
+  for (const word of skipped) {
+    if (word.heardOn) continue;
+    const key = `${word.track}\n${word.cue ?? word.id}`, cue = cues.get(key);
+    if (cue) cue.push(word); else cues.set(key, [word]);
+  }
+  type Turn = { track: string; words: TimelineWord[]; start: number; end: number; vocabulary: Set<string> };
+  const lines: Turn[] = [...cues.values()].map((cue) => ({ track: cue[0].track, words: cue, start: cue[0].start, end: cue[cue.length - 1].end, vocabulary: wordsOf(cue) }))
+    .sort((a, b) => a.start - b.start || b.words.length - a.words.length);
+  // Only cues still open when a line starts can be its copy, so the sweep stays short.
+  const kept: Turn[] = [];
+  let open: Turn[] = [];
+  for (const line of lines) {
+    open = open.filter((other) => other.end > line.start);
+    const copy = open.some((other) => {
+      if (other.track === line.track) return false;
+      const shorter = Math.min(other.end - other.start, line.end - line.start), shared = Math.min(other.end, line.end) - Math.max(other.start, line.start);
+      if (shared < COPY_TIME * Math.max(shorter, 1e-3)) return false;
+      const small = other.vocabulary.size < line.vocabulary.size ? other.vocabulary : line.vocabulary, large = small === other.vocabulary ? line.vocabulary : other.vocabulary;
+      return small.size > 0 && [...small].filter((word) => large.has(word)).length >= COPY_WORDS * small.size;
+    });
+    if (copy) continue;
+    kept.push(line); open.push(line);
+  }
+  // One speaker's cues in a row are one turn, until a long pause.
+  const turns: Turn[] = [];
+  for (const line of kept) {
+    const last = turns[turns.length - 1];
+    if (last && last.track === line.track && line.start - last.end <= PAUSE_BREAK) { last.words = [...last.words, ...line.words]; last.end = Math.max(last.end, line.end); }
+    else turns.push({ ...line });
+  }
+  return turns;
 }
 
 /**
