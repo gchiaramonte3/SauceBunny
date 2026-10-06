@@ -10,7 +10,7 @@ import { sequenceFps, sequenceRate, sequenceTimecode, trackOwner } from "../lib/
 import { GenerateButton } from "./GenerateButton";
 import { MultitrackTimeline } from "./MultitrackTimeline";
 import { MultitrackTransport } from "./MultitrackTransport";
-import { MultitrackTranscript } from "./MultitrackTranscript";
+import { MultitrackTranscript, type TranscriptRequest } from "./MultitrackTranscript";
 import { MultitrackCast } from "./MultitrackCast";
 import { MultitrackSettings } from "./MultitrackSettings";
 import { usePaneWidth } from "../hooks/use-pane-width";
@@ -25,6 +25,8 @@ import { loadViewState, saveViewState } from "../lib/multitrack-view-state";
 
 type Props = {
   document: AafDocument; active: boolean; waveforms: Record<string, number[][]>; waveformErrors: Record<string, string>;
+  /** The original AAF can't be read, so no lane can draw (the page says so once). */
+  waveformsOffline?: boolean;
   labelStatus: string; onRename: RenameMic; onTranscript: (transcript: AafTrackTranscript) => void;
   onRetryLabels?: () => void; onRetryWaveform?: (trackId: string) => void; onOpenMedia?: () => void;
   onOpenSettings?: () => void; onJobState?: (running: boolean) => void; settingsOpen?: boolean; onCloseSettings?: () => void;
@@ -39,7 +41,7 @@ type Props = {
   waveformsBuilding?: string[];
   openRequest?: { id: string; tick: number; frame?: number; trackId?: string } | null;
 };
-export function MultitrackWorkspace({ document, active, waveforms, waveformErrors, labelStatus, onRename, onTranscript, onRetryLabels, onRetryWaveform, onOpenMedia, onOpenSettings, onJobState, settingsOpen, onCloseSettings, aiModelId, openRequest, onVisibleTracks, onMarks, onWaveforms, waveformsBuilding, resolvingMedia }: Props) {
+export function MultitrackWorkspace({ document, active, waveforms, waveformErrors, waveformsOffline = false, labelStatus, onRename, onTranscript, onRetryLabels, onRetryWaveform, onOpenMedia, onOpenSettings, onJobState, settingsOpen, onCloseSettings, aiModelId, openRequest, onVisibleTracks, onMarks, onWaveforms, waveformsBuilding, resolvingMedia }: Props) {
   const [saved] = useState(() => loadViewState(document.id, document.manifest.tracks.map(track => track.id)));
   const [selected, setSelected] = useState(() => new Set(saved?.selected ?? document.manifest.tracks.filter(track => !alternativeLane(document, track.id)).map((track) => track.id)));
   const [expanded, setExpanded] = useState(() => new Set(saved?.expanded ?? []));
@@ -66,6 +68,9 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
   useEffect(() => { onWaveforms?.(document.id, showWaveforms); return () => onWaveforms?.(document.id, false); }, [document.id, showWaveforms, onWaveforms]);
   const saveTimelineView = useCallback((view: { zoom: number; density: string; text: string[] }) => saveViewState(document.id, view), [document.id]);
   const [timecodeEntry, setTimecodeEntry] = useState<string | null>(null);
+  // A track's status glyph asking the Transcript panel for that track's passages to review, or for Transcript info.
+  const [transcriptRequest, setTranscriptRequest] = useState<TranscriptRequest>();
+  const askTranscript = useCallback((trackId: string | null, info = false) => setTranscriptRequest((prior) => ({ tick: (prior?.tick ?? 0) + 1, trackId, info })), []);
   const closeTimecode = useCallback(() => setTimecodeEntry(null), []);
   const [castTrack, setCastTrack] = useState<string | null>(null);
   const [trackMenu, setTrackMenu] = useState<MultitrackMenuTarget | null>(null), [regenerate, setRegenerate] = useState<string | null>(null);
@@ -133,7 +138,7 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
       <div className="cp-multitrack-sequence-head"><h2 title={document.manifest.name}>{document.manifest.name}</h2><span className="cp-multitrack-note">{sequenceFps(document.manifest).toFixed(3).replace(/\.?0+$/, "")} fps</span><span className="cp-multitrack-note" role="status">{labelStatus}</span>{labelStatus === "Labels not saved" && onRetryLabels && <button className="btn btn-ghost" onClick={onRetryLabels}>Retry saving labels</button>}</div>
       <MultitrackMediaStatus document={document} resolving={resolvingMedia} disabled={transcription.loading || relinkers.settings} onBusy={onStripBusy} onDetails={onOpenMedia} />
       <MultitrackCast document={document} active={active} onRename={onRename} editTrack={castTrack} onCloseEdit={() => setCastTrack(null)} />
-      <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={waveformErrors} onRetryWaveform={onRetryWaveform} selected={selected} onSelect={toggleTrack} onRename={onRename} onOwnerMenu={setCastTrack} onView={onView} detail={{ ...view, peaks: detail }}
+      <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={waveformErrors} waveformsOffline={waveformsOffline} onRetryWaveform={onRetryWaveform} onReviewTiming={askTranscript} onTranscriptInfo={() => askTranscript(null, true)} selected={selected} onSelect={toggleTrack} onRename={onRename} onOwnerMenu={setCastTrack} onView={onView} detail={{ ...view, peaks: detail }}
         solo={audio.solo} muted={audio.mute} onSolo={audio.toggleSolo} onMute={audio.toggleMute} levels={audio.levels} onLevel={audio.setTrackLevel} onTrackMenu={(id, x, y) => setTrackMenu({ id, x, y })} frame={audio.frame} onSeek={seek} onScrub={audio.scrub}
         onScrubEnd={(frame, resume) => { void audio.seek(frame, undefined, resume); }} playing={audio.playing} showWaveforms={showWaveforms} waveformsBuilding={waveformsBuilding} transport={transport}
         expanded={expanded} onExpand={expandGroup} initialView={saved ?? undefined} onViewState={saveTimelineView} marks={marks} onClearMarks={clearMarks} />
@@ -157,7 +162,7 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
     {regenerate && active && <MultitrackRegenerate owner={trackOwner(document, regenerate)} generated={document.transcripts.some(item => item.track_id === regenerate)} initial={{ engine: transcription.engine, modelId: transcription.modelId, parakeetModel: transcription.parakeetModel, ...transcription.options }} models={transcription.models} parakeet={transcription.parakeet} onClose={() => setRegenerate(null)} onStart={(choice) => { const id = regenerate; setRegenerate(null); transcription.setOptions({ fast: choice.fast === true, speechOnly: choice.speechOnly === true, castNames: choice.castNames === true }); void transcription.start([id], 0, duration, choice); }} />}
     <div className="cp-multitrack-transcript-pane">
       <div className={`cp-multitrack-resize cp-resize-handle vertical${pane.resizing ? " dragging" : ""}`} role="separator" aria-label="Resize track transcripts" aria-orientation="vertical" aria-valuemin={pane.min} aria-valuemax={pane.max} aria-valuenow={Math.min(pane.width, paneMax)} tabIndex={0} onMouseDown={pane.onMouseDown} onKeyDown={pane.onKeyDown} onDoubleClick={() => pane.setWidth(340)} title="Drag to resize · arrow keys to nudge · Home to reset" />
-      <MultitrackTranscript document={document} frame={audio.frame} solo={audio.solo} onSeek={seek} report={transcription.report} error={transcription.error} loading={transcription.loading} active={active} aiModelId={aiModelId} selectedTracks={selected} />
+      <MultitrackTranscript document={document} frame={audio.frame} solo={audio.solo} onSeek={seek} report={transcription.report} error={transcription.error} loading={transcription.loading} active={active} aiModelId={aiModelId} selectedTracks={selected} request={transcriptRequest} />
     </div>
     {settingsOpen && active && <MultitrackSettings document={document} waveformErrors={waveformErrors} onBusy={onSettingsBusy} disabled={transcription.loading || resolvingMedia || relinkers.strip} onClose={() => onCloseSettings?.()} />}
     {timecodeEntry != null && active && !settingsOpen && <MultitrackTimecodeDialog key={document.id} manifest={document.manifest} initialDigits={timecodeEntry} onClose={closeTimecode} onSeek={(frame) => { void audio.seek(frame, undefined, false); }} />}

@@ -506,11 +506,39 @@ pub fn rename_transcript(srt_path: String, new_stem: String) -> Result<String, c
     dest.to_str().map(str::to_string).ok_or_else(|| crate::AppError::internal("Renamed path isn't valid UTF-8."))
 }
 
+/// AAF Audio keeps its documents in a folder inside the default transcript
+/// library (`aaf::store::location`), so to the Transcripts page it looked like
+/// any project: listed, offered under "Move to folder…", renameable. Renaming
+/// it moved every AAF Audio document out of AAF Audio, String Outs and the
+/// assistants' context (which name that folder), and the store made a new,
+/// empty one. It is never listed, created, renamed, deleted or filed into here.
+fn aaf_store(app: &tauri::AppHandle) -> Option<PathBuf> { super::aaf::store::location(app).ok() }
+
+fn is_aaf_store(dir: &Path, store: Option<&Path>) -> bool {
+    let Some(store) = store else { return false };
+    // Without case, as APFS compares names: "multitrack" is the same folder.
+    let same = |a: &Path, b: &Path| a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase();
+    match (std::fs::canonicalize(dir), std::fs::canonicalize(store)) {
+        (Ok(dir), Ok(store)) => same(&dir, &store),
+        // One of them is not on disk yet: compare the spelling.
+        _ => same(dir, store),
+    }
+}
+
+const AAF_STORE_REFUSAL: &str = "That folder holds AAF Audio's saved sequences, so it can't be changed from here.";
+
 /// Create a one-level subfolder in the transcript library. Returns its path.
 #[tauri::command(async)]
-pub fn create_transcript_folder(library_path: String, name: String) -> Result<String, crate::AppError> {
-    let stem = valid_stem(&name)?;
-    let dir = PathBuf::from(&library_path).join(&stem);
+pub fn create_transcript_folder(app: tauri::AppHandle, library_path: String, name: String) -> Result<String, crate::AppError> {
+    create_folder(&library_path, &name, aaf_store(&app).as_deref())
+}
+
+fn create_folder(library_path: &str, name: &str, store: Option<&Path>) -> Result<String, crate::AppError> {
+    let stem = valid_stem(name)?;
+    let dir = PathBuf::from(library_path).join(&stem);
+    if is_aaf_store(&dir, store) {
+        return Err(crate::AppError::invalid(AAF_STORE_REFUSAL));
+    }
     if dir.exists() {
         return Err(crate::AppError::invalid(format!("A folder named \"{stem}\" already exists.")));
     }
@@ -534,16 +562,17 @@ pub fn create_transcript_folder(library_path: String, name: String) -> Result<St
 /// entries are skipped: `.DS_Store` is a file, but a stray dot-directory is
 /// not something anybody made here.
 #[tauri::command]
-pub async fn list_transcript_folders(library_path: String) -> Result<Vec<String>, crate::AppError> {
+pub async fn list_transcript_folders(app: tauri::AppHandle, library_path: String) -> Result<Vec<String>, crate::AppError> {
     // This runs during application startup. A cloud-backed or unavailable
     // volume can block read_dir indefinitely; never pin the macOS UI thread
     // (or an async executor worker) while waiting for that filesystem.
-    tokio::task::spawn_blocking(move || list_transcript_folders_sync(&library_path))
+    let store = aaf_store(&app);
+    tokio::task::spawn_blocking(move || list_transcript_folders_sync(&library_path, store.as_deref()))
         .await
         .map_err(|e| crate::AppError::internal(format!("Transcript folder scan task failed: {e}")))?
 }
 
-fn list_transcript_folders_sync(library_path: &str) -> Result<Vec<String>, crate::AppError> {
+fn list_transcript_folders_sync(library_path: &str, store: Option<&Path>) -> Result<Vec<String>, crate::AppError> {
     let root = PathBuf::from(&library_path);
     let Ok(entries) = std::fs::read_dir(&root) else {
         // A library that does not exist yet is not an error — it is a fresh
@@ -553,6 +582,7 @@ fn list_transcript_folders_sync(library_path: &str) -> Result<Vec<String>, crate
     let mut out: Vec<String> = entries
         .flatten()
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter(|e| !is_aaf_store(&e.path(), store))
         .filter_map(|e| e.file_name().to_str().map(str::to_string))
         .filter(|n| !n.starts_with('.'))
         .collect();
@@ -567,24 +597,32 @@ fn list_transcript_folders_sync(library_path: &str) -> Result<Vec<String>, crate
 /// transcripts findable in Finder under the name the user chose.
 #[tauri::command(async)]
 pub fn rename_transcript_folder(
+    app: tauri::AppHandle,
     library_path: String,
     folder: String,
     new_name: String,
 ) -> Result<String, crate::AppError> {
-    let stem = valid_stem(&new_name)?;
+    rename_folder(&library_path, &folder, &new_name, aaf_store(&app).as_deref())
+}
+
+fn rename_folder(library_path: &str, folder: &str, new_name: &str, store: Option<&Path>) -> Result<String, crate::AppError> {
+    let stem = valid_stem(new_name)?;
     // `folder` is joined onto the library root, and `Path::join` with an
     // absolute or `..` segment escapes it. It names an EXISTING project, so
     // the cleaned value is discarded; only the refusal matters.
-    valid_stem(&folder)?;
-    let root = PathBuf::from(&library_path);
-    let src = root.join(&folder);
+    valid_stem(folder)?;
+    let root = PathBuf::from(library_path);
+    let src = root.join(folder);
     if !src.is_dir() {
-        return Err(crate::AppError::not_found(folder.as_str()));
+        return Err(crate::AppError::not_found(folder));
+    }
+    if is_aaf_store(&src, store) || is_aaf_store(&root.join(&stem), store) {
+        return Err(crate::AppError::invalid(AAF_STORE_REFUSAL));
     }
     // A month bucket is the app's own filing, not something anyone named, and
     // renaming one would strand every transcript the grouping expects to find
     // there.
-    if is_month_folder(&folder) {
+    if is_month_folder(folder) {
         return Err(crate::AppError::invalid(
             "That folder is one the app files into by date, so it can't be renamed.",
         ));
@@ -618,16 +656,23 @@ pub fn rename_transcript_folder(
 /// moves the transcripts out first, which makes the destructive step explicit
 /// and reversible up to that point.
 #[tauri::command(async)]
-pub fn delete_transcript_folder(library_path: String, folder: String) -> Result<(), crate::AppError> {
+pub fn delete_transcript_folder(app: tauri::AppHandle, library_path: String, folder: String) -> Result<(), crate::AppError> {
+    delete_folder(&library_path, &folder, aaf_store(&app).as_deref())
+}
+
+fn delete_folder(library_path: &str, folder: &str, store: Option<&Path>) -> Result<(), crate::AppError> {
     // Same traversal guard as the rename: validated before anything on disk
     // is looked at, let alone removed.
-    valid_stem(&folder)?;
-    let root = PathBuf::from(&library_path);
-    let dir = root.join(&folder);
+    valid_stem(folder)?;
+    let root = PathBuf::from(library_path);
+    let dir = root.join(folder);
     if !dir.is_dir() {
-        return Err(crate::AppError::not_found(folder.as_str()));
+        return Err(crate::AppError::not_found(folder));
     }
-    if is_month_folder(&folder) {
+    if is_aaf_store(&dir, store) {
+        return Err(crate::AppError::invalid(AAF_STORE_REFUSAL));
+    }
+    if is_month_folder(folder) {
         return Err(crate::AppError::invalid(
             "That folder is one the app files into by date, so it can't be deleted here.",
         ));
@@ -785,19 +830,26 @@ fn copy_library_file_sync(src_path: String, dest_dir: String) -> Result<String, 
 
 /// Move a transcript (+ its sidecars) into `dest_dir`. Returns the new path.
 #[tauri::command(async)]
-pub fn move_transcript_to_folder(srt_path: String, dest_dir: String) -> Result<String, crate::AppError> {
-    let src = PathBuf::from(&srt_path);
+pub fn move_transcript_to_folder(app: tauri::AppHandle, srt_path: String, dest_dir: String) -> Result<String, crate::AppError> {
+    move_transcript(&srt_path, &dest_dir, aaf_store(&app).as_deref())
+}
+
+fn move_transcript(srt_path: &str, dest_dir: &str, store: Option<&Path>) -> Result<String, crate::AppError> {
+    let src = PathBuf::from(srt_path);
     if !src.is_file() {
-        return Err(crate::AppError::not_found(srt_path.as_str()));
+        return Err(crate::AppError::not_found(srt_path));
     }
-    let dir = PathBuf::from(&dest_dir);
+    let dir = PathBuf::from(dest_dir);
     if !dir.is_dir() {
-        return Err(crate::AppError::not_found(dest_dir.as_str()));
+        return Err(crate::AppError::not_found(dest_dir));
+    }
+    if is_aaf_store(&dir, store) {
+        return Err(crate::AppError::invalid(AAF_STORE_REFUSAL));
     }
     let name = src.file_name().ok_or_else(|| crate::AppError::invalid("Bad transcript path."))?;
     let dest = dir.join(name);
     if dest == src {
-        return Ok(srt_path);
+        return Ok(srt_path.to_string());
     }
     ensure_dest_clear(&dest)?;
     std::fs::rename(&src, &dest)
@@ -931,15 +983,15 @@ mod tests {
         std::fs::write(&srt, "x").unwrap();
         std::fs::write(t.path().join("clip.analysis.json"), "{}").unwrap();
 
-        let folder = create_transcript_folder(t.path().to_str().unwrap().to_string(), "Project A".into()).unwrap();
+        let folder = create_folder(t.path().to_str().unwrap(), "Project A", None).unwrap();
         assert!(PathBuf::from(&folder).is_dir());
-        let out = move_transcript_to_folder(srt.to_str().unwrap().to_string(), folder.clone()).unwrap();
+        let out = move_transcript(srt.to_str().unwrap(), &folder, None).unwrap();
         assert!(out.ends_with("Project A/clip.srt"));
         assert!(PathBuf::from(&folder).join("clip.srt").is_file());
         assert!(PathBuf::from(&folder).join("clip.analysis.json").is_file(), "sidecar moves too");
         assert!(!srt.is_file());
         // A duplicate folder is rejected.
-        assert!(create_transcript_folder(t.path().to_str().unwrap().to_string(), "Project A".into()).is_err());
+        assert!(create_folder(t.path().to_str().unwrap(), "Project A", None).is_err());
     }
 
     #[test]
@@ -948,7 +1000,7 @@ mod tests {
         // transcript-file name is free must still not overwrite an existing
         // sidecar that belongs to a sibling in the destination.
         let t = TempTree::new("clobber");
-        let proj = create_transcript_folder(t.path().to_str().unwrap().to_string(), "Project".into()).unwrap();
+        let proj = create_folder(t.path().to_str().unwrap(), "Project", None).unwrap();
         // Destination already holds Interview.srt + its speaker sidecar.
         std::fs::write(PathBuf::from(&proj).join("Interview.srt"), "x").unwrap();
         std::fs::write(PathBuf::from(&proj).join("Interview.diarization.json"), r#"{"srt":true}"#).unwrap();
@@ -957,7 +1009,7 @@ mod tests {
         std::fs::write(&vtt, "y").unwrap();
         std::fs::write(t.path().join("Interview.diarization.json"), r#"{"vtt":true}"#).unwrap();
 
-        let res = move_transcript_to_folder(vtt.to_str().unwrap().to_string(), proj.clone());
+        let res = move_transcript(vtt.to_str().unwrap(), &proj, None);
         assert!(res.is_err(), "move must be rejected — it would clobber Interview.srt's sidecar");
         // The .srt's sidecar is intact; nothing was moved.
         let kept = std::fs::read_to_string(PathBuf::from(&proj).join("Interview.diarization.json")).unwrap();
@@ -1252,7 +1304,7 @@ mod tests {
         std::fs::create_dir(t.path().join("Empty Project")).unwrap();
         std::fs::create_dir(t.path().join("Has Work")).unwrap();
         std::fs::write(t.path().join("Has Work/a.srt"), "x").unwrap();
-        let got = list_transcript_folders(t.path().to_string_lossy().into()).await.unwrap();
+        let got = list_transcript_folders_sync(&t.path().to_string_lossy(), None).unwrap();
         assert_eq!(got, vec!["Empty Project", "Has Work"]);
     }
 
@@ -1264,7 +1316,7 @@ mod tests {
         std::fs::write(t.path().join("loose.srt"), "x").unwrap();
         std::fs::write(t.path().join(".DS_Store"), "x").unwrap();
         assert_eq!(
-            list_transcript_folders(t.path().to_string_lossy().into()).await.unwrap(),
+            list_transcript_folders_sync(&t.path().to_string_lossy(), None).unwrap(),
             vec!["Show"],
         );
     }
@@ -1277,7 +1329,7 @@ mod tests {
         let t = TempTree::new("list-missing");
         let missing = t.path().join("not-created-yet");
         assert_eq!(
-            list_transcript_folders(missing.to_string_lossy().into()).await.unwrap(),
+            list_transcript_folders_sync(&missing.to_string_lossy(), None).unwrap(),
             Vec::<String>::new(),
         );
     }
@@ -1300,11 +1352,7 @@ mod tests {
         let t = TempTree::new("rename-project");
         std::fs::create_dir(t.path().join("Old")).unwrap();
         std::fs::write(t.path().join("Old/a.srt"), "x").unwrap();
-        let out = rename_transcript_folder(
-            t.path().to_string_lossy().into(),
-            "Old".into(),
-            "New".into(),
-        )
+        let out = rename_folder(&t.path().to_string_lossy(), "Old", "New", None)
         .unwrap();
         assert!(out.ends_with("/New"), "{out}");
         assert!(
@@ -1315,16 +1363,41 @@ mod tests {
     }
 
     #[test]
+    fn the_aaf_audio_store_is_never_a_transcript_project() {
+        // It sits inside the default transcript library. Renaming it from the
+        // Transcripts page moved every AAF Audio document out of AAF Audio and
+        // String Outs, which then found none.
+        let t = TempTree::new("aaf-store");
+        let store = t.path().join("Multitrack");
+        std::fs::create_dir(&store).unwrap();
+        let document = store.join(format!("{}.json", "a".repeat(64)));
+        std::fs::write(&document, "{}").unwrap();
+        std::fs::create_dir(t.path().join("Multitrack-old")).unwrap();
+        let library = t.path().to_string_lossy();
+        let store_dir = store.to_string_lossy().into_owned();
+        let store = Some(store.as_path());
+        assert_eq!(list_transcript_folders_sync(&library, store).unwrap(), vec!["Multitrack-old".to_string()]);
+        assert!(rename_folder(&library, "Multitrack", "Archive", store).is_err());
+        assert!(rename_folder(&library, "multitrack", "Archive", store).is_err(), "another spelling of the same folder");
+        assert!(delete_folder(&library, "Multitrack", store).is_err());
+        assert!(rename_folder(&library, "Multitrack-old", "Multitrack", store).is_err(), "a project took the store's name");
+        assert!(create_folder(&library, "Multitrack", store).is_err());
+        let srt = t.path().join("a.srt");
+        std::fs::write(&srt, "1\n00:00:00,000 --> 00:00:01,000\nhi\n").unwrap();
+        assert!(move_transcript(srt.to_str().unwrap(), &store_dir, store).is_err());
+        assert!(document.is_file(), "the AAF Audio document moved");
+        assert!(srt.is_file(), "the transcript was filed into the store");
+        // Anything else with a similar name is an ordinary project.
+        assert!(rename_folder(&library, "Multitrack-old", "Older", store).is_ok());
+    }
+
+    #[test]
     fn refuses_to_rename_a_month_bucket() {
         // Those are the app's own filing. Renaming one strands every
         // transcript the date grouping expects to find inside it.
         let t = TempTree::new("rename-month");
         std::fs::create_dir(t.path().join("2026-08")).unwrap();
-        assert!(rename_transcript_folder(
-            t.path().to_string_lossy().into(),
-            "2026-08".into(),
-            "August".into(),
-        )
+        assert!(rename_folder(&t.path().to_string_lossy(), "2026-08", "August", None)
         .is_err());
         assert!(t.path().join("2026-08").is_dir());
     }
@@ -1338,11 +1411,7 @@ mod tests {
         let t = TempTree::new("rename-case");
         std::fs::create_dir(t.path().join("rushes")).unwrap();
         std::fs::write(t.path().join("rushes/a.srt"), "x").unwrap();
-        let out = rename_transcript_folder(
-            t.path().to_string_lossy().into(),
-            "rushes".into(),
-            "Rushes".into(),
-        )
+        let out = rename_folder(&t.path().to_string_lossy(), "rushes", "Rushes", None)
         .expect("a case-only rename was refused");
         assert!(out.ends_with("/Rushes"), "{out}");
         // The transcript is still there under whichever spelling the
@@ -1356,11 +1425,7 @@ mod tests {
         std::fs::create_dir(t.path().join("A")).unwrap();
         std::fs::create_dir(t.path().join("B")).unwrap();
         std::fs::write(t.path().join("B/keep.srt"), "x").unwrap();
-        assert!(rename_transcript_folder(
-            t.path().to_string_lossy().into(),
-            "A".into(),
-            "B".into(),
-        )
+        assert!(rename_folder(&t.path().to_string_lossy(), "A", "B", None)
         .is_err());
         assert!(
             t.path().join("B/keep.srt").is_file(),
@@ -1383,7 +1448,7 @@ mod tests {
         std::fs::create_dir(t.path().join("Show")).unwrap();
         std::fs::write(t.path().join("Show/ep1.srt"), "x").unwrap();
         std::fs::write(t.path().join("Show/ep2.srt"), "x").unwrap();
-        let err = delete_transcript_folder(t.path().to_string_lossy().into(), "Show".into())
+        let err = delete_folder(&t.path().to_string_lossy(), "Show", None)
             .expect_err("it agreed to delete a project holding two transcripts");
         let msg = format!("{err:?}");
         assert!(msg.contains("still holds 2 transcripts"), "unhelpful refusal: {msg}");
@@ -1428,7 +1493,7 @@ mod tests {
         let t = TempTree::new("delete-one");
         std::fs::create_dir(t.path().join("Show")).unwrap();
         std::fs::write(t.path().join("Show/ep1.srt"), "x").unwrap();
-        let err = delete_transcript_folder(t.path().to_string_lossy().into(), "Show".into())
+        let err = delete_folder(&t.path().to_string_lossy(), "Show", None)
             .unwrap_err();
         assert!(format!("{err:?}").contains("holds 1 transcript."), "{err:?}");
     }
@@ -1437,7 +1502,7 @@ mod tests {
     fn deletes_an_empty_project() {
         let t = TempTree::new("delete-empty");
         std::fs::create_dir(t.path().join("Show")).unwrap();
-        delete_transcript_folder(t.path().to_string_lossy().into(), "Show".into()).unwrap();
+        delete_folder(&t.path().to_string_lossy(), "Show", None).unwrap();
         assert!(!t.path().join("Show").exists());
     }
 
@@ -1449,7 +1514,7 @@ mod tests {
         let t = TempTree::new("delete-dotfile");
         std::fs::create_dir(t.path().join("Show")).unwrap();
         std::fs::write(t.path().join("Show/.DS_Store"), "x").unwrap();
-        delete_transcript_folder(t.path().to_string_lossy().into(), "Show".into()).unwrap();
+        delete_folder(&t.path().to_string_lossy(), "Show", None).unwrap();
         assert!(!t.path().join("Show").exists());
     }
 
@@ -1458,7 +1523,7 @@ mod tests {
         let t = TempTree::new("delete-month");
         std::fs::create_dir(t.path().join("2026-08")).unwrap();
         assert!(
-            delete_transcript_folder(t.path().to_string_lossy().into(), "2026-08".into()).is_err()
+            delete_folder(&t.path().to_string_lossy(), "2026-08", None).is_err()
         );
         assert!(t.path().join("2026-08").is_dir());
     }

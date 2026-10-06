@@ -5,6 +5,26 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+- **AAF Audio and String Outs open clear.** Neither reopens the last sequence
+  or string out at launch; what you open stays open while the app runs.
+- **The "!" beside a mic owner explains itself.** Click it: it means timing
+  needs review (some passages were kept off the timeline, nothing lost), with
+  Review N passages and Transcript info. Every status glyph opens the same way,
+  and "no speech found" no longer shows as a green check.
+- **An offline AAF says so once.** Instead of "Waveform unavailable" on every
+  lane and a Pipeline row per lane, one line says the AAF can't be read, with
+  Retry.
+
+### Fixed
+- **The Transcripts page can no longer rename or delete AAF Audio's store.**
+  It showed as a project called "Multitrack"; renaming it took every AAF Audio
+  document out of AAF Audio and String Outs.
+- **Pipeline Copy and a review link's Copy link work.** WebKit refused both,
+  because each worked something out before writing to the clipboard.
+- "Voices checked for 1 person", "1 track saved", and "Pick a transcript to
+  read" when only AAF Audio documents are listed.
+
 ## [0.6.0] - 2026-09-29
 
 ### Added

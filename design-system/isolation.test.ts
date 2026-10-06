@@ -82,6 +82,9 @@ const allowedProduction = new Set([
   // Controlled zoom buttons and slider, and the In/Out ruler marks: props in,
   // elements out, nothing else imported.
   "src/components/MultitrackZoom", "src/components/RulerMarks",
+  // The glyph beside a mic owner and its click-through popover: a portal, the
+  // shared dismiss hook and a count formatter. Actions are callbacks it is given.
+  "src/components/MultitrackTrackStatus", "src/lib/plural",
 ]);
 const pureHelpers = [...allowedProduction].flatMap(path => [".tsx", ".ts"].map(extension => resolve(root, path + extension)).filter(existsSync));
 

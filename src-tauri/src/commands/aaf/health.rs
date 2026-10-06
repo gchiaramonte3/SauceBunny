@@ -215,6 +215,10 @@ pub struct PipelineHealth {
     pub volumes: Vec<String>,
     /// The newest hang sample's file and its main-thread part, if one was recorded.
     pub latest_hang: Option<String>,
+    /// The co-review session: off, hosting or joined. Its UDP sockets and relay
+    /// connection exist only while one is open (session.rs), so this says
+    /// whose they are when Activity Monitor shows them.
+    pub co_review: String,
 }
 
 #[cfg(target_os = "macos")]
@@ -268,7 +272,8 @@ pub async fn pipeline_health(app: AppHandle) -> Result<PipelineHealth, AppError>
         });
         let uptime_seconds = STARTED.lock().ok().and_then(|started| *started).map_or(0, |started| started.elapsed().as_secs());
         PipelineHealth { resident_bytes: resident_bytes(), uptime_seconds, running_jobs: running_jobs(&app),
-            main_thread_wait_ms: MAIN_WAIT_MS.load(Ordering::Relaxed), volumes: volumes(), latest_hang }
+            main_thread_wait_ms: MAIN_WAIT_MS.load(Ordering::Relaxed), volumes: volumes(), latest_hang,
+            co_review: app.try_state::<crate::commands::SessionManager>().map_or("unknown", |session| session.role_now()).to_string() }
     }).await.map_err(|e| AppError::internal(e.to_string()))
 }
 

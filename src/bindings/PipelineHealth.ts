@@ -20,4 +20,10 @@ volumes: Array<string>,
 /**
  * The newest hang sample's file and its main-thread part, if one was recorded.
  */
-latest_hang: string | null, };
+latest_hang: string | null, 
+/**
+ * The co-review session: off, hosting or joined. Its UDP sockets and relay
+ * connection exist only while one is open (session.rs), so this says
+ * whose they are when Activity Monitor shows them.
+ */
+co_review: string, };

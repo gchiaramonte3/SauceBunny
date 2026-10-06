@@ -78,7 +78,8 @@
 .cp-multitrack-lane.is-solo .cp-multitrack-clip { background: color-mix(in srgb, var(--novella-violet) 36%, var(--bg-2)); }
 .cp-multitrack-waveform { position: absolute; fill: none; stroke: color-mix(in srgb, var(--novella-violet) 60%, var(--fg-1)); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .cp-multitrack-playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--fg-1); pointer-events: none; }
-.cp-multitrack-waveform-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg-3); font-size: var(--text-base); }
+/* One line, so "Waveform unavailable" and its Retry fit a 30px Small lane rather than stacking and clipping. */
+.cp-multitrack-waveform-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: var(--s-2); overflow: hidden; color: var(--fg-3); font-size: var(--text-base); white-space: nowrap; }
 .cp-multitrack-pan { display: flex; align-items: center; color: var(--fg-3); font-size: var(--text-base); }
 .cp-multitrack-pan input { flex: 1; min-width: 0; }
 .cp-multitrack-transport { align-items: center; }
@@ -228,9 +229,17 @@
 .cp-multitrack-page input.cp-multitrack-owner { min-height: 24px; max-height: 24px; height: 24px; min-width: 0; box-sizing: border-box; padding: 2px 4px; border: 1px solid transparent; background: transparent; font-size: var(--text-base); text-overflow: ellipsis; cursor: default; }
 .cp-multitrack-page input.cp-multitrack-owner:focus { cursor: text; }
 .cp-multitrack-owner-status { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.cp-multitrack-saved-status { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; width: 16px; height: 16px; }
+.cp-multitrack-saved-status { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; width: 16px; height: 16px; padding: 0; border: 0; border-radius: var(--r-pill); background: none; color: var(--fg-3); }
+button.cp-multitrack-saved-status { cursor: pointer; }
 .cp-multitrack-saved-status.is-saved { color: var(--success); }
 .cp-multitrack-saved-status.needs-review { color: var(--warning); }
+.cp-multitrack-saved-status.is-empty { color: var(--fg-3); }
+/* What a status glyph means (MultitrackTrackStatus): portalled, so the lane list's scroll cannot clip it. */
+.cp-multitrack-status-popover { position: fixed; z-index: var(--z-popover); display: grid; gap: var(--s-2); width: 300px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: var(--s-3); border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); color: var(--fg-2); font-size: var(--text-base); line-height: var(--leading-normal); }
+.cp-multitrack-status-popover h3 { margin: 0; color: var(--fg-1); font-size: var(--text-md); font-weight: var(--weight-bold); }
+.cp-multitrack-status-popover p { margin: 0; }
+.cp-multitrack-status-popover .cp-multitrack-status-meta { color: var(--fg-3); font-size: var(--text-sm); }
+.cp-multitrack-status-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
 .cp-multitrack-track-switches { gap: 4px; }
 .cp-multitrack-track-switches .btn { min-width: 24px; width: 24px; min-height: 24px; max-height: 24px; height: 24px; box-sizing: border-box; line-height: var(--leading-none); padding: 0; font-size: var(--text-base); }
 .cp-multitrack-track-switches .cp-multitrack-text-toggle { width: 36px; }

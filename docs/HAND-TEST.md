@@ -1103,6 +1103,31 @@ the acceptance test for whenever the verdict UI gets built.
 3. **Nothing changes.** With Sauce Bunny open on a string out, ask Claude to
    change it: it says it can only read. History shows no new step.
 
+### October 5 quick fixes (docs/UI-CORRECTIONS-2026-10-05.md, items 1 to 8)
+
+1. Quit with a sequence open in AAF Audio and a string out open in String
+   Outs; relaunch. AAF Audio says "Open a sequence" (nothing loads, nothing is
+   logged); String Outs shows its list with no tabs. Open one of each, switch
+   pages and back: they stay open.
+2. Transcripts: no project called "Multitrack" appears, in the list or under
+   Move to folder…; with AAF Audio documents listed, the right pane says "Pick
+   a transcript to read."
+3. AAF Audio, after a Whisper run that leaves a "!": click it. A small panel
+   says how many passages need timing review and why; Review N passages
+   switches the Transcript panel to that person at those passages; Transcript
+   info opens the run details. Escape closes it. A green check explains itself
+   the same way; a track with no speech shows a grey (i), not a green check.
+4. Open a sequence whose AAF is on an unmounted drive, with Waveforms on: one
+   line says the AAF can't be read, the lanes stay quiet, the Pipeline logs
+   one failure, not one per lane. Mount it and press Retry: waveforms draw.
+   At Track size Small, a lane's "Waveform unavailable" and Retry sit on one
+   line, Retry fully visible.
+5. Pipeline ▸ Copy, then paste into a text editor: the diagnostics paste.
+   Review ▸ Invite… (Invite reviewers): make a new link and press Copy link
+   while no session is open: it pastes.
+6. Export diagnostics during a co-review session: HEALTH says "Co-review
+   session: hosting" (or joined); outside one, "none open".
+
 ### The Pipeline on String Outs (what to send when it hangs)
 
 1. In String Outs, press ⌘\: the Pipeline opens at the foot of the page with

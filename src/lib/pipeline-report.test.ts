@@ -5,7 +5,7 @@ import { pipelineReport } from "./pipeline-report";
 
 const row = (id: number): AafDiagnosticEvent => ({ id: String(id), timestamp_ms: id, job_id: "import-1", level: "warn", stage: "candidate", message: `Missing /Volumes/Show/track-${id}.mxf`, active: null });
 const health: PipelineHealth = { resident_bytes: 1_610_612_736, uptime_seconds: 3_700, running_jobs: ["job-aaf-7"], main_thread_wait_ms: 12_000,
-  volumes: ["/Volumes/Show · avidfos · network · from //[account]@nexis/Show"], latest_hang: "/logs/hang-1.txt\nCall graph:\n    2001 Thread_1   com.apple.main-thread\n      2001 read" };
+  volumes: ["/Volumes/Show · avidfos · network · from //[account]@nexis/Show"], latest_hang: "/logs/hang-1.txt\nCall graph:\n    2001 Thread_1   com.apple.main-thread\n      2001 read", co_review: "hosting" };
 const base = { page: "String Outs", rows: [], health: null, context: null, inflight: [], stats: [], userAgent: "WebKit", now: new Date(0) };
 
 it("exports failed imports without a document and includes full timestamps and native errors", () => {
@@ -25,6 +25,7 @@ it("says what a hang looked like: the main thread, the volumes, what was in flig
   expect(report).toContain("Main thread: NOT ANSWERING for 12 s");
   expect(report).toContain("1.50 GB resident");
   expect(report).toContain("/Volumes/Show · avidfos · network");
+  expect(report).toContain("Co-review session: hosting (its UDP sockets and relay connection are open)");
   expect(report).toContain("34 s · String Outs · aaf_speech (documentId 47ab1632, trackId 12) · waiting");
   expect(report).toContain("aaf_speech · 20 · 1 · 400 ms · 34 s · Timed out");
   expect(report).toContain("LATEST HANG SAMPLE");
