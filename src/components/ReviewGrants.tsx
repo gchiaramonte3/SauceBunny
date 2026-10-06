@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { copyText } from "../lib/clipboard";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { reviewInviteMessage } from "../lib/review-link";
@@ -114,9 +115,12 @@ export function ReviewGrants({ sessionCode }: {
     const generation = copyGeneration.current;
     setError(null);
     try {
-      const code = sessionCode ?? await invoke<string>("review_code");
-      if (generation !== copyGeneration.current) return;
-      await navigator.clipboard.writeText(reviewInviteMessage(code, secret));
+      // The write starts in the click, before the code is known (lib/clipboard).
+      // A newer Copy makes this one's text reject, so it writes nothing.
+      await copyText((sessionCode ? Promise.resolve(sessionCode) : invoke<string>("review_code")).then((code) => {
+        if (generation !== copyGeneration.current) throw new Error("superseded");
+        return reviewInviteMessage(code, secret);
+      }));
       if (generation !== copyGeneration.current) return;
       setCopied(true);
       copyTimer.current = window.setTimeout(() => setCopied(false), 1600);

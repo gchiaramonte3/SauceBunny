@@ -355,18 +355,25 @@ test("Ask with Claude looks lines up with tools and cites them by address, never
   expect(asked[0].app_state.string_out.address).toMatch(/^saucebunny:\/\/string-out\//);
 });
 
-test("coming back reopens the string out that was open, not the welcome", async ({ page }) => {
+test("leaving the page keeps the string out open, and a relaunch opens clear on the saved list", async ({ page }) => {
   await boot(page);
   await page.getByRole("button", { name: "New string out…" }).first().click();
   await page.getByLabel("Title").fill("Keep me");
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("heading", { name: "Keep me" })).toBeVisible();
-  // A relaunch: the page is rebuilt from nothing, so only what was
-  // remembered can bring the string out back.
-  await page.reload();
+  // Going elsewhere is not closing it: the page stays mounted while hidden.
+  await page.getByRole("button", { name: "Home", exact: true }).click();
   await page.getByRole("button", { name: "String Outs", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Keep me" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Pull the story out, bite by bite" })).toHaveCount(0);
+  // A relaunch rebuilds the page from nothing, and nothing reopens by itself:
+  // the owner asked for the page to start clear. The work is saved and listed.
+  await page.reload();
+  await page.getByRole("button", { name: "String Outs", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Saved string outs" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Keep me" })).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Keep me" })).toHaveCount(0);
+  await page.getByRole("button", { name: /Keep me/ }).click();
+  await expect(page.getByRole("heading", { name: "Keep me" })).toBeVisible();
 });
 
 test("the left column is Ask, Inspector, History, with a plain prompt", async ({ page }) => {

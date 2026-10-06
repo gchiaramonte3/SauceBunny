@@ -81,6 +81,11 @@ export function transcriptRows(document: AafDocument) {
   }))).sort((a, b) => a.startSeconds - b.startSeconds || a.trackId.localeCompare(b.trackId));
 }
 
+/** Passages kept off the timeline that a person can review: placeholders such as [BLANK_AUDIO] carry no words to place. */
+export function passagesToReview(transcript: AafTrackTranscript): number {
+  return (transcript.timing_issues ?? []).filter((issue) => hasTranscriptContent(issue.text)).length;
+}
+
 export function untimedTranscriptRows(document: AafDocument) {
   return document.transcripts.flatMap((transcript) => (transcript.timing_issues ?? []).filter((issue) => hasTranscriptContent(issue.text)).map((issue) => ({
     ...issue, trackId: transcript.track_id, owner: trackOwner(document, transcript.track_id), engine: transcript.engine, model: transcript.model_id,

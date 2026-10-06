@@ -77,7 +77,7 @@ it("exports String Outs with what the string out is doing and every AAF Audio do
   mocks.save.mockResolvedValue("/chosen/string-outs.txt");
   setPipelineContext("String Outs", () => ({ text: "String out 1a2b3c4d · 2 sources", documentIds: ["doc-a", "doc-b"] }));
   mocks.invoke.mockImplementation((command: string) => command === "pipeline_health"
-    ? Promise.resolve({ resident_bytes: 900_000_000, uptime_seconds: 60, running_jobs: [], main_thread_wait_ms: 0, volumes: [], latest_hang: null })
+    ? Promise.resolve({ resident_bytes: 900_000_000, uptime_seconds: 60, running_jobs: [], main_thread_wait_ms: 0, volumes: [], latest_hang: null, co_review: "off" })
     : Promise.resolve(snapshot));
   render(<MultitrackPipeline page="String Outs" />);
   fireEvent.click(screen.getByRole("button", { name: "Export diagnostics" }));

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { plural } from "../lib/plural";
+import { passagesToReview } from "../lib/multitrack";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AafDocument } from "../bindings/AafDocument";
@@ -115,7 +117,8 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
           if (!ownsRun()) break;
           receive.current(result);
           ++outcome.saved;
-          if (result.status === "review") ++outcome.review;
+          // Placeholders such as [BLANK_AUDIO] kept off the timeline are not something to review.
+          if (result.status === "review" && passagesToReview(result) > 0) ++outcome.review;
           if (result.status === "empty") ++outcome.empty;
         } catch (cause) {
           if (current.cancelled || !ownsRun()) break;
@@ -123,7 +126,8 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
         }
       }
       if (ownsRun()) {
-        setStatus(current.cancelled ? `Stopped. ${outcome.saved} tracks saved.` : outcome.failures.length ? `${outcome.saved} tracks saved · ${outcome.failures.length} failed. See Transcript info.` : outcome.review ? `${outcome.saved} tracks saved · ${outcome.review} need timing review.` : "Selected range saved for every track");
+        const saved = `${plural(outcome.saved, "track", "tracks")} saved`;
+        setStatus(current.cancelled ? `Stopped. ${saved}.` : outcome.failures.length ? `${saved} · ${outcome.failures.length} failed. See Transcript info.` : outcome.review ? `${saved} · ${outcome.review} ${outcome.review === 1 ? "needs" : "need"} timing review.` : "Selected range saved for every track");
         setResolution(current.cancelled || outcome.review ? null : outcome.failures.length ? "error" : "success");
       }
     } catch (cause) {

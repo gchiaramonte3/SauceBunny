@@ -343,4 +343,24 @@ describe("multitrack document ownership", () => {
     expect(last[1].labels).toEqual(expect.arrayContaining([expect.objectContaining({ owner_name: "José" }), expect.objectContaining({ owner_name: 'Sam, "Room"' })]));
     expect(result.current.labelStatus).toBe("Labels saved locally");
   });
+
+  it("an unreadable AAF stops every lane's waveform after the first answer, once, and Retry asks again", async () => {
+    // The original AAF on an unmounted drive: every lane's overview needs it,
+    // so one NotFound stands for all of them instead of a failure per lane.
+    const base = mocks.invoke.getMockImplementation()!;
+    let reachable = false;
+    mocks.invoke.mockImplementation((command, args) => command === "aaf_waveform" && !reachable
+      ? Promise.reject({ kind: "NotFound", data: "The original AAF is unavailable. Reconnect its drive or import it again." }) : base(command, args));
+    const { result } = renderHook(() => useMultitrackDocument(true)); await act(async () => result.current.load());
+    const doc = result.current.document!;
+    act(() => { result.current.showTracks(doc.manifest.tracks.map((track) => track.id)); result.current.setWaveformsOn(doc.id, true); });
+    await waitFor(() => expect(result.current.sourceOffline).toContain("The original AAF is unavailable"));
+    const asked = mocks.invoke.mock.calls.filter(([command]) => command === "aaf_waveform").length;
+    expect(asked, "every lane was asked after the AAF was known to be offline").toBeLessThanOrEqual(2);
+    expect(result.current.waveformErrors).toEqual({});
+    reachable = true;
+    await act(async () => result.current.retrySource());
+    await waitFor(() => expect(Object.keys(result.current.waveforms).length).toBeGreaterThan(0));
+    expect(result.current.sourceOffline).toBeNull();
+  });
 });

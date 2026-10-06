@@ -15,10 +15,17 @@ static DOCUMENT_WRITER: Mutex<()> = Mutex::new(());
 pub(super) const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
 
 pub fn root(app: &AppHandle) -> Result<PathBuf, AppError> {
-    let path = app.path().document_dir().map_err(|e| AppError::internal(e.to_string()))?
-        .join("Sauce Bunny").join("Transcripts").join("Multitrack");
+    let path = location(app)?;
     std::fs::create_dir_all(&path)?;
     Ok(path)
+}
+
+/// Where the documents live, without creating the folder: for callers that
+/// only need to recognise it (the Transcripts page must never treat it as a
+/// project, library.rs `is_aaf_store`).
+pub fn location(app: &AppHandle) -> Result<PathBuf, AppError> {
+    Ok(app.path().document_dir().map_err(|e| AppError::internal(e.to_string()))?
+        .join("Sauce Bunny").join("Transcripts").join("Multitrack"))
 }
 
 pub fn cache(app: &AppHandle) -> Result<PathBuf, AppError> {

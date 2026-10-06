@@ -6,36 +6,71 @@ import { MultitrackTimeline } from "./MultitrackTimeline";
 
 afterEach(cleanup);
 
+/** The status glyphs beside the mic owners: buttons that explain themselves (MultitrackTrackStatus). */
+const statuses = () => screen.queryAllByRole("button", { name: /: (Transcript saved|Timing needs review|No speech found)/ });
+const untimed = (text: string) => ({ id: `issue-${text}`, text, reported_timing: "00:00:03,000 --> 00:00:03,000", chunk_start_frame: 0, reason: "The engine returned an empty or reversed time range." });
+
 it("shows a status only as each track's saved result arrives and restores it on reopening", () => {
   const document = multitrackFixture();
   const props = { document, waveforms: {}, waveformErrors: {}, selected: new Set<string>(), solo: new Set<string>(), onSelect: vi.fn(), onRename: vi.fn(), onSeek: vi.fn(), frame: 0 };
   const view = render(<MultitrackTimeline {...props} />);
-  expect(screen.queryAllByRole("img")).toHaveLength(0);
+  expect(statuses()).toHaveLength(0);
   expect(view.container.querySelectorAll(".cp-multitrack-saved-status")).toHaveLength(3);
   const committed = { ...document, transcripts: [{ ...multitrackTranscript(), duration_frames: document.manifest.duration_frames }] };
   view.rerender(<MultitrackTimeline {...props} document={committed} />);
-  expect(screen.getByRole("img", { name: "Alex: Transcribed. Transcript saved." })).toBeTruthy();
-  expect(screen.queryAllByRole("img")).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Alex: Transcript saved." })).toBeTruthy();
+  expect(statuses()).toHaveLength(1);
   // Playback, selection and a new generation attempt have no effect on the
   // persisted result. Only replacing the document's committed data changes it.
   view.rerender(<MultitrackTimeline {...props} document={committed} selected={new Set(["track-2"])} frame={120} />);
-  expect(screen.queryAllByRole("img")).toHaveLength(1);
+  expect(statuses()).toHaveLength(1);
   view.unmount();
   render(<MultitrackTimeline {...props} document={JSON.parse(JSON.stringify(committed))} />);
-  expect(screen.getByRole("img", { name: "Alex: Transcribed. Transcript saved." })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Alex: Transcript saved." })).toBeTruthy();
 });
 
-it("distinguishes saved empty and timing-review results without implying full-range coverage", () => {
+it("distinguishes saved, empty and timing-review results without implying full-range coverage", () => {
   const document = multitrackFixture();
   document.transcripts = [
     { ...multitrackTranscript(), status: "empty", cues: [], duration_frames: document.manifest.duration_frames },
-    { ...multitrackTranscript("track-2"), status: "review" },
+    { ...multitrackTranscript("track-2"), status: "review", timing_issues: [untimed("Words the engine gave no time.")] },
   ];
   render(<MultitrackTimeline document={document} waveforms={{}} waveformErrors={{}} selected={new Set()} solo={new Set()} onSelect={vi.fn()} onRename={vi.fn()} onSeek={vi.fn()} frame={0} />);
-  expect(screen.getByRole("img", { name: "Alex: Transcribed. No speech found; result saved." }).classList.contains("is-saved")).toBe(true);
-  const review = screen.getByRole("img", { name: "Sam mic: Selected range transcribed. Transcript saved; timing review needed." });
+  // No speech is not success: its own neutral glyph.
+  expect(screen.getByRole("button", { name: "Alex: No speech found." }).classList.contains("is-empty")).toBe(true);
+  const review = screen.getByRole("button", { name: "Sam mic: Timing needs review. Selected range transcribed." });
   expect(review.classList.contains("needs-review")).toBe(true);
   expect(review.title).toBe(review.getAttribute("aria-label"));
+});
+
+it("explains the \"!\" on a click, and its actions open that track's passages and Transcript info", () => {
+  const document = multitrackFixture();
+  document.transcripts = [{ ...multitrackTranscript("track-2"), status: "review", timing_issues: [untimed("First."), untimed("Second.")] }];
+  const onReviewTiming = vi.fn(), onTranscriptInfo = vi.fn();
+  render(<MultitrackTimeline document={document} waveforms={{}} waveformErrors={{}} selected={new Set()} solo={new Set()} onSelect={vi.fn()} onRename={vi.fn()} onSeek={vi.fn()} frame={0}
+    onReviewTiming={onReviewTiming} onTranscriptInfo={onTranscriptInfo} />);
+  const glyph = screen.getByRole("button", { name: /Sam mic: Timing needs review/ });
+  expect(glyph.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(glyph);
+  const popover = screen.getByRole("dialog", { name: /Sam mic: Timing needs review/ });
+  expect(popover.textContent).toContain("2 passages were saved without a place on the timeline");
+  expect(popover.textContent).toContain("nothing is lost");
+  fireEvent.click(screen.getByRole("button", { name: "Review 2 passages" }));
+  expect(onReviewTiming).toHaveBeenCalledWith("track-2");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(glyph);
+  fireEvent.click(screen.getByRole("button", { name: "Transcript info" }));
+  expect(onTranscriptInfo).toHaveBeenCalledTimes(1);
+  fireEvent.click(glyph);
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("shows no \"!\" when the only passages kept off the timeline are placeholders with no words", () => {
+  const document = multitrackFixture();
+  document.transcripts = [{ ...multitrackTranscript(), status: "review", duration_frames: document.manifest.duration_frames, timing_issues: [untimed("[BLANK_AUDIO]")] }];
+  render(<MultitrackTimeline document={document} waveforms={{}} waveformErrors={{}} selected={new Set()} solo={new Set()} onSelect={vi.fn()} onRename={vi.fn()} onSeek={vi.fn()} frame={0} />);
+  expect(screen.getByRole("button", { name: "Alex: Transcript saved." }).classList.contains("is-saved")).toBe(true);
 });
 
 it("keeps saved status tied to track identity across owner edits, offline media and group expansion", () => {
@@ -44,14 +79,14 @@ it("keeps saved status tied to track identity across owner edits, offline media 
   document.manifest.graph!.lanes[1].availability = "offline";
   const props = { document, waveforms: {}, waveformErrors: {}, selected: new Set<string>(), solo: new Set<string>(), onSelect: vi.fn(), onRename: vi.fn(), onSeek: vi.fn(), frame: 0 };
   const view = render(<MultitrackTimeline {...props} />);
-  expect(screen.queryAllByRole("img")).toHaveLength(0);
+  expect(statuses()).toHaveLength(0);
   view.rerender(<MultitrackTimeline {...props} expanded={new Set(["track-1"])} />);
-  expect(screen.getByRole("img", { name: /Sam mic: Selected range transcribed/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Sam mic: Transcript saved. Selected range transcribed/ })).toBeTruthy();
   const renamed = { ...document, labels: [...document.labels, { track_id: "track-2", owner_name: "Renamed mic", cast_member_id: null, color: null }] };
   view.rerender(<MultitrackTimeline {...props} document={renamed} expanded={new Set(["track-1"])} />);
-  expect(screen.getByRole("img", { name: /Renamed mic: Selected range transcribed/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Renamed mic: Transcript saved. Selected range transcribed/ })).toBeTruthy();
   view.rerender(<MultitrackTimeline {...props} document={{ ...renamed, transcripts: [] }} expanded={new Set(["track-1"])} />);
-  expect(screen.queryAllByRole("img")).toHaveLength(0);
+  expect(statuses()).toHaveLength(0);
 });
 
 it("keeps settled clip geometry cached during playhead ticks and refreshes on zoom", () => {
@@ -112,7 +147,7 @@ it("says when separate range runs left part of a track untranscribed, and saves 
   document.transcripts = [{ ...multitrackTranscript(), start_frame: 0, duration_frames: 2400, gaps: [[240, 1200]] }];
   const onRename = vi.fn();
   render(<MultitrackTimeline document={document} waveforms={{}} waveformErrors={{}} selected={new Set()} solo={new Set()} onSelect={vi.fn()} onRename={onRename} onSeek={vi.fn()} frame={0} />);
-  expect(screen.getByRole("img", { name: /Alex: Selected ranges transcribed, 1 gap not transcribed/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Alex: Transcript saved. Selected ranges transcribed, 1 gap left out/ })).toBeTruthy();
   const owner = screen.getByRole("textbox", { name: "Mic owner for track-2" });
   fireEvent.change(owner, { target: { value: "  Sam  " } }); fireEvent.blur(owner);
   expect(onRename).toHaveBeenCalledWith("track-2", "Sam");

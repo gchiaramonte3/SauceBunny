@@ -15,7 +15,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { EditNewPanel } from "./EditNewPanel";
 import { EditPage } from "./EditPage";
-import { LAST_STRING_OUT } from "../lib/last-open";
 
 afterEach(cleanup);
 beforeEach(() => {
@@ -61,10 +60,12 @@ it("welcomes a first-time user, and lists their work once there is any", async (
   expect(screen.queryByRole("heading", { name: "Pull the story out, bite by bite" })).toBeNull();
 });
 
-it("forgets a remembered string out that no longer exists instead of failing to open it", async () => {
-  localStorage.setItem(LAST_STRING_OUT, "gone");
+it("opens on the list at launch, whatever was open last time (the owner wants it clear)", async () => {
+  // What older builds stored to reopen it: ignored now.
+  localStorage.setItem("saucebunny.editor.lastEdit", "e1");
+  localStorage.setItem("saucebunny.stringOuts.tabs", JSON.stringify(["e1"]));
   answers.edit_list = [{ id: "e1", title: "First pass", created_at: 1, updated_at: 2, head: 3, states: 3 }];
   render(<EditPage active onOpenSettings={() => undefined} />);
   expect(await screen.findByRole("button", { name: /First pass/ })).toBeTruthy();
-  expect(localStorage.getItem(LAST_STRING_OUT)).toBeNull();
+  expect(screen.queryByRole("tab")).toBeNull();
 });

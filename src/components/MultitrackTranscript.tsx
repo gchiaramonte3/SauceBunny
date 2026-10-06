@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
 import { hasTranscriptContent, sequenceTimecode, trackOwner, transcriptRows, untimedTranscriptRows } from "../lib/multitrack";
 import { cueLabels, cueOwnership } from "../lib/multitrack-ownership";
@@ -20,10 +20,13 @@ import { useAiTranscriptSearch } from "../hooks/use-ai-transcript-search";
 
 const passageKey = (kind: string, trackId: string, id: string) => JSON.stringify([kind, trackId, id]);
 
-export function MultitrackTranscript({ document, frame, solo, onSeek, report, error, loading, active = true, aiModelId, initialAll = false, selectedTracks }: {
+/** A track's status glyph asked for its passages to review (`trackId`) or for Transcript info. */
+export type TranscriptRequest = { tick: number; trackId: string | null; info?: boolean };
+
+export function MultitrackTranscript({ document, frame, solo, onSeek, report, error, loading, active = true, aiModelId, initialAll = false, selectedTracks, request }: {
   document: AafDocument; frame: number; solo: Set<string>; onSeek: (frame: number, trackId: string) => void;
   report?: MultitrackRunReport | null; error?: string | null; loading?: boolean;
-  active?: boolean; aiModelId?: string | null; initialAll?: boolean; selectedTracks?: ReadonlySet<string>;
+  active?: boolean; aiModelId?: string | null; initialAll?: boolean; selectedTracks?: ReadonlySet<string>; request?: TranscriptRequest;
 }) {
   const [limit, setLimit] = useState(200);
   const people = useMemo(() => multitrackPeople(document), [document]);
@@ -54,6 +57,15 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
   ], [rows, untimed, hide]);
   const search = useAiTranscriptSearch(passages, active, aiModelId);
   const { query, enabled, result } = search;
+  const handled = useRef(0), review = useRef<HTMLElement>(null), [reviewTick, setReviewTick] = useState(0);
+  useEffect(() => {
+    if (!request || request.tick === handled.current) return;
+    handled.current = request.tick;
+    if (request.info) { setInfo(true); return; }
+    if (request.trackId) { setChoice(request.trackId); setLimit(200); search.changeQuery(""); setReviewTick(request.tick); }
+  }, [request, search]);
+  // After the tab has switched, bring that person's passages to review into view.
+  useEffect(() => { if (reviewTick) review.current?.scrollIntoView?.({ block: "start" }); }, [reviewTick]);
   const filtered = useMemo(() => rows.filter((row) => !(query.trim() && hide && row.owned.bleed) && (enabled
     ? !result.matches || result.matches.has(passageKey("cue", row.trackId, row.id))
     : `${row.owner} ${row.text}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))), [rows, query, enabled, result.matches, hide]);
@@ -91,7 +103,7 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
             {cue.owned.voice && <span className="cp-multitrack-note">Sounds like {trackOwner(document, cue.owned.voice)}</span>}
           </button>)}
       {filtered.length > limit && <button className="btn btn-ghost cp-multitrack-more" onClick={() => setLimit(limit + 200)}>Show more ({filtered.length - limit} remaining)</button>}
-      {filteredUntimed.length > 0 && <section className="cp-multitrack-untimed" aria-label="Text needing timing review"><h3>Timing needs review</h3>{visibleUntimed.map((cue) => <article key={`${cue.trackId}:${cue.id}`}><strong>{cue.owner}</strong><p>{cue.text}</p><details><summary>Timing details</summary>{cue.reason}<br />Reported: {cue.reported_timing}<br />Audio segment starts at {cue.timecode}</details></article>)}
+      {filteredUntimed.length > 0 && <section ref={review} className="cp-multitrack-untimed" aria-label="Text needing timing review"><h3>Timing needs review</h3>{visibleUntimed.map((cue) => <article key={`${cue.trackId}:${cue.id}`}><strong>{cue.owner}</strong><p>{cue.text}</p><details><summary>Timing details</summary>{cue.reason}<br />Reported: {cue.reported_timing}<br />Audio segment starts at {cue.timecode}</details></article>)}
         {filteredUntimed.length > limit && <button className="btn btn-ghost" onClick={() => setLimit(limit + 200)}>Show more untimed text</button>}</section>}
     </div>
     </div>

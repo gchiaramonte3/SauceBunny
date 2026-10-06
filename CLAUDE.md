@@ -767,7 +767,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and nineteen rules in this file are checked by a test rather than remembered. If you
+One hundred and twenty rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -930,6 +930,7 @@ written after finding the rule already broken somewhere.
 | `voiceprint-contract` | Voiceprints (the voice check's 256-number description of each mic owner's voice, accuracy spec phase 4) are biometric data: written only under `app_data_dir()/voiceprints`, never under Documents, never read by the context layer that answers assistants or by the co-review wire, never in a command's answer or the ownership cache. Only the labels they settle travel |
 | `main-thread-contract` | No NEW `#[tauri::command]` runs on the main thread: it is `async fn` or `#[tauri::command(async)]`. A plain `fn` command runs on the thread that draws the window, so one `exists()` on Avid NEXIS under daytime load froze the app, and a read the volume never answered put it past Force Quit. The 76 left there touch nothing a network volume can hold up (settings, keychain, app data); the list is shrink-only. Tauri's own `asset://` handler had the same flaw and is replaced (`asset_protocol.rs`, pinned by `asset-scope-contract`) |
 | `string-outs-pipeline-contract` | Every String Outs file calls the app through `pipelineInvoke` (lib/pipeline), never Tauri's `invoke` directly. String Outs hung with nothing in any log: the backend journals its own operations, but a call the page made and never got back, or one that is not a backend operation at all (the undo log, an export, Ask), left no trace. The traced call says so while it waits, at 2, 10, 30 and 60 s, into the journal on disk, so a hang that ends in Force Quit is still there on relaunch |
+| `clipboard-contract` | A clipboard write never waits on anything in the click that asked for it: no `await` before `navigator.clipboard.writeText` in the same function. WebKit allows the write only within the click, so the Pipeline's Copy (it built the report first) and a review grant's one-time Copy link (it asked Rust for the code first) were refused, while the Chromium-only Playwright suite passed. Text that is not ready yet goes through `copyText` (lib/clipboard), which starts the write in the click with a promise |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:

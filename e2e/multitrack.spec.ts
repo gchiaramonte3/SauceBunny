@@ -198,7 +198,7 @@ test("98 grouped microphones expand without implicit audition or transcription",
   await region.getByRole('button',{name:'Generate 98 tracks',exact:true}).click();
   await expect.poll(async()=>(await calls()).filter(c=>c.command==='aaf_transcribe_track').length,{timeout:20000}).toBe(98);
   await expect(region.getByRole('status').filter({hasText:'Selected range saved for every track'})).toBeVisible();
-  await expect(region.locator('.cp-multitrack-saved-status[role="img"]')).toHaveCount(98);
+  await expect(region.locator('button.cp-multitrack-saved-status')).toHaveCount(98);
   await region.getByRole('combobox',{name:'Transcript export format'}).selectOption('avid');
   await region.getByRole('button',{name:'Export selected (98)',exact:true}).click();
   await expect(region.getByRole('status').filter({hasText:'98 files saved in /exports'})).toBeVisible();
@@ -509,7 +509,7 @@ for (const width of [1100, 1920]) {
     const region = page.getByRole("region", { name: "AAF Audio", exact: true });
     await region.getByRole("button", { name: "Import AAF…", exact: true }).first().click();
     const generate = region.getByRole("button", { name: "Generate 20 tracks", exact: true });
-    const trackStatus = region.locator('.cp-multitrack-saved-status[role="img"]');
+    const trackStatus = region.locator('button.cp-multitrack-saved-status');
     await expect(trackStatus).toHaveCount(0);
     const soloBefore = await region.getByRole("button", { name: "Solo Alex mic", exact: true }).boundingBox();
     const controls = region.locator(".cp-multitrack-generation .cp-multitrack-options");
@@ -546,12 +546,12 @@ for (const width of [1100, 1920]) {
     await page.evaluate(() => (window as unknown as { __progressTest: { finish: () => void } }).__progressTest.finish());
     await expect(label).toHaveText("Transcribing 2 of 20");
     await expect(trackStatus).toHaveCount(1);
-    await expect(trackStatus).toHaveAttribute("aria-label", "Alex: Selected range transcribed. Transcript saved.");
+    await expect(trackStatus).toHaveAttribute("aria-label", "Alex: Transcript saved. Selected range transcribed.");
     expect(await region.getByRole("button", { name: "Solo Alex mic", exact: true }).boundingBox()).toEqual(soloBefore);
     expect((await button.boundingBox())!.height).toBeCloseTo(initial.height, 3);
     await page.screenshot({ path: test.info().outputPath("multitrack-steady-progress.png") });
     await region.getByRole("button", { name: "Stop", exact: true }).click();
-    await expect(region.getByRole("status").filter({ hasText: "Stopped. 1 tracks saved." })).toBeVisible();
+    await expect(region.getByRole("status").filter({ hasText: "Stopped. 1 track saved." })).toBeVisible();
     await expect(button).toHaveAttribute("aria-busy", "false");
     await expect(trackStatus).toHaveCount(1);
   });
@@ -566,11 +566,11 @@ for (const viewport of [{ width: 1100, height: 740 }, { width: 1680, height: 102
     await expect(region.getByRole("slider", { name: /^Seek / })).toHaveCount(3);
     const generate = region.getByRole("button", { name: "Generate 3 tracks", exact: true });
     await expect(generate).toBeEnabled();
-    await expect(region.locator('.cp-multitrack-saved-status[role="img"]')).toHaveCount(0);
+    await expect(region.locator('button.cp-multitrack-saved-status')).toHaveCount(0);
     await generate.click();
     await expect(region.getByRole("status").filter({ hasText: "Selected range saved for every track" })).toBeVisible();
-    await expect(region.locator('.cp-multitrack-saved-status[role="img"]')).toHaveCount(3);
-    await expect(region.getByRole("img", { name: "Alex: Transcribed. Transcript saved." })).toBeVisible();
+    await expect(region.locator('button.cp-multitrack-saved-status')).toHaveCount(3);
+    await expect(region.getByRole("button", { name: "Alex: Transcript saved.", exact: true })).toBeVisible();
     await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(1);
     await region.getByRole("tab", { name: "All voices", exact: true }).click();
     await expect(region.getByRole("button", { name: /This is the first answer/ })).toHaveCount(3);
@@ -607,9 +607,9 @@ test("Saved transcript icons survive failed regeneration and reopening without m
   });
   await region.getByRole("button", { name: "Generate 3 tracks" }).click();
   await expect(region.getByRole("status").filter({ hasText: "2 tracks saved · 1 failed" })).toBeVisible();
-  const statuses = region.locator('.cp-multitrack-saved-status[role="img"]');
+  const statuses = region.locator('button.cp-multitrack-saved-status');
   await expect(statuses).toHaveCount(2);
-  await expect(region.getByRole("img", { name: /^Room:/ })).toHaveCount(0);
+  await expect(region.locator('button.cp-multitrack-saved-status[aria-label^="Room:"]')).toHaveCount(0);
   await page.evaluate(() => {
     const app = window as unknown as { __TAURI_INTERNALS__: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> } };
     const original = app.__TAURI_INTERNALS__.invoke;
@@ -622,7 +622,7 @@ test("Saved transcript icons survive failed regeneration and reopening without m
   await expect(region.getByRole("status").filter({ hasText: "0 tracks saved · 1 failed" })).toBeVisible();
   await expect(statuses).toHaveCount(2);
   await region.getByRole("button", { name: "Import AAF…", exact: true }).click();
-  await expect(region.getByRole("img", { name: "Alex: Transcribed. Transcript saved." })).toBeVisible();
+  await expect(region.getByRole("button", { name: "Alex: Transcript saved.", exact: true })).toBeVisible();
   await expect(statuses).toHaveCount(2);
 });
 

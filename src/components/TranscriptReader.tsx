@@ -574,7 +574,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
           )}
           {multitrack.error && <p className="cp-multitrack-note" role="alert">{multitrack.error}</p>}
           {!analyzedOnly && <MultitrackLibraryRows entries={multitrack.entries} selected={multitrack.selected} query={query} onOpen={multitrack.select} />}
-          {groups.filter(g => g.folder !== "Multitrack" || g.items.length > 0 || multitrack.entries.length === 0).map((g) => (
+          {groups.map((g) => (
             <section key={g.folder || "root"} className="cp-reader-group">
               <ReaderProjectHeader
                 label={projectFor(projects, g.folder)?.title || g.label}
@@ -685,7 +685,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
         ) : (
           <div className="cp-reader-hint">
             <IconTranscript size={28} />
-            <p>{list.length === 0 ? "Nothing to read yet." : "Pick a transcript to read."}</p>
+            <p>{list.length === 0 && multitrack.entries.length === 0 ? "Nothing to read yet." : "Pick a transcript to read."}</p>
           </div>
         )}
       </main>
