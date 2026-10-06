@@ -14,10 +14,15 @@ that depends on them was built. Each phase stands alone and has a way to
 tell it's done.
 
 **Rules that hold in every phase:**
-- **The bar is locked.** No people, names or speaker chips in the transport or
-  timeline tool row, and the row does not change unless the owner says so.
+- **The bar is locked.** No people, names or speaker chips in the timeline
+  tool row, and the row does not change unless the owner says so.
   Every item below that touches the row is marked **(bar: needs the owner's
-  OK)** and is not built until that OK is given.
+  OK)** and is not built until that OK is given. **October 5:** the owner asked
+  for the row to be "just timeline tools", so it now holds the edit tools,
+  snap, follow and loop, previous and next edit, and View, Audio and zoom.
+  Play, Go to start and the record timecode are in the record pane's header,
+  as the source pane's are, and the status line is at the record pane's foot
+  (`docs/UI-CORRECTIONS-2026-10-05.md`, item 9).
 - **Names belong on the source side.** The record side is A1, A2 and so on,
   patched top-down.
 - The CLAUDE.md contracts (component under 150 lines, `cp-` classes,

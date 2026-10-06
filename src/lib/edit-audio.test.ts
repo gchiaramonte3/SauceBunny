@@ -203,7 +203,9 @@ describe("edit list playback", () => {
     expect(startOf(voices("a2")[0])[0]).toBeCloseTo(4.015 - JOIN_FADE_SECONDS / 2, 6);
     player.close();
   });
-  it.each(["pause", "close"] as const)("%s cancels the native reads it started and sounds nothing late", async (action) => {
+  // Only close (another document) stops a native read: a paused one finishes
+  // into the cache, where Play finds it, instead of being rendered again.
+  it.each(["pause", "close"] as const)("%s sounds nothing late, and only close cancels the native reads it started", async (action) => {
     const pending: Array<() => void> = [];
     invoke.mockImplementation((command, args) => command === "aaf_prepare_audio"
       ? new Promise((resolve) => pending.push(() => resolve({ path: `/audio/${args.trackId}.wav` }))) : Promise.resolve(undefined));
@@ -214,7 +216,7 @@ describe("edit list playback", () => {
     const jobs = prepared().map((args) => args.jobId);
     if (action === "pause") player.pause(); else player.close();
     const cancelled = invoke.mock.calls.filter(([command]) => command === "cancel_job").map(([, args]) => args.jobId);
-    expect(cancelled).toEqual(expect.arrayContaining(jobs));
+    if (action === "close") expect(cancelled).toEqual(expect.arrayContaining(jobs)); else expect(cancelled).toEqual([]);
     pending.splice(0).forEach((finish) => finish());
     for (let i = 0; i < 30; i++) await Promise.resolve();
     expect(sources).toHaveLength(0);

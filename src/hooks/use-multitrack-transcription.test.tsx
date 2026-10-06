@@ -188,7 +188,7 @@ describe("multitrack jobs", () => {
   });
   it("counts a saved timing-review result without claiming clean success", async () => {
     const receive = vi.fn(), base = mocks.invoke.getMockImplementation()!;
-    mocks.invoke.mockImplementation((command, args) => command === "aaf_transcribe_track" ? Promise.resolve({ ...multitrackTranscript(), status: "review" }) : base(command, args));
+    mocks.invoke.mockImplementation((command, args) => command === "aaf_transcribe_track" ? Promise.resolve({ ...multitrackTranscript(), status: "review", timing_issues: [{ id: "issue-1", text: "Words with no usable time.", reported_timing: "--> 00:00:00,000", chunk_start_frame: 0, reason: "outside the chunk" }] }) : base(command, args));
     const { result } = renderHook(() => useMultitrackTranscription(multitrackFixture(), receive));
     await act(async () => result.current.start(["track-1"], 0, 240));
     expect(receive).toHaveBeenCalledTimes(1);

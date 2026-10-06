@@ -1,6 +1,8 @@
 //! Local, read-only AAF import and microphone-track transcription.
 //! Existing Clip/Review playback and global transcription commands are untouched.
 mod audio;
+/// Settings counts and clears AAF Audio's playback windows by this name.
+pub(crate) use audio::is_playback_file;
 mod diagnostics;
 pub use diagnostics::*;
 mod health;
@@ -49,7 +51,7 @@ pub async fn aaf_import(app: AppHandle, path: String, job_id: String, sequence_i
         cast_member_id: None, color: None, gender: None, marker_color: None,
     }).collect();
     let id = blake3::hash(crate::stream_proxy::mint_token()?.as_bytes()).to_hex().to_string();
-    let document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, ownership: None, id,
+    let document = AafDocument { schema_version: DOCUMENT_SCHEMA_VERSION, shoot_date_override: None, ownership: None, title: None, id,
         source_path: source.to_string_lossy().into_owned(), source_size: metadata.len(),
         source_modified_ms: store::modified_ms(&metadata), manifest, labels, transcripts: Vec::new() };
     store::source_ready(&document)?;
@@ -128,6 +130,15 @@ pub async fn aaf_save_labels(app: AppHandle, document_id: String, labels: Vec<Aa
     Ok(document)
 }
 
+/// Name a document for the editor, or with None go back to the sequence's
+/// own name. Every page that lists documents hears the change.
+#[tauri::command]
+pub async fn aaf_rename(app: AppHandle, document_id: String, title: Option<String>) -> Result<AafDocument, AppError> {
+    let document = store::retitle(&store::root(&app)?, &document_id, title)?;
+    let _ = app.emit("saucebunny:multitrack-changed", &document_id);
+    Ok(document)
+}
+
 #[tauri::command]
 pub async fn aaf_save_shoot_date(app: AppHandle, document_id: String, shoot_date: Option<String>) -> Result<AafDocument, AppError> {
     let document = store::metadata(&store::root(&app)?, &document_id, shoot_date, None)?;
@@ -164,7 +175,7 @@ pub async fn aaf_prepare_audio(app: AppHandle, document_id: String, track_id: St
 {
     diagnostics::operation(&app, &job_id, "audio", &format!("Prepare document {document_id} · track {track_id} · frames {start_frame} + {duration_frames}"), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
-    let document = store::load(&store::root(&app)?, &document_id)?;
+    let document = store::playback_document(&store::root(&app)?, &document_id)?;
     audio::prepare(&app, &document, &track_id, start_frame, duration_frames, &job_id).await
     }).await
 }
@@ -238,7 +249,7 @@ pub async fn aaf_speech(app: AppHandle, document_id: String, track_id: String, b
 pub async fn aaf_ownership(app: AppHandle, document_id: String, build: bool, job_id: String) -> Result<ownership::AafOwnership, AppError> {
     diagnostics::operation(&app, &job_id, "ownership", &format!("Bleed labels · document {document_id} · build {build}"), async {
         let _job = process::JobGuard::begin(&app, &job_id)?;
-        ownership::resolve(&app, &document_id, build, &job_id).await
+        ownership::resolve(&app, &document_id, build, &job_id).await.map(ownership::for_page)
     }).await
 }
 
@@ -249,7 +260,7 @@ pub async fn aaf_ownership(app: AppHandle, document_id: String, build: bool, job
 pub async fn aaf_check_voices(app: AppHandle, document_id: String, job_id: String) -> Result<ownership::AafOwnership, AppError> {
     diagnostics::operation(&app, &job_id, "voices", &format!("Voice check · document {document_id}"), async {
         let _job = process::JobGuard::begin(&app, &job_id)?;
-        voices::check(&app, &document_id, &job_id).await
+        voices::check(&app, &document_id, &job_id).await.map(ownership::for_page)
     }).await
 }
 
@@ -443,7 +454,7 @@ mod native_reader_tests {
         let manifest: AafManifest = serde_json::from_slice(&result.stdout).unwrap();
         validate_manifest(&manifest).unwrap();
         let metadata = std::fs::metadata(&source).unwrap();
-        store::source_ready(&AafDocument { schema_version: 1, shoot_date_override: None, ownership: None, id: "f".repeat(64), source_path: source.clone(),
+        store::source_ready(&AafDocument { schema_version: 1, shoot_date_override: None, ownership: None, title: None, id: "f".repeat(64), source_path: source.clone(),
             source_size: metadata.len(), source_modified_ms: store::modified_ms(&metadata),
             manifest: manifest.clone(), labels: Vec::new(), transcripts: Vec::new() }).unwrap();
         let track = manifest.tracks.first().expect("test must inspect at least one track");

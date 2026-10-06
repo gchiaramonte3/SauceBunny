@@ -9,6 +9,7 @@ import { collectLibraryItems } from "./library";
 import { assetKey, type LibraryAsset, type LibraryAssetFacts, type LibraryAssetKind } from "./library-organization";
 import { getHistory, type TranscriptHistoryEntry } from "./transcript-history";
 import { mergeTranscriptLibrary } from "./transcript-library";
+import { documentName } from "./multitrack";
 import { reviewStatusForKey } from "./review-store";
 import { pathKey } from "./repath";
 import { withoutHidden } from "./library-hidden";
@@ -47,7 +48,7 @@ export async function loadProjectCatalog(trees: LibraryFolder[], references: Lib
     ...withoutHidden(trees.flatMap(collectLibraryItems)).map((item) => libraryAsset("file", item.path, item.name)),
     ...web.map((item) => libraryAsset("web", item.url, item.title || item.url)),
     ...transcripts.map((item) => libraryAsset("transcript", item.path, item.title)),
-    ...sequences.map((item) => libraryAsset("multitrack", item.id, item.name)),
+    ...sequences.map((item) => libraryAsset("multitrack", item.id, documentName(item))),
   ];
   const byKey = new Map<string, LibraryAsset>();
   for (const asset of catalog) if (!byKey.has(assetKey(asset))) byKey.set(assetKey(asset), asset);

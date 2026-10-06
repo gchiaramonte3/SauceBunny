@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { copyText } from "../lib/clipboard";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type Event } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -125,8 +126,9 @@ export function PipelinePanel({ page, active, open, onOpenChange, documentId, er
     } catch (cause) { add(`Diagnostics export failed: ${formatError(cause)}`, "err"); }
     finally { savingRef.current = false; if (mounted.current) setSaving(false); }
   };
+  // The write starts in the click, before the report is built (lib/clipboard).
   const copy = async () => {
-    try { await navigator.clipboard.writeText(await report()); add("Diagnostics copied. Includes media paths.", "ok"); }
+    try { await copyText(report()); add("Diagnostics copied. Includes media paths.", "ok"); }
     catch (cause) { add(`Copy failed: ${formatError(cause)}`, "err"); }
   };
   const clear = async () => {

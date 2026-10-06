@@ -5,7 +5,6 @@ import type { EditSummary } from "../bindings/EditSummary";
 import { editFromSequence } from "../lib/edit-new";
 import { editStore, newEditId } from "../lib/edit-store";
 import { formatError } from "../lib/error-format";
-import { LAST_STRING_OUT, recallLast, rememberLast } from "../lib/last-open";
 import { loadJson, saveJson } from "../lib/storage";
 import { EditList } from "./EditList";
 import { EditExportAll } from "./EditExportAll";
@@ -15,18 +14,13 @@ import { IconPlus } from "./Icons";
 import { IconStringOut } from "./IconStringOut";
 import { PipelinePanel } from "./PipelinePanel";
 import { TabStrip } from "./TabStrip";
+import { documentName } from "../lib/multitrack";
 import type { EditSourceMarks } from "../hooks/use-edit-source-side";
 const invoke = pipelineInvoke("String Outs");
 
-/** The string outs open as tabs, in the order they were opened. */
-const TABS_KEY = "saucebunny.stringOuts.tabs";
 const PANEL_ID = "cp-te-tab-panel";
 /** The string out AAF Audio's "Open in String Outs" made for each sequence, by AAF Audio document id. */
 const FOR_SEQUENCE_KEY = "saucebunny.stringOuts.forSequence";
-const loadTabs = (): string[] => {
-  const saved = loadJson<unknown>(TABS_KEY, []);
-  return Array.isArray(saved) ? [...new Set(saved.filter((id): id is string => typeof id === "string"))] : [];
-};
 
 type Props = {
   active: boolean; aiModelId?: string | null; onOpenSettings: (tab: "ai-apis") => void;
@@ -38,9 +32,10 @@ type Props = {
 
 /**
  * String Outs, laid out like AAF Audio: the page title and its actions on
- * top, then the open string out. It reopens whatever was open last, so the
- * welcome shows only to someone who has never made one; after that the page
- * opens on their work or, if they closed it, on their list.
+ * top, then the open string out. Every launch starts clear, on the list of
+ * string outs (or the welcome, for someone who has never made one); nothing
+ * reopens by itself (the owner, 2026-10-05). What is opened stays open in its
+ * tab while the app runs.
  *
  * Open string outs are tabs, like sequence tabs in an NLE: the whole scene in
  * one, a person's bites made from it by Ask in the next, each exported as its
@@ -49,12 +44,8 @@ type Props = {
  * load again when chosen), as in Neo's and Premiere's timelines.
  */
 export function EditPage({ active, aiModelId, onOpenSettings, openRequest, pipelineOpen = false, onPipelineOpen = () => undefined }: Props) {
-  const [editId, setEditId] = useState<string | null>(() => recallLast(LAST_STRING_OUT));
-  const [tabs, setTabs] = useState<string[]>(() => {
-    const saved = loadTabs(), last = recallLast(LAST_STRING_OUT);
-    return last && !saved.includes(last) ? [...saved, last] : saved;
-  });
-  useEffect(() => { saveJson(TABS_KEY, tabs); }, [tabs]);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [tabs, setTabs] = useState<string[]>([]);
   const [edits, setEdits] = useState<EditSummary[] | null>(null);
   const [creating, setCreating] = useState(false);
   useEffect(() => {
@@ -65,20 +56,20 @@ export function EditPage({ active, aiModelId, onOpenSettings, openRequest, pipel
       setEdits(items);
       // Tabs of string outs that no longer exist close themselves.
       setTabs((open) => open.filter((id) => items.some((item) => item.id === id)));
-      // A remembered string out that no longer exists: open the list, and stop remembering it.
-      if (editId && !items.some((item) => item.id === editId)) { rememberLast(LAST_STRING_OUT, null); setEditId(null); }
+      // The open string out no longer exists: back to the list.
+      if (editId && !items.some((item) => item.id === editId)) setEditId(null);
     }).catch(() => { if (live) setEdits([]); });
     return () => { live = false; };
   }, [active, editId]);
   const open = (id: string | null) => {
-    setCreating(false); setEditId(id); rememberLast(LAST_STRING_OUT, id);
+    setCreating(false); setEditId(id);
     if (id) setTabs((current) => current.includes(id) ? current : [...current, id]);
   };
   /** Close a tab; closing the chosen one moves to its right-hand neighbour, else its left. */
   const close = (id: string) => {
     const at = tabs.indexOf(id), rest = tabs.filter((tab) => tab !== id);
     setTabs(rest);
-    if (id === editId) { const next = rest[at] ?? rest[at - 1] ?? null; setEditId(next); rememberLast(LAST_STRING_OUT, next); }
+    if (id === editId) setEditId(rest[at] ?? rest[at - 1] ?? null);
   };
   // AAF Audio's "Open in String Outs": that sequence's string out, made the
   // first time as Avid would start it, the sequence loaded as the source and
@@ -100,7 +91,7 @@ export function EditPage({ active, aiModelId, onOpenSettings, openRequest, pipel
         if (existing && (await editStore.list()).some((item) => item.id === existing)) { open(existing); return; }
         const sequence = await invoke<AafDocument>("aaf_open", { documentId });
         const id = newEditId();
-        await editStore.create(id, editFromSequence(sequence, sequence.manifest.name, false));
+        await editStore.create(id, editFromSequence(sequence, documentName(sequence), false));
         saveJson(FOR_SEQUENCE_KEY, { ...made, [documentId]: id });
         setEdits(await editStore.list());
         open(id);

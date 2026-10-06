@@ -34,7 +34,21 @@ it("exports an all-untimed result and does not mislabel it as no speech", () => 
   render(<MultitrackTranscript document={document} frame={0} solo={new Set()} onSeek={vi.fn()} />);
   expect(screen.queryByText(/No speech found/)).toBeNull();
   expect((screen.getByRole("button", { name: "Export Alex" }) as HTMLButtonElement).disabled).toBe(false);
-  expect(screen.getByText(/Timing review: 1 passage/)).toBeTruthy();
+  // A chip, not a paragraph: it takes the reader to the passages, on All voices.
+  expect(screen.queryByText(/Timing review: 1 passage/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "1 to review" }));
+  expect(screen.getByRole("tab", { name: "All voices" }).getAttribute("aria-selected")).toBe("true");
+  expect(screen.getByRole("region", { name: "Text needing timing review" })).toBeTruthy();
+});
+it("says a run's result in one chip that opens Transcript info, and nothing when there is no run", () => {
+  const props = { document: multitrackFixture(), frame: 0, solo: new Set<string>(), onSeek: vi.fn() };
+  const view = render(<MultitrackTranscript {...props} />);
+  expect(screen.queryByText(/tracks saved|Generating/)).toBeNull();
+  view.rerender(<MultitrackTranscript {...props} loading />);
+  expect(screen.getByRole("status").textContent).toBe("Generating…");
+  view.rerender(<MultitrackTranscript {...props} report={{ requested: 3, saved: 2, review: 0, empty: 0, stopped: false, failures: [{ trackId: "track-3", message: "No audio" }] }} />);
+  fireEvent.click(screen.getByRole("button", { name: "2 of 3 tracks saved · 1 failed" }));
+  expect(screen.getByRole("dialog", { name: "Transcript info" })).toBeTruthy();
 });
 it("opens on a person, supports all voices and reaches every person from the tabs", () => {
   const document = fixture(); document.transcripts.push({ ...multitrackTranscript("track-2"), cues: [{ ...multitrackTranscript().cues[0], text: "Sam's answer." }] });

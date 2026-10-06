@@ -40,7 +40,11 @@ export function useMultitrackAudition(document: AafDocument, active: boolean) {
       .map(track => [track.id, mediaRevision(snapshot, track.id)]));
     if (active) void getEngine()?.warm(latest.current.frame);
   }, [active, document.id, mediaKey, getEngine]);
-  useEffect(() => { if (!active) engine.current?.suspend(); }, [active]);
+  // Leaving the page (or reopening the same sequence, which hides it while it
+  // loads) stops the sound and keeps the prepared windows: coming back used to
+  // prepare two windows of every mic again. Changed media and another
+  // document still let them go, above.
+  useEffect(() => { if (!active) engine.current?.pause(); }, [active]);
   useEffect(() => { engine.current?.setLevel(volume, muted); }, [volume, muted]);
   useEffect(() => { engine.current?.setScrubbing(scrubbing); }, [scrubbing]);
   useEffect(() => { for (const [id, level] of Object.entries(levels)) engine.current?.setTrackLevel(id, level); }, [levels, active]);

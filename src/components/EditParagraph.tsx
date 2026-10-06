@@ -1,5 +1,6 @@
 import { editTc } from "../lib/edit-document";
 import { placementKey, type Ghost, type TimelineParagraph as Paragraph, type PlacedWord, type TimelineLane } from "../lib/edit-model";
+import { EditGhost } from "./EditGhost";
 
 export type EditSeamInfo = { kind: "cut" | "through" | "jump" | "gap"; seconds: number | null };
 
@@ -17,7 +18,6 @@ type Props = {
 };
 
 const dots = (gap: number) => gap >= 1.5 ? "•••" : gap >= 0.8 ? "••" : gap >= 0.35 ? "•" : "";
-const quote = (ghost: Ghost) => ghost.words.map((word) => word.text).join(" ");
 
 /**
  * One speaker's run of words. Words are plain spans, not a contenteditable:
@@ -41,11 +41,8 @@ export function EditParagraph(props: Props) {
     if (!previous) return paragraph.cutBefore && !props.ghosts(item.segment - 1, item.segment).length ? mark(item.segment) : null;
     if (previous.segment !== item.segment) {
       const ghosts = props.ghosts(previous.segment, item.segment);
-      if (ghosts.length) return ghosts.map((ghost) => <span key={ghost.id} className="cp-te-ghost" style={{ "--te-speaker": color } as React.CSSProperties}>
-        {ghost.track !== paragraph.track && <span className="cp-te-ghost-who">{props.nameOf(ghost.track)}:</span>}
-        <span className="cp-te-ghost-text" title="Restore">{quote(ghost)}</span>
-        <button type="button" className="cp-te-restore" aria-label={`Restore “${quote(ghost)}”`} title="Restore this line" onClick={() => props.onRestore(ghost)}>↺</button>{" "}
-      </span>);
+      if (ghosts.length) return ghosts.map((ghost) => <EditGhost key={ghost.id} ghost={ghost} who={ghost.track !== paragraph.track ? props.nameOf(ghost.track) : null}
+        color={color} onRestore={props.onRestore} />);
       return mark(item.segment);
     }
     const gap = item.programStart - previous.programEnd;

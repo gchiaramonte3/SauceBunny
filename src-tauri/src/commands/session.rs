@@ -429,6 +429,19 @@ pub struct SessionManager {
     inner: AsyncMutex<Inner>,
 }
 
+impl SessionManager {
+    /// "off", "hosting" or "joined", for diagnostics: the network listeners and
+    /// the relay connection Activity Monitor shows belong to a session, and a
+    /// report should say whether one was open. Never waits: "busy" when a
+    /// session is changing state at that moment.
+    pub fn role_now(&self) -> &'static str {
+        match self.inner.try_lock() {
+            Ok(inner) => match inner.session { Session::Off => "off", Session::Host { .. } => "hosting", Session::Peer { .. } => "joined" },
+            Err(_) => "busy",
+        }
+    }
+}
+
 impl Default for SessionManager {
     fn default() -> Self {
         Self {

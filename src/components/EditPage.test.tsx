@@ -15,12 +15,27 @@ vi.mock("./EditNewPanel", () => ({ EditNewPanel: () => <div>New panel</div> }));
 
 const edits = [{ id: "scene", title: "Scene", created_at: 1, updated_at: 1, head: 1, states: 1 }, { id: "rosa", title: "Rosa", created_at: 2, updated_at: 2, head: 1, states: 1 }];
 afterEach(cleanup);
-beforeEach(() => { localStorage.clear(); mocks.list.mockResolvedValue(edits); localStorage.setItem("saucebunny.editor.lastEdit", "scene"); });
+beforeEach(() => { localStorage.clear(); mocks.list.mockResolvedValue(edits); });
 
-const tabs = () => screen.getAllByRole("tab").map((tab) => [tab.textContent?.replace("×", ""), tab.getAttribute("aria-selected")]);
+const tabs = () => screen.queryAllByRole("tab").map((tab) => [tab.textContent?.replace("×", ""), tab.getAttribute("aria-selected")]);
+/** Open a saved string out the way a person does at launch: from the page's Saved string outs menu. */
+const openSaved = async (id: string) => {
+  const menu = await screen.findByRole("combobox", { name: "Open saved string out" });
+  fireEvent.change(menu, { target: { value: id } });
+};
 
-it("opens a string out Ask makes in a tab of its own, beside the one it came from", async () => {
+it("starts clear at launch: the list, no tabs, even if older builds remembered some", async () => {
+  localStorage.setItem("saucebunny.editor.lastEdit", "scene");
+  localStorage.setItem("saucebunny.stringOuts.tabs", JSON.stringify(["scene", "rosa"]));
   render(<EditPage active onOpenSettings={vi.fn()} />);
+  expect(await screen.findByText("All string outs")).toBeTruthy();
+  expect(tabs()).toEqual([]);
+  expect(screen.queryByTestId("workspace")).toBeNull();
+});
+
+it("opens a string out Ask makes in a tab of its own, beside the one it came from, and remembers none for next launch", async () => {
+  const view = render(<EditPage active onOpenSettings={vi.fn()} />);
+  await openSaved("scene");
   await waitFor(() => expect(tabs()).toEqual([["Scene", "true"]]));
   fireEvent.click(screen.getByRole("button", { name: "Make Rosa" }));
   expect(tabs()).toEqual([["Scene", "false"], ["Rosa", "true"]]);
@@ -30,13 +45,18 @@ it("opens a string out Ask makes in a tab of its own, beside the one it came fro
   expect(screen.getAllByRole("tab")).toHaveLength(2);
   fireEvent.click(screen.getAllByRole("tab")[0]);
   expect(screen.getByTestId("workspace").textContent).toContain("scene");
-  // The tabs come back after a relaunch.
-  expect(JSON.parse(localStorage.getItem("saucebunny.stringOuts.tabs")!)).toEqual(["scene", "rosa"]);
+  // A relaunch starts clear again.
+  view.unmount();
+  render(<EditPage active onOpenSettings={vi.fn()} />);
+  expect(await screen.findByText("All string outs")).toBeTruthy();
+  expect(tabs()).toEqual([]);
 });
 
 it("closing the chosen tab moves to its neighbour, never deletes, and the last one leaves the list", async () => {
-  localStorage.setItem("saucebunny.stringOuts.tabs", JSON.stringify(["scene", "rosa"]));
   render(<EditPage active onOpenSettings={vi.fn()} />);
+  await openSaved("scene");
+  await openSaved("rosa");
+  fireEvent.click(screen.getAllByRole("tab")[0]);
   await waitFor(() => expect(tabs()).toEqual([["Scene", "true"], ["Rosa", "false"]]));
   fireEvent.click(screen.getAllByRole("tab")[0].querySelector(".cp-tabstrip-close")!);
   expect(tabs()).toEqual([["Rosa", "true"]]);
@@ -48,9 +68,15 @@ it("closing the chosen tab moves to its neighbour, never deletes, and the last o
 });
 
 it("drops a tab whose string out is gone, and follows a rename", async () => {
-  localStorage.setItem("saucebunny.stringOuts.tabs", JSON.stringify(["scene", "deleted-one"]));
-  render(<EditPage active onOpenSettings={vi.fn()} />);
-  await waitFor(() => expect(tabs()).toEqual([["Scene", "true"]]));
+  const view = render(<EditPage active onOpenSettings={vi.fn()} />);
+  await openSaved("scene");
+  await openSaved("rosa");
+  await waitFor(() => expect(tabs()).toEqual([["Scene", "false"], ["Rosa", "true"]]));
+  mocks.list.mockResolvedValue([edits[0]]);
+  view.rerender(<EditPage active={false} onOpenSettings={vi.fn()} />);
+  view.rerender(<EditPage active onOpenSettings={vi.fn()} />);
+  await waitFor(() => expect(tabs()).toEqual([["Scene", "false"]]));
+  fireEvent.click(screen.getAllByRole("tab")[0]);
   fireEvent.click(screen.getByRole("button", { name: "Rename" }));
   expect(tabs()).toEqual([["Scene, renamed", "true"]]);
 });

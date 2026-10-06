@@ -230,7 +230,7 @@ fn read_wav_16k(path: &Path) -> Result<Vec<f32>, String> {
         let size = u32::from_le_bytes([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]]) as usize;
         if &bytes[at..at + 4] == b"data" {
             let end = (at + 8 + size).min(bytes.len());
-            return Ok(bytes[at + 8..end].chunks_exact(2).map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0).collect());
+            return Ok(bytes[at + 8..end].as_chunks::<2>().0.iter().map(|pair| f32::from(i16::from_le_bytes(*pair)) / 32768.0).collect());
         }
         at += 8 + size + size % 2;
     }

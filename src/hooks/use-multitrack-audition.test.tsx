@@ -37,14 +37,17 @@ describe("multitrack audition controls", () => {
     expect([...result.current.mute]).toEqual(["track-3"]);
     expect(result.current.levels).toEqual({ "track-2": -6 });
   });
-  it("defaults audio scrub on, keeps seek independent of solo, and suspends on departure", async () => {
+  it("defaults audio scrub on, keeps seek independent of solo, and pauses on departure, keeping its windows", async () => {
     const fixture = multitrackFixture();
     const { result, rerender, unmount } = renderHook(({ active }) => useMultitrackAudition(fixture, active), { initialProps: { active: true } });
     expect(result.current.scrubbing).toBe(true);
     await act(async () => result.current.seek(240, "track-2", false));
     expect(controls.seek).toHaveBeenCalledWith(240, 0); expect(result.current.solo.size).toBe(0);
     expect(controls.setScrubbing).toHaveBeenCalledWith(true);
-    rerender({ active: false }); expect(controls.suspend).toHaveBeenCalled();
+    rerender({ active: false }); expect(controls.pause).toHaveBeenCalled(); expect(controls.suspend).not.toHaveBeenCalled();
+    // Back on the page: the same engine, warmed from what it kept.
+    controls.warm.mockClear();
+    rerender({ active: true }); expect(controls.close).not.toHaveBeenCalled(); expect(controls.warm).toHaveBeenCalledTimes(1);
     unmount(); expect(controls.close).toHaveBeenCalled();
   });
 });

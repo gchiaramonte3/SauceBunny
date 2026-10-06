@@ -12,21 +12,33 @@ import type { AafProgress } from "../bindings/AafProgress";
 import { alternativeLane, laneReady, mediaRevision } from "../lib/multitrack-graph";
 import { formatError, isAppError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
-import { mergeTrackTranscript } from "../lib/multitrack";
-import { LAST_AAF_DOCUMENT, pickResume, recallLast, rememberLast } from "../lib/last-open";
+import { keepUnchanged, mergeTrackTranscript, sameTranscript } from "../lib/multitrack";
 
 /** Overview builds at once; the native gate (peaks.rs BUILD) allows the same. */
 const WAVEFORM_BUILDS = 2;
 /** One track's overview at one media revision. */
 const waveformSlot = (entry: { id: string; key: string }) => `${entry.id}\n${entry.key}`;
+/** The page as `acceptTranscript` made it: the page before, and the run's result. */
+type Accepted = WeakMap<AafDocument, { from: AafDocument; transcript: AafTrackTranscript }>;
+
+/**
+ * Whether every change between `before` and `page` is a run's result that
+ * `saved` already holds. Anything else (a label edit, another re-read) means
+ * the read may be older than the page.
+ */
+function holdsAccepted(saved: AafDocument, page: AafDocument, before: AafDocument, accepted: Accepted): boolean {
+  for (let at = page; at !== before;) {
+    const step = accepted.get(at);
+    const held = step && saved.transcripts.find((transcript) => transcript.track_id === step.transcript.track_id);
+    if (!step || !held || !sameTranscript(held, step.transcript)) return false;
+    at = step.from;
+  }
+  return true;
+}
 
 export function useMultitrackDocument(active: boolean) {
   const [document, setDocument] = useState<AafDocument | null>(null);
   const [saved, setSaved] = useState<AafDocumentSummary[]>([]);
-  // null until the first list arrives: an empty list and an unread one are
-  // different answers to "has this person used AAF Audio before".
-  const [listed, setListed] = useState(false);
-  const resumed = useRef(false);
   const [loading, setLoading] = useState(false);
   const [resolutionRequest, setResolutionRequest] = useState<{ id: string; token: number } | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -38,6 +50,10 @@ export function useMultitrackDocument(active: boolean) {
   const [labelStatus, setLabelStatus] = useState("");
   const [waveforms, setWaveforms] = useState<Record<string, number[][]>>({});
   const [waveformErrors, setWaveformErrors] = useState<Record<string, string>>({});
+  // The original AAF itself cannot be read (an unmounted drive): every lane's
+  // overview needs it, so one answer stands for all of them instead of a
+  // "Waveform unavailable" per lane and a Pipeline row per lane.
+  const [sourceOffline, setSourceOffline] = useState<string | null>(null);
   // Which document the user has turned Waveforms on for. Keyed by id rather
   // than a boolean so opening another sequence cannot inherit the choice for
   // the render it takes the workspace to report its own.
@@ -46,6 +62,7 @@ export function useMultitrackDocument(active: boolean) {
     setWaveformsFor(prior => on ? documentId : prior === documentId ? null : prior), []);
   const [waveformsBuilding, setWaveformsBuilding] = useState<string[]>([]);
   const current = useRef(document); current.current = document;
+  const accepted = useRef<Accepted>(new WeakMap());
   const importJob = useRef<string | null>(null);
   const revision = useRef(0);
   const saves = useRef(new Map<string, Promise<void>>());
@@ -54,14 +71,11 @@ export function useMultitrackDocument(active: boolean) {
   useEffect(() => {
     if (!active) return;
     let valid = true;
-    void invoke<AafDocumentSummary[]>("aaf_list").then((items) => { if (valid) { setSaved(items); setListed(true); } })
+    void invoke<AafDocumentSummary[]>("aaf_list").then((items) => { if (valid) setSaved(items); })
       // A failed list still ends the wait: the page shows the error and the import button, not a blank.
-      .catch((cause) => { if (valid) { setError(formatError(cause)); setListed(true); } });
+      .catch((cause) => { if (valid) setError(formatError(cause)); });
     return () => { valid = false; };
   }, [active, document?.id]);
-
-  // Reopen where the user left off rather than showing the welcome again.
-  const resuming = !resumed.current && !document && (!listed || pickResume(recallLast(LAST_AAF_DOCUMENT), saved, (item) => item.modified_ms ?? 0) !== null);
 
   const cancelImport = useCallback(() => {
     ++revision.current;
@@ -70,7 +84,7 @@ export function useMultitrackDocument(active: boolean) {
     if (jobId) void invoke("cancel_job", { jobId }).catch((cause) => setError(formatError(cause)));
   }, []);
   const stopResolution = useCallback(() => { setResolutionRequest(null); setResolving(false); }, []);
-  const load = useCallback(async (documentId?: string, selectedPath?: string, sequenceId?: string, resuming = false) => {
+  const load = useCallback(async (documentId?: string, selectedPath?: string, sequenceId?: string) => {
     if (importJob.current) return;
     const token = ++revision.current;
     setResolutionRequest(null); setResolving(false);
@@ -117,27 +131,26 @@ export function useMultitrackDocument(active: boolean) {
       }
       if (token === revision.current && mounted.current) {
         current.current = next; setDocument(next); setLabelStatus("");
-        rememberLast(LAST_AAF_DOCUMENT, next.id);
         if (next.manifest.graph?.sources.length) setResolutionRequest({ id: next.id, token });
       }
     } catch (cause) {
-      // A sequence that cannot reopen on its own is forgotten, not reported:
-      // the page simply opens on its list, and choosing it again says why.
-      if (resuming) rememberLast(LAST_AAF_DOCUMENT, null);
-      else if (token === revision.current && mounted.current) setError(formatError(cause));
+      if (token === revision.current && mounted.current) setError(formatError(cause));
     }
     finally { if (token === revision.current && mounted.current) { importJob.current = null; setLoading(false); } }
   }, []);
 
-  useEffect(() => {
-    if (!active || !listed || resumed.current || current.current) return;
-    resumed.current = true;
-    const id = pickResume(recallLast(LAST_AAF_DOCUMENT), saved, (item) => item.modified_ms ?? 0);
-    if (id) void load(id, undefined, undefined, true);
-  }, [active, listed, saved, load]);
+  // No sequence reopens by itself: the page starts clear on every launch, and
+  // what was open in this session stays open while the app runs (the owner,
+  // 2026-10-05). A reopened sequence whose drive was offline used to fill the
+  // lanes with "Waveform unavailable" and the Pipeline with errors before
+  // anyone had asked for it.
 
   // Read only after queued owner writes. Never apply a resolver's old snapshot
   // over a newer label edit, transcript commit, or different open document.
+  // A run's own result is the one change a read may overlap without reading
+  // again: the run committed before it said so, so a read that holds the
+  // result is no older than the page. Reading again was the second `aaf_open`
+  // (and, with a new document, the second bleed pass) after every run.
   const reconcile = useCallback(async (id: string, token: number) => {
     for (;;) {
       const pending = saves.current.get(id);
@@ -145,12 +158,13 @@ export function useMultitrackDocument(active: boolean) {
       const before = current.current;
       if (!mounted.current || token !== revision.current || before?.id !== id) return;
       const saved = await invoke<AafDocument>("aaf_open", { documentId: id });
-      if (!mounted.current || token !== revision.current || current.current?.id !== id) return;
-      if (pending !== saves.current.get(id) || current.current !== before) continue;
-      // Preserve track-array identity for graph-only checkpoints: other lanes
-      // becoming available must not restart every visible waveform request.
-      const tracks = JSON.stringify(saved.manifest.tracks) === JSON.stringify(before.manifest.tracks) ? before.manifest.tracks : saved.manifest.tracks;
-      const next = { ...saved, manifest: { ...saved.manifest, tracks } };
+      const page = current.current;
+      if (!mounted.current || token !== revision.current || page?.id !== id) return;
+      if (pending !== saves.current.get(id) || (page !== before && !holdsAccepted(saved, page, before, accepted.current))) continue;
+      // Unchanged parts keep their identity: other lanes becoming available
+      // must not restart every visible waveform request, nor a label save the
+      // bleed pass.
+      const next = keepUnchanged(saved, page);
       current.current = next; setDocument(next); return;
     }
   }, []);
@@ -205,12 +219,12 @@ export function useMultitrackDocument(active: boolean) {
   // and failures are keyed by track AND media revision: tracks whose clips
   // look alike (an embedded AAF's often do) share a revision string, and keyed
   // by revision alone one build or one failure stood in for all of them.
-  const loader = useRef<{ failed: Set<string>; building: Map<string, { id: string; jobId: string }> }>({ failed: new Set(), building: new Map() });
+  const loader = useRef<{ failed: Set<string>; building: Map<string, { id: string; jobId: string }>; offline: boolean }>({ failed: new Set(), building: new Map(), offline: false });
   const waveformCache = useRef<Record<string, number[][]>>({});
   const waveformKeys = useRef<Record<string, string>>({});
   // Failures are forgotten with the document too: one remembered after its
   // error was cleared would leave the lane "queued" for ever, with no Retry.
-  useEffect(() => { waveformCache.current = {}; waveformKeys.current = {}; loader.current.failed.clear(); setWaveforms({}); setWaveformErrors({}); }, [documentId]);
+  useEffect(() => { waveformCache.current = {}; waveformKeys.current = {}; loader.current.failed.clear(); loader.current.offline = false; setSourceOffline(null); setWaveforms({}); setWaveformErrors({}); }, [documentId]);
   useEffect(() => {
     const snapshot = current.current;
     if (!snapshot) return;
@@ -242,7 +256,7 @@ export function useMultitrackDocument(active: boolean) {
     const publish = () => { if (mounted.current) setWaveformsBuilding([...state.building.values()].map(job => job.id)); };
     // Held before the invoke, where a change of view and unmounting can cancel it.
     const setBuildingJob = (jobId: string, next: { id: string; key: string }) => { state.building.set(waveformSlot(next), { id: next.id, jobId }); publish(); };
-    while (mounted.current && state.building.size < WAVEFORM_BUILDS) {
+    while (mounted.current && !state.offline && state.building.size < WAVEFORM_BUILDS) {
       const next = wantedRef.current.find(entry => waveformKeys.current[entry.id] !== entry.key && !state.failed.has(waveformSlot(entry)) && !state.building.has(waveformSlot(entry)));
       if (!next) break;
       const jobId = newJobId(); setBuildingJob(jobId, next);
@@ -258,7 +272,9 @@ export function useMultitrackDocument(active: boolean) {
           // did not fail: if it is wanted again by the time it stops, the
           // re-pump below starts it afresh.
           const stopped = isAppError(cause) && cause.kind === "Cancelled";
-          if (!stopped && stillWanted(waveformSlot(next))) { state.failed.add(waveformSlot(next)); setWaveformErrors(prior => ({ ...prior, [next.id]: formatError(cause) })); }
+          // NotFound here is the AAF file itself (store::source_ready): no other lane can be read either.
+          if (!stopped && isAppError(cause) && cause.kind === "NotFound") { state.offline = true; if (mounted.current) setSourceOffline(formatError(cause)); }
+          else if (!stopped && stillWanted(waveformSlot(next))) { state.failed.add(waveformSlot(next)); setWaveformErrors(prior => ({ ...prior, [next.id]: formatError(cause) })); }
         } finally {
           // A request that arrived while this one ran must not be stranded.
           state.building.delete(waveformSlot(next)); publish(); pumpWaveforms();
@@ -298,6 +314,10 @@ export function useMultitrackDocument(active: boolean) {
   }, [persistLabels]);
   /** Resend the labels on screen after a failed save. */
   const retryLabels = useCallback(() => { const doc = current.current; if (doc) { setError(null); persistLabels(doc.id, doc.labels); } }, [persistLabels]);
+  /** The AAF's drive is back: try every lane's overview again. */
+  const retrySource = useCallback(() => {
+    loader.current.offline = false; setSourceOffline(null); pumpWaveforms();
+  }, [pumpWaveforms]);
   /** Forget a track's failed waveform build and ask for it again. */
   const retryWaveform = useCallback((trackId: string) => {
     const entry = wantedRef.current.find(item => item.id === trackId);
@@ -308,8 +328,13 @@ export function useMultitrackDocument(active: boolean) {
   const acceptTranscript = useCallback((transcript: AafTrackTranscript) => {
     const before = current.current;
     if (!before) return;
-    const next = mergeTrackTranscript(before, transcript); current.current = next; setDocument(next);
+    // The run's change event can deliver it first: a re-read that already
+    // holds it needs no second copy, and a second copy is a second bleed pass.
+    const held = before.transcripts.find((item) => item.track_id === transcript.track_id);
+    if (held && sameTranscript(held, transcript)) return;
+    const next = mergeTrackTranscript(before, transcript); accepted.current.set(next, { from: before, transcript });
+    current.current = next; setDocument(next);
   }, []);
-  return { document, saved, resuming, loading, resolving, mediaProgress, stopResolution, error, labelStatus, waveforms, waveformErrors, setWaveformsOn, waveformsBuilding, load, cancelImport, rename, retryLabels, retryWaveform, acceptTranscript, showTracks,
+  return { document, saved, loading, resolving, mediaProgress, stopResolution, error, labelStatus, waveforms, waveformErrors, sourceOffline, retrySource, setWaveformsOn, waveformsBuilding, load, cancelImport, rename, retryLabels, retryWaveform, acceptTranscript, showTracks,
     sequenceChoices, chooseSequence: (id: string) => { if (sequenceChoices) void load(undefined, sequenceChoices.path, id); }, cancelChoice: () => setSequenceChoices(null) };
 }

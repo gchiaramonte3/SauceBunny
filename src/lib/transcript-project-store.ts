@@ -1,16 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
-  parseProjects, reconcileProjects, updateProject,
+  fileDocuments as file, isProjectFolder, makeProject, parseProjects, reconcileProjects, updateProject,
   type TranscriptProject,
 } from "./transcript-projects";
-import { STORE_SCHEMA_VERSION, futureVersionIn, reportFutureVersion } from "./store-schema";
+import { futureVersionIn, reportFutureVersion } from "./store-schema";
 
 /**
  * Where a project's metadata lives, and the one rule that matters.
  *
  * `projects.json` sits beside the transcripts it describes, holding titles,
- * posters and colours. The DIRECTORIES are the truth about what exists; this
- * file only decorates them, so deleting it costs posters and nothing else.
+ * posters, colours and the AAF Audio documents filed in each project. The
+ * DIRECTORIES are the truth about which projects exist; deleting this file
+ * costs the posters and puts every filed AAF Audio document back under AAF
+ * Audio, since a document is filed by reference rather than by moving a file.
  *
  * Modelled on cast-store, including the guard that store exists to document:
  * a write is REFUSED until hydration has read the disk copy. An empty list at
@@ -23,6 +25,14 @@ import { STORE_SCHEMA_VERSION, futureVersionIn, reportFutureVersion } from "./st
  */
 
 const FILE = "projects.json";
+/**
+ * Version 2 added `documents`: the AAF Audio documents filed in a project, by
+ * id. Unlike a transcript, a document is not a file in the folder, so this
+ * list is the only record of where it was filed. A version-1 build reads the
+ * file, drops the field it does not know and would write the shelf back
+ * without it; stamped 2, that build refuses to write instead.
+ */
+export const PROJECTS_SCHEMA_VERSION = 2;
 const READ_CAP = 2 * 1024 * 1024;
 const WRITE_DEBOUNCE_MS = 400;
 
@@ -34,8 +44,9 @@ let hydrating = false;
 let pendingWrite = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 /** Set if projects.json is newer than this build. Closes every write path;
- *  see store-schema.ts. Losing this file costs posters and titles, but it
- *  costs them just as permanently as anything else in Documents. */
+ *  see store-schema.ts. Losing this file costs posters, titles and where
+ *  each AAF Audio document was filed, as permanently as anything else in
+ *  Documents. */
 let futureVersion: number | null = null;
 const listeners = new Set<() => void>();
 
@@ -71,7 +82,7 @@ async function flush(): Promise<void> {
       await invoke("ensure_dir_exists", { path: dir });
       dirEnsured = true;
     }
-    const text = JSON.stringify({ version: STORE_SCHEMA_VERSION, projects }, null, 2);
+    const text = JSON.stringify({ version: PROJECTS_SCHEMA_VERSION, projects }, null, 2);
     await invoke("write_text_to_path", { path: `${dir}/${FILE}`, text, atomic: true });
   } catch {
     // Re-arm rather than dropping the edit; a transient write failure should
@@ -133,7 +144,7 @@ export async function hydrateProjects(
       const text = await invoke<string>("read_text_file_capped", {
         path: `${dir}/${FILE}`, maxBytes: READ_CAP,
       });
-      const fv = futureVersionIn(text);
+      const fv = futureVersionIn(text, PROJECTS_SCHEMA_VERSION);
       if (fv !== null) { futureVersion = fv; reportFutureVersion("projects", fv); }
       const doc: unknown = JSON.parse(text);
       stored = parseProjects((doc as { projects?: unknown })?.projects);
@@ -213,6 +224,21 @@ export function renameProject(from: string, to: string): void {
 export function forgetProject(folder: string): void {
   if (!projects.some((p) => p.folder === folder)) return;
   projects = projects.filter((p) => p.folder !== folder);
+  save();
+  notify();
+}
+
+/**
+ * File AAF Audio documents in the project at `folder`, or with null in none.
+ * A project made a moment ago may not be on the shelf yet (the folder listing
+ * that adds it is a rescan away), so its entry can start here; the next
+ * reconcile keeps it, because the folder is real.
+ */
+export function fileDocuments(ids: readonly string[], folder: string | null): void {
+  const known = folder === null || !isProjectFolder(folder) || projects.some((p) => p.folder === folder);
+  const next = file(known ? projects : [...projects, makeProject(folder, Date.now())], ids, folder);
+  if (next.length === projects.length && next.every((p, i) => p === projects[i])) return;
+  projects = next;
   save();
   notify();
 }

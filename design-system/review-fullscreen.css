@@ -1,0 +1,95 @@
+/* Review full screen prototype (UI corrections 2026-10-05, item 18). Catalog
+   only: cp-rf-* classes are not imported by the app. The tiles in the film
+   strip are the production theater recipe (.cp-people.strip, 168px). */
+
+.cp-rf { position: fixed; inset: 0; background: black; color: var(--fg-1); font-family: var(--font-ui); font-size: var(--text-md); overflow: hidden; }
+.cp-rf-full { position: relative; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); width: 100%; height: 100%; }
+.cp-rf-full.has-people[data-layout="right"] { grid-template-columns: minmax(0, 1fr) auto; }
+.cp-rf-full.has-people[data-layout="bottom"] { grid-template-rows: minmax(0, 1fr) auto; }
+
+/* ── The picture is the page ── */
+.cp-rf-stage { position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; background: black; overflow: hidden; }
+.cp-rf[data-chrome="away"] .cp-rf-stage { cursor: none; }
+.cp-rf-stage.is-drawing { cursor: crosshair; }
+.cp-rf-picture { position: relative; }
+.cp-rf-picture svg { display: block; width: 100%; height: 100%; }
+.cp-rf-reaction { position: absolute; left: 50%; bottom: 22%; display: grid; justify-items: center; gap: 2px; font-size: var(--text-5xl); line-height: var(--leading-none); transform: translateX(-50%); animation: cp-rf-rise 2.4s var(--ease-out) forwards; }
+.cp-rf-reaction span { padding: 2px 6px; border-radius: var(--r-pill); background: var(--bg-3); color: var(--fg-1); font-size: var(--text-sm); }
+@keyframes cp-rf-rise { from { opacity: 0; transform: translate(-50%, 12px); } 15% { opacity: 1; transform: translate(-50%, 0); } to { opacity: 0; transform: translate(-50%, -40px); } }
+.cp-rf-draw-hint { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); padding: 4px 10px; border-radius: var(--r-pill); background: var(--bg-3); color: var(--fg-1); font-size: var(--text-base); white-space: nowrap; }
+
+/* ── A thin title that steps aside with the controls ── */
+.cp-rf-title { position: absolute; inset: 0 0 auto 0; z-index: 3; display: flex; align-items: center; gap: var(--s-3); height: 40px; padding: 0 var(--s-4);
+  background: linear-gradient(rgb(0 0 0 / 0.72), rgb(0 0 0 / 0)); transition: opacity var(--dur-slow) var(--ease-out); }
+.cp-rf-title-name { font-weight: var(--weight-semibold); font-size: var(--text-lg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cp-rf-title-meta { color: var(--fg-3); font-size: var(--text-base); white-space: nowrap; }
+.cp-rf-title-actions { display: flex; gap: var(--s-2); margin-left: auto; }
+.cp-rf-text-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--bg-2); color: var(--fg-1); font: inherit; font-size: var(--text-md); cursor: pointer; }
+.cp-rf-text-btn:hover { border-color: var(--line-3); background: var(--bg-3); }
+.cp-rf-end { color: var(--danger-text); }
+.is-away { opacity: 0; pointer-events: none; }
+
+/* ── One control bar over the bottom of the picture ── */
+.cp-rf-bar { position: absolute; left: 50%; bottom: var(--s-4); z-index: 3; display: flex; align-items: center; gap: var(--s-3); width: min(calc(100% - 32px), 1040px);
+  padding: 6px 8px 6px 14px; border: 1px solid var(--line-1); border-radius: var(--r-lg); background: rgb(14 14 16 / 0.86); box-shadow: var(--shadow-card);
+  transform: translateX(-50%); transition: opacity var(--dur-slow) var(--ease-out), transform var(--dur-slow) var(--ease-out); }
+.cp-rf-bar.is-away { transform: translate(-50%, 8px); }
+.cp-rf-bar-source { display: flex; align-items: center; gap: var(--s-2); min-width: 0; flex: 1 1 auto; }
+.cp-rf-bar-title { font-weight: var(--weight-semibold); white-space: nowrap; }
+.cp-rf-bar-detail { color: var(--fg-3); font-size: var(--text-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cp-rf-live { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 6px; border-radius: var(--r-pill); background: var(--bg-3); font-size: var(--text-sm); font-weight: var(--weight-bold); letter-spacing: var(--track-caps); text-transform: uppercase; }
+.cp-rf-live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.cp-rf-transport { display: flex; align-items: center; gap: var(--s-2); flex: 2 1 260px; min-width: 0; }
+.cp-rf-tc { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--fg-2); white-space: nowrap; }
+.cp-rf-scrub { flex: 1; min-width: 80px; accent-color: var(--fg-1); }
+.cp-rf-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.cp-rf-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--fg-1); cursor: pointer; }
+.cp-rf-btn:hover { background: var(--bg-4); }
+/* A mode that is on lifts (Draw, People, a raised hand); a device that is on stays plain and only OFF is marked. */
+.cp-rf-btn.is-on { background: var(--bg-4); color: var(--fg-0); }
+.cp-rf-btn.off { color: var(--danger-text); }
+.cp-rf-btn:focus-visible, .cp-rf-text-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.cp-rf-sep { width: 1px; height: 20px; margin: 0 6px; background: var(--line-2); }
+.cp-rf-notice { position: absolute; bottom: calc(100% + 8px); left: 50%; margin: 0; padding: 6px 12px; border-radius: var(--r-md); background: var(--bg-3); color: var(--fg-1); box-shadow: var(--shadow-card); transform: translateX(-50%); white-space: nowrap; }
+.cp-rf-react { position: relative; display: inline-flex; }
+.cp-rf-menu { position: absolute; bottom: calc(100% + 10px); left: 50%; z-index: 4; display: grid; grid-template-columns: repeat(5, 34px); gap: 4px; padding: 6px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); transform: translateX(-50%); }
+.cp-rf-menu button { min-height: 32px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--fg-1); font: inherit; font-size: var(--text-xl); cursor: pointer; }
+.cp-rf-menu button:hover, .cp-rf-menu button:focus-visible { background: var(--bg-4); outline: none; }
+.cp-rf-menu .cp-rf-menu-wide { grid-column: 1 / -1; font-size: var(--text-md); }
+
+/* ── People in a film strip: same 168px tiles as the theater strip ── */
+.cp-rf-people { min-width: 0; min-height: 0; background: var(--bg-1); transition: opacity var(--dur-slow) var(--ease-out); }
+.cp-rf-people .cp-people.strip { margin: 0; height: 100%; }
+.cp-rf-people[data-edge="right"] { width: 196px; border-left: 1px solid var(--line-1); padding-top: 44px; }
+.cp-rf-people[data-edge="right"] .cp-people-list { flex-direction: column; height: 100%; overflow-x: hidden; overflow-y: auto; padding: var(--s-2) 14px; }
+.cp-rf-people[data-edge="bottom"] { border-top: 1px solid var(--line-1); }
+.cp-rf-people[data-edge="bottom"] .cp-people-list { padding: var(--s-2) var(--s-3); }
+.cp-rf-people[data-edge="float"] { position: absolute; top: 48px; right: var(--s-4); z-index: 2; max-height: calc(100% - 140px); overflow-y: auto; border-radius: var(--r-card); background: rgb(14 14 16 / 0.72); }
+.cp-rf-people[data-edge="float"] .cp-people-list { flex-direction: column; padding: var(--s-2); }
+
+/* ── Today's room, for comparison and for the way back from full screen ── */
+.cp-rf-window { display: grid; grid-template-columns: 72px minmax(0, 1fr); width: 100%; height: 100%; background: var(--bg-0); }
+.cp-rf-rail { display: grid; align-content: start; gap: var(--s-4); padding: 48px 0 0; border-right: 1px solid var(--line-1); background: var(--bg-1); }
+.cp-rf-rail-item { color: var(--fg-4); font-size: var(--text-sm); text-align: center; }
+.cp-rf-window-main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; padding: 36px 22px 16px; gap: var(--s-3); }
+.cp-rf-room-head { display: flex; align-items: center; gap: var(--s-3); color: var(--fg-3); }
+.cp-rf-room-head strong { color: var(--fg-1); }
+.cp-rf-window-stage { display: grid; min-height: 0; }
+.cp-rf-window-transport { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); color: var(--fg-3); font-size: var(--text-base); }
+.cp-rf-enter { margin-left: auto; }
+
+/* ── The reviewer's options, outside the design ── */
+.cp-rf-options { position: fixed; top: 48px; left: var(--s-3); z-index: 5; max-width: min(300px, calc(100vw - 24px)); padding: 6px 10px; border: 1px dashed var(--line-3); border-radius: var(--r-card); background: var(--bg-2); color: var(--fg-2); font-size: var(--text-base); }
+.cp-rf:has(.cp-rf-window) .cp-rf-options { top: var(--s-3); right: var(--s-3); left: auto; }
+.cp-rf-options summary { min-height: 24px; cursor: pointer; color: var(--fg-1); font-weight: var(--weight-semibold); }
+.cp-rf-options fieldset { display: grid; gap: 2px; margin: var(--s-2) 0 0; padding: 0; border: 0; }
+.cp-rf-options legend { margin-bottom: 2px; color: var(--fg-3); font-size: var(--text-sm); text-transform: uppercase; letter-spacing: var(--track-caps); }
+.cp-rf-options label { display: flex; align-items: center; gap: 6px; min-height: 24px; cursor: pointer; }
+.cp-rf-options p { margin: var(--s-2) 0 2px; color: var(--fg-3); line-height: var(--leading-snug); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-rf-title, .cp-rf-bar, .cp-rf-people { transition: none; }
+  /* A calmer replacement, not none: the reaction still arrives and leaves, without travel. */
+  .cp-rf-reaction { animation: cp-rf-fade 2.4s linear forwards; }
+}
+@keyframes cp-rf-fade { from { opacity: 0; } 10% { opacity: 1; } 80% { opacity: 1; } to { opacity: 0; } }

@@ -4,7 +4,7 @@ import type { MultitrackPerson } from "../lib/multitrack-person";
 import { hasTranscriptContent } from "../lib/multitrack";
 import { useMultitrackExport, type MultitrackExportFormat } from "../hooks/use-multitrack-export";
 import { StatefulButton } from "./StatefulButton";
-import { MultitrackShootDate } from "./MultitrackShootDate";
+import { MultitrackExportMore } from "./MultitrackExportMore";
 import { hasGroupMicrophones } from "../lib/multitrack-avid-files";
 
 export function MultitrackExport({ document, person, selectedTracks }: { document: AafDocument; person?: MultitrackPerson; selectedTracks?: ReadonlySet<string> }) {
@@ -19,16 +19,16 @@ export function MultitrackExport({ document, person, selectedTracks }: { documen
   const busy = output.phase === "loading";
   const grouped = hasGroupMicrophones(document);
   const timedOnly = format === "avid" || format === "srt";
+  // One row: the format, Export for the person on screen, and the rest behind the chevron.
   return <footer className="cp-multitrack-export">
-    {(format === "txt" || format === "pdf") && <MultitrackShootDate document={document} />}
     <div className="cp-multitrack-export-current"><select className="cp-select" aria-label="Transcript export format" value={format} onChange={(event) => setFormat(event.target.value as MultitrackExportFormat)} disabled={busy}>
       <option value="txt">Plain text</option><option value="csv">CSV</option><option value="avid">Avid markers</option><option value="srt">SRT captions</option><option value="pdf">PDF</option><option value="print">Print…</option></select>
       <StatefulButton className="btn btn-primary cp-export-cta cp-sbtn-export" phase={output.phase} idleContent={person ? `Export ${person.name}` : "Export transcript"} loadingLabel="Exporting…" onClick={() => void output.download(format, person?.trackIds, person?.name)} onResolved={output.clearResolution} disabled={timedOnly ? !counts.timed : !counts.scoped} />
+      <MultitrackExportMore document={document} format={format} busy={busy} grouped={grouped}
+        selected={selectedTracks ? { count: selectedIds.length, ready: timedOnly ? counts.selectedTimed : counts.selected } : null}
+        entire={timedOnly ? counts.anyTimed : counts.any} byPerson={counts.anyTimed}
+        onSelected={() => void output.download(format, selectedIds, "Selected tracks")} onEntire={() => void output.download(format)} onByPerson={() => void output.downloadPeople()} />
     </div>
-    <div className="cp-multitrack-export-all">
-      {selectedTracks && <button className="btn btn-ghost" aria-label={`Export selected (${selectedIds.length})`} title="Export saved transcripts from the checked timeline tracks" disabled={busy || (timedOnly ? !counts.selectedTimed : !counts.selected)} onClick={() => void output.download(format, selectedIds, "Selected tracks")}>Selected ({selectedIds.length})</button>}
-      <button className="btn btn-ghost" disabled={busy || (timedOnly ? !counts.anyTimed : !counts.any)} onClick={() => void output.download(format)}>Entire transcript</button><button className="btn btn-ghost" aria-label={grouped ? "Avid files by microphone" : "Avid files by person"} title={grouped ? "Save one file per microphone, targeting its parent sequence track" : "Save a separate Avid marker file for each person"} disabled={busy || !counts.anyTimed} onClick={() => void output.downloadPeople()}>{grouped ? "Avid by mic" : "Avid by person"}</button></div>
-    {format === "srt" && <p className="cp-multitrack-note">Sequence-relative captions, with mic-owner labels. Untimed text stays in text, CSV and PDF.</p>}
     {output.status && <p className="cp-multitrack-note" role="status">{output.status}</p>}
     {output.error && <p className="cp-multitrack-error" role="alert">{output.error}</p>}
   </footer>;

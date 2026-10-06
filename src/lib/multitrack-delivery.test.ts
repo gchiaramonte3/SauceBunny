@@ -43,9 +43,10 @@ describe("authoritative multitrack delivery", () => {
     const legacy = sanitizeCast({ ...cast, members: [{ id: "old", name: "Woman", color: "#123456" }] })!;
     expect(legacy.members[0].gender).toBeUndefined(); expect(legacy.members[0].markerColor).toBeUndefined();
   });
-  it("updates source-named entries without fake SRT paths and preserves historical duplicates", () => {
+  it("names entries as the sequence menus do, without fake SRT paths, and keeps historical duplicates apart", () => {
     const base = { id: "first-id", source_path: "/one/Same.aaf", name: "Sequence", track_count: 50, transcribed_tracks: 1, modified_ms: 2 };
-    expect(multitrackLibraryEntries([base])[0]).toMatchObject({ kind: "multitrack", title: "Same.aaf" });
+    expect(multitrackLibraryEntries([base])[0]).toMatchObject({ kind: "multitrack", title: "Sequence" });
+    expect(multitrackLibraryEntries([{ ...base, title: "Day 3, kitchen" }])[0].title).toBe("Day 3, kitchen");
     expect(multitrackLibraryEntries([{ ...base, transcribed_tracks: 50 }])[0].summary.transcribed_tracks).toBe(50);
     const entries = multitrackLibraryEntries([base, { ...base, id: "second-id", source_path: "/two/Same.aaf" }, { ...base, id: "not-run", transcribed_tracks: 0 }]);
     expect(entries).toHaveLength(2); expect(new Set(entries.map(item => item.title)).size).toBe(2);

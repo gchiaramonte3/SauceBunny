@@ -40,7 +40,7 @@ export function EditSidePanel(props: Props) {
   }, [words, props.lanes]);
   const mentions = useMemo(() => askMentions(props.lanes, document.sources), [props.lanes, document.sources]);
   const ask = useEditAsk({ editId: props.editId, lines, mentions, nameOf: props.nameOf, sourceName: props.sourceName, appLocalModelId: props.appLocalModelId, sourceTc: props.sourceTc,
-    document, words, screen: () => appState({ editId: props.editId, document, selected: ws.selected, caret: ws.placed[ws.caret], marks: ws.marks, tc: props.tc }) });
+    document, words, screen: () => appState({ editId: props.editId, document, selected: ws.selected, caret: ws.placed[ws.caretNow()], marks: ws.marks, tc: props.tc }) });
   /** A proposal lands here as one undo step, or as a new string out that leaves this one alone. */
   const apply = async (message: AskMessage, into: "here" | "new") => {
     const action = message.action;

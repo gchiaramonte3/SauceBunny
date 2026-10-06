@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { FrameStore } from "../lib/frame-store";
 import type { EditDeadPreset, EditDeadReview } from "../components/EditDeadSpaceBar";
 import { editDeadPresets } from "../components/EditDeadSpaceBar";
 import type { EditSelection } from "../components/EditTranscript";
@@ -7,7 +8,7 @@ import type { AafDocument } from "../bindings/AafDocument";
 import { giveTracks, patchAt, unpatch } from "../lib/edit-new";
 import { alternativeLane } from "../lib/multitrack-graph";
 import {
-  addEdit, clipAround, cutRange, deadDefaults, deleteWords, extractProgram, findDeadSpace, ghostLines, healSeam, liftOnTracks, liftProgram,
+  addEdit, clipAround, cutRange, firstAbove, runningEnds, deadDefaults, deleteWords, extractProgram, findDeadSpace, ghostLines, healSeam, liftOnTracks, liftProgram,
   moveParagraph, muteWords, overwrite, paragraphs, placementKey, placeWords, programDuration, removeDeadSpace, restoreRange, seamList, segmentStarts,
   snapToGap, spliceIn, unmuteWords, type DeleteResult, type Ghost, type Timeline, type TimelineLane, type TimelineWord,
 } from "../lib/edit-model";
@@ -27,7 +28,9 @@ type Options = {
   everyone?: TimelineWord[];
   /** Which lanes each source has a mic for. */
   sourceLanes: Record<string, string[]>;
-  audible: Map<string, [number, number][]>; playhead: number; seek: (seconds: number) => void; commit: Commit;
+  audible: Map<string, [number, number][]>;
+  /** The record playhead, in frames (in seconds without `fps`): actions read it as they run, and the caret follows it a word at a time. */
+  frames: FrameStore; seek: (seconds: number) => void; commit: Commit;
   nameOf: (lane: string) => string; tc: (seconds: number) => string;
   /** Snap (N): a splice lands between words rather than inside one. */
   snap?: boolean;
@@ -43,7 +46,8 @@ type Options = {
  * `commit`, which snaps it to frames. Marks, selection, solo and the dead-space
  * review are view state and never enter the history.
  */
-export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, durations, audible, playhead, seek, commit, nameOf, tc, documents, snap = true, fps }: Options) {
+export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, durations, audible, frames, seek, commit, nameOf, tc, documents, snap = true, fps }: Options) {
+  const seconds = (frame: number) => fps ? frame / fps : frame, playheadNow = () => seconds(frames.get());
   const edit = open.timeline, markers = open.markers;
   const [stored, setSelection] = useState<EditSelection>({ anchor: 0, focus: 0, collapsed: true });
   const [marks, setMarks] = useState<EditMarks>({ in: null, out: null });
@@ -74,13 +78,19 @@ export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, du
   const placed = useMemo(() => measure("String Outs", `Placing ${words.length.toLocaleString("en-US")} words on the record`, () => placeWords(words, edit)), [words, edit]);
   const paras = useMemo(() => measure("String Outs", `Laying out ${placed.length.toLocaleString("en-US")} record words as paragraphs`, () => paragraphs(placed)), [placed]);
   const seams = useMemo(() => seamList(edit, words), [edit, words]);
-  const ghosts = useMemo(() => ghostLines(edit, words, durations), [edit, words, durations]);
+  const ghosts = useMemo(() => ghostLines(edit, words, placed), [edit, words, placed]);
   const total = programDuration(edit), starts = segmentStarts(edit), count = placed.length;
   // One record position, as in Avid: a caret is wherever the playhead is, so
   // Insert, Add Edit, markers and the text all mean the same place. A range
-  // is the editor's own choice and stays put while the playhead moves.
-  const underPlayhead = placed.findIndex((item) => item.programEnd > playhead + 1e-6);
-  const parked = underPlayhead < 0 ? count : underPlayhead;
+  // is the editor's own choice and stays put while the playhead moves. The
+  // caret is the first word ending after the playhead, by a binary search over
+  // the running latest end (words on two tracks can overlap). Nothing here
+  // subscribes to the playhead, or the whole editor would redraw at every
+  // word: `caret` is as of this render, actions use `caretNow()`, and what
+  // draws the caret while playing follows `caretAt(frame)` itself.
+  const ends = useMemo(() => runningEnds(placed), [placed]);
+  const caretAt = (frame: number) => firstAbove(ends, seconds(frame) + 1e-6), caretNow = () => (stored.collapsed ? caretAt(frames.get()) : Math.min(stored.anchor, count));
+  const parked = caretAt(frames.get());
   const selection: EditSelection = stored.collapsed ? { anchor: parked, focus: parked, collapsed: true, after: !!stored.after && stored.anchor === parked } : stored;
   const onTracks = tracks ?? new Set(lanes.map((lane) => lane.id));
   const range: [number, number] | null = selection.collapsed || !count ? null
@@ -91,7 +101,7 @@ export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, du
   const marked = marks.in != null && marks.out != null && marks.out > marks.in ? [marks.in, marks.out] as const : null;
   const names = (ids: string[]) => { const list = [...new Set(ids)].map(nameOf); return list.length < 3 ? list.join(" and ") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`; };
 
-  const applyDelete = (cut: Set<string>, removed: number, at = range ? range[0] : caret) => {
+  const applyDelete = (cut: Set<string>, removed: number, at = range ? range[0] : caretNow()) => {
     const result = deleteWords(words, edit, cut);
     void change(`Delete ${plural(removed, "Word")}`, (timeline) => deleteWords(words, timeline, cut).edit);
     setSelection({ anchor: at, focus: at, collapsed: true, after: at > 0 });
@@ -149,7 +159,7 @@ export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, du
     const frame = (seconds: number) => fps ? Math.round(seconds * fps) / fps : seconds;
     const [srcIn, srcOut] = (sourceWords.length ? cutRange(bounds, sourceWords, { id: "whole", source, srcIn: 0, srcOut: durations[source] ?? Infinity }) : [take!.from, take!.to]).map(frame);
     const lanes = take ? take.lanes : [...speakers];
-    const at = Math.max(0, Math.min(total, marks.in ?? playhead));
+    const at = Math.max(0, Math.min(total, marks.in ?? playheadNow()));
     const position = how === "append" ? total : frame(snap ? snapToGap(edit, placed, at) : at);
     const given = open.document.tracks.filter((lane) => lane.featured === false && lanes.includes(lane.id)).map((lane) => lane.name);
     const label = how === "overwrite" ? "Overwrite" : sourceWords.length ? `Insert ${plural(sourceWords.length, "Word")}` : "Insert Clip";
@@ -245,22 +255,23 @@ export function useEditWorkspace({ open, words, everyone, lanes, sourceLanes, du
     setDead(null);
     setMessage(`Removed ${result.seconds.toFixed(1)} s.`);
   };
-  const addMarker = () => void commit("Add Marker", (state) => state.markers.some((m) => Math.abs(m.at - playhead) < 1e-3) ? null
-    : { markers: [...state.markers, { id: `m-${Date.now().toString(36)}`, at: playhead, track: null, name: "Marker", comment: "", color: "red" }].sort((a, b) => a.at - b.at) });
+  const addMarker = () => { const playhead = playheadNow(); void commit("Add Marker", (state) => state.markers.some((m) => Math.abs(m.at - playhead) < 1e-3) ? null
+    : { markers: [...state.markers, { id: `m-${Date.now().toString(36)}`, at: playhead, track: null, name: "Marker", comment: "", color: "red" }].sort((a, b) => a.at - b.at) }); };
   const updateMarker = (id: string, change: Partial<Pick<TimelineMarker, "name" | "comment" | "color">>, group?: string) =>
     void commit("Edit Marker", (state) => ({ markers: state.markers.map((item) => item.id === id ? { ...item, ...change } : item) }), group ?? `marker:${id}`);
   const removeMarker = (id: string) => { setMarker(null); void commit("Delete Marker", (state) => ({ markers: state.markers.filter((item) => item.id !== id) })); };
-  const cutHere = () => void change("Add Edit", (timeline) => addEdit(timeline, playhead));
+  const cutHere = () => { const playhead = playheadNow(); void change("Add Edit", (timeline) => addEdit(timeline, playhead)); };
   const setTimeline = (label: string, next: Timeline) => void change(label, () => next);
 
   return {
-    edit, markers, placed, paras, seams, ghosts, total, count, range, caret, selected, keys, marks, marked, onTracks, selection, dead, prompt, seam, message, extractGuard, setExtractGuard,
+    edit, markers, placed, paras, seams, ghosts, total, count, range, caret, caretAt, caretNow, frames, selected, keys, marks, marked, onTracks, selection, dead, prompt, seam, message, extractGuard, setExtractGuard,
     setSelection, setMarks, setSeam, setMessage, setPrompt, setDead, names, marker: markers.find((item) => item.id === marker) ?? null, setMarker, updateMarker, removeMarker,
     toggleTrack: (id: string, only: boolean) => setTracks((state) => only ? new Set([id]) : toggled(state ?? new Set(lanes.map((lane) => lane.id)), id)),
     skipDead: (index: number) => setDeadHeld((state) => state && { ...state, review: { ...state.review, skip: toggled(state.review.skip, index) } }),
     remove, applyDelete, restore, insert, overwrite: (source: string, sourceWords: TimelineWord[], take?: { from: number; to: number; lanes: string[] }) => place("overwrite", source, sourceWords, take), untrack, patch, addWhole, move, chooseSeam, healCut, takeMarked, findDead, applyDead, addMarker, cutHere, setTimeline,
-    markIn: () => setMarks((m) => ({ in: playhead, out: m.out != null && m.out > playhead ? m.out : null })),
-    markOut: () => setMarks((m) => ({ in: m.in != null && m.in < playhead ? m.in : null, out: playhead })),
-    markClip: () => { const clip = clipAround(edit, playhead); if (clip) setMarks({ in: clip[0], out: clip[1] }); },
+    markIn: () => { const playhead = playheadNow(); setMarks((m) => ({ in: playhead, out: m.out != null && m.out > playhead ? m.out : null })); },
+    markOut: () => { const playhead = playheadNow(); setMarks((m) => ({ in: m.in != null && m.in < playhead ? m.in : null, out: playhead })); },
+    markClip: () => { const clip = clipAround(edit, playheadNow()); if (clip) setMarks({ in: clip[0], out: clip[1] }); },
   };
 }
+

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  fallbackPosterSource, isProjectFolder, makeProject, parseProjects, projectFor, reconcileProjects, updateProject, type TranscriptProject, projectPosterSource,
+  fallbackPosterSource, fileDocuments, isProjectFolder, makeProject, parseProjects, projectFor, projectOfDocument, reconcileProjects, updateProject,
+  type TranscriptProject, projectPosterSource,
 } from "./transcript-projects";
 
 /**
@@ -160,5 +161,30 @@ describe("projectPosterSource", () => {
 
   it("treats a project with no metadata as unchosen", () => {
     expect(projectPosterSource(null, items)).toBe("/lib/Show/b.srt");
+  });
+});
+
+describe("AAF Audio documents filed by reference", () => {
+  const a = "a".repeat(64), b = "b".repeat(64);
+  it("keeps the ids a project files, once each, and nothing that is not an id", () => {
+    const [project] = parseProjects([{ folder: "Show", documents: [a, a, "../escape", 7, b] }]);
+    expect(project.documents).toEqual([a, b]);
+    expect(parseProjects([{ folder: "Show" }])[0].documents).toEqual([]);
+  });
+
+  it("files a document in one project at most, and null takes it out of all of them", () => {
+    let projects = [P("Show", { documents: [a] }), P("Other")];
+    projects = fileDocuments(projects, [a, b], "Other");
+    expect(projects.map((p) => p.documents)).toEqual([[], [a, b]]);
+    expect(projectOfDocument(projects, b)?.folder).toBe("Other");
+    projects = fileDocuments(projects, [a], null);
+    expect(projects.map((p) => p.documents)).toEqual([[], [b]]);
+    expect(projectOfDocument(projects, a)).toBeNull();
+  });
+
+  it("changes nothing, and keeps every object, when nothing moves", () => {
+    const projects = [P("Show", { documents: [a] }), P("Other")];
+    const same = fileDocuments(projects, [a], "Show");
+    expect(same.every((p, i) => p === projects[i])).toBe(true);
   });
 });

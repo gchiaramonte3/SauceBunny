@@ -1141,11 +1141,144 @@ the acceptance test for whenever the verdict UI gets built.
 10. Neither Source dialog nor Share your screen is wider than its content on an
    ultrawide display (2560 × 1080): about 640 and 720 points.
 
+### October 5 quick fixes (docs/UI-CORRECTIONS-2026-10-05.md, items 1 to 8)
+
+1. Quit with a sequence open in AAF Audio and a string out open in String
+   Outs; relaunch. AAF Audio says "Open a sequence" (nothing loads, nothing is
+   logged); String Outs shows its list with no tabs. Open one of each, switch
+   pages and back: they stay open.
+2. Transcripts: no project called "Multitrack" appears, in the list or under
+   Move to folder…; with AAF Audio documents listed, the right pane says "Pick
+   a transcript to read."
+3. AAF Audio, after a Whisper run that leaves a "!": click it. A small panel
+   says how many passages need timing review and why; Review N passages
+   switches the Transcript panel to that person at those passages; Transcript
+   info opens the run details. Escape closes it. A green check explains itself
+   the same way; a track with no speech shows a grey (i), not a green check.
+4. Open a sequence whose AAF is on an unmounted drive, with Waveforms on: one
+   line says the AAF can't be read, the lanes stay quiet, the Pipeline logs
+   one failure, not one per lane. Mount it and press Retry: waveforms draw.
+   At Track size Small, a lane's "Waveform unavailable" and Retry sit on one
+   line, Retry fully visible.
+5. Pipeline ▸ Copy, then paste into a text editor: the diagnostics paste.
+   Review ▸ Invite… (Invite reviewers): make a new link and press Copy link
+   while no session is open: it pastes.
+6. Export diagnostics during a co-review session: HEALTH says "Co-review
+   session: hosting" (or joined); outside one, "none open".
+
+### October 5: String Outs tools, Add sequence, dividers (items 9, 12, 13)
+
+1. Open a string out at the narrowest window. The timeline's tool row is one
+   line of tools: no Play, no RECORD or SOURCE timecode, no status text. The
+   record pane has Go to start and Play beside its scrub bar and timecode, as
+   the source pane does, and Space still plays. Lift a range: "Lifted …"
+   appears as a quiet line under the string out's words.
+2. Hide the source text, then switch the timeline to Source (the corner
+   switch, or ⇧T): the source pane comes back, with its own Play.
+3. Add sequence opens a menu under itself, to the left, about 420 pixels wide
+   on the 2560-pixel screen, newest first: eight, then "Show N more". Hover a
+   row and press ×, or arrow to one and press Delete: it leaves the list.
+   Clear list empties it; "Show N hidden sequences" puts them back. Hide one,
+   save that sequence again in AAF Audio: it is listed again. New string out ▸
+   Start from leaves out what is hidden and offers to show it. Nothing is
+   deleted from AAF Audio.
+4. Drag the line between the source and the record: it moves, and the source
+   text's scrollbar is not grabbed. Drag the line beside Ask and the one above
+   the timeline. Tab to a divider: the arrows nudge it, Shift for bigger steps;
+   Home and a double-click reset it. Relaunch: the sizes are kept. Narrow the
+   window to its minimum: the record pane keeps its room, the source gives way.
+
+### October 5: String Outs removed lines and playback (items 15 and 19)
+
+1. Build a string out from three short chunks of a long sequence. With Removed
+   lines on, only the cuts between the chunks show, struck through, one line
+   per speaker; nothing from before the first chunk or after the last. Hover
+   one: ↺ appears and restores it on every track. Right-click one: Restore
+   this line.
+2. Open a large string out (a whole sequence of many mics) and play it. The
+   playhead line, the timecode and the highlighted word move smoothly; the
+   window stays responsive (scroll the text and the timeline while it plays).
+   Space pauses at once.
+3. While playing, press I and O, M, ⌘B, and V from the source: each lands
+   where the playhead is when you press it. Loop a marked range: it loops.
+
+### October 5: AAF Audio's bleed pass and audio prep (items 10 and 16)
+
+1. Open a transcribed multi-mic sequence with Pipeline open. Regenerate one
+   track. When it lands, the Pipeline shows one "Bleed labels" row for the
+   sequence, not two.
+2. Rename a mic owner, then change the shoot date: no "Bleed labels" row
+   either time. Right-click a line and choose "Bleed from another mic": one
+   row, and the line dims. "Use the automatic call" undoes it the same way.
+3. With Pipeline open, play a multi-mic sequence for ten seconds, Pause, and
+   Play again: no new "Prepare" rows for the five seconds you were in. Scrub
+   away and back: none for the window you came back to.
+4. Go to Transcripts and back to AAF Audio, then reopen the same sequence
+   from the menu: Play starts at once, with no "Prepare" rows.
+5. Settings ▸ General ▸ Cache lists AAF Audio playback with a size. Clear it:
+   the size goes to zero, Waveforms and the bleed labels are still there,
+   and Play prepares the audio again.
+
+### October 5: AAF Audio documents in Transcripts (item 17)
+
+1. Open Transcripts with a transcribed AAF Audio sequence. It is listed under
+   AAF Audio by its sequence's name, as AAF Audio's menu names it.
+2. Right-click it: Rename…, Move to project…, Open in AAF Audio, Open in
+   String Outs, Reveal AAF in Finder, Remove from Transcripts, reachable with
+   the arrow keys. Rename it: the new name shows here, in AAF Audio's heading
+   and menu, and in String Outs' Add sequence. Open the AAF in Media Composer
+   (or look at the sequence): its name is unchanged. Rename it to nothing: the
+   sequence's name comes back.
+3. Drag it onto a project heading: it is listed inside the project, and
+   AAF Audio says every transcript is in a project. Quit and reopen: it is
+   still there. Drag it onto the AAF Audio heading: it comes back out. Move to
+   project… does the same from the menu, and Create & move makes a project.
+4. Click it: above the transcript, its file, tracks, people, shoot date and
+   length, with Open in AAF Audio and Open in String Outs. Each opens it.
+5. Remove from Transcripts: it leaves this page only. Settings ▸ General ▸
+   Removed from the Library or Transcripts brings it back.
+6. Select two transcripts with ⌘-click and drag them onto a project: the
+   ghost says "2 transcripts" and both move.
+
+### October 5: AAF Audio's Transcript panel (item 14)
+
+1. Open a transcribed sequence at the narrowest window. Under the person tabs:
+   the search field, one row of chips, then the first line of transcript. No
+   sentence runs across the panel.
+2. Press the sparkle at the end of the search field: it lights, the field
+   asks you to describe what you want, and Return searches with the local
+   model. While it runs, Stop sits beside the sparkle.
+3. The Bleed chip says the state ("Bleed not measured", "Bleed · 2 dimmed").
+   Click it: Hide bleed, one sentence, Measure mics (and Check voices when
+   levels left words unsure). Escape closes it and returns to the chip.
+4. With passages to review, "N to review" switches to All voices and scrolls
+   to them. After a run, "2 of 3 tracks saved · 1 failed" opens Transcript
+   info.
+5. The footer is one row: format, Export {person}, and a chevron with Export
+   selected, Entire transcript, Avid files by mic or person, and the shoot
+   date (Plain text and PDF).
+
+### October 5: models download in Settings (item 11)
+
+1. Settings ▸ Transcription ▸ Parakeet lists Parakeet Ultra (Recommended) and
+   Parakeet TDT 0.6B v3, each with its size. Download Ultra: the row shows a
+   bar and Cancel; Cancel stops it with no error, and Download starts again.
+   Let it finish: Installed. Delete asks once ("Delete ≈0.6 GB?") before it
+   deletes.
+2. With Ultra deleted, open AAF Audio and choose Parakeet ▸ Parakeet Ultra:
+   the model menu says "(not downloaded)", one line under the controls says
+   "Parakeet Ultra is not downloaded." with Download in Settings…, and there
+   is no download button on the page. Download in Settings… opens Settings on
+   Transcription. Install Ultra there and close Settings: the line is gone
+   without relaunching.
+3. A track's Regenerate… with a missing model says the same, and its Download
+   in Settings… closes the dialog and opens Settings.
+
 ### The Pipeline on String Outs (what to send when it hangs)
 
 1. In String Outs, press ⌘\: the Pipeline opens at the foot of the page with
    room to read, and ⌘\ closes it. It opens the same way on AAF Audio.
-2. Open a large string out (AFF BANK 1). The log says when it started reading
+2. Open a large string out (dozens of mics). The log says when it started reading
    every mic's words and how long that took. Anything that took more than a
    second, waited, or failed has a row; fast calls do not.
 3. Export diagnostics: the file has HEALTH (memory, main thread, running

@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { passagesToReview } from "../lib/multitrack";
 import { createPortal } from "react-dom";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { MultitrackRunReport } from "../hooks/use-multitrack-transcription";
@@ -13,7 +14,7 @@ export function MultitrackRunDetails({ document, report, error, onClose }: {
   const dialog = useRef<HTMLDivElement>(null);
   useModalFocus(true, dialog);
   useDismiss(dialog, onClose);
-  const reviewCount = document.transcripts.reduce((count, track) => count + (track.timing_issues?.length ?? 0), 0);
+  const reviewCount = document.transcripts.reduce((count, track) => count + passagesToReview(track), 0);
   const notes = [...new Set(document.transcripts.flatMap((track) => track.warnings))];
   return createPortal(<div className="cp-modal-scrim">
     <div ref={dialog} className="cp-multitrack-settings cp-multitrack-run-details" role="dialog" aria-modal="true" aria-label="Transcript info" tabIndex={-1}

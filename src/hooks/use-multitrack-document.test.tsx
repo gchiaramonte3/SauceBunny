@@ -159,6 +159,59 @@ describe("multitrack document ownership", () => {
     expect(result.current.document?.labels.find(label => label.track_id === "track-1")?.owner_name).toBe("Newest Owner");
   });
 
+  it("a run's change event and its result read the document once, and the words keep their identity", async () => {
+    const disk = multitrackFixture(), base = mocks.invoke.getMockImplementation()!;
+    const read = deferred<ReturnType<typeof multitrackFixture>>(); let reads = 0;
+    mocks.invoke.mockImplementation((command, args) => {
+      if (command === "aaf_open") return ++reads === 1 ? read.promise : Promise.resolve(structuredClone(disk));
+      return base(command, args);
+    });
+    const { result } = renderHook(() => useMultitrackDocument(true)); await act(async () => result.current.load());
+    // The run commits, says so, and then returns its result while the re-read is out.
+    disk.transcripts = [multitrackTranscript()];
+    act(() => { void mocks.listeners.get("saucebunny:multitrack-changed")?.({ payload: disk.id }); });
+    await waitFor(() => expect(reads).toBe(1));
+    act(() => result.current.acceptTranscript(structuredClone(disk.transcripts[0])));
+    const words = result.current.document?.transcripts;
+    await act(async () => read.resolve(structuredClone(disk)));
+    expect(reads).toBe(1);
+    expect(result.current.document?.transcripts).toBe(words);
+  });
+
+  it("a result the change event already delivered is not merged a second time", async () => {
+    const disk = multitrackFixture(), base = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((command, args) => command === "aaf_open" ? Promise.resolve(structuredClone(disk)) : base(command, args));
+    const { result } = renderHook(() => useMultitrackDocument(true)); await act(async () => result.current.load());
+    disk.transcripts = [multitrackTranscript()];
+    await act(async () => mocks.listeners.get("saucebunny:multitrack-changed")?.({ payload: disk.id }));
+    const words = result.current.document?.transcripts;
+    expect(words).toHaveLength(1);
+    act(() => result.current.acceptTranscript(structuredClone(disk.transcripts[0])));
+    expect(result.current.document?.transcripts).toBe(words);
+    // A different result for the track is still taken.
+    const rerun = { ...structuredClone(disk.transcripts[0]), model_id: "another-model" };
+    act(() => result.current.acceptTranscript(rerun));
+    expect(result.current.document?.transcripts.find((item) => item.track_id === "track-1")?.model_id).toBe("another-model");
+  });
+
+  it("a label edit during the change event's read still reads again", async () => {
+    let disk = multitrackFixture(); const base = mocks.invoke.getMockImplementation()!;
+    const read = deferred<ReturnType<typeof multitrackFixture>>(); let reads = 0;
+    mocks.invoke.mockImplementation((command, args) => {
+      if (command === "aaf_open") return ++reads === 1 ? read.promise : Promise.resolve(structuredClone(disk));
+      if (command === "aaf_save_labels") { disk = { ...disk, labels: structuredClone(args.labels) }; return Promise.resolve(structuredClone(disk)); }
+      return base(command, args);
+    });
+    const { result } = renderHook(() => useMultitrackDocument(true)); await act(async () => result.current.load());
+    const old = structuredClone(disk);
+    act(() => { void mocks.listeners.get("saucebunny:multitrack-changed")?.({ payload: disk.id }); });
+    await waitFor(() => expect(reads).toBe(1));
+    act(() => result.current.rename("track-1", "Newest Owner"));
+    await act(async () => read.resolve(old));
+    await waitFor(() => expect(reads).toBe(2));
+    expect(result.current.document?.labels.find(label => label.track_id === "track-1")?.owner_name).toBe("Newest Owner");
+  });
+
   it("a legacy metadata inspection cannot restore labels older than an overlapping save", async () => {
     let disk = multitrackFixture(); const metadata = deferred<ReturnType<typeof multitrackFixture>>();
     const base = mocks.invoke.getMockImplementation()!;
@@ -342,5 +395,25 @@ describe("multitrack document ownership", () => {
     const last = mocks.invoke.mock.calls.filter(([command]) => command === "aaf_save_labels").at(-1)!;
     expect(last[1].labels).toEqual(expect.arrayContaining([expect.objectContaining({ owner_name: "José" }), expect.objectContaining({ owner_name: 'Sam, "Room"' })]));
     expect(result.current.labelStatus).toBe("Labels saved locally");
+  });
+
+  it("an unreadable AAF stops every lane's waveform after the first answer, once, and Retry asks again", async () => {
+    // The original AAF on an unmounted drive: every lane's overview needs it,
+    // so one NotFound stands for all of them instead of a failure per lane.
+    const base = mocks.invoke.getMockImplementation()!;
+    let reachable = false;
+    mocks.invoke.mockImplementation((command, args) => command === "aaf_waveform" && !reachable
+      ? Promise.reject({ kind: "NotFound", data: "The original AAF is unavailable. Reconnect its drive or import it again." }) : base(command, args));
+    const { result } = renderHook(() => useMultitrackDocument(true)); await act(async () => result.current.load());
+    const doc = result.current.document!;
+    act(() => { result.current.showTracks(doc.manifest.tracks.map((track) => track.id)); result.current.setWaveformsOn(doc.id, true); });
+    await waitFor(() => expect(result.current.sourceOffline).toContain("The original AAF is unavailable"));
+    const asked = mocks.invoke.mock.calls.filter(([command]) => command === "aaf_waveform").length;
+    expect(asked, "every lane was asked after the AAF was known to be offline").toBeLessThanOrEqual(2);
+    expect(result.current.waveformErrors).toEqual({});
+    reachable = true;
+    await act(async () => result.current.retrySource());
+    await waitFor(() => expect(Object.keys(result.current.waveforms).length).toBeGreaterThan(0));
+    expect(result.current.sourceOffline).toBeNull();
   });
 });

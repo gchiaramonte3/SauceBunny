@@ -81,6 +81,11 @@ export function transcriptRows(document: AafDocument) {
   }))).sort((a, b) => a.startSeconds - b.startSeconds || a.trackId.localeCompare(b.trackId));
 }
 
+/** Passages kept off the timeline that a person can review: placeholders such as [BLANK_AUDIO] carry no words to place. */
+export function passagesToReview(transcript: AafTrackTranscript): number {
+  return (transcript.timing_issues ?? []).filter((issue) => hasTranscriptContent(issue.text)).length;
+}
+
 export function untimedTranscriptRows(document: AafDocument) {
   return document.transcripts.flatMap((transcript) => (transcript.timing_issues ?? []).filter((issue) => hasTranscriptContent(issue.text)).map((issue) => ({
     ...issue, trackId: transcript.track_id, owner: trackOwner(document, transcript.track_id), engine: transcript.engine, model: transcript.model_id,
@@ -89,6 +94,39 @@ export function untimedTranscriptRows(document: AafDocument) {
 
 export function mergeTrackTranscript(document: AafDocument, transcript: AafTrackTranscript): AafDocument {
   return { ...document, transcripts: [...document.transcripts.filter((item) => item.track_id !== transcript.track_id), transcript] };
+}
+
+/**
+ * One saved run, whether it reached the page as a run's result or in a
+ * re-read. Cues are compared by what places a word (id, extent, text); a
+ * word's own times change only with its cue's run.
+ */
+export function sameTranscript(a: AafTrackTranscript, b: AafTrackTranscript): boolean {
+  if (a === b) return true;
+  if (a.track_id !== b.track_id || a.start_frame !== b.start_frame || a.duration_frames !== b.duration_frames || a.engine !== b.engine
+    || a.model_id !== b.model_id || a.status !== b.status || a.cues.length !== b.cues.length || a.timing_issues.length !== b.timing_issues.length) return false;
+  return a.cues.every((cue, index) => {
+    const other = b.cues[index];
+    return cue.id === other.id && cue.start_sample === other.start_sample && cue.end_sample === other.end_sample && cue.text === other.text;
+  });
+}
+
+/**
+ * A re-read, keeping the page's own tracks, transcripts and cue calls wherever
+ * they did not change. A label save, a shoot date and every relink checkpoint
+ * re-read the whole document; with new arrays each time, everything keyed on
+ * them (the bleed pass, the reader's rows, every visible waveform request)
+ * ran again over words that had not moved.
+ */
+export function keepUnchanged(saved: AafDocument, page: AafDocument): AafDocument {
+  const tracks = JSON.stringify(saved.manifest.tracks) === JSON.stringify(page.manifest.tracks) ? page.manifest.tracks : saved.manifest.tracks;
+  const kept = saved.transcripts.map((transcript) => {
+    const held = page.transcripts.find((item) => item.track_id === transcript.track_id);
+    return held && sameTranscript(held, transcript) ? held : transcript;
+  });
+  const transcripts = kept.length === page.transcripts.length && kept.every((transcript, index) => transcript === page.transcripts[index]) ? page.transcripts : kept;
+  const ownership = JSON.stringify(saved.ownership ?? null) === JSON.stringify(page.ownership ?? null) ? page.ownership : saved.ownership;
+  return { ...saved, manifest: { ...saved.manifest, tracks }, transcripts, ownership };
 }
 
 /** One min/max vertical stroke per pixel bin, retaining quiet detail when zoomed. */
@@ -135,6 +173,16 @@ export function exportMultitrack(document: AafDocument, format: "csv" | "txt"): 
 }
 
 /**
+ * A document's own name: the title the editor gave it in Transcripts, else
+ * its sequence's name. Every page that names a document asks here; the
+ * Transcripts page used the AAF's filename and the sequence menus the
+ * sequence's name, so one document went by two names.
+ */
+export function documentName(item: AafDocumentSummary | AafDocument): string {
+  return item.title?.trim() || ("manifest" in item ? item.manifest.name : item.name);
+}
+
+/**
  * What a sequence picker shows for each saved sequence: its name, and where
  * two share a name (Avid exports are often all "Sequence.Exported.01") the
  * file it came from too, then when it was saved if even that is shared.
@@ -145,9 +193,12 @@ export function sequenceLabels(items: AafDocumentSummary[]): Map<string, string>
     for (const item of items) counts.set(label(item), (counts.get(label(item)) ?? 0) + 1);
     return counts;
   };
-  const names = tally((item) => item.name);
-  const withFile = (item: AafDocumentSummary) => (names.get(item.name) ?? 0) > 1 ? `${item.name} · ${item.source_path.split("/").pop() || item.source_path}` : item.name;
+  const names = tally(documentName);
+  const withFile = (item: AafDocumentSummary) => (names.get(documentName(item)) ?? 0) > 1 ? `${documentName(item)} · ${item.source_path.split("/").pop() || item.source_path}` : documentName(item);
   const files = tally(withFile);
   const when = (ms: number) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return new Map(items.map((item) => [item.id, (files.get(withFile(item)) ?? 0) > 1 && item.modified_ms ? `${withFile(item)} · ${when(item.modified_ms)}` : withFile(item)]));
+  const withDate = (item: AafDocumentSummary) => (files.get(withFile(item)) ?? 0) > 1 && item.modified_ms ? `${withFile(item)} · ${when(item.modified_ms)}` : withFile(item);
+  // Two imports of one file saved in the same minute still read differently.
+  const dates = tally(withDate);
+  return new Map(items.map((item) => [item.id, (dates.get(withDate(item)) ?? 0) > 1 ? `${withDate(item)} · ${item.id.slice(0, 8)}` : withDate(item)]));
 }

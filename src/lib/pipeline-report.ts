@@ -30,6 +30,8 @@ function healthLines(health: PipelineHealth | null, error: string | null | undef
     `Main thread: ${health.main_thread_wait_ms >= 2_000 ? `NOT ANSWERING for ${msText(health.main_thread_wait_ms)}` : "answering"}`,
     `Processes running: ${health.running_jobs.length ? health.running_jobs.join(", ") : "none"}`,
     "Volumes:", ...(health.volumes.length ? health.volumes.map((volume) => `  ${volume}`) : ["  none besides the startup disk"]),
+    // Activity Monitor shows a session's UDP sockets and relay connection; this says whether one was open.
+    `Co-review session: ${health.co_review === "off" ? "none open (no network listeners of ours)" : health.co_review === "hosting" ? "hosting (its UDP sockets and relay connection are open)" : health.co_review === "joined" ? "joined (its UDP sockets and relay connection are open)" : health.co_review}`,
   ];
 }
 

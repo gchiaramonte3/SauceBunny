@@ -5,6 +5,81 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+- **AAF Audio and String Outs open clear.** Neither reopens the last sequence
+  or string out at launch; what you open stays open while the app runs.
+- **The "!" beside a mic owner explains itself.** Click it: it means timing
+  needs review (some passages were kept off the timeline, nothing lost), with
+  Review N passages and Transcript info. Every status glyph opens the same way,
+  and "no speech found" no longer shows as a green check.
+- **An offline AAF says so once.** Instead of "Waveform unavailable" on every
+  lane and a Pipeline row per lane, one line says the AAF can't be read, with
+  Retry.
+- **String Outs' tool row holds tools only.** Play and Go to start are in the
+  record pane beside its timecode, as the source pane has them; the status
+  line is a quiet line under the string out; the RECORD and SOURCE readouts
+  are gone. The row fits on one line at the narrowest window.
+- **Add sequence is a short menu you can clear.** It opens to the left under
+  its button, newest first, with the eight most recent and "Show N more".
+  Remove one (× or Delete) or Clear list: that hides it from Add sequence and
+  Start from and deletes nothing, and a hidden sequence comes back by itself
+  when it is saved again in AAF Audio.
+- **String Outs' removed lines stop flooding the page.** Only cuts between
+  the pieces of a string out show as removed, as one line per speaker turn
+  with bleed copies left out, struck through in the text with Restore on
+  hover and in the right-click menu.
+- **String Outs plays smoothly.** Playing no longer redraws the whole editor
+  each frame: on a 146,000-word string out, from about 16 frames a second to
+  about 60.
+- **AAF Audio's Transcript panel says less.** AI search is a button at the
+  end of the search field; bleed, passages to review and the last run are
+  chips under it, each opening its explanation; the export footer is one row
+  with the rest behind a chevron. The first line of transcript now sits right
+  under the search.
+- **Models download in Settings.** Settings ▸ Transcription lists Parakeet
+  Ultra beside TDT v3, each with Download, Cancel and Delete. AAF Audio no
+  longer downloads anything: it says which model is missing, with Download
+  in Settings…, and notices when Settings installs it.
+- **AAF Audio transcripts can be organized in Transcripts.** Right-click one
+  to rename it, move it to a project, open it in AAF Audio or String Outs,
+  reveal its AAF in Finder or remove it from the page; drag it onto a project
+  heading to file it there, and onto the AAF Audio heading to take it out.
+  Renaming changes the name Sauce Bunny shows everywhere, never the
+  sequence's name in the AAF. Selecting one shows its file, tracks, people,
+  shoot date and length above the transcript, with Open in AAF Audio and
+  Open in String Outs. AAF Audio transcripts are now named as AAF Audio and
+  String Outs name them, by sequence rather than by file.
+- **Dragging several selected transcripts onto a project moves them all.**
+  Only the first one moved before.
+- **String Outs' dividers move.** Drag the lines beside Ask, between the source
+  and the record, and above the timeline, or use the arrow keys; double-click
+  or Home resets, and the sizes are kept. The record pane keeps its room at
+  the narrowest window.
+
+### Fixed
+- **One bleed-label pass after a transcription run, not two.** The run's
+  result and its change event each re-read the sequence and each ran the
+  bleed labels again (about 600 ms apiece on a 20-mic sequence). Renaming a
+  mic owner or a relink checkpoint no longer runs them at all, and the page
+  is no longer sent the words the labels were unsure of, which it never drew.
+- **AAF Audio prepares each five seconds of a mic once.** Pausing, scrubbing
+  or leaving the page no longer throws away audio being prepared, so Play
+  starts from what was ready; coming back to the page or reopening the same
+  sequence keeps what was prepared; two requests for the same five seconds
+  share one; and audio already on disk is ready at once, without reading the
+  sequence again or checking media the window does not use.
+- **AAF Audio's prepared audio is counted, cleared and kept under 2 GB.**
+  Settings ▸ General ▸ Cache lists it as AAF Audio playback, Clear all removes
+  it, and past 2 GB the least recently played goes first. It used to grow
+  for ever (1.29 GB on one Mac) where Settings could not see it.
+- **The Transcripts page can no longer rename or delete AAF Audio's store.**
+  It showed as a project called "Multitrack"; renaming it took every AAF Audio
+  document out of AAF Audio and String Outs.
+- **Pipeline Copy and a review link's Copy link work.** WebKit refused both,
+  because each worked something out before writing to the clipboard.
+- "Voices checked for 1 person", "1 track saved", and "Pick a transcript to
+  read" when only AAF Audio documents are listed.
+
 ## [0.6.0] - 2026-09-29
 
 ### Added

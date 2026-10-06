@@ -30,7 +30,8 @@ the app is allowed to do to the data without asking.
 
 ```
 Transcripts/
-  projects.json            project metadata (titles, posters, colours)
+  projects.json            project metadata (titles, posters, colours, and the
+                           AAF Audio documents filed in each, by id; version 2)
   <Project>/               a project folder, or
   YYYY-MM/                 the date-organized default
     *.srt / *.vtt          the transcripts themselves
@@ -117,11 +118,15 @@ Audio document id, both safe to delete:
   anywhere, never in a command's answer (`voiceprint-contract`). Deleting it
   reverts those calls to unsure. Settings shows the count and deletes all.
 
-The AAF Audio document itself gained three optional fields, so the schema
-stays 2 and an older build reads a newer document: a cue's `words` (each
-word's measured time and confidence, from Parakeet) and `suspect` (why a
-Whisper cue may be invented), and the document's `ownership` (the editor's
-own per-cue calls, which win over the resolver).
+The AAF Audio document itself gained optional fields without a schema bump,
+so an older build reads a newer document: a cue's `words` (each word's
+measured time and confidence, from Parakeet) and `suspect` (why a Whisper cue
+may be invented), the document's `ownership` (the editor's own per-cue calls,
+which win over the resolver), and its `title` (the name the editor gave it in
+Transcripts, `aaf_rename`; the manifest's sequence name, which re-imports find
+a document by, is never overwritten). An older build drops a field it does
+not know on its next save of that document. Every page names a document with
+`documentName`: the title, else the sequence's name.
 
 ### `app_cache_dir()` — three named directories
 
@@ -132,6 +137,9 @@ app's own cache folder that prefix says nothing, so:
 ```
 app_cache_dir()/
   media/        downloads/ audio/ meta/      never swept
+    aaf/        AAF Audio's overviews and    never swept
+                indexes; its playback        past 2 GB, least recently
+                windows                      played first
   thumbnails/   poster JPEGs                 never swept
   scratch/      job temps, playback prep,    swept at 24h
                 Whisper WAVs, diarizer JSON
@@ -141,6 +149,12 @@ app_cache_dir()/
 - `media/` is **sweep-exempt**: downloaded sources and their audio, which are
   "download once, reuse forever". Bounded by a user-set cap
   (`mediaCacheCapGb`, `enforce_media_cache_cap`) and clearable from Settings.
+- `media/aaf/` holds AAF Audio's waveform overviews, PCM indexes and media
+  probe records, which are never swept (an overview takes minutes a mic to
+  build again on a network volume), and its playback windows, five seconds of
+  one mic each (`.wav`, and `.asset.json` for embedded audio). Those are swept
+  past 2 GB, least recently played first (`audio::sweep_playback`, a minute
+  apart at most), and Settings counts and clears them as AAF Audio playback.
 - `thumbnails/` is sweep-exempt too: posters are cheap to keep and expensive
   to regenerate daily. Settings' thumbnails bucket is the manual purge.
 - `scratch/` is swept at startup, on a background thread, failures non-fatal.
@@ -222,11 +236,18 @@ Not all of these are preferences. Sorted by what losing them would cost:
 - **Identity**: `installId`, `review.author`, `review.authorColor`.
 - **Genuine preference**: layout, widths, open/closed, `keybindings.v1`,
   `playbackRate`, `streamRungPref`, `streamKeep`, `mediaDevices`, the
-  `*Dismissed*` flags, `welcomed`, `onboarding`, and String Outs' open tabs,
-  last open string out and Ask model (`stringOuts.tabs`, `editor.lastEdit`,
-  `stringOuts.model`), and the string out Open in String Outs made for each
-  AAF Audio sequence (`stringOuts.forSequence`, so asking again reuses it). A tab only names a string out; closing one, or losing
-  the key, never touches the edit, which lives in `timelines.sqlite`.
+  `*Dismissed*` flags, `welcomed`, `onboarding`, and String Outs' Ask model
+  (`stringOuts.model`), its pane sizes (`stringOuts.sideWidth`,
+  `stringOuts.sourceWidth`, `stringOuts.timelineHeight`, stored only once a
+  divider has been moved), the sequences hidden from Add sequence and Start
+  from (`stringOuts.hiddenSequences`: each one's save time when it was hidden,
+  so a later save in AAF Audio lists it again; hiding deletes nothing), and the
+  string out Open in String Outs made for each AAF Audio sequence
+  (`stringOuts.forSequence`, so asking again reuses it). Neither String Outs
+  nor AAF Audio remembers what was open: both open clear at launch, and the
+  retired `stringOuts.tabs`, `editor.lastEdit` and `aafAudio.lastDocument`
+  are ignored where an older build left them. The edits themselves live in
+  `timelines.sqlite`.
 - **Cache**: `panelSnapshot` (the panel's synchronous boot seed),
   `lastUpdateCheck`, `ytdlpVersion`, `diarizerModelsReady`.
 
@@ -256,8 +277,19 @@ below, one step further.
 
 **The directories are the truth about what a project is.** `projects.json`
 only decorates them; `reconcileProjects` re-derives the list from disk on
-every scan, so deleting the file costs posters and titles, nothing more.
-That is deliberate and it is why a display string is tolerable as the key.
+every scan, so deleting the file costs posters and titles, and puts every
+filed AAF Audio document back under AAF Audio. That is deliberate and it is
+why a display string is tolerable as the key.
+
+**AAF Audio documents join a project by reference.** A document lives in AAF
+Audio's store by id, not in the project's folder, so `projects.json` lists
+the ids filed in each project (`documents`), one project per document at
+most; nothing moves on disk. That list exists nowhere else, so the file went
+to version 2 (`PROJECTS_SCHEMA_VERSION`): a version-1 build would read it,
+drop the field it does not know and write the shelf back without it, and
+stamped 2 it refuses to write instead. An id that no longer names a listed
+document is ignored, not removed, so a document that comes back finds its
+project.
 
 **Facts stored twice.** Only one, and it is intentional: a speaker override
 lives under the SRT path AND under a content fingerprint

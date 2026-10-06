@@ -1,29 +1,32 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
-import { hasTranscriptContent, sequenceTimecode, trackOwner, transcriptRows, untimedTranscriptRows } from "../lib/multitrack";
+import { hasTranscriptContent, passagesToReview, sequenceTimecode, trackOwner, transcriptRows, untimedTranscriptRows } from "../lib/multitrack";
 import { cueLabels, cueOwnership } from "../lib/multitrack-ownership";
 import { useMultitrackOwnership } from "../hooks/use-multitrack-ownership";
 import { useBleedHidden } from "../hooks/use-bleed-hidden";
 import { setBleedHidden } from "../lib/bleed-hidden";
 import { formatError } from "../lib/error-format";
-import { MultitrackBleedBar } from "./MultitrackBleedBar";
+import { MultitrackBleedChip } from "./MultitrackBleedChip";
 import { MultitrackCueMenu, type CueMenuTarget } from "./MultitrackCueMenu";
 import { multitrackPeople, multitrackScope } from "../lib/multitrack-person";
 import { MultitrackTranscriptTabs } from "./MultitrackTranscriptTabs";
 import { MultitrackCueText } from "./MultitrackCueText";
 import { MultitrackExport } from "./MultitrackExport";
-import { MultitrackRunInfo } from "./MultitrackRunInfo";
+import { MultitrackRunChip } from "./MultitrackRunChip";
 import { MultitrackRunDetails } from "./MultitrackRunDetails";
-import { IconInfo } from "./Icons";
+import { IconInfo, IconSparkles } from "./Icons";
 import type { MultitrackRunReport } from "../hooks/use-multitrack-transcription";
 import { useAiTranscriptSearch } from "../hooks/use-ai-transcript-search";
 
 const passageKey = (kind: string, trackId: string, id: string) => JSON.stringify([kind, trackId, id]);
 
-export function MultitrackTranscript({ document, frame, solo, onSeek, report, error, loading, active = true, aiModelId, initialAll = false, selectedTracks }: {
+/** A track's status glyph asked for its passages to review (`trackId`) or for Transcript info. */
+export type TranscriptRequest = { tick: number; trackId: string | null; info?: boolean };
+
+export function MultitrackTranscript({ document, frame, solo, onSeek, report, error, loading, active = true, aiModelId, initialAll = false, selectedTracks, request }: {
   document: AafDocument; frame: number; solo: Set<string>; onSeek: (frame: number, trackId: string) => void;
   report?: MultitrackRunReport | null; error?: string | null; loading?: boolean;
-  active?: boolean; aiModelId?: string | null; initialAll?: boolean; selectedTracks?: ReadonlySet<string>;
+  active?: boolean; aiModelId?: string | null; initialAll?: boolean; selectedTracks?: ReadonlySet<string>; request?: TranscriptRequest;
 }) {
   const [limit, setLimit] = useState(200);
   const people = useMemo(() => multitrackPeople(document), [document]);
@@ -54,6 +57,15 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
   ], [rows, untimed, hide]);
   const search = useAiTranscriptSearch(passages, active, aiModelId);
   const { query, enabled, result } = search;
+  const handled = useRef(0), review = useRef<HTMLElement>(null), [reviewTick, setReviewTick] = useState(0);
+  useEffect(() => {
+    if (!request || request.tick === handled.current) return;
+    handled.current = request.tick;
+    if (request.info) { setInfo(true); return; }
+    if (request.trackId) { setChoice(request.trackId); setLimit(200); search.changeQuery(""); setReviewTick((tick) => tick + 1); }
+  }, [request, search]);
+  // After the tab has switched, bring that person's passages to review into view.
+  useEffect(() => { if (reviewTick) review.current?.scrollIntoView?.({ block: "start" }); }, [reviewTick]);
   const filtered = useMemo(() => rows.filter((row) => !(query.trim() && hide && row.owned.bleed) && (enabled
     ? !result.matches || result.matches.has(passageKey("cue", row.trackId, row.id))
     : `${row.owner} ${row.text}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))), [rows, query, enabled, result.matches, hide]);
@@ -64,22 +76,30 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
   // the current-cue class follows the audition clock on each playback tick.
   const visible = useMemo(() => filtered.slice(0, limit).map((cue) => ({ ...cue, timecode: sequenceTimecode(document.manifest, cue.startFrame) })), [filtered, limit, document.manifest]);
   const visibleUntimed = useMemo(() => filteredUntimed.slice(0, limit).map((cue) => ({ ...cue, timecode: sequenceTimecode(document.manifest, cue.chunk_start_frame) })), [filteredUntimed, limit, document.manifest]);
-  const runInfo = useMemo(() => <MultitrackRunInfo document={document} report={report} error={error} loading={loading} />, [document, report, error, loading]);
+  const reviewCount = useMemo(() => document.transcripts.reduce((count, track) => count + passagesToReview(track), 0), [document.transcripts]);
+  const reviewAll = () => { setChoice("all"); setLimit(200); search.changeQuery(""); setReviewTick((tick) => tick + 1); };
+  const bleedError = ownership.error ?? switchError, hasRun = !!(loading || report || error);
   return <aside className="cp-multitrack-transcript" aria-label="Track transcripts">
     <div className="cp-multitrack-transcript-content">
     <header className="cp-multitrack-transcript-head"><h2>Transcript</h2><span>{document.transcripts.length} / {document.manifest.tracks.length} tracks</span>
       <button type="button" className="btn-icon cp-multitrack-info" aria-label="Transcript info" title="Transcript info" aria-haspopup="dialog" onClick={() => setInfo(true)}><IconInfo size={14} /></button></header>
     <MultitrackTranscriptTabs people={people} selected={selected} panelId={panelId} onSelect={(id) => { setChoice(id === "all" ? "all" : people.find((item) => item.id === id)?.trackIds[0] ?? id); setLimit(200); search.changeQuery(""); }} />
-    <form className="cp-multitrack-search" onSubmit={(event) => { event.preventDefault(); void search.search(); }}>
-      <input type="search" aria-label="Search track transcripts" placeholder={enabled ? "Describe what you're looking for…" : "Search transcripts…"} value={query} maxLength={1000} onChange={(event) => { search.changeQuery(event.target.value); setLimit(200); }} />
-      <div className="cp-multitrack-search-options">
-        <label><input type="checkbox" checked={enabled} onChange={(event) => search.changeEnabled(event.target.checked)} />Search with AI</label>
-        {enabled && (search.busy ? <button type="button" className="btn btn-ghost" onClick={search.stop}>Stop search</button> : <button type="submit" className="btn btn-ghost" disabled={!active || !query.trim() || !passages.length}>Search</button>)}
+    {/* What is always true is out of sight; what changes is a chip, and each chip's popover explains it. */}
+    <form className="cp-multitrack-search" onSubmit={(event) => { event.preventDefault(); if (enabled && active && query.trim() && passages.length) void search.search(); }}>
+      <div className={`cp-multitrack-search-field${enabled && search.busy ? " is-busy" : ""}`}>
+        <input type="search" aria-label="Search track transcripts" placeholder={enabled ? "Describe it, then press Return" : "Search transcripts…"} value={query} maxLength={1000} onChange={(event) => { search.changeQuery(event.target.value); setLimit(200); }} />
+        {enabled && search.busy && <button type="button" className="btn btn-ghost cp-multitrack-search-stop" aria-label="Stop search" onClick={search.stop}>Stop</button>}
+        <button type="button" className={`cp-icon-btn cp-multitrack-ai${enabled ? " active" : ""}`} aria-pressed={enabled} aria-label="Search with AI"
+          title="Search with AI: describe what you are looking for, then press Return. Runs on this Mac." onClick={() => search.changeEnabled(!enabled)}><IconSparkles size={14} /></button>
       </div>
-      {enabled && <p className="cp-multitrack-note" role={result.phase === "error" ? "alert" : "status"}>{result.message || "Local AI. Press Enter to search."}</p>}
+      {enabled && result.message && <p className="cp-multitrack-note" role={result.phase === "error" ? "alert" : "status"}>{result.message}</p>}
     </form>
-    <MultitrackBleedBar ownership={ownership.ownership} bleed={bleedLines} hidden={hideBleed} hide={hide} onHide={(next) => { setSwitchError(null); setBleedHidden(next).catch((cause) => setSwitchError(formatError(cause))); }} measuring={ownership.measuring} onMeasure={() => { void ownership.measure(); }} checking={ownership.checking} onCheckVoices={() => { void ownership.checkVoices(); }} onCancel={ownership.cancel} error={ownership.error ?? switchError} />
-    {runInfo}
+    {(document.transcripts.length > 0 || reviewCount > 0 || hasRun) && <div className="cp-multitrack-chips">
+      {document.transcripts.length > 0 && <MultitrackBleedChip ownership={ownership.ownership} bleed={bleedLines} hidden={hideBleed} hide={hide} onHide={(next) => { setSwitchError(null); setBleedHidden(next).catch((cause) => setSwitchError(formatError(cause))); }} measuring={ownership.measuring} onMeasure={() => { void ownership.measure(); }} checking={ownership.checking} onCheckVoices={() => { void ownership.checkVoices(); }} onCancel={ownership.cancel} />}
+      {reviewCount > 0 && <button type="button" className="cp-multitrack-chip" title="Passages saved without a place on the timeline. Shows them all" onClick={reviewAll}>{reviewCount.toLocaleString()} to review</button>}
+      <MultitrackRunChip report={report} error={error} loading={loading} onInfo={() => setInfo(true)} />
+    </div>}
+    {bleedError && <p className="cp-multitrack-note cp-multitrack-chips-error" role="alert">{bleedError}</p>}
     <div id={panelId} className="cp-multitrack-transcript-body" role="tabpanel" aria-label={person?.name ?? "All voices"} tabIndex={0}>
       {!rows.length && !untimed.length ? <div className="cp-multitrack-transcript-empty"><h3>{loading ? "Waiting for the first completed track" : report && !report.saved ? "No new transcript was saved" : scoped.transcripts.length ? "No speech found in completed tracks" : person ? `No transcript for ${person.name} yet` : "Read each mic in context"}</h3><p>{report?.failures.length ? "Open Transcript info (i) for the failed tracks, then check those tracks and generate again." : "Check tracks, choose an engine, then generate. Saved results appear here."}</p></div>
         : !filtered.length && !filteredUntimed.length ? <p className="cp-multitrack-note">{enabled && result.phase !== "ready" ? "No matching passages found so far." : "No matching transcript text."}</p>
@@ -91,7 +111,7 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
             {cue.owned.voice && <span className="cp-multitrack-note">Sounds like {trackOwner(document, cue.owned.voice)}</span>}
           </button>)}
       {filtered.length > limit && <button className="btn btn-ghost cp-multitrack-more" onClick={() => setLimit(limit + 200)}>Show more ({filtered.length - limit} remaining)</button>}
-      {filteredUntimed.length > 0 && <section className="cp-multitrack-untimed" aria-label="Text needing timing review"><h3>Timing needs review</h3>{visibleUntimed.map((cue) => <article key={`${cue.trackId}:${cue.id}`}><strong>{cue.owner}</strong><p>{cue.text}</p><details><summary>Timing details</summary>{cue.reason}<br />Reported: {cue.reported_timing}<br />Audio segment starts at {cue.timecode}</details></article>)}
+      {filteredUntimed.length > 0 && <section ref={review} className="cp-multitrack-untimed" aria-label="Text needing timing review"><h3>Timing needs review</h3>{visibleUntimed.map((cue) => <article key={`${cue.trackId}:${cue.id}`}><strong>{cue.owner}</strong><p>{cue.text}</p><details><summary>Timing details</summary>{cue.reason}<br />Reported: {cue.reported_timing}<br />Audio segment starts at {cue.timecode}</details></article>)}
         {filteredUntimed.length > limit && <button className="btn btn-ghost" onClick={() => setLimit(limit + 200)}>Show more untimed text</button>}</section>}
     </div>
     </div>

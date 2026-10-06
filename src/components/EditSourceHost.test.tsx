@@ -6,9 +6,11 @@ import { useEditSourceSide, type EditSourceMarks, type EditSourceTake } from "..
 import type { TimelineWord } from "../lib/edit-model";
 import { EditSourceHost } from "./EditSourceHost";
 
-vi.mock("../hooks/use-edit-playback", () => ({
-  useEditPlayback: () => ({ frame: 0, playing: false, busy: false, toggle: vi.fn(), pause: vi.fn(), seek: vi.fn(async () => undefined) }),
-}));
+vi.mock("../hooks/use-edit-playback", async () => {
+  const { createFrameStore } = await import("../lib/frame-store");
+  const frames = createFrameStore(0);
+  return { useEditPlayback: () => ({ frames, playing: false, busy: false, toggle: vi.fn(), pause: vi.fn(), seek: vi.fn(async () => undefined) }) };
+});
 afterEach(cleanup);
 
 const edit: EditDocument = {

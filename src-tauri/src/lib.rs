@@ -272,6 +272,7 @@ pub fn run() {
             commands::aaf_open,
             commands::aaf_list,
             commands::aaf_save_labels,
+            commands::aaf_rename,
             commands::aaf_save_shoot_date,
             commands::aaf_read_recording_dates,
             commands::aaf_prepare_audio,

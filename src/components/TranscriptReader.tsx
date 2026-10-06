@@ -10,15 +10,16 @@ import { ReaderRowThumb } from "./ReaderRowThumb";
 import { ReaderRowMenu, type RowMenuTarget } from "./ReaderRowMenu";
 import { ReaderProjectHeader } from "./ReaderProjectHeader";
 import { ProjectMenu, type ProjectMenuTarget } from "./ProjectMenu";
-import { isProjectFolder, projectFor, projectPosterSource } from "../lib/transcript-projects";
+import { isProjectFolder, projectFor, projectOfDocument, projectPosterSource } from "../lib/transcript-projects";
 import {
-  editProject, forgetProject, getProjects, hydrateProjects, renameProject,
+  editProject, fileDocuments, forgetProject, getProjects, hydrateProjects, renameProject,
   subscribeProjects, syncProjectFolders,
 } from "../lib/transcript-project-store";
 import { folderLabel, organizeTranscripts, withEmptyProjects, type TranscriptSort } from "../lib/transcript-organize";
 import {
-  loadTranscriptLibrary, type LibraryTranscript,
+  documentOfKey, layoutDocuments, loadTranscriptLibrary, type LibraryTranscript,
 } from "../lib/transcript-library";
+import { plural } from "../lib/plural";
 import { TRANSCRIPTS_CHANGED_EVENT, renameEntryPath, type TranscriptHistoryEntry } from "../lib/transcript-history";
 import { renameSpeakerOverridesPath } from "./transcript/helpers";
 import { carriedPaths } from "../lib/project-rename-carry";
@@ -28,7 +29,13 @@ import { WEB_POSTERS_CHANGED_EVENT } from "../lib/web-poster-store";
 import { subscribeHidden } from "../lib/library-hidden";
 import { useMultitrackLibrary } from "../hooks/use-multitrack-library";
 import { MultitrackLibraryRows, matchingMultitrackEntries } from "./MultitrackLibraryRows";
+import { MultitrackReaderSummary } from "./MultitrackReaderSummary";
+import { MultitrackRowMenu, type DocumentMenuTarget } from "./MultitrackRowMenu";
 import { MultitrackTranscript } from "./MultitrackTranscript";
+
+/** The AAF Audio group's key among the folder keys: its fold choice, and the
+ *  heading a filed document is dragged back onto. No folder is called this. */
+const AAF_GROUP = "__aaf_audio__";
 
 /**
  * The Transcripts reader — a reading-first workspace OUTSIDE the Clip editor
@@ -86,10 +93,14 @@ type Props = {
    *  transcript is selected. */
   children: ReactNode;
   onOpenMultitrack?: (id: string, frame?: number, trackId?: string) => void;
+  /** Open an AAF Audio document's string out in String Outs. */
+  onOpenInStringOuts?: (id: string) => void;
 };
 
-export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, recents, stage, stageAvailable: fileStageAvailable, stageExpanded, stageFloating, onExpandStage, docTab, onDocTab, analysis, onRenameTranscript, onMoveTranscript, onImportTranscript, onGoToClip, children, onOpenMultitrack }: Props) {
+export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, recents, stage, stageAvailable: fileStageAvailable, stageExpanded, stageFloating, onExpandStage, docTab, onDocTab, analysis, onRenameTranscript, onMoveTranscript, onImportTranscript, onGoToClip, children, onOpenMultitrack, onOpenInStringOuts }: Props) {
   const multitrack = useMultitrackLibrary(visible);
+  const [docMenu, setDocMenu] = useState<DocumentMenuTarget | null>(null);
+  const closeDocMenu = useCallback(() => setDocMenu(null), []);
   const stageAvailable = fileStageAvailable && !multitrack.selected;
   const [list, setList] = useState<LibraryTranscript[]>([]);
   const [tick, setTick] = useState(0);
@@ -264,6 +275,11 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
     () => withEmptyProjects(organized.groups, projects.map((p) => p.folder), organized.searching),
     [organized, projects],
   );
+  // AAF Audio transcripts: in the project each is filed in, else in their own group.
+  const searchingDocs = query.trim() !== "";
+  const docs = layoutDocuments(analyzedOnly ? [] : matchingMultitrackEntries(multitrack.entries, query), projects,
+    new Set(groups.map((g) => g.folder).filter(isProjectFolder)), searchingDocs, sort);
+  const docsOpen = searchingDocs || isOpen(AAF_GROUP, true);
 
   /** The art for a project's picture: the chosen transcript's, else the newest
    *  one's. Same `transcriptArt` the rows use, so nothing decodes twice. */
@@ -386,7 +402,9 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   const listRef = useRef<HTMLDivElement>(null);
   const marquee = useMarquee({
     containerRef: listRef,
-    itemSelector: ".cp-reader-row",
+    // AAF Audio rows are documents, not files: the batch verbs a selection
+    // feeds (Trash, Remove, Move) all take paths, so the band leaves them out.
+    itemSelector: ".cp-reader-row:not([data-path^=\"aaf:\"])",
     // Rows sit inside per-project sections, so a band starting in the gap
     // between two groups belongs to the section rather than the scroller.
     gutterSelector: ".cp-reader-group, .cp-reader-list",
@@ -399,25 +417,39 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
     targetSelector: "[data-drop]",
     targetAttr: "data-drop",
     // Finder's rule: dragging a row that is part of the selection drags the
-    // whole selection; dragging one outside it drags only that one.
-    pathsFor: (path: string) => (pick.selected.has(path) ? pick.selectedPaths : [path]),
+    // whole selection; dragging one outside it drags only that one. An AAF
+    // Audio row is never in the selection (the band leaves it out).
+    pathsFor: (path: string) => (documentOfKey(path) ? [path] : pick.selected.has(path) ? pick.selectedPaths : [path]),
     onDrop: (folder: string, paths: readonly string[]) => {
-      const path = paths[0];
-      const hit = path ? entryByPath.get(path) : undefined;
-      // Dropping something back where it already lives is a no-op rather than
-      // a move. The command returns early on its own, but a rescan would
-      // still churn the picker for nothing.
-      if (!hit || hit.folder === folder) return;
-      // CAUGHT, like the row menu's copy of this call. The move can be
-      // refused - a name collision in the destination is the ordinary case -
-      // and a bare `void` on a rejecting promise is an unhandled rejection
-      // that the user never sees and console-clean fails on. A drag has no
-      // dialog to report into, so it borrows the picker's error line.
+      // A document is filed by reference: onto a project, or back onto its own group.
+      const ids = paths.map(documentOfKey).filter((id): id is string => id !== null);
+      if (ids.length) {
+        if (folder === AAF_GROUP || isProjectFolder(folder)) fileDocuments(ids, folder === AAF_GROUP ? null : folder);
+        return;
+      }
+      // Every transcript dragged moves, not only the first: the ghost said one
+      // and the drop moved one, whatever was selected. Dropping something back
+      // where it already lives is a no-op rather than a move.
+      const moves = paths.map((path) => entryByPath.get(path))
+        .filter((hit): hit is NonNullable<typeof hit> => hit !== undefined && hit.folder !== folder);
+      if (folder === AAF_GROUP || !moves.length) return;
+      // CAUGHT, like the row menu's copy of this call. A move can be refused -
+      // a name collision in the destination is the ordinary case - and a bare
+      // `void` on a rejecting promise is an unhandled rejection that the user
+      // never sees and console-clean fails on. A drag has no dialog to report
+      // into, so it borrows the picker's error line.
       setProjectErr(null);
-      void onMoveTranscript(hit.entry, `${transcriptLibraryPath}/${folder}`)
-        .catch((e) => setProjectErr(formatError(e)));
+      void (async () => {
+        const failed: string[] = [];
+        for (const hit of moves) {
+          try { await onMoveTranscript(hit.entry, `${transcriptLibraryPath}/${folder}`); }
+          catch (e) { failed.push(formatError(e)); }
+        }
+        if (failed.length) setProjectErr(failed.join(" · "));
+      })();
     },
   });
+  const draggingDocuments = !!rowDrag.drag?.paths.some((path) => documentOfKey(path) !== null);
 
   return (
     <div
@@ -445,7 +477,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
             aria-hidden="true"
             style={{ left: rowDrag.drag.x, top: rowDrag.drag.y }}
           >
-            1 transcript
+            {draggingDocuments ? "1 AAF Audio transcript" : plural(rowDrag.drag.paths.length, "transcript", "transcripts")}
           </div>
         )}
         <div className="cp-reader-picker-head">
@@ -573,12 +605,26 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
             />
           )}
           {multitrack.error && <p className="cp-multitrack-note" role="alert">{multitrack.error}</p>}
-          {!analyzedOnly && <MultitrackLibraryRows entries={multitrack.entries} selected={multitrack.selected} query={query} onOpen={multitrack.select} />}
-          {groups.filter(g => g.folder !== "Multitrack" || g.items.length > 0 || multitrack.entries.length === 0).map((g) => (
+          {(docs.unfiled.length > 0 || docs.filed.size > 0) && (
+            <section className="cp-reader-group" aria-label="AAF Audio transcripts">
+              <ReaderProjectHeader
+                label="AAF Audio" count={docs.unfiled.length} art={null} isProject={false} accent={null}
+                requestThumb={requestThumb} posterVersions={posterVersions} onMenu={() => undefined}
+                collapsed={!docsOpen} onToggle={() => toggleGroup(AAF_GROUP, true)}
+                dropKey={AAF_GROUP} dropActive={draggingDocuments && rowDrag.drag?.over === AAF_GROUP}
+              />
+              {docsOpen && docs.unfiled.length === 0 && <p className="cp-reader-group-empty">Every AAF Audio transcript is in a project. Drag one here to take it out.</p>}
+              {docsOpen && <MultitrackLibraryRows entries={docs.unfiled} selected={multitrack.selected} onOpen={multitrack.select} onMenu={setDocMenu} />}
+            </section>
+          )}
+          {groups.map((g) => {
+            const filedHere = docs.filed.get(g.folder) ?? [];
+            const holdsActive = g.items.some((t) => t.path === activePath) || filedHere.some((entry) => entry.id === multitrack.selected);
+            return (
             <section key={g.folder || "root"} className="cp-reader-group">
               <ReaderProjectHeader
                 label={projectFor(projects, g.folder)?.title || g.label}
-                count={g.items.length}
+                count={g.items.length + filedHere.length}
                 art={posterArtFor(g.folder, g.items)}
                 isProject={isProjectFolder(g.folder)}
                 accent={projectFor(projects, g.folder)?.color ?? null}
@@ -591,15 +637,15 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                   posterFrom: projectFor(projects, g.folder)?.posterFrom ?? null,
                   x, y,
                 })}
-                collapsed={!isOpen(g.folder, g.items.some((t) => t.path === activePath))}
-                onToggle={() => toggleGroup(g.folder, g.items.some((t) => t.path === activePath))}
+                collapsed={!isOpen(g.folder, holdsActive)}
+                onToggle={() => toggleGroup(g.folder, holdsActive)}
                 dropKey={moveTargets.has(g.folder) ? g.folder : undefined}
-                dropActive={rowDrag.drag?.over === g.folder}
+                dropActive={rowDrag.drag?.over === g.folder && (isProjectFolder(g.folder) || !draggingDocuments)}
               />
-              {isOpen(g.folder, false) && g.items.length === 0 && (
+              {isOpen(g.folder, false) && g.items.length === 0 && filedHere.length === 0 && (
                 <p className="cp-reader-group-empty">Nothing here yet. Drag a transcript onto this heading, or move one in from its row menu.</p>
               )}
-              {isOpen(g.folder, g.items.some((t) => t.path === activePath)) && g.items.map((t) => (
+              {isOpen(g.folder, holdsActive) && g.items.map((t) => (
                 <button
                   key={t.path}
                   type="button"
@@ -636,8 +682,10 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                   </span>
                 </button>
               ))}
+              {isOpen(g.folder, holdsActive) && <MultitrackLibraryRows entries={filedHere} selected={multitrack.selected} onOpen={multitrack.select} onMenu={setDocMenu} />}
             </section>
-          ))}
+            );
+          })}
           {list.length === 0 && groups.length === 0 && multitrack.entries.length === 0 && (
             <div className="cp-reader-empty">
               <p>No transcripts yet.</p>
@@ -660,9 +708,12 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
       </aside>
       <main className="cp-reader-main" aria-label="Transcript">
         {multitrack.selected ? <div className="cp-multitrack-reader">
-          <header className="cp-multitrack-reader-head"><span>{multitrack.entries.find(item => item.id === multitrack.selected)?.title}</span>
-            {onOpenMultitrack && <button className="btn btn-ghost" onClick={() => onOpenMultitrack(multitrack.selected!)}>Open timeline</button>}</header>
-          {multitrack.document ? <MultitrackTranscript key={multitrack.document.id} document={multitrack.document} frame={-1} solo={new Set()} initialAll active={visible} onSeek={(frame, trackId) => onOpenMultitrack?.(multitrack.selected!, frame, trackId)} /> : <p role="status">{multitrack.error || "Opening saved transcript…"}</p>}
+          {multitrack.document ? <>
+            <MultitrackReaderSummary document={multitrack.document}
+              onOpen={onOpenMultitrack ? () => onOpenMultitrack(multitrack.document!.id) : undefined}
+              onOpenInStringOuts={onOpenInStringOuts ? () => onOpenInStringOuts(multitrack.document!.id) : undefined} />
+            <MultitrackTranscript key={multitrack.document.id} document={multitrack.document} frame={-1} solo={new Set()} initialAll active={visible} onSeek={(frame, trackId) => onOpenMultitrack?.(multitrack.selected!, frame, trackId)} />
+          </> : <p role="status">{multitrack.error || "Opening saved transcript…"}</p>}
         </div> : activePath ? (
           <>
             <div className="cp-reader-tabs" role="tablist" aria-label="Transcript view">
@@ -685,7 +736,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
         ) : (
           <div className="cp-reader-hint">
             <IconTranscript size={28} />
-            <p>{list.length === 0 ? "Nothing to read yet." : "Pick a transcript to read."}</p>
+            <p>{list.length === 0 && multitrack.entries.length === 0 ? "Nothing to read yet." : "Pick a transcript to read."}</p>
           </div>
         )}
       </main>
@@ -745,6 +796,17 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
           libraryPath={transcriptLibraryPath}
           onRename={onRenameTranscript}
           onMove={onMoveTranscript}
+        />
+      )}
+      {docMenu && (
+        <MultitrackRowMenu
+          target={docMenu}
+          projects={projects.map((project) => ({ folder: project.folder, title: project.title }))}
+          filedIn={projectOfDocument(projects, docMenu.entry.id)?.folder ?? null}
+          libraryPath={transcriptLibraryPath}
+          onClose={closeDocMenu}
+          onOpen={(id) => onOpenMultitrack?.(id)}
+          onOpenInStringOuts={onOpenInStringOuts}
         />
       )}
     </div>

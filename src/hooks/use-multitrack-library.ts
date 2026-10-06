@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AafDocument } from "../bindings/AafDocument";
@@ -6,10 +6,15 @@ import type { AafDocumentSummary } from "../bindings/AafDocumentSummary";
 import { multitrackLibraryEntries, type MultitrackLibraryEntry } from "../lib/transcript-library";
 import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
+import { subscribeHidden } from "../lib/library-hidden";
 
 /** Disk is authoritative, including commits whose original IPC caller has gone. */
 export function useMultitrackLibrary(visible: boolean) {
-  const [entries, setEntries] = useState<MultitrackLibraryEntry[]>([]);
+  const [items, setItems] = useState<AafDocumentSummary[]>([]);
+  // Remove from Transcripts changes what is listed without a new read.
+  const [removals, setRemovals] = useState(0);
+  useEffect(() => subscribeHidden(() => setRemovals((count) => count + 1)), []);
+  const entries: MultitrackLibraryEntry[] = useMemo(() => { void removals; return multitrackLibraryEntries(items); }, [items, removals]);
   const [selected, select] = useState<string | null>(null);
   const [document, setDocument] = useState<AafDocument | null>(null);
   const [error, setError] = useState("");
@@ -22,7 +27,7 @@ export function useMultitrackLibrary(visible: boolean) {
     const refresh = async () => {
       const token = ++request.current;
       try {
-        const items = await invoke<AafDocumentSummary[]>("aaf_list");
+        const listed = await invoke<AafDocumentSummary[]>("aaf_list");
         let doc = selected ? await invoke<AafDocument>("aaf_open", { documentId: selected }) : null;
         if (doc && doc.manifest.recording_dates == null && !inspected && !disposed) {
           inspected = true; metadataJob = newJobId();
@@ -30,7 +35,7 @@ export function useMultitrackLibrary(visible: boolean) {
           catch { /* An offline source must not hide its saved transcript. */ }
           finally { metadataJob = null; }
         }
-        if (!disposed && token === request.current) { setEntries(multitrackLibraryEntries(items)); setDocument(doc); setError(""); }
+        if (!disposed && token === request.current) { setItems(listed); setDocument(doc); setError(""); }
       } catch (cause) { if (!disposed && token === request.current) setError(formatError(cause)); }
     };
     const onSaucebunnyMultitrackChanged = () => { void refresh(); };

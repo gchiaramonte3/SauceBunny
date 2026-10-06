@@ -15,10 +15,17 @@ static DOCUMENT_WRITER: Mutex<()> = Mutex::new(());
 pub(super) const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
 
 pub fn root(app: &AppHandle) -> Result<PathBuf, AppError> {
-    let path = app.path().document_dir().map_err(|e| AppError::internal(e.to_string()))?
-        .join("Sauce Bunny").join("Transcripts").join("Multitrack");
+    let path = location(app)?;
     std::fs::create_dir_all(&path)?;
     Ok(path)
+}
+
+/// Where the documents live, without creating the folder: for callers that
+/// only need to recognise it (the Transcripts page must never treat it as a
+/// project, library.rs `is_aaf_store`).
+pub fn location(app: &AppHandle) -> Result<PathBuf, AppError> {
+    Ok(app.path().document_dir().map_err(|e| AppError::internal(e.to_string()))?
+        .join("Sauce Bunny").join("Transcripts").join("Multitrack"))
 }
 
 pub fn cache(app: &AppHandle) -> Result<PathBuf, AppError> {
@@ -197,6 +204,21 @@ pub fn labels(root: &Path, id: &str, labels: Vec<AafTrackLabel>) -> Result<AafDo
     Ok(document)
 }
 
+/// Name the document for the editor (Transcripts' Rename), or with None or a
+/// blank name go back to the sequence's own. Only the title changes: the
+/// manifest's name is what a re-import finds the document by.
+pub fn retitle(root: &Path, id: &str, title: Option<String>) -> Result<AafDocument, AppError> {
+    let title = title.map(|title| title.trim().to_string()).filter(|title| !title.is_empty());
+    if title.as_ref().is_some_and(|title| title.chars().count() > 200 || title.chars().any(char::is_control)) {
+        return Err(AppError::invalid("Use a name of up to 200 characters, on one line"));
+    }
+    let _guard = DOCUMENT_WRITER.lock().map_err(|_| AppError::internal("AAF Audio save lock unavailable"))?;
+    let mut document = load(root, id)?;
+    document.title = title;
+    write(root, &document)?;
+    Ok(document)
+}
+
 /// Record (or, with None, clear) the editor's call on who said one cue. Only
 /// Owner and Bleed can be said by hand; the cue must exist, and a bleed call
 /// names a real track as the source.
@@ -351,14 +373,14 @@ fn summarize_with_identity(root: &Path, id: &str, path: &Path) -> Result<(AafDoc
     #[derive(serde::Deserialize)]
     struct Manifest { name: String, tracks: Vec<serde::de::IgnoredAny>, #[serde(default)] source_fingerprint: String, #[serde(default)] duration_frames: i64 }
     #[derive(serde::Deserialize)]
-    struct Summary { schema_version: u32, id: String, source_path: String, manifest: Manifest, transcripts: Vec<serde::de::IgnoredAny> }
+    struct Summary { schema_version: u32, id: String, source_path: String, manifest: Manifest, transcripts: Vec<serde::de::IgnoredAny>, #[serde(default)] title: Option<String> }
     let document: Summary = read_json(&document_path(root, id)?)?;
     if !(1..=DOCUMENT_SCHEMA_VERSION).contains(&document.schema_version) {
         return Err(AppError::invalid("This multitrack document was saved by an unsupported version. Update Sauce Bunny."));
     }
     if document.id != id { return Err(AppError::invalid("AAF Audio document identity does not match its filename")); }
     let identity = (document.manifest.source_fingerprint, document.manifest.duration_frames);
-    Ok((AafDocumentSummary { id: document.id, name: document.manifest.name,
+    Ok((AafDocumentSummary { id: document.id, name: document.manifest.name, title: document.title,
         track_count: document.manifest.tracks.len() as u32,
         transcribed_tracks: document.transcripts.len() as u32, source_path: document.source_path,
         modified_ms: Some(modified_ms(&std::fs::metadata(path)?)) }, identity))
@@ -368,7 +390,7 @@ pub fn source_ready(document: &AafDocument) -> Result<(), AppError> {
     let metadata = std::fs::metadata(&document.source_path)
         .map_err(|_| AppError::not_found("The original AAF is unavailable. Reconnect its drive or import it again."))?;
     if metadata.len() != document.source_size || modified_ms(&metadata) != document.source_modified_ms
-        || source_fingerprint(Path::new(&document.source_path))? != document.manifest.source_fingerprint {
+        || known_fingerprint(Path::new(&document.source_path))? != document.manifest.source_fingerprint {
         return Err(AppError::invalid("The original AAF has changed. Import the new file before preparing more audio."));
     }
     Ok(())
@@ -391,6 +413,63 @@ pub fn source_fingerprint(path: &Path) -> Result<String, AppError> {
     file.read_exact(&mut buffer)?;
     hash.update(&buffer);
     Ok(format!("{:x}", hash.finalize()))
+}
+
+/// What a stat says about a file without reading it: replaced, rewritten or
+/// touched, one of these moves. The change time cannot be set by a program,
+/// unlike the modification time, so a same-size rewrite with its time put
+/// back (the case `source_fingerprint` reads both ends of a file for) still
+/// shows.
+type Stamp = (u64, u64, u64, i64, i64, i64, i64);
+fn stamp(metadata: &std::fs::Metadata) -> Stamp {
+    use std::os::unix::fs::MetadataExt;
+    (metadata.dev(), metadata.ino(), metadata.size(), metadata.mtime(), metadata.mtime_nsec(), metadata.ctime(), metadata.ctime_nsec())
+}
+
+type Fingerprints = Mutex<std::collections::HashMap<PathBuf, (Stamp, String)>>;
+static FINGERPRINTS: std::sync::OnceLock<Fingerprints> = std::sync::OnceLock::new();
+/// Enough for the AAF and every MXF of several large sequences; past it the
+/// memory starts again (each entry is about 200 bytes).
+const FINGERPRINTS_KEPT: usize = 16_384;
+
+/// `source_fingerprint`, remembered while a stat shows nothing has touched
+/// the file. Playback checks the AAF and the media under each five-second
+/// window of every mic it plays, and each fingerprint is two 64 KiB reads:
+/// round trips on NEXIS, many times a second.
+pub fn known_fingerprint(path: &Path) -> Result<String, AppError> {
+    let now = stamp(&std::fs::metadata(path)?);
+    let known = FINGERPRINTS.get_or_init(Default::default);
+    if let Some((_, value)) = known.lock().ok().and_then(|known| known.get(path).filter(|(at, _)| *at == now).cloned()) { return Ok(value); }
+    let value = source_fingerprint(path)?;
+    if let Ok(mut known) = known.lock() {
+        if known.len() >= FINGERPRINTS_KEPT { known.clear(); }
+        known.insert(path.to_path_buf(), (now, value.clone()));
+    }
+    Ok(value)
+}
+
+static PLAYBACK_DOCUMENTS: Mutex<Vec<(String, Stamp, std::sync::Arc<AafDocument>)>> = Mutex::new(Vec::new());
+
+/// A document as playback reads it: without its transcripts, and parsed again
+/// only when its file changes. Every five-second window of every mic used to
+/// parse the whole document, megabytes of transcript, which cost more than
+/// reading a window already on disk. Four are kept: String Outs plays from
+/// several sequences at once.
+pub fn playback_document(root: &Path, id: &str) -> Result<std::sync::Arc<AafDocument>, AppError> {
+    let now = stamp(&std::fs::metadata(document_path(root, id)?)?);
+    if let Ok(kept) = PLAYBACK_DOCUMENTS.lock() {
+        if let Some((_, _, document)) = kept.iter().find(|(known, at, _)| known == id && *at == now) { return Ok(document.clone()); }
+    }
+    let mut document = load(root, id)?;
+    document.transcripts = Vec::new();
+    document.ownership = None;
+    let document = std::sync::Arc::new(document);
+    if let Ok(mut kept) = PLAYBACK_DOCUMENTS.lock() {
+        kept.retain(|(known, _, _)| known != id);
+        if kept.len() >= 4 { kept.remove(0); }
+        kept.push((id.to_string(), now, document.clone()));
+    }
+    Ok(document)
 }
 
 pub fn modified_ms(metadata: &std::fs::Metadata) -> u64 {
@@ -534,7 +613,7 @@ mod tests {
         assert_eq!(merge_transcript(Some(before), run(0, 100, &[], &[]), &rate).unwrap().gaps, None);
     }
     fn fixture() -> AafDocument {
-        AafDocument { schema_version: 1, shoot_date_override: None, ownership: None, id: "a".repeat(64), source_path: "/tmp/source.aaf".into(),
+        AafDocument { schema_version: 1, shoot_date_override: None, ownership: None, title: None, id: "a".repeat(64), source_path: "/tmp/source.aaf".into(),
             source_size: 1, source_modified_ms: 0,
             manifest: AafManifest { schema_version: 1, graph: None, recording_dates: None, name: "Test".into(), source_fingerprint: "b".repeat(64),
                 edit_rate: AafRate { numerator: 24000, denominator: 1001 }, start_frame: 0, duration_frames: 240,
@@ -544,6 +623,27 @@ mod tests {
                     source_start_sample: None, sample_rate: None, warnings: vec![] }], warnings: vec![] }], warnings: vec![] },
             labels: vec![AafTrackLabel { track_id: "10".into(), owner_name: "Café".into(), cast_member_id: None, color: None, gender: None, marker_color: None }],
             transcripts: vec![] }
+    }
+
+    #[test]
+    fn a_title_names_the_document_and_leaves_its_sequence_name_alone() {
+        let root = std::env::temp_dir().join(format!("aaf-title-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let doc = fixture();
+        create(&root, &doc).unwrap();
+        let named = retitle(&root, &doc.id, Some("  Day 3, kitchen  ".into())).unwrap();
+        assert_eq!((named.title.as_deref(), named.manifest.name.as_str()), (Some("Day 3, kitchen"), "Test"));
+        let listed = list(&root).unwrap();
+        assert_eq!((listed[0].title.as_deref(), listed[0].name.as_str()), (Some("Day 3, kitchen"), "Test"));
+        // A blank name goes back to the sequence's; a long or two-line one is refused.
+        assert!(retitle(&root, &doc.id, Some("   ".into())).unwrap().title.is_none());
+        assert!(retitle(&root, &doc.id, Some("x".repeat(201))).is_err());
+        assert!(retitle(&root, &doc.id, Some("two\nlines".into())).is_err());
+        // Importing the same AAF again finds the document by its sequence and keeps the name.
+        retitle(&root, &doc.id, Some("Kept".into())).unwrap();
+        let again = import(&root, AafDocument { id: "c".repeat(64), ..fixture() }).unwrap();
+        assert_eq!((again.id.as_str(), again.title.as_deref()), (doc.id.as_str(), Some("Kept")));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -631,6 +731,43 @@ mod tests {
         std::fs::File::options().write(true).open(&path).unwrap()
             .set_times(std::fs::FileTimes::new().set_modified(original_time)).unwrap();
         assert_ne!(identity, source_fingerprint(&path).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_remembered_fingerprint_still_sees_a_same_size_rewrite_with_its_time_put_back() {
+        let root = std::env::temp_dir().join(format!("aaf-known-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("fixture.mxf");
+        std::fs::write(&path, vec![1_u8; 150_000]).unwrap();
+        let original_time = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let first = known_fingerprint(&path).unwrap();
+        assert_eq!(first, source_fingerprint(&path).unwrap());
+        assert_eq!(known_fingerprint(&path).unwrap(), first);
+        std::fs::write(&path, vec![2_u8; 150_000]).unwrap();
+        std::fs::File::options().write(true).open(&path).unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(original_time)).unwrap();
+        assert_ne!(known_fingerprint(&path).unwrap(), first, "the memory hid a rewritten file");
+        assert_eq!(known_fingerprint(&path).unwrap(), source_fingerprint(&path).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn playback_parses_a_document_once_without_its_words_until_it_is_saved_again() {
+        let root = std::env::temp_dir().join(format!("aaf-playback-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let doc = fixture();
+        create(&root, &doc).unwrap();
+        let transcript = AafTrackTranscript { track_id: "10".into(), start_frame: 0, duration_frames: 48, engine: AafEngine::Parakeet, model_id: "test".into(),
+            status: AafTranscriptStatus::Completed, sample_rate: 16000, cues: vec![AafCue { id: "cue".into(), start_sample: 0, end_sample: 8000, text: "Hello".into(), boundary_review: false, words: None, suspect: None }],
+            timing_issues: vec![], warnings: vec![], gaps: None };
+        save_transcript(&root, &doc, transcript).unwrap();
+        let first = playback_document(&root, &doc.id).unwrap();
+        assert!(first.transcripts.is_empty(), "playback was handed the transcripts");
+        assert!(std::sync::Arc::ptr_eq(&first, &playback_document(&root, &doc.id).unwrap()), "parsed again with nothing changed");
+        let mut renamed = doc.labels.clone(); renamed[0].owner_name = "Dev".into();
+        labels(&root, &doc.id, renamed).unwrap();
+        let after = playback_document(&root, &doc.id).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&first, &after), "a saved document was not read again");
+        assert_eq!(after.labels[0].owner_name, "Dev");
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

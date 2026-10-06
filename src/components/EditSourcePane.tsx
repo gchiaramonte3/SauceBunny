@@ -1,14 +1,15 @@
 import { useEffect, useId, useMemo, useRef } from "react";
+import { useFrame } from "../hooks/use-frame";
 import { editTc } from "../lib/edit-document";
-import { paragraphHolding, paragraphs, paragraphStarts, type PlacedWord, type TimelineLane } from "../lib/edit-model";
+import { firstAbove, paragraphHolding, paragraphs, paragraphStarts, type PlacedWord, type TimelineLane } from "../lib/edit-model";
+import type { FrameStore } from "../lib/frame-store";
 import { ALL_VOICES } from "../lib/edit-source-view";
 import { measure } from "../lib/pipeline";
 import type { MultitrackPerson } from "../lib/multitrack-person";
-import { EditScrubber } from "./EditScrubber";
 import { MultitrackTranscriptTabs } from "./MultitrackTranscriptTabs";
 import { EditWindowedParagraphs } from "./EditWindowedParagraphs";
-import { EditTextSettings, editTextVars, type EditTextStyle } from "./EditTextSettings";
-import { IconPause, IconPlay } from "./Icons";
+import { editTextVars, type EditTextStyle } from "./EditTextSettings";
+import { EditSourceTools } from "./EditSourceTools";
 
 /** A source as the pane needs it: its name, length in seconds, and start timecode in frames. */
 export type EditSourceInfo = { id: string; short: string; duration: number; startFrames: number };
@@ -26,7 +27,8 @@ type Props = {
   canInsert: boolean;
   /** The source's In and Out (seconds), shown on its rail and, when set by I and O, on the words between them. */
   marks: { in: number | null; out: number | null };
-  playhead: number; playing: boolean; onPlay: () => void; onScrub: (seconds: number) => void; onScrubStart: () => void; onScrubEnd: () => void;
+  /** The source playhead, in frames: the head follows each frame, the text the word under it. */
+  frames: FrameStore; playing: boolean; onPlay: () => void; onScrub: (seconds: number) => void; onScrubStart: () => void; onScrubEnd: () => void;
   text: EditTextStyle; onText: (style: EditTextStyle) => void; onPlace: (how: "insert" | "append" | "overwrite") => void;
 };
 
@@ -48,8 +50,15 @@ export function EditSourcePane(props: Props) {
   const scrubbing = useRef(false);
   const body = useRef<HTMLDivElement>(null);
   const count = placed.length;
-  const inEdit = placed.filter((item) => used.has(item.word.id)).length;
-  const current = placed.find((item) => item.word.start <= props.playhead && props.playhead < item.word.end)?.word.id ?? null;
+  const inEdit = useMemo(() => placed.filter((item) => used.has(item.word.id)).length, [placed, used]);
+  // The word under the playhead, by a binary search over the words in time
+  // order: the text redraws when the playhead crosses a word, not every frame.
+  const timed = useMemo(() => {
+    const sorted = placed.map((item) => item.word).sort((a, b) => a.start - b.start);
+    let latest = -Infinity;
+    return { sorted, ends: sorted.map((word) => (latest = Math.max(latest, word.end))) };
+  }, [placed]);
+  const current = useFrame(props.frames, (frame) => { const word = timed.sorted[firstAbove(timed.ends, frame / fps)]; return word && word.start <= frame / fps ? word.id : null; });
   // Where each paragraph's words start, and which paragraph holds a word: the
   // pane draws only the pages near the view, and these must be drawn anyway.
   const firsts = useMemo(() => paragraphStarts(paras), [paras]);
@@ -68,14 +77,8 @@ export function EditSourcePane(props: Props) {
   };
   const extend = (to: number) => props.onRange([Math.min(anchor.current ?? to, to), Math.max(anchor.current ?? to, to)]);
   return <section className="cp-te-source" aria-label={`Source: ${source.short}`} style={editTextVars(props.text)}>
-    <div className="cp-te-tools">
-      <button type="button" className="cp-icon-btn cp-te-play" aria-label={props.playing ? `Pause ${source.short}` : `Play ${source.short}`}
-        title={props.playing ? "Pause the source (Space)" : "Play the source (Space)"} onClick={props.onPlay}>{props.playing ? <IconPause size={14} /> : <IconPlay size={14} />}</button>
-      <EditScrubber label={`${source.short} position`} value={props.playhead} max={source.duration} text={editTc(props.playhead, fps, source.startFrames)} range={props.marks}
-        onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} />
-      <span className="cp-te-tools-tc">{editTc(props.playhead, fps, source.startFrames)}</span>
-      <EditTextSettings pane="Source" style={props.text} onChange={props.onText} />
-    </div>
+    <EditSourceTools source={source} fps={fps} frames={props.frames} marks={props.marks} playing={props.playing} onPlay={props.onPlay}
+      onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} text={props.text} onText={props.onText} />
     <MultitrackTranscriptTabs people={props.people} selected={props.tab} panelId={panelId} onSelect={props.onTab} />
     <div ref={body} id={panelId} className="cp-te-src-body" role="tabpanel" aria-label={`${person?.name ?? "All voices"} in ${source.short}, read only`} tabIndex={0}
       onPointerDown={(event) => {

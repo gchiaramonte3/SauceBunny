@@ -110,6 +110,11 @@ pub async fn extract_16k(app: &AppHandle, document: &AafDocument, track: &str, s
     Ok((wav, info))
 }
 
+/// One mic's five seconds for playback, from the cache when it is there. A
+/// window is made once: a second request for it waits for the first and
+/// reads its file, and nothing the page does short of opening another
+/// document stops a window being made, so what Pause or a scrub walks away
+/// from is on disk when Play comes back for it.
 pub async fn prepare(app: &AppHandle, document: &AafDocument, track: &str, start: i64,
     duration: i64, job: &str) -> Result<AafAudioAsset, AppError>
 {
@@ -117,22 +122,24 @@ pub async fn prepare(app: &AppHandle, document: &AafDocument, track: &str, start
     store::track(document, track)?;
     store::source_ready(document)?;
     if super::linked_audio::needed(document) { return prepare_linked(app, document, track, start, duration, job).await; }
-    let _permit = preparation(app, job).await?;
     let reader = super::pcm::get(app, document, job).await?;
     let selected = reader.index.track(track)?;
-    let sample_rate = selected.sample_rate;
+    let (sample_rate, sample_width) = (selected.sample_rate, selected.sample_width);
     let expected = reader.index.sample(start + duration, sample_rate) - reader.index.sample(start, sample_rate);
     let key = store::cache_key(document, track, &format!("audition-native-v1-{start}-{duration}"));
     let cache = store::cache(app)?;
     let metadata_path = cache.join(format!("{key}.asset.json"));
     let destination = cache.join(format!("{key}.wav"));
-    if metadata_path.is_file() && destination.is_file() {
-        if let Ok(asset) = store::read_json::<AafAudioAsset>(&metadata_path) {
-            if asset.path == destination.to_string_lossy() && asset.start_frame == start && asset.duration_frames == duration
-                && asset.sample_rate == sample_rate && asset.sample_count == expected as i64
-                && native_wav_valid(&destination, sample_rate, selected.sample_width, expected) { return Ok(asset); }
-        }
-    }
+    let kept = || {
+        let asset = store::read_json::<AafAudioAsset>(&metadata_path).ok()?;
+        (asset.path == destination.to_string_lossy() && asset.start_frame == start && asset.duration_frames == duration
+            && asset.sample_rate == sample_rate && asset.sample_count == expected as i64
+            && native_wav_valid(&destination, sample_rate, sample_width, expected)).then_some(asset)
+    };
+    if let Some(asset) = kept() { used(&destination); return Ok(asset); }
+    let _claim = process::claim(app, job, &destination).await?;
+    if let Some(asset) = kept() { used(&destination); return Ok(asset); }
+    let _permit = preparation(app, job).await?;
     let work = WorkDir::new(app, job)?;
     process::progress(app, job, Some(track), "preparing-audio", 0, duration);
     let wav = work.0.join("audio.wav");
@@ -145,22 +152,83 @@ pub async fn prepare(app: &AppHandle, document: &AafDocument, track: &str, start
     let asset = AafAudioAsset { path: destination.to_string_lossy().into_owned(), start_frame: start,
         duration_frames: duration, sample_rate, sample_count: sample_count as i64, peaks: Vec::new() };
     crate::commands::system::write_bytes_impl(&metadata_path.to_string_lossy(), &serde_json::to_vec(&asset)?, false, false, true)?;
+    sweep_soon(&cache);
     Ok(asset)
 }
 
 async fn prepare_linked(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64, job: &str) -> Result<AafAudioAsset, AppError> {
-    super::linked::check_sources(document, store::track(document, track)?)?;
+    super::linked::check_window_sources(document, store::track(document, track)?, start, duration)?;
     let expected = super::linked_audio::sample(start+duration, &document.manifest.edit_rate)-super::linked_audio::sample(start, &document.manifest.edit_rate);
     let key = store::cache_key(document, track, &format!("linked-pcm-v1-{start}-{duration}"));
-    let destination = store::cache(app)?.join(format!("{key}.wav"));
+    let cache = store::cache(app)?;
+    let destination = cache.join(format!("{key}.wav"));
     if !native_wav_valid(&destination, 48000, 3, expected) {
-        let work = WorkDir::new(app, job)?; let partial = work.0.join("window.wav");
-        super::linked_audio::render(app, document, track, start, duration, job, &partial).await?;
-        process::check_cancelled(app, job)?;
-        std::fs::rename(partial, &destination)?;
+        let _claim = process::claim(app, job, &destination).await?;
+        if !native_wav_valid(&destination, 48000, 3, expected) {
+            let work = WorkDir::new(app, job)?; let partial = work.0.join("window.wav");
+            super::linked_audio::render(app, document, track, start, duration, job, &partial).await?;
+            process::check_cancelled(app, job)?;
+            std::fs::rename(partial, &destination)?;
+            sweep_soon(&cache);
+        }
     }
+    used(&destination);
     Ok(AafAudioAsset { path: destination.to_string_lossy().into_owned(), start_frame: start, duration_frames: duration,
         sample_rate: 48000, sample_count: expected as i64, peaks: Vec::new() })
+}
+
+/// Playback windows kept on disk, at most; past it the least recently played
+/// go first. A window is about 0.72 MB (five seconds of one mic at 48 kHz,
+/// 24-bit), so this holds a little under 3,000: several minutes of a large
+/// sequence, every mic. They were kept for ever (1.29 GB on the development
+/// Mac), outside Settings' sizes and Clear all.
+pub const PLAYBACK_CACHE_BYTES: u64 = 2 << 30;
+static LAST_SWEEP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A playback window's file, by name: the window (`.wav`) and, for embedded
+/// audio, what it was made from (`.asset.json`). Nothing else in the AAF
+/// media cache ends this way: overviews, indexes and probes stay.
+pub fn is_playback_file(name: &str) -> bool { name.ends_with(".wav") || name.ends_with(".asset.json") }
+
+/// A window was played: the sweep takes the least recently played first.
+fn used(path: &Path) {
+    let _ = std::fs::File::options().write(true).open(path).and_then(|file| file.set_modified(std::time::SystemTime::now()));
+}
+
+/// Sweep after a window is made, a minute apart at most, off the request.
+fn sweep_soon(cache: &Path) {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs());
+    let last = LAST_SWEEP.load(std::sync::atomic::Ordering::Relaxed);
+    if now.saturating_sub(last) < 60 || LAST_SWEEP.compare_exchange(last, now, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed).is_err() { return; }
+    let cache = cache.to_path_buf();
+    tauri::async_runtime::spawn_blocking(move || sweep_playback(&cache, PLAYBACK_CACHE_BYTES));
+}
+
+/// Remove the least recently played windows until the rest fit in `cap`.
+/// Returns how many windows went.
+pub fn sweep_playback(cache: &Path, cap: u64) -> u32 {
+    let Ok(entries) = std::fs::read_dir(cache) else { return 0 };
+    let mut windows = Vec::new();
+    let mut total = 0_u64;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() || !is_playback_file(&name) { continue; }
+        total += meta.len();
+        if name.ends_with(".wav") { windows.push((entry.path(), meta.modified().unwrap_or(std::time::UNIX_EPOCH))); }
+    }
+    windows.sort_by_key(|(_, played)| *played);
+    let mut removed = 0;
+    for (wav, _) in windows {
+        if total <= cap { break; }
+        let sidecar = wav.with_extension("asset.json");
+        let bytes = std::fs::metadata(&wav).map_or(0, |meta| meta.len()) + std::fs::metadata(&sidecar).map_or(0, |meta| meta.len());
+        if std::fs::remove_file(&wav).is_ok() {
+            let _ = std::fs::remove_file(&sidecar);
+            total = total.saturating_sub(bytes); removed += 1;
+        }
+    }
+    removed
 }
 
 fn native_wav_valid(path: &Path, hz: u32, width: u32, samples: u64) -> bool {
@@ -237,7 +305,7 @@ pub fn read_wav(path: &Path) -> Result<Vec<f32>, AppError> {
         let body = at + 8;
         if &bytes[at..at + 4] == b"data" {
             let end = body.saturating_add(size).min(bytes.len());
-            return Ok(bytes[body..end].chunks_exact(2).map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0).collect());
+            return Ok(bytes[body..end].as_chunks::<2>().0.iter().map(|pair| f32::from(i16::from_le_bytes(*pair)) / 32768.0).collect());
         }
         at = body.saturating_add(size + size % 2);
     }
@@ -289,6 +357,34 @@ mod tests {
         let mut truncated = wav(&[0; 100]); truncated.pop();
         std::fs::write(&path, truncated).unwrap();
         assert!(inspect_wav(&path).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn the_sweep_takes_the_least_recently_played_windows_and_nothing_else() {
+        let root = std::env::temp_dir().join(format!("aaf-sweep-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let window = |name: &str, age: u64| {
+            let path = root.join(format!("{name}.wav"));
+            std::fs::write(&path, vec![0_u8; 100]).unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap()
+                .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(age)).unwrap();
+            path
+        };
+        let (old, middle, recent) = (window("old", 300), window("middle", 200), window("recent", 100));
+        std::fs::write(old.with_extension("asset.json"), b"{}").unwrap();
+        // An overview and an index live beside the windows and are never playback.
+        std::fs::write(root.join("x.peaks-v1.bin"), vec![0_u8; 1000]).unwrap();
+        std::fs::write(root.join("x.index-v2.json"), vec![0_u8; 1000]).unwrap();
+        // 302 bytes of windows against 200: the oldest goes, with what it was made from.
+        assert_eq!(sweep_playback(&root, 200), 1);
+        assert!(!old.exists() && !old.with_extension("asset.json").exists());
+        assert!(middle.exists() && recent.exists());
+        assert!(root.join("x.peaks-v1.bin").exists() && root.join("x.index-v2.json").exists());
+        // Played again, a window goes to the back of the line.
+        used(&middle);
+        assert_eq!(sweep_playback(&root, 100), 1);
+        assert!(middle.exists() && !recent.exists());
+        assert_eq!(sweep_playback(&root, 100), 0, "a cache inside its cap was swept");
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

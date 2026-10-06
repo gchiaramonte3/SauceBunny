@@ -112,6 +112,25 @@ describe("export formats", () => {
  * That is the second time a Node-version assumption has passed locally and
  * failed there, so this sticks to readdirSync.
  */
+describe("Parakeet models", () => {
+  // Settings names each model's size on its armed Delete, and AAF Audio names
+  // the model a run is missing: both read lib/parakeet-models, which has to
+  // describe the models transcript.rs accepts, at the sizes it states.
+  const ts = readFileSync(join(ROOT, "src/lib/parakeet-models.ts"), "utf8");
+  const rs = readFileSync(join(ROOT, "src-tauri/src/commands/transcript.rs"), "utf8");
+  const tsModels = [...ts.matchAll(/\{ id: "([^"]+)", name: "[^"]+", size: "≈([^"]+)" \}/g)].map(([, id, size]) => [id, size]);
+  const rsModels = [...rs.matchAll(/ParakeetModel \{ id: "([^"]+)", arg: "[^"]+", folder: "[^"]+", label: "[^"]+", size: "~([^"]+)" \}/g)].map(([, id, size]) => [id, size]);
+
+  it("found both tables", () => {
+    expect(tsModels.length).toBeGreaterThanOrEqual(2);
+    expect(rsModels.length).toBe(tsModels.length);
+  });
+
+  it("lists the same models at the same sizes", () => {
+    expect(Object.fromEntries(tsModels)).toEqual(Object.fromEntries(rsModels));
+  });
+});
+
 function filesUnder(dir: string, ext: string, recurse: boolean): string[] {
   const out: string[] = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {

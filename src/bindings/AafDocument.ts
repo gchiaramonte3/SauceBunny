@@ -14,4 +14,11 @@ shoot_date_override?: string,
  * resolver's (accuracy spec, phase 3). Keyed by cue, so a regenerated
  * transcript, whose cue ids are new, starts from the resolver again.
  */
-ownership?: Array<AafCueOwnership>, };
+ownership?: Array<AafCueOwnership>, 
+/**
+ * The editor's own name for the document (Transcripts' Rename). The
+ * sequence's name in the manifest is never overwritten: re-imports find
+ * their document by it and String Outs keeps it. An older build reads a
+ * titled document and drops the title on its next save.
+ */
+title?: string, };

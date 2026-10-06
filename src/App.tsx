@@ -4786,6 +4786,7 @@ export default function App() {
           <div ref={readerViewRef} tabIndex={-1} className="cp-view cp-view-reader" hidden={activeView !== "reader"}>
             <TranscriptReader
               onOpenMultitrack={(id, frame, trackId) => { setMultitrackOpenRequest((previous) => ({ id, frame, trackId, tick: (previous?.tick ?? 0) + 1 })); setActiveView("multitrack"); }}
+              onOpenInStringOuts={(documentId) => { setEditorOpenRequest((previous) => ({ documentId, marks: null, tick: (previous?.tick ?? 0) + 1 })); setActiveView("editor"); }}
               onImportTranscript={() => { void handleImportTranscript(); }}
               onGoToClip={handleSwitchToClip}
               transcriptLibraryPath={defaults.transcriptLibrary}

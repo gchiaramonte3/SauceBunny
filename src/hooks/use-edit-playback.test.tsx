@@ -41,7 +41,8 @@ describe("useEditPlayback", () => {
     expect(engines[0].calls.map(([name]) => name)).toEqual(["setDocument", "setLevel", "setJoinFade", "toggle"]);
     expect(engines[0].calls[0]).toEqual(["setDocument", document, ["T1"], {}]);
     act(() => engines[0].notify({ frame: 12, rate: 1, busy: false, error: null }));
-    expect(result.current).toMatchObject({ frame: 12, playing: true });
+    expect(result.current).toMatchObject({ playing: true });
+    expect(result.current.frames.get()).toBe(12);
     await act(() => result.current.toggle());
     expect(engines).toHaveLength(1);
   });
@@ -70,5 +71,21 @@ describe("useEditPlayback", () => {
     expect(engines[0].calls.at(-1)).toEqual(["close"]);
     await act(() => result.current.toggle());
     expect(engines).toHaveLength(1);
+  });
+});
+
+describe("the playhead outside React state", () => {
+  it("moves the frame without re-rendering whoever holds the playback, and re-renders on a change of state", async () => {
+    let renders = 0;
+    const { result } = renderHook(() => { renders++; return useEditPlayback({ document, audible: ["T1"], active: true }); });
+    await act(() => result.current.toggle());
+    act(() => engines[0].notify({ frame: 1, rate: 1, busy: false, error: null }));
+    const settled = renders;
+    for (let frame = 2; frame < 60; frame++) act(() => engines[0].notify({ frame, rate: 1, busy: false, error: null }));
+    expect(renders).toBe(settled);
+    expect(result.current.frames.get()).toBe(59);
+    act(() => engines[0].notify({ frame: 59, rate: 0, busy: false, error: null }));
+    expect(renders).toBe(settled + 1);
+    expect(result.current.playing).toBe(false);
   });
 });

@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
-import type { AafTrackTranscript } from "../bindings/AafTrackTranscript";
 import { audioTrackLabel, clampFrame, sequenceTimecode, trackOwner, transcriptRows } from "../lib/multitrack";
 import { MultitrackWaveform } from "./MultitrackWaveform";
 import { MultitrackLevel } from "./MultitrackLevel";
 import { MultitrackPictureLane } from "./MultitrackPictureLane";
 import { multitrackTextLayout } from "../lib/multitrack-text-layout";
 import { alternativeLane, laneMetadata, laneReady, laneStatus, visibleLanes } from "../lib/multitrack-graph";
-import { IconChevronRight, IconChevronDown, IconCircleCheck, IconAlert } from "./Icons";
+import { IconChevronRight, IconChevronDown } from "./Icons";
+import { MultitrackTrackStatus } from "./MultitrackTrackStatus";
 import { MultitrackZoom } from "./MultitrackZoom";
 import { RulerMarks } from "./RulerMarks";
 
@@ -26,10 +26,14 @@ type Props = {
   /** In and Out, in frames with Out included, drawn on the ruler as Clip draws them; clearing both (G) from the × on the range. */
   marks?: { in: number | null; out: number | null }; onClearMarks?: () => void;
   onRetryWaveform?: (trackId: string) => void;
+  /** The original AAF can't be read: lanes stay quiet, and the page says why once. */
+  waveformsOffline?: boolean;
   frame: number; onSeek: (frame: number, trackId?: string) => void; onScrub?: (frame: number) => void;
   onScrubEnd?: (frame: number, resume: boolean) => void; playing?: boolean; showWaveforms?: boolean; transport?: ReactNode;
   /** The tracks being built now; the rest are waiting their turn, not working. */
   waveformsBuilding?: string[];
+  /** From a track's status glyph: show its passages to review, or Transcript info. */
+  onReviewTiming?: (trackId: string) => void; onTranscriptInfo?: () => void;
 };
 function TrackLabel({ document, trackId, onRename, onOwnerMenu }: Pick<Props, "document" | "onRename" | "onOwnerMenu"> & { trackId: string }) {
   const owner = trackOwner(document, trackId), [draft, setDraft] = useState(owner);
@@ -40,19 +44,7 @@ function TrackLabel({ document, trackId, onRename, onOwnerMenu }: Pick<Props, "d
     onBlur={() => { if (!cancelled.current && draft.trim() !== owner) onRename(trackId, draft.trim()); cancelled.current = false; }}
     onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { cancelled.current = true; setDraft(owner); event.currentTarget.blur(); } }} />;
 }
-function TranscriptStatus({ transcript, owner, duration }: { transcript?: AafTrackTranscript; owner: string; duration: number }) {
-  if (!transcript) return <span className="cp-multitrack-saved-status" aria-hidden="true" />;
-  const review = transcript.status === "review";
-  const gaps = transcript.gaps?.length ?? 0;
-  const range = gaps ? `Selected ranges transcribed, ${gaps} ${gaps === 1 ? "gap" : "gaps"} not transcribed`
-    : transcript.start_frame > 0 || transcript.duration_frames < duration ? "Selected range transcribed" : "Transcribed";
-  const detail = review ? "Transcript saved; timing review needed" : transcript.status === "empty" ? "No speech found; result saved" : "Transcript saved";
-  const label = `${owner}: ${range}. ${detail}.`;
-  return <span className={`cp-multitrack-saved-status${review ? " needs-review" : " is-saved"}`} role="img" aria-label={label} title={label}>
-    {review ? <IconAlert size={16} /> : <IconCircleCheck size={16} />}
-  </span>;
-}
-export function MultitrackTimeline({ document, waveforms, waveformErrors, selected, onSelect, onRename, solo, muted = new Set(), onSolo, onMute, levels = {}, onLevel, onTrackMenu, onOwnerMenu, frame, onSeek, onScrub, onScrubEnd, playing = false, showWaveforms = true, waveformsBuilding = [], transport, detail, onView, expanded = new Set(), onExpand, initialView, onViewState, marks = { in: null, out: null }, onClearMarks, onRetryWaveform }: Props) {
+export function MultitrackTimeline({ document, waveforms, waveformErrors, selected, onSelect, onRename, solo, muted = new Set(), onSolo, onMute, levels = {}, onLevel, onTrackMenu, onOwnerMenu, frame, onSeek, onScrub, onScrubEnd, playing = false, showWaveforms = true, waveformsBuilding = [], transport, detail, onView, expanded = new Set(), onExpand, initialView, onViewState, marks = { in: null, out: null }, onClearMarks, onRetryWaveform, waveformsOffline = false, onReviewTiming, onTranscriptInfo }: Props) {
   const [zoom, setZoom] = useState(initialView?.zoom ?? 1), [start, setStart] = useState(0), [density, setDensity] = useState(initialView?.density ?? "small");
   const [textTracks, setTextTracks] = useState(() => new Set(initialView?.text ?? [])), [dragging, setDragging] = useState(false), [hover, setHover] = useState<number | null>(null);
   useEffect(() => { onViewState?.({ zoom, density, text: [...textTracks] }); }, [onViewState, zoom, density, textTracks]);
@@ -122,7 +114,7 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
             <label className="cp-multitrack-check" title={children > 0 ? "Include in transcription and selected-track exports. Option-click to set its alternative microphones too." : "Include in transcription and selected-track exports"}><input type="checkbox" disabled={!ready && !savedTranscripts.has(track.id)} checked={selected.has(track.id)} onChange={(event) => onSelect(track.id, (event.nativeEvent as MouseEvent).altKey === true)} aria-label={`Select ${track.name}`} /><span>{audioTrackLabel(document, track.id)}</span></label>
             <div className="cp-multitrack-owner-status">
               <TrackLabel key={trackOwner(document, track.id)} document={document} trackId={track.id} onRename={onRename} onOwnerMenu={onOwnerMenu} />
-              <TranscriptStatus transcript={savedTranscripts.get(track.id)} owner={trackOwner(document, track.id)} duration={duration} />
+              <MultitrackTrackStatus transcript={savedTranscripts.get(track.id)} owner={trackOwner(document, track.id)} duration={duration} onReview={onReviewTiming} onInfo={onTranscriptInfo} />
             </div>
             <div className="cp-multitrack-track-switches"><button className="btn btn-ghost cp-multitrack-solo" disabled={!ready} aria-pressed={solo.has(track.id)} aria-label={`Solo ${track.name}`} title={`Solo ${trackOwner(document, track.id)}`} onClick={() => onSolo?.(track.id)}>S</button>
               <button className="btn btn-ghost cp-multitrack-solo" aria-pressed={muted.has(track.id)} aria-label={`Mute ${track.name}`} title={`Mute ${trackOwner(document, track.id)}`} onClick={() => onMute?.(track.id)}>M</button>
@@ -137,7 +129,7 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
             onPointerCancel={(event) => endGesture(event.pointerId, true)} onLostPointerCapture={(event) => endGesture(event.pointerId, true)} onPointerLeave={() => setHover(null)}
             onKeyDown={(event) => { const targets: Record<string, number> = { ArrowLeft: frame - (event.shiftKey ? 10 : 1), ArrowRight: frame + (event.shiftKey ? 10 : 1), Home: 0, End: duration - 1 }; if (event.key in targets) { event.preventDefault(); event.stopPropagation(); onSeek(clampFrame(targets[event.key], duration)); } }}>
             {clipsByTrack.get(track.id)?.map((style, clipIndex) => <span className="cp-multitrack-clip" key={clipIndex} style={style} />)}
-            {!ready ? <span className="cp-multitrack-waveform-note">{laneStatus(document, track.id)}</span> : showWaveforms && (peaks ? <MultitrackWaveform peaks={peaks} from={detailed ? 0 : viewStart / duration} to={detailed ? 1 : viewEnd / duration} gain={levels[track.id] ?? 1} /> : <span className="cp-multitrack-waveform-note" title={waveformErrors[track.id] || undefined}>{waveformErrors[track.id] ? <>Waveform unavailable{onRetryWaveform && <button className="btn btn-ghost" aria-label={`Retry waveform for ${track.name}`} onClick={() => onRetryWaveform(track.id)}>Retry</button>}</> : waveformsBuilding.includes(track.id) ? "Preparing waveform…" : "Waveform queued"}</span>)}
+            {!ready ? <span className="cp-multitrack-waveform-note">{laneStatus(document, track.id)}</span> : showWaveforms && !waveformsOffline && (peaks ? <MultitrackWaveform peaks={peaks} from={detailed ? 0 : viewStart / duration} to={detailed ? 1 : viewEnd / duration} gain={levels[track.id] ?? 1} /> : <span className="cp-multitrack-waveform-note" title={waveformErrors[track.id] || undefined}>{waveformErrors[track.id] ? <>Waveform unavailable{onRetryWaveform && <button className="btn btn-ghost" aria-label={`Retry waveform for ${track.name}`} onClick={() => onRetryWaveform(track.id)}>Retry</button>}</> : waveformsBuilding.includes(track.id) ? "Preparing waveform…" : "Waveform queued"}</span>)}
             {textTracks.has(track.id) && <div className="cp-multitrack-text-overlay">{cues.length ? cues.map((cue) => <span className={cue.summary ? "cp-multitrack-text-summary" : undefined} key={cue.id} title={cue.title} style={cue.style}>{cue.text}</span>) : <span className="cp-multitrack-no-text">No transcript in this view</span>}</div>}
             {hover !== null && <span className="cp-multitrack-cursor" style={{ left: `${(hover - viewStart) / span * 100}%` }} />}
             {frame >= viewStart && frame < viewEnd && <span className="cp-multitrack-playhead" style={{ left: `${(frame - viewStart) / span * 100}%` }} />}
