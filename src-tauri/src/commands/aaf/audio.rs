@@ -237,7 +237,7 @@ pub fn read_wav(path: &Path) -> Result<Vec<f32>, AppError> {
         let body = at + 8;
         if &bytes[at..at + 4] == b"data" {
             let end = body.saturating_add(size).min(bytes.len());
-            return Ok(bytes[body..end].chunks_exact(2).map(|pair| f32::from(i16::from_le_bytes([pair[0], pair[1]])) / 32768.0).collect());
+            return Ok(bytes[body..end].as_chunks::<2>().0.iter().map(|pair| f32::from(i16::from_le_bytes(*pair)) / 32768.0).collect());
         }
         at = body.saturating_add(size + size % 2);
     }
