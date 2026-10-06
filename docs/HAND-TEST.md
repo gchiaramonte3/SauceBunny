@@ -1292,6 +1292,10 @@ the acceptance test for whenever the verdict UI gets built.
    Outs has not answered for …") are there, and, if macOS allowed it, a
    "Recorded what every thread was doing" row with a hang file in the log
    folder. Export diagnostics and send that file.
+5. Open a string out built from several multi-mic sequences, once with the
+   Pipeline closed and once with it open. Both times "Read N words in …"
+   says a few seconds, not half a minute, and WORKING stays lit through the
+   read instead of flickering.
 
 ### Media on Avid NEXIS during the working day (the freeze past Force Quit)
 

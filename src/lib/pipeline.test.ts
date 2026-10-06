@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 
-import { callStats, describeCall, inFlight, measure, pipelineActivity, pipelineInvoke, pipelineLog, waitMilestone, watchPage } from "./pipeline";
+import { callStats, describeCall, inFlight, measure, pipelineActivity, pipelineInvoke, pipelineLog, subscribePipelineActivity, waitMilestone, watchPage } from "./pipeline";
 
 /** Every row written to the journal so far, flattened. */
 const logged = () => mocks.invoke.mock.calls.filter(([command]) => command === "pipeline_log")
@@ -32,6 +32,22 @@ it("says a call is still waiting at 2, 10, 30 and 60 seconds, as it waits, then 
   expect(logged().at(-1)).toMatchObject({ level: "ok", message: expect.stringMatching(/finished after 61 s/) });
   expect(pipelineActivity()).toEqual({ busy: false, waiting: null });
   expect(callStats().find((stat) => stat.command === "aaf_speech")).toMatchObject({ calls: 1, failed: 0 });
+});
+
+it("tells the pill about calls made one after another once, not twice a call", async () => {
+  // String Outs reads a string out's mics this way: 121 calls for eight
+  // sequences. Each idle-then-busy flip re-rendered the whole Pipeline.
+  mocks.invoke.mockResolvedValue("ok");
+  const invoke = pipelineInvoke("String Outs");
+  const heard = vi.fn();
+  const stop = subscribePipelineActivity(heard);
+  for (let index = 0; index < 40; index++) await invoke("aaf_speech", { documentId: "d", trackId: String(index) });
+  expect(heard).toHaveBeenCalledTimes(1);
+  expect(pipelineActivity()).toEqual({ busy: true, waiting: null });
+  await vi.advanceTimersByTimeAsync(500);
+  expect(heard).toHaveBeenCalledTimes(2);
+  expect(pipelineActivity()).toEqual({ busy: false, waiting: null });
+  stop();
 });
 
 it("logs a failure with its message, but not a waveform that was never built or a call the user stopped", async () => {
