@@ -2010,6 +2010,7 @@ const CACHE_CATEGORIES = [
   { id: "audio", label: "Audio", hint: "Cached audio tracks for instant transcription" },
   { id: "meta", label: "Metadata", hint: "Saved titles, durations, and stream links" },
   { id: "thumbnails", label: "Thumbnails", hint: "Poster frames for imported files" },
+  { id: "aaf", label: "AAF Audio playback", hint: "Each mic's audio, prepared five seconds at a time to play. Up to 2 GB is kept, the least recently played going first" },
   // Listed LAST and worded as a warning, because it is the one category here
   // that does not come back. Everything above is derived - re-download, re-
   // extract, re-read. A received file came off a peer's machine and the
@@ -2148,7 +2149,7 @@ function CacheControls({ excludePaths, capGb, clearOnQuit, onRetentionChange }: 
     <div className="cp-pane-row">
       <div className="k">
         Cache
-        <span className="desc">Downloaded copies, audio tracks, saved details, thumbnails, and working files. Safe to clear; everything regenerates and exported clips are untouched.</span>
+        <span className="desc">Downloaded copies, audio tracks, saved details, thumbnails, AAF Audio playback, and working files. Safe to clear; everything regenerates and exported clips are untouched.</span>
       </div>
       <div className="v cp-cache-controls">
         <span className="cp-cache-total">

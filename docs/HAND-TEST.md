@@ -1172,6 +1172,14 @@ the acceptance test for whenever the verdict UI gets built.
 2. Rename a mic owner, then change the shoot date: no "Bleed labels" row
    either time. Right-click a line and choose "Bleed from another mic": one
    row, and the line dims. "Use the automatic call" undoes it the same way.
+3. With Pipeline open, play a multi-mic sequence for ten seconds, Pause, and
+   Play again: no new "Prepare" rows for the five seconds you were in. Scrub
+   away and back: none for the window you came back to.
+4. Go to Transcripts and back to AAF Audio, then reopen the same sequence
+   from the menu: Play starts at once, with no "Prepare" rows.
+5. Settings ▸ General ▸ Cache lists AAF Audio playback with a size. Clear it:
+   the size goes to zero, Waveforms and the bleed labels are still there,
+   and Play prepares the audio again.
 
 ### October 5: AAF Audio's Transcript panel (item 14)
 

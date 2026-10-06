@@ -126,7 +126,7 @@ pub async fn resolve(app: &AppHandle, document_id: &str, build: bool, job: &str)
 /// cancellably, and reads what the first wrote.
 async fn once(cached: &Path, stamp: String, check: impl Fn() -> Result<(), AppError>,
     work: impl FnOnce(String) -> Result<AafOwnership, AppError> + Send + 'static) -> Result<AafOwnership, AppError> {
-    let _claim = peaks::claim_until(cached, check).await?;
+    let _claim = process::claim_until(cached, check).await?;
     if let Ok(previous) = store::read_json::<AafOwnership>(cached) {
         if previous.stamp == stamp { return Ok(previous); }
     }

@@ -1,6 +1,8 @@
 //! Local, read-only AAF import and microphone-track transcription.
 //! Existing Clip/Review playback and global transcription commands are untouched.
 mod audio;
+/// Settings counts and clears AAF Audio's playback windows by this name.
+pub(crate) use audio::is_playback_file;
 mod diagnostics;
 pub use diagnostics::*;
 mod health;
@@ -164,7 +166,7 @@ pub async fn aaf_prepare_audio(app: AppHandle, document_id: String, track_id: St
 {
     diagnostics::operation(&app, &job_id, "audio", &format!("Prepare document {document_id} · track {track_id} · frames {start_frame} + {duration_frames}"), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
-    let document = store::load(&store::root(&app)?, &document_id)?;
+    let document = store::playback_document(&store::root(&app)?, &document_id)?;
     audio::prepare(&app, &document, &track_id, start_frame, duration_frames, &job_id).await
     }).await
 }

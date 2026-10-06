@@ -3,7 +3,7 @@
 //! Binary i16 pairs keep the two-level sum below 1/32 of 16-bit mono PCM size.
 use super::{audio::WorkDir, model::*, pcm, process, store};
 use crate::AppError;
-use std::{fs::File, io::{Read, Seek, SeekFrom, Write}, path::{Path, PathBuf}};
+use std::{fs::File, io::{Read, Seek, SeekFrom, Write}, path::Path};
 use tauri::AppHandle;
 
 pub(super) const BASE: u64 = 256;
@@ -15,37 +15,6 @@ const HEADER: u64 = 32;
 /// one; more would crowd audition, which every build already yields to.
 /// Matches WAVEFORM_BUILDS in use-multitrack-document.ts.
 pub(super) static BUILD: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
-
-/// Overviews being built, by cache path. The two permits are for two
-/// DIFFERENT tracks: the same track asked for twice at once (AAF Audio's
-/// overview while String Outs measures that mic) waits for the first build
-/// and reads its result, rather than reading every file again over NEXIS.
-/// Bleed labels being computed are claimed here too, by THEIR cache file
-/// (ownership.rs), which no overview path can equal.
-static BUILDING: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
-
-/// This request's claim on building one overview, released when dropped.
-pub(super) struct Claim(PathBuf);
-impl Drop for Claim {
-    fn drop(&mut self) { if let Ok(mut held) = BUILDING.lock() { held.retain(|path| path != &self.0); } }
-}
-
-/// Wait, cancellably, until nobody else is building this overview, then claim it.
-/// Taken before a build permit, so a request waiting here holds no permit.
-pub(super) async fn claim(app: &AppHandle, job: &str, path: &Path) -> Result<Claim, AppError> {
-    claim_until(path, || process::check_cancelled(app, job)).await
-}
-
-pub(super) async fn claim_until(path: &Path, check: impl Fn() -> Result<(), AppError>) -> Result<Claim, AppError> {
-    loop {
-        check()?;
-        {
-            let mut held = BUILDING.lock().map_err(|_| AppError::internal("Waveform and bleed-label builds are unavailable"))?;
-            if !held.iter().any(|other| other == path) { held.push(path.to_path_buf()); return Ok(Claim(path.to_path_buf())); }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-}
 
 fn sample(bytes: &[u8]) -> i16 {
     // Round outwards below when reducing. Retain low-amplitude activity even
@@ -165,7 +134,7 @@ pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, star
     if !may_build { return Err(AppError::invalid(super::linked_audio::NOT_BUILT)); }
     // Cancellation is checked after waiting and once per bounded read. No detached
     // scans survive tab changes; a new request can rebuild a cancelled partial.
-    let _claim = claim(app, job, &path).await?;
+    let _claim = process::claim(app, job, &path).await?;
     let _build = super::audio::acquire(app, job, &BUILD).await?;
     process::check_cancelled(app, job)?;
     if path.is_file() {
@@ -183,31 +152,3 @@ pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, star
     Ok(AafWaveform { track_id: track.into(), peaks })
 }
 
-#[cfg(test)]
-mod claim_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn one_build_per_overview_but_different_overviews_build_together() {
-        let (one, two) = (PathBuf::from("/cache/one.peaks-v2.bin"), PathBuf::from("/cache/two.peaks-v2.bin"));
-        let first = claim_until(&one, || Ok(())).await.unwrap();
-        // Another track is not held up.
-        let other = tokio::time::timeout(std::time::Duration::from_millis(50), claim_until(&two, || Ok(()))).await;
-        assert!(matches!(other, Ok(Ok(_))));
-        // The same track waits for the first build...
-        let waiting = tokio::spawn({ let one = one.clone(); async move { claim_until(&one, || Ok(())).await.is_ok() } });
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-        assert!(!waiting.is_finished());
-        // ...and gets its turn once that build is done.
-        drop(first);
-        assert!(tokio::time::timeout(std::time::Duration::from_secs(2), waiting).await.is_ok_and(|done| done.is_ok_and(|claimed| claimed)));
-    }
-
-    #[tokio::test]
-    async fn a_request_waiting_its_turn_can_still_be_cancelled() {
-        let path = PathBuf::from("/cache/cancel.peaks-v2.bin");
-        let _held = claim_until(&path, || Ok(())).await.unwrap();
-        let stopped = tokio::time::timeout(std::time::Duration::from_secs(2), claim_until(&path, || Err(AppError::Cancelled))).await;
-        assert!(matches!(stopped, Ok(Err(AppError::Cancelled))));
-    }
-}

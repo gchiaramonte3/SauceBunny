@@ -51,6 +51,16 @@ All notable changes to Sauce Bunny. Format loosely follows
   bleed labels again (about 600 ms apiece on a 20-mic sequence). Renaming a
   mic owner or a relink checkpoint no longer runs them at all, and the page
   is no longer sent the words the labels were unsure of, which it never drew.
+- **AAF Audio prepares each five seconds of a mic once.** Pausing, scrubbing
+  or leaving the page no longer throws away audio being prepared, so Play
+  starts from what was ready; coming back to the page or reopening the same
+  sequence keeps what was prepared; two requests for the same five seconds
+  share one; and audio already on disk is ready at once, without reading the
+  sequence again or checking media the window does not use.
+- **AAF Audio's prepared audio is counted, cleared and kept under 2 GB.**
+  Settings ▸ General ▸ Cache lists it as AAF Audio playback, Clear all removes
+  it, and past 2 GB the least recently played goes first. It used to grow
+  for ever (1.29 GB on one Mac) where Settings could not see it.
 - **The Transcripts page can no longer rename or delete AAF Audio's store.**
   It showed as a project called "Multitrack"; renaming it took every AAF Audio
   document out of AAF Audio and String Outs.

@@ -271,12 +271,24 @@ pub fn refresh_lanes(tracks: &[AafTrack], graph: &mut AafGraph) {
 }
 
 pub fn check_sources(document: &AafDocument, track: &AafTrack) -> Result<(), AppError> {
+    check_clips(document, track, |_| true)
+}
+
+/// `check_sources` for the clips under [start, start + duration) only: what a
+/// playback window or an extract reads. Checking every source the lane uses
+/// anywhere in the sequence was most of the cost of a window already on disk.
+pub fn check_window_sources(document: &AafDocument, track: &AafTrack, start: i64, duration: i64) -> Result<(), AppError> {
+    check_clips(document, track, |clip| clip.start_frame < start + duration && clip.start_frame + clip.duration_frames > start)
+}
+
+fn check_clips(document: &AafDocument, track: &AafTrack, read: impl Fn(&AafClip) -> bool) -> Result<(), AppError> {
     if track.clips.iter().any(|c| c.kind == "unavailable") { return Err(AppError::invalid("This lane contains unsupported processing. See AAF Audio settings.")); }
     if let Some(graph) = &document.manifest.graph {
-        for source in graph.sources.iter().filter(|s| track.clips.iter().any(|c| c.source_id.as_deref() == Some(&s.id))) {
+        let used: std::collections::HashSet<&str> = track.clips.iter().filter(|clip| read(clip)).filter_map(|clip| clip.source_id.as_deref()).collect();
+        for source in graph.sources.iter().filter(|s| used.contains(s.id.as_str())) {
             if source.status != "ready" { return Err(AppError::not_found("Audio is unavailable. Refresh or locate media first.")); }
             let binding = source.resolved.as_ref().ok_or_else(|| AppError::not_found("Audio is offline. Locate media first."))?;
-            if store::source_fingerprint(Path::new(&binding.path))? != binding.fingerprint { return Err(AppError::invalid("Linked media changed. Locate media again before processing.")); }
+            if store::known_fingerprint(Path::new(&binding.path))? != binding.fingerprint { return Err(AppError::invalid("Linked media changed. Locate media again before processing.")); }
         }
     }
     Ok(())
@@ -305,6 +317,29 @@ mod tests {
         std::fs::rename(&parked,&path).unwrap(); refresh_binding(&mut s,&mut c); assert_eq!(s.status,"ready");
         std::fs::write(&path,b"other recording").unwrap(); refresh_binding(&mut s,&mut c); assert_eq!(s.status,"needs_relink");
         refresh_binding(&mut s,&mut c); assert_eq!(s.status,"needs_relink"); assert_eq!(s.resolved.as_ref().unwrap().fingerprint,binding);
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn a_window_checks_only_the_media_under_it() {
+        let path=std::env::temp_dir().join(format!("aaf-window-{}",uuid::Uuid::new_v4()));
+        std::fs::write(&path,b"first recording").unwrap();
+        let mut ready=source(); ready.id="source:ready".into(); ready.status="ready".into();
+        ready.resolved=Some(AafResolvedSource { path:path.to_string_lossy().into_owned(),fingerprint:store::source_fingerprint(&path).unwrap(),stream_index:0,size:15,modified_ms:0 });
+        let mut offline=source(); offline.id="source:offline".into();
+        let clip=|start:i64,source:&str| AafClip { start_frame:start, duration_frames:100, kind:"audio".into(), master_id:None, source_id:Some(source.into()),
+            source_start_sample:None, sample_rate:None, warnings:vec![] };
+        let track=AafTrack { id:"10".into(), name:"Rosa".into(), physical_track_number:None, clips:vec![clip(0,"source:ready"),clip(100,"source:offline")], warnings:vec![] };
+        let mut document:AafDocument=serde_json::from_value(serde_json::json!({ "schema_version":2, "id":"d".repeat(64), "source_path":"/fixtures/kitchen.aaf", "source_size":1, "source_modified_ms":1,
+            "manifest":{ "schema_version":2, "name":"Kitchen", "source_fingerprint":"e".repeat(64), "edit_rate":{ "numerator":24, "denominator":1 },
+                "start_frame":0, "duration_frames":200, "timecode_fps":24, "drop_frame":false, "tracks":[], "warnings":[],
+                "graph":{ "sequence_id":"top", "sources":[], "positions":[], "markers":[], "picture_tracks":[], "path_mappings":[], "lanes":[] } },
+            "labels":[], "transcripts":[] })).unwrap();
+        document.manifest.graph.as_mut().unwrap().sources=vec![ready,offline];
+        // The first clip's media is there; the second's is not. Only a window over the second fails.
+        assert!(check_window_sources(&document,&track,0,50).is_ok());
+        assert!(check_window_sources(&document,&track,99,2).is_err());
+        assert!(check_window_sources(&document,&track,100,50).is_err());
+        assert!(check_sources(&document,&track).is_err());
         std::fs::remove_file(path).unwrap();
     }
     #[test]
