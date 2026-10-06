@@ -37,6 +37,9 @@ import { observePremiereLink, setPremiereVisibleInput } from "./lib/premiere-lin
 import { IconSettings } from "./components/Icons";
 import { ReviewProgramSurfaces, type ReviewProgramSurfacesHandle } from "./components/ReviewProgramSurfaces";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
+import { moveQueue, moveRecents } from "./lib/relink";
+import { ReconnectFileSheet, type ReconnectRequest } from "./components/ReconnectFileSheet";
+import { usePathsMoved } from "./hooks/use-paths-moved";
 import {
   durationToTc, framesToTc, tcToFrames, isCompleteTc,
   tcDigitsToDisplay,
@@ -1090,6 +1093,17 @@ export default function App() {
   // local files when probe_local_file succeeds. Failed loads never land here.
   const [recentSources, setRecentSources] = useState<RecentSource[]>(() => loadRecentSources());
   useEffect(() => saveRecentSources(recentSources), [recentSources]);
+  // "Where is this file?" for an offline file that was opened (ReconnectFileSheet).
+  const [reconnecting, setReconnecting] = useState<ReconnectRequest | null>(null);
+  const reconnectKnown = useMemo(() => [
+    ...recentSources.flatMap((entry) => entry.kind === "file" ? [entry.value] : []),
+    ...clipQueue.flatMap((clip) => clip.source.kind === "file" ? [clip.source.path] : []),
+  ], [recentSources, clipQueue]);
+  // A library root reconnected to a new place: Continue and the clip queue follow it.
+  usePathsMoved(({ from, to }) => {
+    setRecentSources((prev) => moveRecents(prev, from, to));
+    setClipQueue((prev) => moveQueue(prev, from, to));
+  });
   const recordRecentSource = useCallback(
     (entry: { kind: RecentSource["kind"]; value: string; title: string; durationSeconds?: number }) => {
       setRecentSources((prev) => upsertRecent(prev, entry));
@@ -2344,13 +2358,11 @@ export default function App() {
     }
     void (async () => {
       const err = await loadLocalPath(entry.value);
-      if (err?.kind === "NotFound") {
-        setRecentSources((prev) => removeRecent(prev, entry.value));
-        pushNotification("info", "Removed from recents",
-          `"${entry.title}" no longer exists at its saved location.`);
-      }
+      // Not removed: a file on a drive that is not mounted yet is not gone
+      // (docs/RECONNECT-MEDIA-SPEC-2026-10-05.md). Ask where it is instead.
+      if (err?.kind === "NotFound") setReconnecting({ path: entry.value, title: entry.title, durationSeconds: entry.durationSeconds });
     })();
-  }, [handleFetch, loadLocalPath, pushNotification]);
+  }, [handleFetch, loadLocalPath]);
 
   const handleRemoveRecentSource = useCallback((value: string) => {
     setRecentSources((prev) => removeRecent(prev, value));
@@ -2737,7 +2749,10 @@ export default function App() {
     navigateView("coreview");
   }, [handleOpenRecentSource, navigateView]);
   const handleLibraryOpenLocalPath = useCallback((path: string) => {
-    void loadLocalPath(path); // navigates via openSourceView
+    // Navigates via openSourceView; a file that cannot be found asks where it is.
+    void loadLocalPath(path).then((failure) => {
+      if (failure?.kind === "NotFound") setReconnecting({ path, title: path.split("/").pop() || path });
+    });
   }, [loadLocalPath]);
   const handleVideoMoment = useCallback((path: string, seconds: number) => {
     if (!Number.isFinite(seconds) || seconds < 0) return;
@@ -4744,6 +4759,7 @@ export default function App() {
               addFolder={lib.addFolder}
               removeRoot={lib.removeRoot}
               scanRoot={lib.scanRoot}
+              locateRoot={(root) => { void lib.locateRoot(root); }}
               requestThumb={lib.requestThumb}
               invalidateThumb={lib.invalidateThumb}
               posterVersions={lib.posterVersions}
@@ -4765,6 +4781,8 @@ export default function App() {
               scanning={lib.scanning}
               addFolder={lib.addFolder}
               removeRoot={lib.removeRoot}
+              scanRoot={lib.scanRoot}
+              locateRoot={(root) => { void lib.locateRoot(root); }}
               rescanAll={lib.rescanAll}
               requestThumb={lib.requestThumb}
               invalidateThumb={lib.invalidateThumb}
@@ -5928,6 +5946,13 @@ export default function App() {
           above every panel/drawer/modal. Always rendered; the component
           short-circuits to null when closed so the overhead is one
           `if (!open) return null`. */}
+      {reconnecting && <ReconnectFileSheet request={reconnecting} known={reconnectKnown}
+        onCancel={() => setReconnecting(null)}
+        onDone={(path, others) => {
+          setReconnecting(null);
+          void loadLocalPath(path);
+          if (others > 0) pushNotification("success", "Reconnected", `${others} other ${others === 1 ? "file" : "files"} that moved with it ${others === 1 ? "was" : "were"} reconnected too.`);
+        }}/>}
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

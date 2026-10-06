@@ -23,6 +23,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: async () => null }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 vi.mock("../lib/mediabunny-helpers", () => ({
   extractPosterBlob: async () => null,
   extractFrameAsBlob: async () => null,

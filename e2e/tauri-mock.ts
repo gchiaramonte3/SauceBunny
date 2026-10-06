@@ -93,6 +93,23 @@ export function tauriMockInit(expectedBuildId: string): void {
       if (localStorage.getItem("e2e.organization") !== expected) throw new Error("Library folders changed in another window. Reload before editing.");
       localStorage.setItem("e2e.organization", text); return null;
     },
+    // Availability before a scan (docs/RECONNECT-MEDIA-SPEC-2026-10-05.md):
+    // a path naming "missing" moved; one on /Volumes/Offline is an unmounted drive.
+    media_availability: (args: unknown) => (args as { paths: string[] }).paths.map((path) => ({ path,
+      state: path.startsWith("/Volumes/Offline") && localStorage.getItem("e2e.mounted") !== "1" ? "driveOffline" : path.includes("missing") ? "missing" : "online",
+      volume: path.startsWith("/Volumes/") ? path.split("/")[2] : null, folder: !/\.[a-z0-9]{2,4}$/i.test(path) })),
+    // Locate folder… / Locate file…: what a spec has staged, or a cancelled picker.
+    "plugin:dialog|open": () => localStorage.getItem("e2e.pickFolder"),
+    // A file a spec names "missing" is not where it was (NotFound, as Rust
+    // answers); the file a spec staged for Locate probes like a real one.
+    // Everything else keeps the old null probe.
+    probe_local_file: (args: unknown) => {
+      const path = String((args as { path?: unknown } | undefined)?.path ?? "");
+      if (path.includes("missing")) return Promise.reject({ kind: "NotFound", data: path });
+      if (path !== localStorage.getItem("e2e.pickFolder")) return null;
+      return { path, filename: path.split("/").pop(), size_bytes: 1024, duration: 12, width: 1920, height: 1080, fps: 24,
+        vcodec: "h264", acodec: "aac", has_video: true, has_audio: true };
+    },
     library_reference_status: (args: unknown) => (args as { paths: string[] }).paths.map((path) => ({ path, exists: !path.includes("missing") })),
     aaf_list: () => JSON.parse(localStorage.getItem("e2e.aafList") ?? "[]"),
     edit_list: () => [],

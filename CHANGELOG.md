@@ -5,6 +5,26 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- **Offline library folders say why, and come back.** A folder on a drive
+  that is not connected reads "NEXIS is not connected" instead of a red "Not
+  found", and fills in by itself when the drive mounts. A folder that moved
+  offers Locate folder…, which puts the new place where the old one was and
+  takes its posters, marks, timecodes, transcripts, Continue entries and
+  project folder items with it. Offline folders stay in the Library sidebar
+  instead of disappearing from it.
+- **"Where is this file?"** Opening a file that moved asks where it is
+  instead of failing: Locate file… checks the one you pick against what was
+  known about it (name and length) and asks before using a different one,
+  then reconnects the other files that moved with it, as one undo. A file on
+  a drive that is not connected opens by itself when the drive mounts.
+
+### Fixed
+- **Continue no longer forgets a file it cannot reach.** Opening one on a
+  drive that is not mounted used to remove it from Continue.
+- **A Library folder on a drive that stops answering no longer scans for
+  ever.** Each drive gets two seconds, and an unmounted one is never touched.
+
 ## [0.6.0] - 2026-09-29
 
 ### Added

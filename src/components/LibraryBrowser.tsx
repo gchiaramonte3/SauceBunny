@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { diskFolderTargets, mergeFolderBranches, newFolderPath } from "../lib/library-folder";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { LibraryOfflineRoots } from "./LibraryOfflineRoots";
 import { LibraryTree } from "./LibraryTree";
 import { LibraryProjectSidebar } from "./LibraryProjectSidebar";
 import { LibraryProjectPane } from "./LibraryProjectPane";
@@ -67,6 +68,9 @@ type Props = {
   scanning: boolean;
   addFolder: () => Promise<void>;
   removeRoot: (root: string) => void;
+  /** Retry and Locate folder… for a root that is offline. */
+  scanRoot: (root: string) => void;
+  locateRoot: (root: string) => void;
   /** Re-open a cached web source. The URL goes back through the normal fetch
    *  path, which finds the warm cache and skips extraction. */
   onOpenWebUrl: (url: string) => void;
@@ -117,7 +121,7 @@ type Props = {
 const BROWSE_CAP = 300;
 
 export function LibraryBrowser({
-  roots, scans, scanning, addFolder, removeRoot, onOpenWebUrl, rescanAll, requestThumb, invalidateThumb,
+  roots, scans, scanning, addFolder, removeRoot, scanRoot, locateRoot, onOpenWebUrl, rescanAll, requestThumb, invalidateThumb,
   posterVersions, bumpPoster, resetPoster, selection, selectionTick, sessionsRequestTick = 0,
   onOpenLocalPath, onReviewLocalPath, onOpenTranscriptHistory, onOpenMultitrack, transcriptLibrary, onOpenVideoMoment, onVideoSettings,
   onBatchTranscribe, batchLine, onBatchCancel,
@@ -700,6 +704,7 @@ export function LibraryBrowser({
           onCollapse={() => setTreeOpen(false)}
           addFolder={addFolder}
           onAddMenu={(element) => { const rect = element.getBoundingClientRect(); setAddMenu({ x: rect.left, y: rect.bottom }); }}
+          offlineSidebar={<LibraryOfflineRoots roots={roots} scans={scans} onLocate={locateRoot} onRetry={scanRoot} onRemove={removeRoot}/>}
           projectSelected={!!projectId}
           projectSidebar={<LibraryProjectSidebar data={organization.data} selected={projectId} onSelect={selectProject} onDisk={(path) => { setProjectId(null); setShelf(null); setSelected([{ path, name: path.split("/").pop() || path }]); }} onEdit={setEditingProject} onNew={newProject} busy={!organization.ready || organization.busy} dropOver={cardDrag.drag?.over ?? projectDrop} />}
           onFavoriteDisk={favoriteDisk}

@@ -357,24 +357,54 @@ test("library: seeded root scans into a shelf; search filters a flat grid; Esc r
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
-test("library: failed root scan shows the inline error row; remove forgets the root", async ({ page }) => {
+test("library: an offline root says why, Locate folder… reconnects it in place, Remove forgets it", async ({ page }) => {
+  // docs/RECONNECT-MEDIA-SPEC-2026-10-05.md: a missing root is a state with a
+  // next step, not a red "Not found", and nothing is removed until asked.
   await page.addInitScript(() => {
-    localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e/missing-root"]));
+    if (sessionStorage.getItem("e2e.seeded")) return;
+    sessionStorage.setItem("e2e.seeded", "1");
+    localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e/missing-root", "/e2e/gone-root"]));
+    localStorage.setItem("saucebunny.libraryThumbTimes", JSON.stringify({ "/e2e/missing-root/clip.mov": 4 }));
   });
   await boot(page);
   await goHome(page);
-  // Fail loud: the AppError renders inline (formatError), never a silent skip.
   const row = page.locator(".cp-lib-row", { hasText: "missing-root" });
-  await expect(row.getByRole("alert")).toContainText("Not found: /e2e/missing-root");
+  await expect(row.getByRole("status")).toContainText("This folder was moved or renamed");
+  await expect(row.getByText("/e2e/missing-root", { exact: true })).toBeVisible();
+  await expect(row.getByRole("alert")).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Retry" })).toBeVisible();
-  // Remove (hover-revealed ×) asks for confirmation, then forgets the root —
-  // storage included. Disk is never touched (nothing to touch here anyway).
-  page.once("dialog", (d) => { void d.accept(); });
-  await row.locator(".cp-lib-row-head").hover();
-  await row.getByRole("button", { name: /Remove missing-root/ }).click();
+  await page.screenshot({ path: test.info().outputPath("offline-root-home.png") });
+  // Locate folder…: the new place takes the old one's position, and what was stored under it follows.
+  await page.evaluate(() => localStorage.setItem("e2e.pickFolder", "/e2e/Library"));
+  await row.getByRole("button", { name: "Locate folder…" }).click();
   await expect(page.locator(".cp-lib-row", { hasText: "missing-root" })).toHaveCount(0);
-  const roots = await page.evaluate(() => localStorage.getItem("saucebunny.libraryRoots"));
-  expect(roots).toBe("[]");
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem("saucebunny.libraryRoots") ?? "[]"))).toEqual(["/e2e/Library", "/e2e/gone-root"]);
+  expect(JSON.parse(await page.evaluate(() => localStorage.getItem("saucebunny.libraryThumbTimes") ?? "{}"))).toEqual({ "/e2e/Library/clip.mov": 4 });
+  // Remove asks, then forgets the root; disk is never touched.
+  page.once("dialog", (d) => { void d.accept(); });
+  await page.locator(".cp-lib-row", { hasText: "gone-root" }).getByRole("button", { name: "Remove gone-root from library" }).click();
+  await expect(page.locator(".cp-lib-row", { hasText: "gone-root" })).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("saucebunny.libraryRoots"))).toBe(JSON.stringify(["/e2e/Library"]));
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
+test("library: a root on a drive that is not connected comes back by itself when it mounts", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/Volumes/Offline/Show"]));
+  });
+  await boot(page);
+  await goHome(page);
+  const row = page.locator(".cp-lib-row", { hasText: "Show" }).first();
+  await expect(row.getByRole("status")).toContainText("Offline is not connected");
+  await expect(row.getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await page.locator(".cp-nav-item").filter({ hasText: "Library" }).first().click();
+  await expect(page.getByRole("region", { name: "Offline folders" })).toContainText("Show");
+  await page.screenshot({ path: test.info().outputPath("offline-root-sidebar.png") });
+  await page.evaluate(() => {
+    localStorage.setItem("e2e.mounted", "1");
+    (window as unknown as { __TAURI_MOCK__: { emitTauriEvent: (event: string, payload: unknown) => void } }).__TAURI_MOCK__.emitTauriEvent("media:volumes-changed", null);
+  });
+  await expect(page.getByRole("region", { name: "Offline folders" })).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 

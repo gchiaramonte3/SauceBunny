@@ -124,6 +124,16 @@ serializes acknowledged writes and owns scoped undo/redo. The native
 atomically, with expected-text compare-and-save and a stable sibling file lock
 across app processes. Failed or unknown-format reads never authorize a reset.
 
+Library roots that cannot be reached are a state, not an error
+(`docs/RECONNECT-MEDIA-SPEC-2026-10-05.md`). `commands/availability.rs`
+answers whether paths can be reached from the kernel's mount table and one
+time-limited probe per volume, so an unmounted or stalled NEXIS never holds a
+thread the app waits on, and `watch_volumes` emits `media:volumes-changed`
+when a drive mounts. `use-library-scan` asks before it scans and asks again on
+that event; Locate folder… moves every record stored under the old root
+through `src/lib/relink.ts` (`moveStoredPaths`, and `PATHS_MOVED_EVENT` for
+records held in component state).
+
 Project items are references to local paths, web URLs, transcript paths or saved
 Multitrack document IDs. Removal/reparenting never deletes originals. Media
 rename/repath updates stable asset IDs; organization undo preserves those newer

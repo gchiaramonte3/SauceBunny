@@ -16,6 +16,11 @@ import {
   saveLibraryRoots,
 } from "../lib/library";
 import type { LibraryFolder } from "../types";
+import type { MediaAvailability } from "../bindings/MediaAvailability";
+import type { MediaState } from "../bindings/MediaState";
+import { moveStoredPaths } from "../lib/relink";
+import { samePath } from "../lib/repath";
+import { useTauriListeners } from "./use-tauri-listeners";
 
 // ════════════════════════════════════════════════════════════════════════
 // Poster loader — module scope so the cache is one per app, shared by every
@@ -530,7 +535,11 @@ export function requestHoverFrames(path: string): Promise<string[]> {
 export type RootScan =
   | { status: "loading" }
   | { status: "ok"; tree: LibraryFolder }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string }
+  /** Cannot be reached, and why: a drive that is not mounted, a folder that
+   *  moved, a volume that does not answer, or no permission
+   *  (docs/RECONNECT-MEDIA-SPEC-2026-10-05.md). Not an error, and never removed. */
+  | { status: "offline"; state: Exclude<MediaState, "online">; volume: string | null };
 
 export type LibraryScan = {
   /** Persisted root folders the user added (order preserved). */
@@ -547,6 +556,8 @@ export type LibraryScan = {
   rescanAll: () => void;
   /** Re-scan one root (the inline error row's Retry). */
   scanRoot: (root: string) => void;
+  /** Locate folder…: point an offline root at where it is now, moving everything stored under it. */
+  locateRoot: (root: string) => Promise<void>;
   /** Shared, cached, concurrency-capped poster loader. */
   requestThumb: (path: string) => Promise<string | null>;
   /** Bust one path's cached poster (race-guarded blob revoke). */
@@ -607,6 +618,14 @@ export function useLibraryScan(warmPosters = true): LibraryScan {
     const sweep = scanSweepRef.current;
     setScans((s) => ({ ...s, [root]: { status: "loading" } }));
     try {
+      // Ask first, with a time limit and without touching an unmounted drive,
+      // so a dead NEXIS reads as offline instead of "Scanning…" for ever.
+      const [found] = await invoke<MediaAvailability[]>("media_availability", { paths: [root] }) ?? [];
+      if (scanSweepRef.current !== sweep || !rootsRef.current.includes(root)) return;
+      if (found && found.state !== "online") {
+        setScans((s) => ({ ...s, [root]: { status: "offline", state: found.state as Exclude<MediaState, "online">, volume: found.volume } }));
+        return;
+      }
       const tree = await invoke<LibraryFolder>("scan_library_folder", {
         path: root,
         maxDepth: LIBRARY_SCAN_DEPTH,
@@ -708,11 +727,53 @@ export function useLibraryScan(warmPosters = true): LibraryScan {
 
   const scanRoot = useCallback((root: string) => { void scanOne(root); }, [scanOne]);
 
+  // A drive mounting, or coming back to the window, brings offline roots
+  // back without a click. Only roots that are offline or failed are asked
+  // again, and asking never waits on a volume that does not answer.
+  const scansRef = useRef(scans);
+  scansRef.current = scans;
+  const recheck = useCallback(() => {
+    for (const root of rootsRef.current) {
+      const state = scansRef.current[root]?.status;
+      if (state === "offline" || state === "error") void scanOne(root);
+    }
+  }, [scanOne]);
+  useTauriListeners((on) => {
+    const onMediaVolumesChanged = () => recheck();
+    on("media:volumes-changed", onMediaVolumesChanged);
+  }, [recheck]);
+  useEffect(() => {
+    window.addEventListener("focus", recheck);
+    return () => window.removeEventListener("focus", recheck);
+  }, [recheck]);
+
+  const locateRoot = useCallback(async (root: string) => {
+    const name = root.split("/").pop() || root;
+    const scan = scansRef.current[root];
+    const parent = root.slice(0, root.lastIndexOf("/")) || "/";
+    const picked = await openDialog({ directory: true, multiple: false, title: `Locate ${name}`,
+      defaultPath: scan?.status === "offline" && scan.state === "driveOffline" ? "/Volumes" : parent });
+    if (typeof picked !== "string" || !picked || samePath(picked, root)) return;
+    // The new place takes the old one's position on Home; a folder already in
+    // the library just absorbs it rather than appearing twice.
+    const current = rootsRef.current;
+    const next = current.some((r) => samePath(r, picked)) ? current.filter((r) => r !== root) : current.map((r) => (r === root ? picked : r));
+    rootsRef.current = next;
+    setRoots(next);
+    saveLibraryRoots(next);
+    setScans((s) => {
+      const { [root]: _moved, ...rest } = s;
+      return rest;
+    });
+    moveStoredPaths(root, picked);
+    void scanOne(picked);
+  }, [scanOne]);
+
   const scanning = roots.some((r) => scans[r]?.status === "loading");
 
   return {
     roots, scans, scanning,
-    addFolder, removeRoot, rescanAll, scanRoot,
+    addFolder, removeRoot, rescanAll, scanRoot, locateRoot,
     requestThumb: requestThumbnail, invalidateThumb,
     posterVersions, bumpPoster, resetPoster,
   };

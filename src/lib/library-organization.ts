@@ -171,6 +171,17 @@ export function matchesSmartFolder(asset: LibraryAsset, facts: LibraryAssetFacts
     || (rule.status === "needs-review" && facts.needsReview === true) || (rule.status === "offline" && facts.offline === true);
 }
 
+/** A folder moved: files and transcripts under it, and disk Favorites, follow. Same object when nothing moved. */
+export function moveOrganizationPaths(data: LibraryOrganization, move: (path: string) => string | null): LibraryOrganization {
+  const assets = data.assets.map((a) => {
+    const moved = a.kind === "file" || a.kind === "transcript" ? move(a.locator) : null;
+    return moved ? { ...a, locator: moved } : a;
+  });
+  const favorites = data.favorites.map((f) => { const moved = f.kind === "disk" ? move(f.target) : null; return moved ? { ...f, target: moved } : f; });
+  const changed = assets.some((a, i) => a !== data.assets[i]) || favorites.some((f, i) => f !== data.favorites[i]);
+  return changed ? { ...data, assets, favorites } : data;
+}
+
 export function relinkAsset(data: LibraryOrganization, id: string, locator: string): LibraryOrganization {
   const asset = data.assets.find((a) => a.id === id);
   if (!asset || (asset.kind !== "file" && asset.kind !== "transcript")) throw new Error("Only local files can be relinked.");

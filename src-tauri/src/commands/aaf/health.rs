@@ -236,27 +236,16 @@ fn without_account(from: &str) -> String {
     }
 }
 
-/// Every mount but the system's own. MNT_NOWAIT, so a stalled network volume
-/// answers from the kernel's cache instead of holding this up.
-#[cfg(target_os = "macos")]
+/// Every mount but the system's own, from the kernel's cached table
+/// (`availability::mounts`, MNT_NOWAIT), so a stalled network volume answers
+/// from the cache instead of holding this up.
 fn volumes() -> Vec<String> {
-    let mut mounts: *mut libc::statfs = std::ptr::null_mut();
-    // SAFETY: getmntinfo points `mounts` at a buffer it owns, holding `count` entries.
-    let count = unsafe { libc::getmntinfo(&mut mounts, libc::MNT_NOWAIT) };
-    if count <= 0 || mounts.is_null() { return Vec::new(); }
-    // SAFETY: as above; the buffer stays valid until the next getmntinfo on this thread.
-    let mounts = unsafe { std::slice::from_raw_parts(mounts, count as usize) };
-    let text = |chars: &[libc::c_char]| unsafe { std::ffi::CStr::from_ptr(chars.as_ptr()) }.to_string_lossy().into_owned();
-    mounts.iter().filter_map(|mount| {
-        let on = text(&mount.f_mntonname);
-        let kind = text(&mount.f_fstypename);
-        let local = mount.f_flags & libc::MNT_LOCAL as u32 != 0;
-        let system = on == "/" || on.starts_with("/System/") || on.starts_with("/private/var/") || matches!(kind.as_str(), "devfs" | "autofs" | "nullfs");
-        (!system).then(|| format!("{on} · {kind} · {} · from {}", if local { "local" } else { "network" }, without_account(&text(&mount.f_mntfromname))))
+    crate::commands::availability::mounts().into_iter().filter_map(|mount| {
+        let system = mount.on == "/" || mount.on.starts_with("/System/") || mount.on.starts_with("/private/var/")
+            || matches!(mount.kind.as_str(), "devfs" | "autofs" | "nullfs");
+        (!system).then(|| format!("{} · {} · {} · from {}", mount.on, mount.kind, if mount.local { "local" } else { "network" }, without_account(&mount.from)))
     }).collect()
 }
-#[cfg(not(target_os = "macos"))]
-fn volumes() -> Vec<String> { Vec::new() }
 
 #[tauri::command]
 pub async fn pipeline_health(app: AppHandle) -> Result<PipelineHealth, AppError> {

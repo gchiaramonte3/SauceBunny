@@ -1103,6 +1103,26 @@ the acceptance test for whenever the verdict UI gets built.
 3. **Nothing changes.** With Sauce Bunny open on a string out, ask Claude to
    change it: it says it can only read. History shows no new step.
 
+### Offline library roots come back (docs/RECONNECT-MEDIA-SPEC-2026-10-05.md)
+
+1. Add a folder on NEXIS (or any external drive) to the Library, open a clip
+   from it so it is in Continue, set a poster and in/out marks on it.
+2. Quit, unmount the drive, relaunch. Home shows the root as "NEXIS is not
+   connected" with its path, not a red "Not found"; the Library sidebar lists
+   it under Offline. The app stays responsive throughout.
+3. Mount the drive: within a few seconds the shelf fills by itself.
+4. Rename the folder in Finder. Home says "This folder was moved or renamed".
+   Locate folder… and choose it: the shelf returns in the same place, and the
+   clip's poster, marks and Continue entry are still there.
+5. With the drive unmounted, open the clip from Continue: "NEXIS is not
+   connected"; mount it and the clip opens by itself. The entry stays in
+   Continue either way.
+6. Move two clips that are both in Continue into another folder in Finder.
+   Open one: "Where is …?". Locate file…: it opens, and the other clip's
+   Continue tile now points at its new place too. ⌘Z puts both back.
+7. Locate a different file (another name or length): the sheet lists what
+   differs and waits for "Use this file anyway".
+
 ### The Pipeline on String Outs (what to send when it hangs)
 
 1. In String Outs, press ⌘\: the Pipeline opens at the foot of the page with
