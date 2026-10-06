@@ -407,15 +407,16 @@ Library rather than relying on the monitor's.
 
 ---
 
-## Decisions for the owner
+## Decisions (the owner agreed all three as recommended, 2026-10-05)
 
-1. **Should the Reconnect Media dialog open by itself** when the app starts
-   with offline items? Recommended: no (see phase 3), a pill instead.
-2. **Should "Reconnect others automatically" be on by default?** Recommended:
-   yes, as in Premiere; it only acts on items whose name and size match.
-3. **Is "changed" (same name, different size) worth stopping for?**
-   Recommended: yes, one click; a re-exported file with the same name is a
-   different cut, and its review notes may not apply.
+1. **The Reconnect Media dialog does not open by itself** when the app starts
+   with offline items (see phase 3); a pill instead, because the owner often
+   launches before NEXIS is mounted.
+2. **"Reconnect others automatically" is on by default**, as in Premiere; it
+   only acts on items whose name matches and that are present at the new place.
+3. **"Changed" (same name, different size or length) stops for one click**: a
+   re-exported file with the same name is a different cut, and its review
+   notes may not apply.
 
 ---
 
