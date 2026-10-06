@@ -128,8 +128,10 @@ it("measures a sequence's main mics before anyone is patched, so the Source view
   // A new string out patches nobody; Rosa's and Sam's are the sequence's own tracks.
   const fresh: EditDocument = { ...document, tracks: document.tracks.map((track) => ({ ...track, featured: false })) };
   const { result } = renderHook(() => useEditSources(fresh, true));
+  // Waiting for `measuring` to be false is not enough: it is false before
+  // measuring starts, so under a loaded suite the calls were read too early.
+  await waitFor(() => expect(calls("aaf_speech", true).map(([, args]) => args.trackId)).toEqual(["track-1", "track-2"]));
   await waitFor(() => expect(result.current.measuring).toBe(false));
-  expect(calls("aaf_speech", true).map(([, args]) => args.trackId)).toEqual(["track-1", "track-2"]);
 });
 
 it("is not measured while words are still being read, nor when a mic's words failed", async () => {

@@ -56,18 +56,21 @@ async function boot(page: Page, trackCount = 3, audible = false, grouped = false
       if (command === "plugin:dialog|save") return Promise.resolve("/exports/transcript.txt");
       if (command === "write_text_to_path") return Promise.resolve(args.path);
       if (command === "print_transcript" || command === "export_transcript_pdf") return Promise.resolve();
-      if (command === "aaf_import" || command === "aaf_open") return Promise.resolve(fixture);
+      // A copy, as the real IPC delivers one: handing the page the mock's own
+      // object let a run's commit change the page's document in place,
+      // without a render, which no build can do.
+      if (command === "aaf_import" || command === "aaf_open") return Promise.resolve(structuredClone(fixture));
       // Deliberately never finishes: opening the timeline and reading saved
       // dialogue must not depend on a slow or disconnected MXF mount.
       if (command === "aaf_resolve_media") return new Promise(() => {});
-      if (command === "aaf_save_labels") { fixture.labels = args.labels as typeof fixture.labels; return Promise.resolve(fixture); }
+      if (command === "aaf_save_labels") { fixture.labels = args.labels as typeof fixture.labels; return Promise.resolve(structuredClone(fixture)); }
       if (command === "aaf_waveform") return Promise.resolve({ track_id: args.trackId, peaks: Array.from({ length: 400 }, (_, index) => { const height = (index % 19) / 20; return [-height, height]; }) });
       if (command === "parakeet_model_downloaded") return Promise.resolve(true);
       if (command === "list_whisper_models") return Promise.resolve([{ id: "large-v3", name: "Large v3", downloaded: true }]);
       if (command === "aaf_transcribe_track") {
         const committed = { ...transcript, track_id: args.trackId as string, start_frame: args.startFrame as number, duration_frames: args.durationFrames as number };
         fixture.transcripts = [...fixture.transcripts.filter(t => t.track_id !== committed.track_id), committed];
-        return Promise.resolve(committed);
+        return Promise.resolve(structuredClone(committed));
       }
       if (command === "aaf_prepare_audio") return Promise.resolve({ path: `/e2e-mock/solo-${args.durationFrames}.wav`, start_frame: args.startFrame, duration_frames: args.durationFrames, sample_rate: 16000, sample_count: Math.ceil(Number(args.durationFrames) * 1001 / 24000 * 16000), peaks: [] });
       return original(command, args);

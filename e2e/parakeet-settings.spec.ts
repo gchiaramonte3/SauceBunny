@@ -22,7 +22,7 @@ test("a missing Parakeet model is downloaded in Settings, and AAF Audio sees it 
     app.__TAURI_INTERNALS__.invoke = (command, args = {}) => {
       if (command === "aaf_list") return Promise.resolve([]);
       if (command === "aaf_sequences") return Promise.resolve([{ id: "fixture", name: fixture.manifest.name }]);
-      if (command === "aaf_import" || command === "aaf_open") return Promise.resolve(fixture);
+      if (command === "aaf_import" || command === "aaf_open") return Promise.resolve(structuredClone(fixture));
       if (command === "plugin:dialog|open") return Promise.resolve(fixture.source_path);
       if (command === "aaf_resolve_media") return new Promise(() => {});
       if (command === "list_whisper_models") return Promise.resolve([]);
