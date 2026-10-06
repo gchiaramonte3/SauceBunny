@@ -250,8 +250,11 @@ stored words.
 every file 0.17.5 expects. 0.17.5 also links text-processing-rs's
 NemoTextProcessing (Apache-2.0, statically, opt-out only from a Swift 6.2
 manifest), recorded in THIRD-PARTY-LICENSES. Ultra is offered first in AAF
-Audio's picker with its own cancellable download, not in Settings, since
-that is where it is used. Cast names are an opt-in "Spell cast names" (the
+Audio's picker. (It first had its own cancellable download there, not in
+Settings, since that is where it is used. The owner reversed that on October
+5: every model downloads in Settings ▸ Transcription, which now lists Ultra
+and v3, and AAF Audio says which model is missing and links there;
+`docs/UI-CORRECTIONS-2026-10-05.md`, item 11.) Cast names are an opt-in "Spell cast names" (the
 mic owners' names), **off by default**, because the first real run showed
 why: on Parakeet v3 at the cautious similarity, FluidAudio's rescorer fixed
 "Siomara" to "Xiomara" and also turned "it was funny" into "it Saoirse". A

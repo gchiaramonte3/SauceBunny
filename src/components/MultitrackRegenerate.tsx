@@ -3,14 +3,16 @@ import { createPortal } from "react-dom";
 import type { WhisperModel } from "../bindings/WhisperModel";
 import type { MultitrackModelChoice } from "../hooks/use-multitrack-transcription";
 import type { useParakeetModels } from "../hooks/use-parakeet-models";
-import { PARAKEET_MODELS } from "../lib/parakeet-models";
+import { PARAKEET_MODELS, parakeetName } from "../lib/parakeet-models";
 import { useModalFocus } from "../hooks/use-modal-focus";
 import { MultitrackModelPicker } from "./MultitrackModelPicker";
 import { GenerateButton } from "./GenerateButton";
 
-export function MultitrackRegenerate({ owner, generated = false, initial, models, parakeet, onClose, onStart }: {
+export function MultitrackRegenerate({ owner, generated = false, initial, models, parakeet, onClose, onStart, onOpenSettings }: {
   owner: string; generated?: boolean; initial: MultitrackModelChoice; models: WhisperModel[]; parakeet: ReturnType<typeof useParakeetModels>;
   onClose: () => void; onStart: (choice: MultitrackModelChoice) => void;
+  /** Settings ▸ Transcription, the one place models download. */
+  onOpenSettings?: () => void;
 }) {
   const [choice, setChoice] = useState(initial), dialog = useRef<HTMLDivElement>(null);
   useModalFocus(true, dialog);
@@ -21,7 +23,8 @@ export function MultitrackRegenerate({ owner, generated = false, initial, models
       <header><h2>{action} {owner}</h2><button className="btn btn-ghost" aria-label="Close transcription options" onClick={onClose}>×</button></header>
       <p>Transcribe this track's entire sequence with the selected engine. {generated && "Its saved transcript stays available until the replacement succeeds. "}Other tracks stay unchanged.</p>
       <div className="cp-multitrack-options"><MultitrackModelPicker choice={choice} models={models} onChange={setChoice} parakeet={parakeet} /></div>
-      {!ready && <p>{choice.engine === "parakeet" ? "Download the model above first." : "An installed model is required. Download it in Settings first."}</p>}
+      {!ready && <p>{choice.engine === "parakeet" ? `${parakeetName(choice.parakeetModel ?? PARAKEET_MODELS[0].id)} is not downloaded.` : "An installed Whisper model is required."}
+        {onOpenSettings && <> <button type="button" className="cp-multitrack-text-button" onClick={() => { onClose(); onOpenSettings(); }}>Download in Settings…</button></>}</p>}
       <footer><button className="btn btn-ghost" onClick={onClose}>Cancel</button><GenerateButton idleLabel={`${action} track`} loading={false} disabled={!ready} onClick={() => onStart(choice)} /></footer>
     </div>
   </div>, document.body);

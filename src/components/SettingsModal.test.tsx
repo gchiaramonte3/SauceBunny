@@ -51,7 +51,8 @@ vi.mock("@tauri-apps/api/core", () => ({
     return Promise.resolve(null);
   },
 }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => {}) }));
+// emit: Settings tells AAF Audio when it installs or deletes a Parakeet model.
+vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => {}), emit: () => Promise.resolve() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 vi.mock("@tauri-apps/api/path", () => ({ appDataDir: () => Promise.resolve("/d"), join: (...p: string[]) => Promise.resolve(p.join("/")) }));
 
@@ -148,19 +149,20 @@ describe("deleting a downloaded model", () => {
   });
 });
 
-describe("the Parakeet model, which has no size to name", () => {
-  it("arms too, and asks in words rather than inventing a number", async () => {
-    // Parakeet carries no size_bytes, and the only figure that exists is the
-    // "~0.5 GB" transcript.rs already states twice. A third copy in a third
-    // language is the drift duplicated-tables-contract exists to stop, so the
-    // arming carries the safety and the label stays qualitative.
+describe("the Parakeet models", () => {
+  it("each arms before it deletes, naming its size as the Whisper rows do", async () => {
+    // This used to stay qualitative ("Delete the model?") because the only
+    // size was a figure in transcript.rs. The sizes are now in
+    // lib/parakeet-models too, pinned to the Rust table by
+    // duplicated-tables-contract, so naming one adds no unpinned copy.
     render(<SettingsModal {...props()} />);
-    const b = await screen.findByRole("button", { name: "Delete the Parakeet model" });
+    const b = await screen.findByRole("button", { name: "Delete Parakeet TDT 0.6B v3" });
     fireEvent.click(b);
     expect(h.calls.some((c) => c.cmd === "delete_parakeet_model")).toBe(false);
-    expect(b.textContent).toBe("Delete the model?");
-    fireEvent.click(b);
-    expect(h.calls.some((c) => c.cmd === "delete_parakeet_model")).toBe(true);
+    const armed = screen.getByRole("button", { name: "Confirm deleting Parakeet TDT 0.6B v3" });
+    expect(armed.textContent).toBe("Delete ≈0.5 GB?");
+    fireEvent.click(armed);
+    await waitFor(() => expect(h.calls.find((c) => c.cmd === "delete_parakeet_model")?.args).toEqual({ model: "parakeet-tdt-0.6b-v3" }));
   });
 });
 

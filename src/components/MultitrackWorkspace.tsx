@@ -22,6 +22,7 @@ import { MultitrackTimecodeDialog } from "./MultitrackTimecodeDialog";
 import { MultitrackMediaStatus } from "./MultitrackMediaStatus";
 import { alternativeLane, laneMetadata, laneReady, laneSelectable, visibleLanes } from "../lib/multitrack-graph";
 import { loadViewState, saveViewState } from "../lib/multitrack-view-state";
+import { parakeetName } from "../lib/parakeet-models";
 
 type Props = {
   document: AafDocument; active: boolean; waveforms: Record<string, number[][]>; waveformErrors: Record<string, string>;
@@ -153,13 +154,13 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
           <div className="cp-multitrack-generate-row"><GenerateButton idleLabel={`Generate ${chosen.length} ${chosen.length === 1 ? "track" : "tracks"}`} loadingLabel={transcription.status || "Preparing…"} loading={transcription.loading} progress={transcription.progress} resolution={transcription.resolution} onResolved={transcription.clearResolution} disabled={cannotGenerate} onClick={() => void transcription.start(chosen, range.start, range.end - range.start)} />
             {transcription.loading && <button className="btn btn-ghost" onClick={transcription.stop}>Stop</button>}</div>
         </div>
-        {!transcription.ready && <p className="cp-multitrack-note">An installed model is required. {onOpenSettings && <button className="cp-multitrack-text-button" onClick={onOpenSettings}>Open model settings</button>}</p>}
+        {!transcription.ready && <p className="cp-multitrack-note">{transcription.engine === "parakeet" ? `${parakeetName(transcription.parakeetModel)} is not downloaded.` : "An installed Whisper model is required."} {onOpenSettings && <button className="cp-multitrack-text-button" onClick={onOpenSettings}>Download in Settings…</button>}</p>}
         {!selected.size && <p className="cp-multitrack-note">Check at least one track to generate.</p>}
         {transcription.status && <p className="cp-multitrack-note" role="status">{transcription.status}</p>}
       </div>
     </div>
     <MultitrackTrackActions document={document} target={trackMenu} disabled={transcription.loading} onClose={closeTrackMenu} onRegenerate={(id) => { audio.pause(); setRegenerate(id); }} />
-    {regenerate && active && <MultitrackRegenerate owner={trackOwner(document, regenerate)} generated={document.transcripts.some(item => item.track_id === regenerate)} initial={{ engine: transcription.engine, modelId: transcription.modelId, parakeetModel: transcription.parakeetModel, ...transcription.options }} models={transcription.models} parakeet={transcription.parakeet} onClose={() => setRegenerate(null)} onStart={(choice) => { const id = regenerate; setRegenerate(null); transcription.setOptions({ fast: choice.fast === true, speechOnly: choice.speechOnly === true, castNames: choice.castNames === true }); void transcription.start([id], 0, duration, choice); }} />}
+    {regenerate && active && <MultitrackRegenerate owner={trackOwner(document, regenerate)} generated={document.transcripts.some(item => item.track_id === regenerate)} initial={{ engine: transcription.engine, modelId: transcription.modelId, parakeetModel: transcription.parakeetModel, ...transcription.options }} models={transcription.models} parakeet={transcription.parakeet} onOpenSettings={onOpenSettings} onClose={() => setRegenerate(null)} onStart={(choice) => { const id = regenerate; setRegenerate(null); transcription.setOptions({ fast: choice.fast === true, speechOnly: choice.speechOnly === true, castNames: choice.castNames === true }); void transcription.start([id], 0, duration, choice); }} />}
     <div className="cp-multitrack-transcript-pane">
       <div className={`cp-multitrack-resize cp-resize-handle vertical${pane.resizing ? " dragging" : ""}`} role="separator" aria-label="Resize track transcripts" aria-orientation="vertical" aria-valuemin={pane.min} aria-valuemax={pane.max} aria-valuenow={Math.min(pane.width, paneMax)} tabIndex={0} onMouseDown={pane.onMouseDown} onKeyDown={pane.onKeyDown} onDoubleClick={() => pane.setWidth(340)} title="Drag to resize · arrow keys to nudge · Home to reset" />
       <MultitrackTranscript document={document} frame={audio.frame} solo={audio.solo} onSeek={seek} report={transcription.report} error={transcription.error} loading={transcription.loading} active={active} aiModelId={aiModelId} selectedTracks={selected} request={transcriptRequest} />

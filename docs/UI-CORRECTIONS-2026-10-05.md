@@ -15,9 +15,9 @@ change the owner can see comes before the one they cannot ("prioritize the UI
 changes"). One item jumps the queue: **1** is a data-loss hazard found while
 reading the Transcripts page, and it is a few lines.
 
-**Status (2026-10-05):** items 1 to 8 are built (pull request A), and 9, 12
-and 13 (pull request B). The rest are taken one at a time in this order, each
-as its own pull request.
+**Status (2026-10-05):** items 1 to 8 are built (pull request A), 9, 12 and
+13 (pull request B), and 11 (pull request C). The rest are taken one at a
+time in this order, each as its own pull request.
 
 | # | Item | What it is | Effort | PR |
 |---|---|---|---|---|
@@ -228,6 +228,16 @@ MB) and the voice model behind Check voices.
 **Done when:** no `download_parakeet_model` call remains outside Settings
 (`cancellable-download-contract` says so), and Ultra installs and deletes from
 Settings.
+
+**As built (C):** `ParakeetModelRows` in Settings ▸ Transcription ▸ Parakeet:
+Ultra first and Recommended, then v3, each with Download, Cancel, an armed
+Delete and Installed; only v3 offers Use as default and In use, because it is
+what Clip and dictation run. Deleting v3 while it is in use falls back to
+Whisper, as before. AAF Audio's picker marks a missing model "(not
+downloaded)", and the workspace and the Regenerate dialog each say which
+model is missing with **Download in Settings…**. Settings emits
+`panel:parakeet-models-changed` after an install or a delete, and AAF Audio
+checks again on it. The speller and voice-model rows are still to do.
 
 ## 12. "Add sequence…" is a short menu you can clear
 

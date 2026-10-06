@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 
 /**
  * A long download holds its job id, so Cancel has something to cancel.
@@ -19,9 +19,13 @@ import { resolve } from "node:path";
  * of those they are looking at.
  *
  * This pins the half that is checkable in source: the id is held, and the
- * cancel path exists.
+ * cancel path exists. It also pins WHERE a model downloads: only Settings.
+ * AAF Audio's picker downloaded Parakeet Ultra inline, so the one model the
+ * owner most needed could not be seen or deleted where every other model is
+ * (docs/UI-CORRECTIONS-2026-10-05.md, item 11).
  */
-const SETTINGS = resolve(__dirname, "../components/SettingsModal.tsx");
+const SETTINGS = resolve(__dirname, "../components/ParakeetModelRows.tsx");
+const SRC = resolve(__dirname, "..");
 const RUST = resolve(__dirname, "../../src-tauri/src/commands/transcript.rs");
 
 function lines(text: string): string {
@@ -55,6 +59,20 @@ describe("the model download can be stopped", () => {
 
   it("offers a cancel that reaches the running job", () => {
     expect(ui, "no cancel path for the model download").toMatch(/cancel_job/);
+  });
+
+  it("downloads a model only from Settings", () => {
+    const callers: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) { walk(path); continue; }
+        if (!/\.tsx?$/.test(name) || /\.test\.tsx?$/.test(name)) continue;
+        if (lines(readFileSync(path, "utf8")).includes("download_parakeet_model")) callers.push(relative(SRC, path));
+      }
+    };
+    walk(SRC);
+    expect(callers, "a page other than Settings downloads a Parakeet model").toEqual(["components/ParakeetModelRows.tsx"]);
   });
 
   it("does not report a cancelled download as a failure", () => {
