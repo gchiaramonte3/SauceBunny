@@ -735,6 +735,46 @@
   overflow-wrap: anywhere;
 }
 
+/* An offline root (LibraryOfflineRoot): a state, not an error, so neutral
+   rather than red, with the reason first and the next step beside it. */
+.cp-lib-offline {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin: 0 var(--s-7);
+  padding: var(--s-3);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+}
+.cp-lib-offline-icon { color: var(--fg-3); }
+.cp-lib-offline-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  color: var(--fg-3);
+}
+.cp-lib-offline-text strong { color: var(--fg-1); font-weight: var(--weight-bold); }
+.cp-lib-offline-path {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg-4);
+}
+.cp-lib-offline-actions { display: flex; flex: none; flex-wrap: wrap; gap: var(--s-2); }
+.cp-lib-offline-roots { margin-top: var(--s-3); }
+.cp-lib-offline-root { display: flex; align-items: center; gap: var(--s-2); min-height: 30px; padding: 0 var(--s-2); color: var(--fg-3); }
+.cp-lib-offline-name { display: flex; flex: 1; flex-direction: column; min-width: 0; font: var(--text-md)/var(--leading-snug) var(--font-ui); }
+.cp-lib-offline-name > span, .cp-lib-offline-name > small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cp-lib-offline-name > small { font-size: var(--text-sm); color: var(--fg-4); }
+.cp-lib-offline-root .cp-lib-tree-act { width: auto; padding: 0 var(--s-1); font: var(--text-sm)/var(--leading-snug) var(--font-ui); }
+
 /* ============================================================
    THUMBNAIL PICKER — "Choose thumbnail…" modal (fixed overlay +
    backdrop, 16:9 preview, scrub slider OR preset tiles, action row).

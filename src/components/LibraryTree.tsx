@@ -7,6 +7,8 @@ import { libraryPosterPaths, type LibraryCrumb, type LibraryKindFilter } from ".
 import { FolderTagMenu } from "./FolderTagMenu";
 import { useFinderTags } from "../hooks/use-finder-tags";
 import { primarySwatch } from "../lib/finder-tags";
+import { usePathsMoved } from "../hooks/use-paths-moved";
+import { moveList } from "../lib/relink";
 
 /** Which folders are open. Persisted so a deep library does not cost the
  *  same four expansions on every launch. */
@@ -26,6 +28,8 @@ type Props = {
   addFolder: () => Promise<void>;
   onAddMenu?: (element: HTMLElement) => void;
   projectSidebar?: React.ReactNode;
+  /** Roots that cannot be reached, listed under the tree rather than dropped from it. */
+  offlineSidebar?: React.ReactNode;
   projectSelected?: boolean;
   onFavoriteDisk?: (path: string) => void;
   favoritePaths?: string[];
@@ -138,7 +142,7 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
 export function LibraryTree({
   trees, selection, onSelect, kind, onKind, onCollapse,
   addFolder, rescanAll, scanning, removeRoot, shelf, onSelectShelf, dropOver,
-  onAddMenu, projectSidebar, projectSelected, onFavoriteDisk, favoritePaths = [], onLoadFolder,
+  onAddMenu, projectSidebar, offlineSidebar, projectSelected, onFavoriteDisk, favoritePaths = [], onLoadFolder,
 }: Props) {
   /* Roots open by default; ancestors of the current selection are revealed
      when the selection CHANGES. Persisted, because a deep library otherwise
@@ -159,6 +163,11 @@ export function LibraryTree({
     return { set: new Set<string>(), had: false };
   }, []);
   const [expanded, setExpanded] = useState<Set<string>>(stored.set);
+  // A root reconnected to a new place keeps its folders open.
+  usePathsMoved(({ from, to }) => setExpanded((prev) => {
+    const moved = moveList([...prev], from, to);
+    return moved.every((path) => prev.has(path)) ? prev : new Set(moved);
+  }));
   useEffect(() => {
     try { localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expanded])); } catch { /* quota */ }
   }, [expanded]);
@@ -457,6 +466,7 @@ export function LibraryTree({
           );
         })}
         </div>
+        {offlineSidebar}
       </div>
       <div
         className={"cp-lib-tree-resize cp-resize-handle vertical" + (resizing ? " dragging" : "")}

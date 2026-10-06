@@ -52,6 +52,11 @@ export function loadSourceMarks(): Record<string, SourceMarks> {
   return out;
 }
 
+/** Replace the whole map (a folder moved: relink.ts). */
+export function saveSourceMarks(map: Record<string, SourceMarks>): void {
+  saveJson(KEY, map);
+}
+
 /** The marks for one source, or nulls when it has none. */
 export function marksFor(source: string | null | undefined, fps?: number): SourceMarks {
   if (!source) return { inFrames: null, outFrames: null };

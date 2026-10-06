@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { usePathsMoved } from "./use-paths-moved";
+import { moveKeys } from "../lib/relink";
 import {
   addCustomColumn, customValue, loadCustomColumns, loadCustomValues,
   pruneCustomValues, removeCustomColumn, renameCustomColumn, repathCustomValues,
@@ -64,6 +66,9 @@ export function useCustomColumns() {
   const repath = useCallback((from: string, to: string) => {
     setValues((prev) => repathCustomValues(prev, from, to));
   }, []);
+
+  // A folder moved (Locate folder… on an offline root): its files' values follow.
+  usePathsMoved(({ from, to }) => setValues((prev) => moveKeys(prev, from, to)));
 
   return { columns, add, rename, remove, valueFor, setValue, repath };
 }

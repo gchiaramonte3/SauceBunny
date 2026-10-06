@@ -16,7 +16,7 @@ vi.mock("./LibraryBrowserBar", () => ({ LibraryBrowserBar: ({ query, onQuery }: 
 
 afterEach(() => { cleanup(); localStorage.clear(); });
 const props: Parameters<typeof LibraryBrowser>[0] = {
-  roots: ["/e2e-mock/Library"], scans: {}, scanning: false, addFolder: async () => {}, removeRoot: vi.fn(),
+  roots: ["/e2e-mock/Library"], scans: {}, scanning: false, addFolder: async () => {}, removeRoot: vi.fn(), scanRoot: vi.fn(), locateRoot: vi.fn(),
   onOpenWebUrl: vi.fn(), rescanAll: vi.fn(), requestThumb: async () => null,
   invalidateThumb: vi.fn(), posterVersions: {}, bumpPoster: vi.fn(), resetPoster: vi.fn(),
   selection: null, selectionTick: 0, onOpenLocalPath: vi.fn(), onOpenTranscriptHistory: vi.fn(),

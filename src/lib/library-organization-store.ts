@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "./error-format";
 import { appUndo } from "./undo";
 import { pathKey } from "./repath";
-import { emptyOrganization, parseOrganization, type LibraryOrganization } from "./library-organization";
+import { emptyOrganization, moveOrganizationPaths, parseOrganization, type LibraryOrganization } from "./library-organization";
 
 type Snapshot = { data: LibraryOrganization; ready: boolean; busy: boolean; error: string | null };
 
@@ -79,6 +79,12 @@ export class LibraryOrganizationStore {
     });
     this.queue = task;
     return task.then(() => succeeded);
+  };
+
+  /** A folder moved (relink.ts). Not an organization edit, so not undoable here. */
+  movePaths = async (move: (path: string) => string | null): Promise<void> => {
+    await this.ensure();
+    await this.edit("update Library locations", (data) => moveOrganizationPaths(data, move), false);
   };
 
   repath = async (oldPath: string, newPath: string): Promise<void> => {

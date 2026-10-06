@@ -9,6 +9,7 @@ import {
 } from "../lib/library-selection";
 import { ThumbnailPicker } from "./ThumbnailPicker";
 import { IconSearch } from "./Icons";
+import { LibraryOfflineRoot } from "./LibraryOfflineRoot";
 import type { RootScan } from "../hooks/use-library-scan";
 import {
   artFirst,
@@ -73,6 +74,8 @@ type Props = {
   addFolder: () => Promise<void>;
   removeRoot: (root: string) => void;
   scanRoot: (root: string) => void;
+  /** Locate folder… for an offline root. */
+  locateRoot: (root: string) => void;
   requestThumb: (path: string) => Promise<string | null>;
   invalidateThumb: (path: string) => void;
   posterVersions: Record<string, number>;
@@ -98,7 +101,7 @@ export function LibraryView({
   recentSources, onOpenLocalPath, onOpenRecentSource, onOpenTranscriptHistory,
   onReviewLocalPath, onReviewRecentSource, transcriptLibraryPath,
   onSwitchToClip, homeResetSignal, homeVisible,
-  roots, scans, addFolder, removeRoot, scanRoot,
+  roots, scans, addFolder, removeRoot, scanRoot, locateRoot,
   requestThumb, invalidateThumb, posterVersions, bumpPoster, resetPoster,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -371,6 +374,10 @@ export function LibraryView({
           <p className="cp-lib-note">Scanning…</p>
         </section>
       );
+    }
+    if (scan.status === "offline") {
+      return <LibraryOfflineRoot key={root} root={root} label={label} state={scan.state} volume={scan.volume}
+        onLocate={() => locateRoot(root)} onRetry={() => scanRoot(root)} onRemove={() => removeRoot(root)}/>;
     }
     if (scan.status === "error") {
       return (

@@ -37,6 +37,10 @@ import { observePremiereLink, setPremiereVisibleInput } from "./lib/premiere-lin
 import { IconSettings } from "./components/Icons";
 import { ReviewProgramSurfaces, type ReviewProgramSurfacesHandle } from "./components/ReviewProgramSurfaces";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
+import { moveQueue, moveRecents } from "./lib/relink";
+import { offlineFileCopy } from "./lib/media-offline";
+import type { MediaAvailability } from "./bindings/MediaAvailability";
+import { usePathsMoved } from "./hooks/use-paths-moved";
 import {
   durationToTc, framesToTc, tcToFrames, isCompleteTc,
   tcDigitsToDisplay,
@@ -1090,6 +1094,11 @@ export default function App() {
   // local files when probe_local_file succeeds. Failed loads never land here.
   const [recentSources, setRecentSources] = useState<RecentSource[]>(() => loadRecentSources());
   useEffect(() => saveRecentSources(recentSources), [recentSources]);
+  // A library root reconnected to a new place: Continue and the clip queue follow it.
+  usePathsMoved(({ from, to }) => {
+    setRecentSources((prev) => moveRecents(prev, from, to));
+    setClipQueue((prev) => moveQueue(prev, from, to));
+  });
   const recordRecentSource = useCallback(
     (entry: { kind: RecentSource["kind"]; value: string; title: string; durationSeconds?: number }) => {
       setRecentSources((prev) => upsertRecent(prev, entry));
@@ -2345,9 +2354,11 @@ export default function App() {
     void (async () => {
       const err = await loadLocalPath(entry.value);
       if (err?.kind === "NotFound") {
-        setRecentSources((prev) => removeRecent(prev, entry.value));
-        pushNotification("info", "Removed from recents",
-          `"${entry.title}" no longer exists at its saved location.`);
+        // Not removed: a file on a drive that is not mounted yet is not gone
+        // (docs/RECONNECT-MEDIA-SPEC-2026-10-05.md). Say why it did not open.
+        const [found] = await invoke<MediaAvailability[]>("media_availability", { paths: [entry.value] }).catch(() => []) ?? [];
+        const copy = offlineFileCopy(found && found.state !== "online" ? found.state : "missing", found?.volume ?? null, entry.title);
+        pushNotification("info", copy.title, copy.body);
       }
     })();
   }, [handleFetch, loadLocalPath, pushNotification]);
@@ -4744,6 +4755,7 @@ export default function App() {
               addFolder={lib.addFolder}
               removeRoot={lib.removeRoot}
               scanRoot={lib.scanRoot}
+              locateRoot={(root) => { void lib.locateRoot(root); }}
               requestThumb={lib.requestThumb}
               invalidateThumb={lib.invalidateThumb}
               posterVersions={lib.posterVersions}
@@ -4765,6 +4777,8 @@ export default function App() {
               scanning={lib.scanning}
               addFolder={lib.addFolder}
               removeRoot={lib.removeRoot}
+              scanRoot={lib.scanRoot}
+              locateRoot={(root) => { void lib.locateRoot(root); }}
               rescanAll={lib.rescanAll}
               requestThumb={lib.requestThumb}
               invalidateThumb={lib.invalidateThumb}

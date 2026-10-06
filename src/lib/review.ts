@@ -470,6 +470,26 @@ export function linkFingerprint(fp: string, key: string): void {
   putReviewDoc({ ...doc, fingerprints: [...have, fp] });
 }
 
+/**
+ * A folder moved (relink.ts). Files received in a session are keyed by where
+ * they are, and past reviews remember a path to open; both follow. A review's
+ * KEY never changes, so its notes stay found.
+ */
+export function moveReviewPaths(move: (path: string) => string | null): void {
+  const received = loadJson<Record<string, string>>(RECEIVED_KEY, {});
+  let receivedChanged = false;
+  const nextReceived: Record<string, string> = {};
+  for (const [path, key] of Object.entries(received)) {
+    const moved = move(path);
+    if (moved) receivedChanged = true;
+    nextReceived[moved ?? path] = key;
+  }
+  if (receivedChanged) saveJson(RECEIVED_KEY, nextReceived);
+  const history = loadJson<ReviewHistoryEntry[]>(HISTORY_KEY, []);
+  const nextHistory = history.map((entry) => { const moved = entry.path ? move(entry.path) : null; return moved ? { ...entry, path: moved } : entry; });
+  if (nextHistory.some((entry, index) => entry !== history[index])) saveJson(HISTORY_KEY, nextHistory);
+}
+
 export type ReviewHistoryEntry = { key: string; title: string; path: string; updatedAt: number; count: number };
 
 export function loadReviewHistory(): ReviewHistoryEntry[] {

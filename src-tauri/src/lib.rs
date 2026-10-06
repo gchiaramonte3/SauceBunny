@@ -333,6 +333,7 @@ pub fn run() {
             commands::lookup_local_thumbnail,
             commands::save_poster_to_cache,
             commands::scan_library_folder,
+            commands::media_availability,
             commands::scan_transcript_library,
             commands::trash_transcript,
             commands::rename_transcript,
@@ -433,6 +434,8 @@ pub fn run() {
             // The Pipeline's watchdog: the main thread and the page, both of
             // which go quiet in a hang and cannot report it themselves.
             commands::start_pipeline_watchdog(app.handle().clone());
+            // Offline library roots come back when their drive mounts.
+            commands::watch_volumes(app.handle().clone());
             // Native menus, panels and subsequent windows must not inherit a
             // light system appearance while the web content is always dark.
             app.set_theme(Some(tauri::Theme::Dark));
