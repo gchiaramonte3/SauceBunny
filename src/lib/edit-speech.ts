@@ -1,5 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { pipelineInvoke } from "./pipeline";
 import type { AafSpeech } from "../bindings/AafSpeech";
+const invoke = pipelineInvoke("String Outs");
 
 /**
  * One AAF Audio track's speech analysis (src-tauri/src/speech.rs): where its

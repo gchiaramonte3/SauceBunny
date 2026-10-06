@@ -129,8 +129,9 @@ for (const scale of [1, 1.25]) {
     await expect(region.getByRole("status").filter({ hasText: "Selected range saved for every track" })).toBeVisible();
     const calls = await page.evaluate(() => (window as unknown as { __multitrackCalls: { command: string; args: Record<string, unknown> }[] }).__multitrackCalls.filter(call => call.command === "aaf_transcribe_track"));
     expect(calls).toHaveLength(3);
-    for (const call of calls) expect(call.args).toMatchObject({ engine: "whisper", fast: true, speechOnly: true });
-    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("saucebunny.multitrackTranscriptionOptions")!))).toEqual({ fast: true, speechOnly: true });
+    // Spell cast names stays off unless asked for: it can respell a word.
+    for (const call of calls) expect(call.args).toMatchObject({ engine: "whisper", fast: true, speechOnly: true, castNames: false });
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("saucebunny.multitrackTranscriptionOptions")!))).toEqual({ fast: true, speechOnly: true, castNames: false });
     await region.getByRole("combobox", { name: "Engine", exact: true }).selectOption("parakeet");
     await expect(options).toHaveCount(0);
     await region.getByRole("combobox", { name: "Engine", exact: true }).selectOption("whisper");

@@ -28,6 +28,10 @@ obs-audio-acceptance = []
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# asset:// off the main thread (asset_protocol.rs): the two crates Tauri's own
+# handler uses, already in the lockfile through tauri.
+http-range = "0.1"
+percent-encoding = "2"
 tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
 # statvfs, for the free-space check a session recording needs: it is the one
 # feature that can write 8 GB unattended, and "recording failed" is a much

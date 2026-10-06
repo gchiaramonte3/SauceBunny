@@ -5,9 +5,11 @@ import { IconPlus, IconSettings } from "./Icons";
 import { IconMultitrack } from "./IconMultitrack";
 import { IconStringOut } from "./IconStringOut";
 import { MultitrackWorkspace } from "./MultitrackWorkspace";
-import { MultitrackPipeline } from "./MultitrackPipeline";
+import { PipelinePanel } from "./PipelinePanel";
 
-export function MultitrackPage({ active, onOpenSettings, onOpenInStringOuts, aiModelId, openRequest }: { active: boolean; onOpenSettings?: () => void;
+export function MultitrackPage({ active, onOpenSettings, onOpenInStringOuts, aiModelId, openRequest, pipelineOpen = false, onPipelineOpen = () => undefined }: { active: boolean; onOpenSettings?: () => void;
+  /** The Pipeline at the foot of the page: one open/closed state for every page, toggled by ⌘\. */
+  pipelineOpen?: boolean; onPipelineOpen?: (open: boolean) => void;
   /** Cut this sequence by its words in String Outs. */
   /** With AAF Audio's In and Out, in seconds, so String Outs opens with that range marked in the source. */
   onOpenInStringOuts?: (documentId: string, marks: { in: number | null; out: number | null } | null) => void;
@@ -53,6 +55,7 @@ export function MultitrackPage({ active, onOpenSettings, onOpenInStringOuts, aiM
     {state.document ? <MultitrackWorkspace key={state.document.id} document={state.document} active={active && !state.loading} resolvingMedia={state.resolving} openRequest={pendingOpen ? null : openRequest} waveforms={state.waveforms} waveformErrors={state.waveformErrors} labelStatus={state.labelStatus} onRename={state.rename} onRetryLabels={state.retryLabels} onRetryWaveform={state.retryWaveform} onWaveforms={state.setWaveformsOn} waveformsBuilding={state.waveformsBuilding} onOpenMedia={() => setSettingsOpen(true)} onTranscript={state.acceptTranscript} onOpenSettings={onOpenSettings} onJobState={setJobRunning} settingsOpen={settingsOpen} onCloseSettings={() => setSettingsOpen(false)} aiModelId={aiModelId} onVisibleTracks={state.showTracks} onMarks={keepMarks} />
       : state.resuming || state.loading ? null
       : <div className="cp-multitrack-empty"><IconMultitrack size={32} /><h2>Read the room, mic by mic</h2><p>Import an AAF to see its audio tracks together. Solo a mic, label its owner, and generate a searchable transcript.</p><button className="btn btn-ghost" disabled={state.loading} onClick={() => void state.load()}>Import AAF…</button><span>Local processing · Your original AAF stays untouched</span></div>}
-    <MultitrackPipeline documentId={state.document?.id} error={state.error} loading={state.loading || state.resolving || jobRunning} />
+    <PipelinePanel page="AAF Audio" active={active} open={pipelineOpen} onOpenChange={onPipelineOpen} documentId={state.document?.id} error={state.error} loading={state.loading || state.resolving || jobRunning}
+      emptyMessage="Import an AAF to log media discovery. Export diagnostics includes offline paths and matching errors." />
   </section>;
 }

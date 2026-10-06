@@ -83,6 +83,46 @@ plays on (absent: every patched lane). Neither needed a schema bump, since
 an older build reading a newer file ignores neither in a way that loses
 work: it would play a one-person clip on every track, not drop it.
 
+**The Pipeline journal (2026-10-05).** `app_log_dir()/multitrack.jsonl` and
+its `.previous.jsonl`, two rolling 1 MiB files, 1,500 rows kept in memory. It
+began as AAF Audio's import log and is now the app's: the backend's operations,
+the page's own rows (`pipeline_log`, from `lib/pipeline.ts`) and the watchdog's
+(`aaf/health.rs`). Diagnostic retention, not data: Clear in the Pipeline
+removes both files, and nothing reads them but the Pipeline and its export.
+Written on purpose BEFORE anything is known to be wrong, so a hang that ends in
+Force Quit is still there on relaunch. Beside it, `hang-<unix ms>.txt`: macOS
+`sample` output for every thread, taken once per main-thread hang, newest five
+kept, older ones removed by the watchdog (only files it named itself). No
+transcript text, titles, prompts or names are written to either.
+
+**Transcript accuracy (2026-10-04).** Two derived stores, both keyed by AAF
+Audio document id, both safe to delete:
+
+- `ownership/<id>.json`: the bleed resolver's labels (owner, bleed,
+  overtalk, off-mic, unsure, other) for every word not plainly its mic
+  owner's, with counts and warnings. A cache: its `stamp` starts with the
+  document's modification time, then each waveform overview's and the
+  voiceprints file's, and anything newer recomputes it. String Outs and the
+  context layer read it; the context layer trusts it only when the stamp's
+  first part matches the document as it is now (new transcripts mean new
+  cue ids).
+- `bleed.json`: the Hide bleed switch, `{ "hide": bool }`, one per Mac.
+  Absent or unreadable means off, which leaves nothing out. Here rather than
+  in WebView storage because `sauce-bunny --mcp` answers assistants without
+  the app and has to honour it; the renderer reads and writes it through
+  `bleed_hidden` / `set_bleed_hidden` (atomic write).
+- `voiceprints/<id>.json`: each mic owner's learned voice (unit-length, 256
+  numbers, early and possibly late in the day) and the calls it settled.
+  Biometric data, and the reason it is here and not in Documents; never sent
+  anywhere, never in a command's answer (`voiceprint-contract`). Deleting it
+  reverts those calls to unsure. Settings shows the count and deletes all.
+
+The AAF Audio document itself gained three optional fields, so the schema
+stays 2 and an older build reads a newer document: a cue's `words` (each
+word's measured time and confidence, from Parakeet) and `suspect` (why a
+Whisper cue may be invented), and the document's `ownership` (the editor's
+own per-cue calls, which win over the resolver).
+
 ### `app_cache_dir()` — three named directories
 
 The root used to be one organized subtree plus a flat pile of

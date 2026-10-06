@@ -142,7 +142,7 @@ fn reads_one_persons_lines_in_a_timecode_range_and_says_which_string_outs_use_th
 
 #[test]
 fn a_page_stops_under_its_budget_and_continues_from_its_cursor() {
-    let long = super::Line { line: "x".into(), who: "P".into(), track: "A1".into(), tc_in: "".into(), tc_out: "".into(), text: "word ".repeat(2_000), in_string_outs: vec![] };
+    let long = super::Line { line: "x".into(), who: "P".into(), track: "A1".into(), tc_in: "".into(), tc_out: "".into(), text: "word ".repeat(2_000), in_string_outs: vec![], bleed_from: None };
     let lines = vec![long; 50];
     let (first, next) = super::sequences::page(&lines, 0, 1_000);
     assert!(first.len() < 10 && next == Some(first.len()), "{} lines", first.len());
@@ -239,4 +239,53 @@ fn the_history_is_read_without_holding_up_the_app() {
     renamed.title = "Renamed".into();
     writer.commit(EDIT, "Rename", None, &renamed, 3_000).unwrap();
     assert_eq!(reader.head(EDIT).unwrap().label, "Rename");
+}
+
+/// The app's bleed labels, cached beside timelines.sqlite: P2's first line,
+/// "I am so tired, says t2 at 0.", marked as heard on P1's mic.
+fn cache_bleed(f: &Fixture, stamp_matches: bool) {
+    let app_data = f.ctx.roots.timelines.parent().unwrap();
+    let document = std::fs::metadata(f.ctx.roots.multitrack.join(format!("{BANK}.json"))).unwrap();
+    let stamp = if stamp_matches { format!("{}:t1=1", crate::commands::aaf::store::modified_ms(&document)) } else { "1:old".into() };
+    let words: Vec<Value> = (0..7).map(|index| json!({ "track_id": "t2", "cue_id": "t2-c0", "index": index, "label": "bleed", "heard_on": "t1", "delta_db": -15.0 })).collect();
+    let path = crate::commands::aaf::ownership::cache_file(app_data, BANK);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, json!({ "document_id": BANK, "measured": ["t1", "t2"], "missing": [], "words": words, "stamp": stamp,
+        "counts": { "owner": 0, "bleed": 7, "overtalk": 0, "offmic": 0, "unsure": 0 } }).to_string()).unwrap();
+}
+
+#[test]
+fn a_bleed_line_names_who_really_said_it_and_search_returns_it_once() {
+    let f = fixture();
+    cache_bleed(&f, true);
+    crate::commands::aaf::ownership::set_hides_bleed(f.ctx.roots.timelines.parent().unwrap(), true).unwrap();
+    let found = call(&f.ctx, "search_transcripts", json!({ "query": "tired", "people": ["P2"], "sequences": [BANK] }));
+    assert!(found["matches"].as_array().unwrap().iter().all(|hit| !hit["line"].as_str().unwrap().ends_with("/t2-c0")), "the bleed copy was returned: {found}");
+    let all = call(&f.ctx, "search_transcripts", json!({ "query": "tired", "people": ["P2"], "sequences": [BANK], "include_bleed": true }));
+    let copy = all["matches"].as_array().unwrap().iter().find(|hit| hit["line"].as_str().unwrap().ends_with("/t2-c0")).expect("include_bleed lost the copy");
+    assert_eq!(copy["bleed_from"], "P1");
+    // The owner's own lines carry no mark at all.
+    let page = call(&f.ctx, "read_transcript", json!({ "sequence": BANK, "person": "P1", "limit": 3 }));
+    assert!(page["lines"].as_array().unwrap().iter().all(|line| line.get("bleed_from").is_none()));
+}
+
+/// Off is the default: nothing is left out of a search, and the copy says
+/// whose mic it came from, because the label may be wrong.
+#[test]
+fn with_bleed_not_hidden_search_returns_the_copy_marked() {
+    let f = fixture();
+    cache_bleed(&f, true);
+    let found = call(&f.ctx, "search_transcripts", json!({ "query": "tired", "people": ["P2"], "sequences": [BANK] }));
+    let copy = found["matches"].as_array().unwrap().iter().find(|hit| hit["line"].as_str().unwrap().ends_with("/t2-c0")).expect("the copy was left out with bleed not hidden");
+    assert_eq!(copy["bleed_from"], "P1");
+    let none = call(&f.ctx, "search_transcripts", json!({ "query": "tired", "people": ["P2"], "sequences": [BANK], "include_bleed": false }));
+    assert!(none["matches"].as_array().unwrap().iter().all(|hit| !hit["line"].as_str().unwrap().ends_with("/t2-c0")));
+}
+
+#[test]
+fn labels_from_an_older_document_are_ignored_not_trusted() {
+    let f = fixture();
+    cache_bleed(&f, false);
+    let found = call(&f.ctx, "search_transcripts", json!({ "query": "tired", "people": ["P2"], "sequences": [BANK] }));
+    assert!(found["matches"].as_array().unwrap().iter().any(|hit| hit["line"].as_str().unwrap().ends_with("/t2-c0")));
 }

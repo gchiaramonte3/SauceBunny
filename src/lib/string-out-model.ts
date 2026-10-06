@@ -1,9 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
+import { pipelineInvoke, traced } from "./pipeline";
 import type { LlmModel } from "../bindings/LlmModel";
 import type { LlmServerInfo } from "../bindings/LlmServerInfo";
 import { streamChat, type ChatMessage } from "./ai-chat";
 import { cloudChat, loadAiProvider, loadCloudModel, serviceTier, type CloudProvider } from "./ai-provider";
 import { ensureLocalAiServer, selectLocalAiModel } from "./local-ai-server";
+const invoke = pipelineInvoke("String Outs");
 
 /**
  * The model String Outs talks to. It is String Outs' own choice: picking a
@@ -60,7 +61,9 @@ export const contextOf = (model: AskModel) => model.kind === "local" ? model.ser
 
 /** One answer from either kind of model, with the transcript as the system prefix. */
 export function chat(model: AskModel, system: string, messages: ChatMessage[], signal: AbortSignal, maxTokens = 1200): Promise<string> {
+  // Timed in the Pipeline like a call into the app: a local model's reply streams over HTTP, past invoke.
   return model.kind === "local"
-    ? streamChat(model.server, [{ role: "system", content: system }, ...messages], () => undefined, signal, { temperature: 0, maxTokens })
-    : cloudChat(model.provider, system, messages, signal, 0);
+    ? traced("String Outs", `Ask (local model ${model.server.model_id})`, "ask_local_reply",
+      () => streamChat(model.server, [{ role: "system", content: system }, ...messages], () => undefined, signal, { temperature: 0, maxTokens }))
+    : traced("String Outs", `Ask (${model.provider})`, "ask_cloud_reply", () => cloudChat(model.provider, system, messages, signal, 0));
 }

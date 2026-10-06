@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { pipelineInvoke } from "../lib/pipeline";
 import { useEffect, useRef, useState } from "react";
 import type { AssistantReply } from "../bindings/AssistantReply";
 import type { EditDocument } from "../bindings/EditDocument";
@@ -10,6 +10,7 @@ import { askBuildTitle, askFindPrompt, askMentioned, askParts, askPrompt, asksTo
 import { formatError } from "../lib/error-format";
 import { buildSourcePrefix, transcriptBudget } from "../lib/prompt-prefix";
 import { chat, connectModel, contextOf, loadStringOutModel, saveStringOutModel, type AskModel, type StringOutModel } from "../lib/string-out-model";
+const invoke = pipelineInvoke("String Outs");
 
 type Options = {
   editId: string; lines: AskLine[]; mentions: AskMention[];

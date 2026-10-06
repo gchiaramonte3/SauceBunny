@@ -44,6 +44,7 @@ pub const TOOLS: &[Tool] = &[
             "people": { "type": "array", "items": { "type": "string" }, "description": "Only these people (names or keys)." },
             "sequences": { "type": "array", "items": { "type": "string" }, "description": "Only these sequences." },
             "limit": { "type": "integer", "minimum": 1, "maximum": 500, "description": "Most matches to return (default 50)." },
+            "include_bleed": { "type": "boolean", "description": "Whether to return lines a mic only picked up from someone else's mic (marked bleed_from); those repeat the owner's line. Defaults to true, or to false when the editor hides bleed in Sauce Bunny." },
         }), &["query"]) },
     Tool { name: "list_string_outs", title: "List string outs",
         description: "Every string out: a cut built from chunks of sequences, sent back to Avid as an AAF. Title, running time, the sequences it uses and who is on A1 and down.",
@@ -94,7 +95,7 @@ pub fn call(ctx: &Context, name: &str, args: &Value) -> Result<Value, AppError> 
         "read_transcript" => value(sequences::read(ctx, required(args, "sequence")?, sequences::Read {
             person: text(args, "person"), from: text(args, "from"), to: text(args, "to"), cursor: number(args, "cursor", 0), limit: number(args, "limit", sequences::PAGE_LINES),
         })?),
-        "search_transcripts" => value(sequences::search(ctx, required(args, "query")?, &strings(args, "people"), &strings(args, "sequences"), number(args, "limit", 50))?),
+        "search_transcripts" => value(sequences::search(ctx, required(args, "query")?, &strings(args, "people"), &strings(args, "sequences"), number(args, "limit", 50), args.get("include_bleed").and_then(serde_json::Value::as_bool).unwrap_or_else(|| !ctx.hides_bleed()))?),
         "list_string_outs" => value(json!({ "string_outs": string_outs::list(ctx)? })),
         "get_string_out" => value(string_outs::detail(ctx, required(args, "string_out")?)?),
         "get_history" => value(string_outs::history(ctx, required(args, "string_out")?)?),

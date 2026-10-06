@@ -106,6 +106,32 @@ pub struct AafCue {
     pub text: String,
     #[serde(default)]
     pub boundary_review: bool,
+    /// Each word with the time the recognizer measured for it, when the
+    /// engine reports one (Parakeet does). Absent on documents written before
+    /// it was kept and on Whisper runs, whose words are still placed by
+    /// length (docs/TRANSCRIPT-ACCURACY-SPEC-2026-10-04.md, phase 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub words: Option<Vec<AafCueWord>>,
+    /// Why this cue may have been invented rather than heard (Whisper's
+    /// stock phrases and loops on silence). A label for the editor to check;
+    /// the cue is never removed (accuracy spec, phase 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub suspect: Option<String>,
+}
+
+/// A recognized word: sequence-relative 16 kHz samples, like its cue, and the
+/// recognizer's confidence (0 to 1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafCueWord {
+    pub text: String,
+    #[ts(type = "number")]
+    pub start_sample: i64,
+    #[ts(type = "number")]
+    pub end_sample: i64,
+    pub confidence: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -171,6 +197,24 @@ pub struct AafDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub shoot_date_override: Option<String>,
+    /// The editor's own calls on who said a cue, which win over the bleed
+    /// resolver's (accuracy spec, phase 3). Keyed by cue, so a regenerated
+    /// transcript, whose cue ids are new, starts from the resolver again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ownership: Option<Vec<AafCueOwnership>>,
+}
+
+/// "This cue is Rosa's" or "this cue is bleed from Dev's mic", said by the editor.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AafCueOwnership {
+    pub track_id: String,
+    pub cue_id: String,
+    pub label: crate::bleed::AafOwnershipLabel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub heard_on: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

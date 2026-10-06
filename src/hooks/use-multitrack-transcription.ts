@@ -9,19 +9,24 @@ import type { WhisperModel } from "../bindings/WhisperModel";
 import { newJobId } from "../lib/job-id";
 import { formatError } from "../lib/error-format";
 import { loadMultitrackTranscriptionOptions, saveMultitrackTranscriptionOptions, type MultitrackTranscriptionOptions } from "../lib/multitrack-transcription-options";
+import { preferredParakeet, type ParakeetModelId } from "../lib/parakeet-models";
+import { useParakeetModels } from "./use-parakeet-models";
 
 export type MultitrackRunReport = { requested: number; saved: number; review: number; empty: number; stopped: boolean; failures: Array<{ trackId: string; message: string }> };
-export type MultitrackModelChoice = { engine: AafEngine; modelId: string } & Partial<MultitrackTranscriptionOptions>;
+export type MultitrackModelChoice = { engine: AafEngine; modelId: string; parakeetModel?: ParakeetModelId } & Partial<MultitrackTranscriptionOptions>;
 
 export function useMultitrackTranscription(document: AafDocument, onTranscript: (result: AafTrackTranscript) => void, active = true) {
   const [engine, setEngine] = useState<AafEngine>("parakeet");
   const [models, setModels] = useState<WhisperModel[]>([]);
-  const [modelId, setModelId] = useState("medium.en");
+  const [modelId, setModelId] = useState("large-v3-turbo");
   const [options, setOptionsState] = useState(loadMultitrackTranscriptionOptions);
   const setOptions = useCallback((next: MultitrackTranscriptionOptions) => {
     setOptionsState(next); saveMultitrackTranscriptionOptions(next);
   }, []);
-  const [parakeetReady, setParakeetReady] = useState(false);
+  const parakeet = useParakeetModels();
+  const [parakeetModel, setParakeetModel] = useState<ParakeetModelId>("parakeet-ultra");
+  const parakeetReady = parakeet.ready[parakeetModel];
+  const checkParakeet = parakeet.check;
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [status, setStatus] = useState("");
@@ -37,13 +42,19 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
   const checkModels = useCallback(async () => {
     const revision = ++modelCheckRevision.current;
     try {
-      const [whisper, ready] = await Promise.all([invoke<WhisperModel[]>("list_whisper_models"), invoke<boolean>("parakeet_model_downloaded")]);
+      const [whisper, installed] = await Promise.all([invoke<WhisperModel[]>("list_whisper_models"), checkParakeet()]);
       if (!mounted.current || revision !== modelCheckRevision.current) return;
-      setModels(whisper.filter((model) => model.downloaded)); setParakeetReady(ready);
-      if (initialModelCheck.current) { initialModelCheck.current = false; if (!ready && whisper.some((model) => model.downloaded)) setEngine("whisper"); }
-      setModelId((current) => whisper.some((model) => model.id === current && model.downloaded) ? current : whisper.find((model) => model.downloaded)?.id ?? "medium.en");
+      setModels(whisper.filter((model) => model.downloaded));
+      const anyParakeet = Object.values(installed).some(Boolean);
+      // The best installed Parakeet on first look (Ultra when it is there), so
+      // nobody is sent to a download they did not ask for.
+      if (initialModelCheck.current) { initialModelCheck.current = false; setParakeetModel(preferredParakeet(installed)); if (!anyParakeet && whisper.some((model) => model.downloaded)) setEngine("whisper"); }
+      // The most accurate installed Whisper, not the first in the list (the
+      // list runs smallest first).
+      const best = [...whisper].reverse().find((model) => model.downloaded)?.id;
+      setModelId((current) => whisper.some((model) => model.id === current && model.downloaded) ? current : best ?? "large-v3-turbo");
     } catch (cause) { if (mounted.current && revision === modelCheckRevision.current) setError(formatError(cause)); }
-  }, []);
+  }, [checkParakeet]);
   const invalidateModelCheck = useCallback(() => { ++modelCheckRevision.current; }, []);
   useEffect(() => {
     if (!active) return;
@@ -81,10 +92,11 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
   }, []);
   const start = useCallback(async (trackIds: string[], startFrame: number, durationFrames: number, choice?: MultitrackModelChoice) => {
     if (run.current || !trackIds.length) return;
-    const selectedEngine = choice?.engine ?? engine, selectedModel = choice?.modelId ?? modelId;
+    const selectedEngine = choice?.engine ?? engine, selectedModel = choice?.modelId ?? modelId, selectedParakeet = choice?.parakeetModel ?? parakeetModel;
     const fast = selectedEngine === "whisper" && (choice?.fast ?? options.fast);
     const speechOnly = selectedEngine === "whisper" && (choice?.speechOnly ?? options.speechOnly);
-    if (choice && (selectedEngine === "parakeet" ? !parakeetReady : !models.some((model) => model.id === selectedModel))) { setError("The selected model is not installed."); return; }
+    const castNames = choice?.castNames ?? options.castNames;
+    if (choice && (selectedEngine === "parakeet" ? !parakeet.ready[selectedParakeet] : !models.some((model) => model.id === selectedModel))) { setError("The selected model is not installed."); return; }
     const current = { cancelled: false, jobId: newJobId() as string | null, index: 0, count: trackIds.length };
     run.current = current; setLoading(true); setResolution(null); setError(null); setProgress(0); setReport(null);
     const ownsRun = () => mounted.current && run.current === current && sourceId.current === document.id;
@@ -97,7 +109,7 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
         const completed = index / trackIds.length * 100;
         setProgress((previous) => Math.max(previous ?? 0, completed));
         try {
-          const result = await invoke<AafTrackTranscript>("aaf_transcribe_track", { documentId: document.id, trackId, startFrame, durationFrames, engine: selectedEngine, modelId: selectedEngine === "parakeet" ? "parakeet-tdt-0.6b-v3" : selectedModel, language: "en", fast, speechOnly, jobId: current.jobId });
+          const result = await invoke<AafTrackTranscript>("aaf_transcribe_track", { documentId: document.id, trackId, startFrame, durationFrames, engine: selectedEngine, modelId: selectedEngine === "parakeet" ? selectedParakeet : selectedModel, language: "en", fast, speechOnly, castNames, jobId: current.jobId });
           // Native success is a committed result, even when Stop arrived while
           // its IPC reply was in flight. Stop still prevents the next track.
           if (!ownsRun()) break;
@@ -120,7 +132,7 @@ export function useMultitrackTranscription(document: AafDocument, onTranscript: 
       if (ownsRun()) { setReport({ ...outcome, stopped: current.cancelled }); setLoading(false); setProgress(null); }
       if (run.current === current) run.current = null;
     }
-  }, [document.id, engine, modelId, parakeetReady, models, options]);
+  }, [document.id, engine, modelId, parakeetModel, parakeet.ready, models, options]);
   const ready = engine === "parakeet" ? parakeetReady : models.some((model) => model.id === modelId);
-  return { engine, setEngine, models, modelId, setModelId, options, setOptions, parakeetReady, ready, loading, progress, status, error, report, resolution, clearResolution: () => setResolution(null), start, stop };
+  return { engine, setEngine, models, modelId, setModelId, parakeetModel, setParakeetModel, parakeet, options, setOptions, parakeetReady, ready, loading, progress, status, error, report, resolution, clearResolution: () => setResolution(null), start, stop };
 }

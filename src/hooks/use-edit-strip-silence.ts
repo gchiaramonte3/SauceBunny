@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { pipelineInvoke } from "../lib/pipeline";
 import { useRef, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { AafWaveform } from "../bindings/AafWaveform";
@@ -9,6 +9,7 @@ import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
 import { sequenceFps } from "../lib/multitrack";
 import type { EditChange } from "./use-edit-session";
+const invoke = pipelineInvoke("String Outs");
 
 type Options = {
   open: OpenEdit; documents: Map<string, AafDocument>; words: TimelineWord[];

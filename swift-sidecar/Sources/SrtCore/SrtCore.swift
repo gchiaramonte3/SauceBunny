@@ -15,11 +15,128 @@ public struct CueToken: Equatable {
   public let token: String
   public let startTime: Double
   public let endTime: Double
-  public init(token: String, startTime: Double, endTime: Double) {
+  /// The decoder's confidence in this token, 0 to 1. Tokens built without one
+  /// (tests, older callers) count as certain.
+  public let confidence: Float
+  public init(token: String, startTime: Double, endTime: Double, confidence: Float = 1) {
     self.token = token
     self.startTime = startTime
     self.endTime = endTime
+    self.confidence = confidence
   }
+}
+
+/// One spoken word with the time the recognizer measured for it, written
+/// beside the SRT so the app stops estimating word positions from their
+/// length (docs/TRANSCRIPT-ACCURACY-SPEC-2026-10-04.md, phase 1). Times are
+/// seconds from the start of the file the recognizer was given.
+public struct TimedWord: Codable, Equatable {
+  public let text: String
+  public let start: Double
+  public let end: Double
+  /// Mean confidence of the word's tokens, 0 to 1.
+  public let confidence: Float
+}
+
+func startsWord(_ tok: CueToken) -> Bool {
+  tok.token.hasPrefix(" ") || tok.token.hasPrefix("\u{2581}")
+}
+
+/// Group sub-word tokens into words, by the same rule `tokensToSrt` breaks
+/// on: a word begins at a token with a leading space (or U+2581) and runs
+/// until the next one. So "3.14", "U.S." and a trailing comma stay inside
+/// the word they belong to, and a cue's words are exactly its text split on
+/// spaces.
+public func tokensToWords(_ tokens: [CueToken]) -> [TimedWord] {
+  var words: [TimedWord] = []
+  var run: [CueToken] = []
+  func flush() {
+    let text = run.map(\.token).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+    if let first = run.first, let last = run.last, !text.isEmpty {
+      let confidence = run.map(\.confidence).reduce(0, +) / Float(run.count)
+      words.append(TimedWord(text: text, start: first.startTime, end: max(last.endTime, first.startTime), confidence: confidence))
+    }
+    run = []
+  }
+  for tok in tokens {
+    if startsWord(tok) && !run.isEmpty { flush() }
+    run.append(tok)
+  }
+  flush()
+  // Parakeet's token END times are estimates and overlap the next token by up
+  // to about 80 ms on real speech ("We" 0.00-0.24, "drove" 0.16-0.48). A word
+  // ends where the next one starts, never after it.
+  for i in words.indices.dropLast() where words[i].end > words[i + 1].start && words[i + 1].start > words[i].start {
+    let w = words[i]
+    words[i] = TimedWord(text: w.text, start: w.start, end: words[i + 1].start, confidence: w.confidence)
+  }
+  return words
+}
+
+/// Put a vocabulary rescorer's replacements ("in video" -> "NVIDIA", or a cast
+/// name spelled right) into measured words without losing their times. Each
+/// (original, replacement) pair takes the next run of words, in order, whose
+/// letters match `original`; the run becomes one word with the replacement's
+/// text, the run's start and end, the punctuation the run ended with, and its
+/// lowest confidence. A pair that matches nothing changes nothing.
+public func applyReplacements(_ words: [TimedWord], _ pairs: [(String, String)]) -> [TimedWord] {
+  var out = words
+  var cursor = 0
+  for (original, replacement) in pairs where plausibleReplacement(original, replacement) {
+    let wanted = original.split(separator: " ").map { bare(String($0)) }.filter { !$0.isEmpty }
+    guard !wanted.isEmpty, !replacement.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+    var at = cursor
+    while at + wanted.count <= out.count {
+      if (0..<wanted.count).allSatisfy({ bare(out[at + $0].text) == wanted[$0] }) { break }
+      at += 1
+    }
+    guard at + wanted.count <= out.count else { continue }
+    let run = out[at..<(at + wanted.count)]
+    let tail = String(run.last!.text.reversed().prefix { !($0.isLetter || $0.isNumber) }.reversed())
+    let merged = TimedWord(text: replacement + tail, start: run.first!.start, end: run.last!.end, confidence: run.map(\.confidence).min() ?? 1)
+    out.replaceSubrange(at..<(at + wanted.count), with: [merged])
+    cursor = at + 1
+  }
+  return out
+}
+
+func bare(_ text: String) -> String { text.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "'" } }
+
+func editDistance(_ a: String, _ b: String) -> Int {
+  let b = Array(b)
+  var row = Array(0...b.count)
+  for (i, ca) in a.enumerated() {
+    var previous = row[0]
+    row[0] = i + 1
+    for (j, cb) in b.enumerated() {
+      let next = min(row[j + 1] + 1, row[j] + 1, previous + (ca == cb ? 0 : 1))
+      previous = row[j + 1]
+      row[j + 1] = next
+    }
+  }
+  return row[b.count]
+}
+
+/// Our own guard on the rescorer, because it needs one. MEASURED on Parakeet
+/// v3 with FluidAudio 0.17.5 at its cautious similarity (0.7): given the
+/// names "Xiomara" and "Saoirse" it rightly turned "Siomara" into "Xiomara"
+/// and also turned "it was funny" into "it Saoirse", deleting two real words.
+/// A replacement is a respelling: at most two words, sharing at least 60% of
+/// their letters with the name.
+public func plausibleReplacement(_ original: String, _ replacement: String) -> Bool {
+  let (from, to) = (bare(original), bare(replacement))
+  guard !from.isEmpty, !to.isEmpty, original.split(separator: " ").count <= 2 else { return false }
+  return 1 - Double(editDistance(from, to)) / Double(max(from.count, to.count)) >= 0.6
+}
+
+/// A sentence ends here, and the word before it is not an abbreviation whose
+/// period belongs to the word ("U.S.", "e.g.", "Mr.").
+func endsSentence(_ text: String) -> Bool {
+  guard let last = text.last, ".?!".contains(last) else { return false }
+  let word = text.split(separator: " ").last.map(String.init) ?? text
+  if word.range(of: #"^([A-Za-z]\.)+$"#, options: .regularExpression) != nil { return false }
+  let titles: Set<String> = ["mr.", "mrs.", "ms.", "dr.", "st.", "vs.", "jr.", "sr.", "mt."]
+  return !titles.contains(word.lowercased())
 }
 
 /// Soft cap: roughly two overlay lines.
@@ -73,9 +190,6 @@ public func tokensToSrt(_ tokens: [CueToken]) -> String {
     guard let first = toks.first, let last = toks.last, !t.isEmpty else { return }
     cues.append((start: first.startTime, end: last.endTime, text: t))
   }
-  func startsWord(_ tok: CueToken) -> Bool {
-    tok.token.hasPrefix(" ") || tok.token.hasPrefix("\u{2581}")
-  }
   /// Index of the last token that begins a word, past the first token.
   func lastWordStart(_ toks: [CueToken]) -> Int? {
     for i in stride(from: toks.count - 1, through: 1, by: -1) where startsWord(toks[i]) { return i }
@@ -83,6 +197,17 @@ public func tokensToSrt(_ tokens: [CueToken]) -> String {
   }
 
   for tok in tokens {
+    // A sentence that has ended breaks the cue at the next word, once the cue
+    // is long enough not to fragment (`cueSentenceMin`). Checked BEFORE the
+    // token joins, and only at a word start, so "3.14" can never split: its
+    // "14" does not start a word.
+    if startsWord(tok), !cur.isEmpty {
+      let before = textOf(cur[...])
+      if before.count >= cueSentenceMin && endsSentence(before) {
+        emit(cur[...])
+        cur = []
+      }
+    }
     cur.append(tok)
     let text = textOf(cur[...])
 

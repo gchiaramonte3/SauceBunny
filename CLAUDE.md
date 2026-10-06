@@ -101,6 +101,8 @@ src-tauri/                    # Rust backend
     main.rs                   # shim: `--mcp` serves MCP over stdio (mcp.rs), else run()
     context/                  # read-only answers for assistants (sequences, transcripts, string outs)
     mcp.rs                    # `sauce-bunny --mcp`: the context over MCP, stdio, no window
+    bleed.rs                  # owner / bleed / overtalk for every word on every iso mic
+    eval.rs                   # `sauce-bunny --eval`: the transcript accuracy scorer (dev tool)
     lib.rs                    # Tauri app setup, menu, window management, command registry
     commands/                 # Invoke handlers, split by domain (r47):
       mod.rs                  #   shared helpers + event types, re-exports
@@ -109,6 +111,7 @@ src-tauri/                    # Rust backend
       transcript.rs           #   whisper + diarizer pipelines
       system.rs               #   JobRegistry, cache, fs, windows, build-id
     stream_proxy.rs           # loopback media proxy (token-gated; see below)
+    asset_protocol.rs         # asset:// served off the main thread (see Asset-protocol scope)
   tauri.conf.json             # Tauri config (titleBarStyle: Overlay, sidecar declarations)
   Cargo.toml                  # Package: sauce-bunny · lib: sauce_bunny_lib
 swift-sidecar/                # Speaker diarization (Swift 5.9+, SPM)
@@ -422,6 +425,9 @@ with the ones still open. The table below is the index into it.
 | Library tree state | `localStorage` `saucebunny.libraryTreeExpanded` — which folders are open. Roots seed open once; the selection's ancestors are revealed when the selection MOVES, never on a rescan, and never on first mount when a preference is already recorded |
 | Analysis corrections | `~/Documents/Sauce Bunny/Analysis Corrections/<source-sha256>.json` — schema-versioned original shot snapshot plus independent user field overrides. Native atomic read/compare/write serializes webviews and rejects stale row revisions. Original source contents are hashed on reopening, not matched by filename. Exact original boundary anchors prevent reruns from retargeting corrections onto different shots; unmatched overrides remain on disk. Saved snapshots reflect the last correction, not a separate promise that every inference result is archived. |
 | Transcript edits | History: `app_data_dir()/timelines.sqlite`, every state as a tree (undone branches kept), a JSON patch per step and a whole document every 100 (`src-tauri/src/edit_log.rs`). NOT in Documents: a live SQLite file's `-wal`/`-shm` side files are what iCloud eviction breaks. Readable copy of each edit's current state: `~/Documents/Sauce Bunny/Edits/<slug>-<id8>.json`, atomically rewritten on every step |
+| Bleed labels | `app_data_dir()/ownership/<document-id>.json` — the bleed resolver's answer for an AAF Audio document (owner, bleed, overtalk, off-mic, unsure per word), a cache stamped with the document's and each overview's modification time, so it recomputes when either moves. The editor's own calls live IN the document (`ownership`, per cue) and win. Read by String Outs and by the context layer for assistants, which trusts it only when the stamp's document time matches. See `docs/TRANSCRIPT-ACCURACY-SPEC-2026-10-04.md` Whether bleed is LEFT OUT anywhere (All voices, String Outs, an assistant's search) is one switch, Hide bleed, in `app_data_dir()/bleed.json` so the MCP server reads it too; absent means off, and off is the default, because a line wrongly called bleed vanishes with nothing saying so |
+| Voiceprints | `app_data_dir()/voiceprints/<document-id>.json` — each mic owner's learned voice (256 numbers) and the calls it settled. **Biometric data**: never under `~/Documents`, never on the wire, never in a command's answer or the context layer (`voiceprint-contract`); Settings ▸ Transcription ▸ Voiceprints shows the count and deletes them all |
+| Pipeline journal | `app_log_dir()/multitrack.jsonl` (+ `.previous.jsonl`), two rolling 1 MiB files: the backend's operations, the page's own rows (`pipeline_log`: String Outs' calls that waited, failed or ran long, page stalls, uncaught errors) and the watchdog's (`aaf/health.rs`: main thread or page not answering). On disk ON PURPOSE: a hang that ends in Force Quit is still in the Pipeline on relaunch. Hang samples (`/usr/bin/sample` of every thread, once per main-thread hang) sit beside it as `hang-<unix ms>.txt`, newest five kept. No transcript text, titles or names |
 | Review grants | `app_data_dir()/review-grants.json` — one record per issued link: label, BLAKE3 of the secret, created/last-seen, revoked. NOT under `~/Documents`, which is iCloud-synced, because it holds secret hashes. Atomic write: a truncated grant file is a host that refuses everyone |
 | Undelivered notes | `localStorage` `saucebunny.review.outbox` — review ops whose send failed, per review key. Never evicted: unacknowledged notes are the user's work, so nothing is dropped however long the queue grows (`MAX_PER_REVIEW`, 500, is documented as a warning threshold, and nothing outside the tests reads it). A write that cannot persist throws rather than losing the note. Drained on every snapshot adoption, not just the first; re-sending an op the host already has is a no-op because `add` carries a fully-built comment and resolve/like/status are SET rather than toggle |
 | Received review files | `localStorage` `saucebunny.review.receivedAs` — local path (NFC-keyed) to the review key the session that delivered it was using. Consulted BEFORE the fingerprint index when opening a file: a copy received in a session has a `<hash8>-` filename prefix, so its fingerprint deliberately does not match the host's, and without this a guest's own notes read back empty |
@@ -568,6 +574,19 @@ large library would put a thousand-pattern scan on the playback byte-range path.
 Guarded by `src/lib/asset-scope-contract.test.ts` — do not widen the scope to
 get unblocked.
 
+**The `asset://` handler is ours, and it must stay off the main thread.**
+Tauri's built-in handler opens and reads the file on the thread WKWebView asks
+from, which is the MAIN thread: every 1 MB range a `<video>` pulls, and the
+whole file when a request has no Range. On Avid NEXIS under daytime load that
+froze the window, and a read the volume never answered parked the main thread
+in an uninterruptible kernel wait that Force Quit could not reach. `lib.rs`
+registers `asset_protocol::handle` under the name `asset`, which makes Tauri
+skip its own; the handler does the same scope check and answers on the
+blocking pool. It also serves only the app's own pages, where Tauri's served
+any webview, including the media resolver's external page. Do not remove the
+registration or call `respond()` before `spawn_blocking`; the asset-scope
+contract checks both.
+
 Don't reintroduce the IFrame, custom URI schemes for `<video>`, or WebCodecs-audio — all three are proven non-starters in WKWebView (see the deep-research notes that drove r61/r63).
 
 ---
@@ -583,7 +602,7 @@ All sidecars are bundled binaries invoked through `tauri-plugin-shell`. Each lon
 | ffmpeg | Clip cutting, transcode, audio extraction | `npm run refresh:ffmpeg` (osxexperts.net static arm64) |
 | ffprobe | yt-dlp stream fixups (HLS aac_adtstoasc) | `npm run refresh:ffprobe` (martin-riedl.de static arm64) |
 | whisper-cli | Local speech-to-text (whisper.cpp) | `npm run build:whisper` (builds from source, statically linked) |
-| saucebunny-diarize | Speaker diarization (Swift) | `npm run build:diarizer` (builds from `swift-sidecar/`) |
+| saucebunny-diarize | Speaker diarization, Parakeet speech-to-text (`--asr`, with each word's measured time, batches of windows on one model load, optional cast-name spelling) and voiceprints for the voice check (`--embed`) (Swift, FluidAudio 0.17.5) | `npm run build:diarizer` (builds from `swift-sidecar/`) |
 | llama-server | Local LLM chat for the AI Summary tab | `npm run build:llama` (builds llama.cpp from source, static + Metal) |
 | saucebunny-dictate | Live on-device dictation for review comments (Apple Speech, partial results while you speak) | `npm run build:dictate` (builds from `swift-sidecar/`) |
 | saucebunny-capture | ScreenCaptureKit engine for co-review screen sharing (display list + capture) | `npm run build:capture` (builds from `swift-sidecar/`) |
@@ -748,7 +767,7 @@ human can check.
 
 ## Enforced contracts
 
-One hundred and sixteen rules in this file are checked by a test rather than remembered. If you
+One hundred and nineteen rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -908,6 +927,9 @@ written after finding the rule already broken somewhere.
 | `text-decoration-contract` | A `text-decoration` shorthand names only the line. WebKit reads its style and colour parts only from Safari 26.2, and macOS 14 can run Safari 17, where `underline dotted` is dropped whole and the underline vanishes. Style and colour go in their longhands |
 | `mark-shape-contract` | A stem in the marker colour draws the chevron wing: every `border-left`/`-right` or inset side shadow in `var(--marker)` belongs to a class with a `--mark-wing-*` wing, or is one of two named regions that sit under winged marks. AAF Audio's and String Outs' rulers drew a flat violet band with no wing, and nothing at all for a lone In or Out, beside Clip's chevrons; both now draw `RulerMarks` (marks.css). The design catalog's stylesheets are scanned too: they load after production's and win |
 | `mark-keys-contract` | AAF Audio and String Outs bind the same seven marking keys to the same meanings, Avid's: I and O mark, G clears both, D clears In, F clears Out, Q and W go to the marks. They drifted apart in separate files: AAF Audio cleared with G while String Outs used ⌥X and ignored G, and neither had D or F |
+| `voiceprint-contract` | Voiceprints (the voice check's 256-number description of each mic owner's voice, accuracy spec phase 4) are biometric data: written only under `app_data_dir()/voiceprints`, never under Documents, never read by the context layer that answers assistants or by the co-review wire, never in a command's answer or the ownership cache. Only the labels they settle travel |
+| `main-thread-contract` | No NEW `#[tauri::command]` runs on the main thread: it is `async fn` or `#[tauri::command(async)]`. A plain `fn` command runs on the thread that draws the window, so one `exists()` on Avid NEXIS under daytime load froze the app, and a read the volume never answered put it past Force Quit. The 76 left there touch nothing a network volume can hold up (settings, keychain, app data); the list is shrink-only. Tauri's own `asset://` handler had the same flaw and is replaced (`asset_protocol.rs`, pinned by `asset-scope-contract`) |
+| `string-outs-pipeline-contract` | Every String Outs file calls the app through `pipelineInvoke` (lib/pipeline), never Tauri's `invoke` directly. String Outs hung with nothing in any log: the backend journals its own operations, but a call the page made and never got back, or one that is not a backend operation at all (the undo log, an export, Ask), left no trace. The traced call says so while it waits, at 2, 10, 30 and 60 s, into the journal on disk, so a hang that ends in Force Quit is still there on relaunch |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:

@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef } from "react";
 import { editTc } from "../lib/edit-document";
 import { paragraphHolding, paragraphs, paragraphStarts, type PlacedWord, type TimelineLane } from "../lib/edit-model";
 import { ALL_VOICES } from "../lib/edit-source-view";
+import { measure } from "../lib/pipeline";
 import type { MultitrackPerson } from "../lib/multitrack-person";
 import { EditScrubber } from "./EditScrubber";
 import { MultitrackTranscriptTabs } from "./MultitrackTranscriptTabs";
@@ -40,7 +41,7 @@ type Props = {
 export function EditSourcePane(props: Props) {
   const { source, speakers, colors, fps, used, range, placed } = props;
   // A person's tab reads one line per cue, as AAF Audio lists them.
-  const paras = useMemo(() => paragraphs(placed, props.tab !== ALL_VOICES), [placed, props.tab]);
+  const paras = useMemo(() => measure("String Outs", `Laying out ${placed.length.toLocaleString("en-US")} source words as paragraphs`, () => paragraphs(placed, props.tab !== ALL_VOICES)), [placed, props.tab]);
   const panelId = useId();
   const person = props.people.find((item) => item.id === props.tab);
   const anchor = useRef<number | null>(null);

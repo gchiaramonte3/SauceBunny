@@ -8,6 +8,29 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [0.6.0] - 2026-09-29
 
 ### Added
+- **More accurate AAF Audio transcripts.** Parakeet's own word times are
+  kept instead of being guessed from word length, words it was unsure of are
+  underlined, and captions break at sentence ends. **Parakeet Ultra**, a
+  more accurate drop-in for v3, is offered first in AAF Audio's model picker
+  with its own download, and Parakeet now loads once per sixteen minutes of
+  audio instead of every two. Whisper adds **large-v3-turbo**, and its stock
+  inventions on silence ("Thank you for watching") are flagged.
+- **Bleed is labelled.** Measure mics compares every lav's level, against its
+  own noise floor, and finds the same words on a louder mic: those copies are
+  dimmed and labelled ("Heard on Rosa's mic"). **Hide bleed** (off by
+  default, under AAF Audio's search box and in Settings ▸ Transcription ▸
+  Bleed) also leaves them out of All voices, search, String Outs' source
+  pane and the assistants' answers; off, nothing is left out anywhere, since
+  a line wrongly called bleed would vanish with nothing saying so. Nothing is
+  deleted either way, and right-click gives you the final say on any line.
+- **Check voices** learns each mic owner's voice from the sequence itself and
+  settles the lines the levels could not, warns when two people sound too
+  alike or a mic seems to have changed hands, and keeps the voiceprints on
+  this Mac (Settings ▸ Transcription ▸ Voiceprints deletes them).
+- **Spell cast names** (off by default) tells the recognizer the mic owners'
+  names; a respelling is only taken when it looks like the word it replaces.
+- `sauce-bunny --eval` scores hand-checked scenes, so changes to the
+  defaults can be measured on real footage.
 - **String Outs cuts like an editing timeline.** V splices at the record In
   mark, else the playhead (with Snap on, in the gap between words), instead
   of at the text caret, which started at the first word. The playhead parks
@@ -58,7 +81,25 @@ All notable changes to Sauce Bunny. Format loosely follows
   mics right after their own track, in AAF Audio and String Outs. Each tab
   starts with its track.
 
+### Added
+- **The Pipeline on String Outs**, the same log AAF Audio has, at the foot of
+  the page; ⌘\ opens and closes it on every page. Every call String Outs
+  makes is timed: one still running says so at 2, 10, 30 and 60 seconds,
+  while it waits, and one that failed or ran long gets a row when it ends. A
+  watchdog notices when the window or the page stops answering, says so in
+  the log, and records what the app was stuck on. The log is on disk, so after
+  a Force Quit it is still there. Export diagnostics adds the app's memory,
+  mounted volumes (NEXIS included), what the string out was doing and how
+  every kind of call has performed. No transcript text or names are in it.
+
 ### Fixed
+- **The app could freeze past Force Quit on Avid NEXIS.** Video, audio and
+  posters were read off disk on the app's main thread, by the media loader
+  Tauri ships (one megabyte per request, or a whole file when no range was
+  asked for). On a network volume under daytime load each read could take
+  seconds, and a read the volume never answered left that thread waiting in
+  the kernel, where Force Quit cannot reach it. Those reads now happen on a
+  background pool: a slow volume slows that clip, not the app.
 - String Outs ignored every letter key straight after it opened, until
   something inside it was clicked.
 - With the timeline on Source, Z, X, M, T, A, S and ⌘B still edited the

@@ -105,4 +105,25 @@ describe("asset scope contract", () => {
       + "pattern set grows per call and lands on the playback byte-range path.",
     ).toBe(true);
   });
+  it("serves asset:// off the main thread, through the app's own handler", () => {
+    // Tauri's built-in handler opens and reads the file on the thread WKWebView
+    // asks from, which is the MAIN thread. On Avid NEXIS under daytime load
+    // that froze the window, and a stalled read left it in a kernel wait that
+    // Force Quit could not reach. lib.rs registers our handler under the same
+    // name, which makes Tauri skip installing its own.
+    const lib = readFileSync(resolve(ROOT, "src-tauri/src/lib.rs"), "utf8");
+    expect(
+      /\.register_asynchronous_uri_scheme_protocol\("asset",\s*asset_protocol::handle\)/.test(lib),
+      "lib.rs must register asset_protocol::handle for \"asset\", or Tauri's main-thread handler comes back.",
+    ).toBe(true);
+    const handler = readFileSync(resolve(ROOT, "src-tauri/src/asset_protocol.rs"), "utf8");
+    const handle = handler.slice(handler.indexOf("pub fn handle"), handler.indexOf("\n}\n", handler.indexOf("pub fn handle")));
+    expect(handle.length, "asset_protocol::handle not found").toBeGreaterThan(100);
+    const blocking = handle.indexOf("spawn_blocking");
+    expect(blocking, "handle must move the file work to the blocking pool").toBeGreaterThan(0);
+    // Everything that touches the disk is in respond(); it may only be reached
+    // from inside the spawned closure, never before it on the calling thread.
+    expect(handle.indexOf("respond("), "respond() must be called inside spawn_blocking").toBeGreaterThan(blocking);
+    expect(/File::open|std::fs::|metadata\(/.test(handle.slice(0, blocking)), "handle touches the disk before spawn_blocking").toBe(false);
+  });
 });

@@ -68,6 +68,7 @@ What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Ever
 │   │   ├── commands/          # Tauri commands by domain — twelve modules:
 │   │   │                     #   download, media, transcript, library, tags, system,
 │   │   │                     #   session, peer_stream, rung, llm, cloud_ai, sniff
+│   │   ├── asset_protocol.rs  # asset:// (local media) served off the main thread
 │   │   └── stream_proxy.rs    # loopback fMP4 media proxy for web playback
 │   ├── binaries/              # Bundled sidecar executables (gitignored; fetched by `npm run setup`)
 │   ├── capabilities/          # Tauri permission lists
@@ -255,12 +256,24 @@ PCM windows; no full-file transcode or new library is required.
 Empty audio-mapping headers are not successful persistent cache entries and are
 reported separately from an actual UMID mismatch. Both standard and legacy Sound
 data definitions are recognized. Per-file header start/end events, elapsed times,
-validation timings and memory/disk cache-hit totals appear in Multitrack Pipeline.
+validation timings and memory/disk cache-hit totals appear in the Pipeline.
 
 Source files have no arbitrary size ceiling. AAF and MXF fingerprints use
 64-bit seeks and two 64 KiB reads regardless of total size. Graph/header bounds,
 PCM window sizes and corruption checks remain independent resource safeguards.
-`MultitrackPipeline` reuses the Clip `LogsPanel`, including before import succeeds.
+`PipelinePanel` reuses the Clip `LogsPanel` at the foot of AAF Audio and String
+Outs (one open state, App's `logsOpen`, toggled by ⌘\ on every page), including
+before an import succeeds. It is one log for the app: the page writes its own
+rows into the same journal (`pipeline_log`), from `lib/pipeline.ts`, whose
+`pipelineInvoke` times every call String Outs makes (rows when one waits past
+2/10/30/60 s, fails or runs past a second; a per-command table for the export),
+whose `measure` times calculations on the page's thread, and whose `watchPage`
+logs page stalls and uncaught errors and sends a heartbeat. `aaf/health.rs` is
+the watchdog thread: it pings the main thread every half second and watches the
+heartbeat, writes a row when either goes quiet (and again when it answers), and
+runs `/usr/bin/sample` once per main-thread hang. `pipeline_health` adds memory,
+running processes, mounted volumes (local or network, `MNT_NOWAIT` so a stalled
+NEXIS cannot hold the export) and the newest hang sample to Export diagnostics.
 Native `aaf-diagnostic` events record job boundaries, subprocess stages/timings,
 candidate paths/sizes, validation failures and media-resolution totals. The local
 journal retains 1,500 recent rows in memory and two rolling 1 MiB files under
@@ -522,6 +535,39 @@ selection, what is open), and what lives only in WebView storage (speaker
 renames and the media link of single-file transcripts, a moved Transcripts
 library unless `--library` names it). Changes and live state are phase 4 of
 the spec and go through the app, so the undo log keeps one writer.
+
+## Multitrack transcript accuracy: words, bleed, voices
+
+Built from `docs/TRANSCRIPT-ACCURACY-SPEC-2026-10-04.md`. Four layers, each
+usable without the next:
+
+- **Measured words.** `saucebunny-diarize --asr` writes each word's time and
+  confidence beside the SRT (`--words`); `aaf/transcribe.rs` attaches them
+  to their cue (`AafCue.words`) when they spell it exactly, and
+  `speech.rs` uses them, snapping each boundary within 40 ms. `--batch` runs
+  up to eight two-minute windows on one model load; `--asr-model ultra`
+  picks Parakeet Ultra; `--vocabulary` spells cast names through
+  FluidAudio's CTC rescorer, guarded so a replacement must be a respelling.
+- **The bleed resolver.** `src-tauri/src/bleed.rs` is pure: each mic's level
+  in 20 ms frames against its own floor, from the waveform overviews, and
+  the same words on a louder mic. `aaf/ownership.rs` runs it over a document
+  (`aaf_ownership`), applies the voice check's calls to unsure words and the
+  editor's per-cue calls over everything, and caches the answer in
+  `app_data_dir()/ownership/`. The AAF Audio reader dims bleed, String Outs
+  reads it via `use-edit-sources`, and the context layer marks `bleed_from`
+  on lines for assistants. Leaving it OUT (All voices, search, String Outs'
+  crosstalk report, an assistant's search) follows one switch, Hide bleed
+  (`lib/bleed-hidden.ts`, kept in `app_data_dir()/bleed.json` so the MCP
+  server honours it too), which is off by default.
+- **The voice check.** `aaf/voices.rs` (`aaf_check_voices`) learns each
+  owner's voiceprint from the stretches their mic dominates
+  (`saucebunny-diarize --embed`, FluidAudio's WeSpeaker model, normalised in
+  the sidecar), settles unsure words by voice and then by which mic heard
+  them first, and warns of look-alikes and mic swaps. Voiceprints are kept in
+  `app_data_dir()/voiceprints/` and nowhere else (`voiceprint-contract`).
+- **The scorer.** `src-tauri/src/eval.rs`, `sauce-bunny --eval`, scores
+  hand-checked scenes against the app's transcript and labels, or any
+  engine's words (`--hyp`), so no default changes on anyone's say-so.
 
 ## Local AI: one transcript ingestion, shared by every feature
 

@@ -38,6 +38,8 @@ import { formatError } from "../lib/error-format";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { YouTubeSettings } from "./YouTubeSettings";
 import { AiApiSettings } from "./AiApiSettings";
+import { VoiceprintSettings } from "./VoiceprintSettings";
+import { BleedSettings } from "./BleedSettings";
 import { NdiAttribution, PremiereSetup } from "./PremiereSetup";
 import type { NdiTelemetry } from "../bindings/NdiTelemetry";
 import { useModalFocus } from "../hooks/use-modal-focus";
@@ -357,6 +359,12 @@ const MODEL_INFO: Record<string, ModelInfo> = {
     accuracy: "Near-pro quality. Robust to noise, overlapping voices, varied audio.",
     speed: "~2× realtime on Apple Silicon.",
     whenToUse: "Final captions for delivery; archival transcripts.",
+  },
+  "large-v3-turbo": {
+    tagline: "The most accurate Whisper, in any language.",
+    accuracy: "Fewer errors than Medium on conversation and noisy rooms; multilingual.",
+    speed: "About as fast as Medium on Apple Silicon.",
+    whenToUse: "When Whisper is the engine and accuracy matters most.",
   },
 };
 
@@ -1756,6 +1764,14 @@ export function SettingsModal(props: Props) {
                       Reset
                     </button>
                   </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection id="tx-bleed" label="Bleed" open={sectionOpen("tx-bleed")} onToggle={() => toggleSection("tx-bleed")}>
+                  <BleedSettings />
+                </CollapsibleSection>
+
+                <CollapsibleSection id="tx-voiceprints" label="Voiceprints" open={sectionOpen("tx-voiceprints")} onToggle={() => toggleSection("tx-voiceprints")}>
+                  <VoiceprintSettings />
                 </CollapsibleSection>
 
                 <CollapsibleSection id="tx-dictation" label="Dictation microphone" open={sectionOpen("tx-dictation")} onToggle={() => toggleSection("tx-dictation")}>

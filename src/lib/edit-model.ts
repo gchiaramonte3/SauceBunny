@@ -22,7 +22,8 @@ import { multitrackTextLayout } from "./multitrack-text-layout";
 /** A person. `track` is their AAF track number, 0 when they have none; `angle` marks a group angle given one. */
 export type TimelineLane = { id: string; name: string; track: number; angle?: boolean };
 /** `cue` is the transcript cue the word was said in (AAF Audio's cue id), when known. */
-export type TimelineWord = { id: string; source: string; track: string; text: string; start: number; end: number; cue?: string };
+/** `heardOn`: the AAF track this word was really spoken into, when the bleed resolver says it is bleed on this mic. */
+export type TimelineWord = { id: string; source: string; track: string; text: string; start: number; end: number; cue?: string; heardOn?: string };
 /** `tracks`: the lanes this clip plays on, when it was cut with only some (a bite of one person); absent, every lane on a track. */
 export type TimelineSegment = { id: string; source: string; srcIn: number; srcOut: number; tracks?: string[] };
 export type TimelineMute = { source: string; track: string; srcIn: number; srcOut: number };
@@ -202,7 +203,10 @@ export function deleteWords(words: TimelineWord[], edit: Timeline, keys: Set<str
     for (const item of placed) {
       const middle = (item.word.start + item.word.end) / 2;
       if (item.segment !== segment || middle < srcIn || middle >= srcOut) continue;
-      (keys.has(placementKey(item)) ? removed : crosstalk).push(item.word);
+      if (keys.has(placementKey(item))) removed.push(item.word);
+      // A bleed copy of a line is the same speech heard on a neighbour's mic,
+      // not someone talking over it: cutting it costs nobody their words.
+      else if (!item.word.heardOn) crosstalk.push(item.word);
     }
   }
   const segments = edit.segments.flatMap((segment, index) =>

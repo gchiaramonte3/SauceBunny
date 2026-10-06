@@ -1,8 +1,16 @@
 import { useId, useMemo, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
-import { hasTranscriptContent, sequenceTimecode, transcriptRows, untimedTranscriptRows } from "../lib/multitrack";
+import { hasTranscriptContent, sequenceTimecode, trackOwner, transcriptRows, untimedTranscriptRows } from "../lib/multitrack";
+import { cueLabels, cueOwnership } from "../lib/multitrack-ownership";
+import { useMultitrackOwnership } from "../hooks/use-multitrack-ownership";
+import { useBleedHidden } from "../hooks/use-bleed-hidden";
+import { setBleedHidden } from "../lib/bleed-hidden";
+import { formatError } from "../lib/error-format";
+import { MultitrackBleedBar } from "./MultitrackBleedBar";
+import { MultitrackCueMenu, type CueMenuTarget } from "./MultitrackCueMenu";
 import { multitrackPeople, multitrackScope } from "../lib/multitrack-person";
 import { MultitrackTranscriptTabs } from "./MultitrackTranscriptTabs";
+import { MultitrackCueText } from "./MultitrackCueText";
 import { MultitrackExport } from "./MultitrackExport";
 import { MultitrackRunInfo } from "./MultitrackRunInfo";
 import { MultitrackRunDetails } from "./MultitrackRunDetails";
@@ -27,17 +35,28 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
   const selected = choice === "all" ? "all" : people.find((person) => person.trackIds.includes(choice))?.id ?? firstWithText?.id ?? people[0]?.id ?? "all";
   const person = people.find((item) => item.id === selected), panelId = useId();
   const scoped = useMemo(() => multitrackScope(document, person?.trackIds), [document, person]);
-  const rows = useMemo(() => transcriptRows(scoped), [scoped]);
+  const ownership = useMultitrackOwnership(document, active);
+  const hide = useBleedHidden(), [switchError, setSwitchError] = useState<string | null>(null), [cueMenu, setCueMenu] = useState<CueMenuTarget | null>(null);
+  const labelled = useMemo(() => transcriptRows(scoped).map((row) => {
+    const labels = cueLabels(ownership.index, row.trackId, row.id);
+    return { ...row, labels, owned: cueOwnership(labels, row.text.split(/\s+/).filter(Boolean).length) };
+  }), [scoped, ownership.index]);
+  // Bleed is a line heard on the wrong mic. With Hide bleed on (lib/bleed-hidden)
+  // it is left out where every voice is read together (All voices, search, AI
+  // search); otherwise, and always on the mic's own tab, it is only dimmed.
+  const hideBleed = hide && selected === "all";
+  const rows = useMemo(() => labelled.filter((row) => !(hideBleed && row.owned.bleed)), [labelled, hideBleed]);
+  const bleedLines = labelled.filter((row) => row.owned.bleed).length;
   const untimed = useMemo(() => untimedTranscriptRows(scoped), [scoped]);
   const passages = useMemo(() => [
-    ...rows.map((row) => ({ key: passageKey("cue", row.trackId, row.id), text: `${row.owner}: ${row.text}` })),
+    ...rows.filter((row) => !hide || !row.owned.bleed).map((row) => ({ key: passageKey("cue", row.trackId, row.id), text: `${row.owner}: ${row.text}` })),
     ...untimed.map((row) => ({ key: passageKey("untimed", row.trackId, row.id), text: `${row.owner}: ${row.text}` })),
-  ], [rows, untimed]);
+  ], [rows, untimed, hide]);
   const search = useAiTranscriptSearch(passages, active, aiModelId);
   const { query, enabled, result } = search;
-  const filtered = useMemo(() => rows.filter((row) => enabled
+  const filtered = useMemo(() => rows.filter((row) => !(query.trim() && hide && row.owned.bleed) && (enabled
     ? !result.matches || result.matches.has(passageKey("cue", row.trackId, row.id))
-    : `${row.owner} ${row.text}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [rows, query, enabled, result.matches]);
+    : `${row.owner} ${row.text}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))), [rows, query, enabled, result.matches, hide]);
   const filteredUntimed = useMemo(() => untimed.filter((row) => enabled
     ? !result.matches || result.matches.has(passageKey("untimed", row.trackId, row.id))
     : `${row.owner} ${row.text}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [untimed, query, enabled, result.matches]);
@@ -59,12 +78,17 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
       </div>
       {enabled && <p className="cp-multitrack-note" role={result.phase === "error" ? "alert" : "status"}>{result.message || "Local AI. Press Enter to search."}</p>}
     </form>
+    <MultitrackBleedBar ownership={ownership.ownership} bleed={bleedLines} hidden={hideBleed} hide={hide} onHide={(next) => { setSwitchError(null); setBleedHidden(next).catch((cause) => setSwitchError(formatError(cause))); }} measuring={ownership.measuring} onMeasure={() => { void ownership.measure(); }} checking={ownership.checking} onCheckVoices={() => { void ownership.checkVoices(); }} onCancel={ownership.cancel} error={ownership.error ?? switchError} />
     {runInfo}
     <div id={panelId} className="cp-multitrack-transcript-body" role="tabpanel" aria-label={person?.name ?? "All voices"} tabIndex={0}>
       {!rows.length && !untimed.length ? <div className="cp-multitrack-transcript-empty"><h3>{loading ? "Waiting for the first completed track" : report && !report.saved ? "No new transcript was saved" : scoped.transcripts.length ? "No speech found in completed tracks" : person ? `No transcript for ${person.name} yet` : "Read each mic in context"}</h3><p>{report?.failures.length ? "Open Transcript info (i) for the failed tracks, then check those tracks and generate again." : "Check tracks, choose an engine, then generate. Saved results appear here."}</p></div>
         : !filtered.length && !filteredUntimed.length ? <p className="cp-multitrack-note">{enabled && result.phase !== "ready" ? "No matching passages found so far." : "No matching transcript text."}</p>
-          : visible.map((cue) => <button className={`cp-multitrack-cue${(!solo.size || solo.has(cue.trackId)) && frame >= cue.startFrame && frame < cue.endFrame ? " is-current" : ""}`} key={`${cue.trackId}:${cue.id}`} onClick={() => onSeek(cue.startFrame, cue.trackId)}>
-            <span className="cp-multitrack-cue-meta"><strong>{cue.owner}</strong><span>{cue.timecode}</span></span><span className="cp-multitrack-cue-text">{cue.text}</span>{cue.boundary_review && <span className="cp-multitrack-note">Check processing boundary</span>}
+          : visible.map((cue) => <button className={`cp-multitrack-cue${(!solo.size || solo.has(cue.trackId)) && frame >= cue.startFrame && frame < cue.endFrame ? " is-current" : ""}${cue.owned.bleed ? " is-bleed" : ""}`} key={`${cue.trackId}:${cue.id}`} onClick={() => onSeek(cue.startFrame, cue.trackId)}
+            onContextMenu={(event) => { event.preventDefault(); setCueMenu({ trackId: cue.trackId, cueId: cue.id, owner: cue.owner, heardOn: cue.owned.heardOn, heardOnName: cue.owned.heardOn ? trackOwner(document, cue.owned.heardOn) : null, bleed: cue.owned.bleed, manual: cue.owned.manual, x: event.clientX, y: event.clientY }); }}>
+            <span className="cp-multitrack-cue-meta"><strong>{cue.owner}</strong><span>{cue.timecode}</span></span><MultitrackCueText text={cue.text} words={cue.words} labels={cue.labels} />{cue.boundary_review && <span className="cp-multitrack-note">Check processing boundary</span>}{cue.suspect && <span className="cp-multitrack-note">{cue.suspect}</span>}
+            {cue.owned.bleed && <span className="cp-multitrack-note">{cue.owned.heardOn ? `Heard on ${trackOwner(document, cue.owned.heardOn)}'s mic` : "Heard on another mic"}{cue.owned.manual ? " (your call)" : ""}</span>}
+            {cue.owned.offMic && <span className="cp-multitrack-note">Off mic: on no one's lav</span>}
+            {cue.owned.voice && <span className="cp-multitrack-note">Sounds like {trackOwner(document, cue.owned.voice)}</span>}
           </button>)}
       {filtered.length > limit && <button className="btn btn-ghost cp-multitrack-more" onClick={() => setLimit(limit + 200)}>Show more ({filtered.length - limit} remaining)</button>}
       {filteredUntimed.length > 0 && <section className="cp-multitrack-untimed" aria-label="Text needing timing review"><h3>Timing needs review</h3>{visibleUntimed.map((cue) => <article key={`${cue.trackId}:${cue.id}`}><strong>{cue.owner}</strong><p>{cue.text}</p><details><summary>Timing details</summary>{cue.reason}<br />Reported: {cue.reported_timing}<br />Audio segment starts at {cue.timecode}</details></article>)}
@@ -72,6 +96,7 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
     </div>
     </div>
     <MultitrackExport document={document} person={person} selectedTracks={selectedTracks} />
+    <MultitrackCueMenu target={cueMenu} onClose={() => setCueMenu(null)} onSet={(label, heardOn) => { if (cueMenu) void ownership.setCue(cueMenu.trackId, cueMenu.cueId, label, heardOn); }} />
     {info && <MultitrackRunDetails document={document} report={report} error={error} onClose={() => setInfo(false)} />}
   </aside>;
 }

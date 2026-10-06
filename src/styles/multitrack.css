@@ -25,6 +25,23 @@
 .cp-multitrack-sequence-head h2 { margin: 0; color: var(--fg-1); font-weight: var(--weight-semibold); line-height: var(--leading-snug); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cp-multitrack-sequence-head p { margin: 4px 0 0; color: var(--fg-3); font-size: var(--text-base); font-variant-numeric: tabular-nums; }
 .cp-multitrack-note { color: var(--fg-3); font-size: var(--text-base); line-height: var(--leading-normal); }
+/* Bleed: a line, or words inside one, heard on this mic but spoken into
+   another. Dimmed, not hidden, on the mic's own tab; the reader hides whole
+   bleed lines from All voices and search. */
+.cp-multitrack-cue.is-bleed .cp-multitrack-cue-text,
+.cp-multitrack-word-bleed { color: var(--fg-4); }
+.cp-multitrack-bleed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+.cp-multitrack-bleed-warnings { flex-basis: 100%; margin: 0; padding-left: 18px; color: var(--fg-2); font-size: var(--text-base); line-height: var(--leading-snug); }
+.cp-multitrack-bleed label { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); font-size: var(--text-base); }
+/* A word the recognizer was unsure of: dotted, not coloured, so it reads as
+   "check me" without competing with selection or the current cue. Longhands,
+   per text-decoration-contract. */
+.cp-multitrack-word-unsure {
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--fg-4);
+  text-underline-offset: 3px;
+}
 .cp-multitrack-timeline { flex: 1; display: flex; flex-direction: column; }
 .cp-multitrack-timeline-tools { display: flex; align-items: center; gap: 12px; color: var(--fg-3); font-size: var(--text-base); }
 .cp-multitrack-zoom { display: flex; align-items: center; gap: 4px; }
@@ -256,6 +273,7 @@
 .cp-multitrack-generation .cp-multitrack-options { margin: 0; align-items: center; gap: 10px; }
 .cp-multitrack-options label { flex-direction: row; align-items: center; gap: 6px; }
 .cp-multitrack-options .cp-select { min-width: 100px; max-width: 160px; }
+.cp-multitrack-names { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); font-size: var(--text-base); }
 .cp-multitrack-asr-options { min-width: 0; max-width: 280px; color: var(--fg-3); font-size: var(--text-base); }
 .cp-multitrack-asr-options summary { min-height: 30px; align-content: center; cursor: pointer; padding: 4px 6px; border-radius: var(--r-sm); }
 .cp-multitrack-asr-options summary:hover { color: var(--fg-1); background: var(--bg-3); }

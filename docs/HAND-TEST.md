@@ -1103,6 +1103,80 @@ the acceptance test for whenever the verdict UI gets built.
 3. **Nothing changes.** With Sauce Bunny open on a string out, ask Claude to
    change it: it says it can only read. History shows no new step.
 
+### The Pipeline on String Outs (what to send when it hangs)
+
+1. In String Outs, press ⌘\: the Pipeline opens at the foot of the page with
+   room to read, and ⌘\ closes it. It opens the same way on AAF Audio.
+2. Open a large string out (AFF BANK 1). The log says when it started reading
+   every mic's words and how long that took. Anything that took more than a
+   second, waited, or failed has a row; fast calls do not.
+3. Export diagnostics: the file has HEALTH (memory, main thread, running
+   processes, volumes with NEXIS marked network), PAGE (the string out in
+   counts and ids, no titles or words), IN FLIGHT NOW, CALLS SINCE LAUNCH
+   (per command: calls, failures, average, longest) and the log. Read it for
+   any transcript text, title or person's name: there must be none.
+4. When String Outs hangs next: wait 15 seconds, then Force Quit if you must.
+   Relaunch and open the Pipeline: rows written DURING the hang ("Still
+   waiting on …", "The app's main thread has not answered for …", "String
+   Outs has not answered for …") are there, and, if macOS allowed it, a
+   "Recorded what every thread was doing" row with a hang file in the log
+   folder. Export diagnostics and send that file.
+
+### Media on Avid NEXIS during the working day (the freeze past Force Quit)
+
+The app used to read every chunk of a playing clip on its main thread, so a
+NEXIS volume slowing down under daytime load froze the window, and a read the
+volume never answered left it unkillable. Reads now happen off that thread.
+
+1. With NEXIS mounted and busy (or while AAF Audio is transcribing or
+   measuring mics from it), open a clip that lives on NEXIS and play it,
+   scrub it, and open the Library on a NEXIS folder with posters.
+2. While it plays, move the window, open Settings, switch views: the app
+   answers immediately even when the picture stalls. A stall now shows as a
+   clip that stops loading, never a spinning cursor over the whole window.
+3. If a clip ever hangs, ⌘Q (or Force Quit) closes the app. It may take as
+   long as the volume does to give up on that one read, but the window must
+   not be frozen while it waits.
+
+### Transcript accuracy (AAF Audio, needs a transcribed multi-mic AAF)
+
+1. **Parakeet Ultra.** In AAF Audio, Engine Parakeet, Model "Parakeet Ultra
+   (not downloaded)": Download Parakeet Ultra. Cancel mid-way stops it with no
+   error; Download again finishes. Generate two mics: their words follow the
+   speech to the frame when you click them in String Outs, and words the
+   recognizer was unsure of are underlined.
+2. **Measure mics.** With the mics transcribed, Measure mics (it reads the
+   media once; Stop works). All voices then says how many lines heard on
+   another mic are dimmed, "Heard on X's mic", and Hide bleed is OFF: every
+   line is still there. Pick a line you know is someone else's leaning into
+   a mic and check it is labelled; pick a line said by the mic's owner while
+   a neighbour talks over them and check it is NOT labelled. Tick Hide
+   bleed: All voices now says the lines are hidden, and Settings ▸
+   Transcription ▸ Bleed shows the switch on. Quit and reopen: still on.
+3. **Your call wins.** Right-click a dimmed line ▸ "Name, on their own mic":
+   it shows normally everywhere; right-click ▸ "Use the automatic call" puts
+   it back. Reopen the AAF: the call is still there.
+4. **Check voices** on AFF BANK 1 (the run nothing automated has done end to
+   end: its parts were measured, the in-app loop was not). The bar first
+   says these mics hear each other almost equally. Check voices runs (one
+   mic and ten minutes at a time; Stop works), says how many voices it
+   checked, and (with Hide bleed on) All voices then hides more than the
+   handful levels alone did. Listen to five newly hidden lines: each should be a copy of someone
+   else's line. Any warnings make sense (two people who really sound alike;
+   a mic you know was swapped). Settings ▸ Transcription ▸ Voiceprints
+   shows the count; Delete all, confirmed, empties it.
+5. **Spell cast names.** On a scene with unusual names, generate with the
+   box off, then on: names are spelled as on the mics, and read the rest of
+   the scene for any word wrongly turned into a name.
+6. **String Outs and assistants.** With Hide bleed on: in String Outs'
+   source pane, All voices reads each line once; cutting a line no longer
+   warns about overtalk from its own bleed copies; Ask "where does X say Y"
+   cites no bleed copy. Turn it off: All voices shows the copies again, and
+   an assistant's search returns them (marked as heard on the owner's mic).
+7. **Score a scene** (phase 0): `--eval-template` a scene of two mics,
+   correct the CSV by listening, then `--eval`; the report has WER, names,
+   timing and bleed numbers.
+
 ### Ask with tools (String Outs, needs a Claude or OpenAI key, or a Qwen model)
 
 1. In a string out made from AFF BANK 1, set Ask's model to Claude. Ask

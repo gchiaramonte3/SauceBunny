@@ -66,6 +66,10 @@ const WHISPER_MODELS: &[(&str, &str, u64)] = &[
     ("base.en",   "Base (English)",   147_700_000),
     ("small.en",  "Small (English)",  487_700_000),
     ("medium.en", "Medium (English)", 1_530_000_000),
+    // Multilingual, and the most accurate Whisper offered: fewer errors than
+    // medium.en on conversational speech at a similar speed on Apple Silicon
+    // (accuracy spec, phase 2). Exact size at the pinned commit.
+    ("large-v3-turbo", "Large v3 Turbo (multilingual)", 1_624_555_275),
 ];
 
 fn whisper_models_dir(app: &AppHandle) -> Result<PathBuf, crate::AppError> {
@@ -147,28 +151,52 @@ fn parakeet_models_dir(app: &AppHandle) -> Result<PathBuf, crate::AppError> {
 /// child. So the model lands beside `parakeet/`, and any readiness check has to
 /// look there (this mismatch is why a downloaded model previously read as
 /// "not downloaded" and bounced the user to Settings).
-fn parakeet_repo_dir(app: &AppHandle) -> Result<PathBuf, crate::AppError> {
+fn parakeet_repo_dir(app: &AppHandle, model: ParakeetModel) -> Result<PathBuf, crate::AppError> {
     let models = parakeet_models_dir(app)?; // ensures <…/models> exists
     let parent = models
         .parent()
         .ok_or_else(|| crate::AppError::internal("parakeet models dir has no parent"))?;
-    Ok(parent.join("parakeet-tdt-0.6b-v3"))
+    Ok(parent.join(model.folder))
 }
 
-/// True when the Parakeet repo dir holds the compiled Core ML bundles. We require
-/// both the Encoder and Decoder `.mlmodelc` (stable names across v3) so a
-/// half-finished download doesn't read as ready.
-#[tauri::command]
-pub fn parakeet_model_downloaded(app: AppHandle) -> bool {
-    let Ok(dir) = parakeet_repo_dir(&app) else { return false };
+/// A Parakeet model the app can run: the id documents record, the sidecar's
+/// `--asr-model` value, and the folder FluidAudio writes it to (its repo name
+/// without `-coreml`, beside `models/parakeet`). Ultra is FluidAudio 0.17.3's
+/// post-trained v3, same tokenizer and API (accuracy spec, phase 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParakeetModel { pub id: &'static str, pub arg: &'static str, pub folder: &'static str, pub label: &'static str, pub size: &'static str }
+
+pub const PARAKEET_V3: ParakeetModel = ParakeetModel { id: "parakeet-tdt-0.6b-v3", arg: "v3", folder: "parakeet-tdt-0.6b-v3", label: "Parakeet", size: "~0.5 GB" };
+pub const PARAKEET_ULTRA: ParakeetModel = ParakeetModel { id: "parakeet-ultra", arg: "ultra", folder: "parakeet-ultra", label: "Parakeet Ultra", size: "~0.6 GB" };
+
+/// The model a caller named, by id or by `--asr-model` value. None means v3,
+/// which is what every caller meant before Ultra existed.
+pub fn parakeet_model(name: Option<&str>) -> Result<ParakeetModel, crate::AppError> {
+    match name.map(str::trim) {
+        None | Some("") => Ok(PARAKEET_V3),
+        Some(name) => [PARAKEET_V3, PARAKEET_ULTRA].into_iter().find(|model| model.id == name || model.arg == name)
+            .ok_or_else(|| crate::AppError::invalid(format!("Unknown Parakeet model: {name}"))),
+    }
+}
+
+pub fn parakeet_ready(app: &AppHandle, model: ParakeetModel) -> bool {
+    let Ok(dir) = parakeet_repo_dir(app, model) else { return false };
     dir.join("Encoder.mlmodelc").is_dir() && dir.join("Decoder.mlmodelc").is_dir()
 }
 
-/// Remove the downloaded Parakeet model (frees ~0.5 GB). Mirrors
+/// True when the Parakeet repo dir holds the compiled Core ML bundles. We require
+/// both the Encoder and Decoder `.mlmodelc` (stable names across v3 and Ultra)
+/// so a half-finished download doesn't read as ready.
+#[tauri::command]
+pub fn parakeet_model_downloaded(app: AppHandle, model: Option<String>) -> bool {
+    parakeet_model(model.as_deref()).is_ok_and(|model| parakeet_ready(&app, model))
+}
+
+/// Remove a downloaded Parakeet model (frees ~0.5 GB). Mirrors
 /// `delete_whisper_model`; the Settings "Delete" button calls this.
 #[tauri::command]
-pub fn delete_parakeet_model(app: AppHandle) -> Result<(), crate::AppError> {
-    let dir = parakeet_repo_dir(&app)?;
+pub fn delete_parakeet_model(app: AppHandle, model: Option<String>) -> Result<(), crate::AppError> {
+    let dir = parakeet_repo_dir(&app, parakeet_model(model.as_deref())?)?;
     if dir.exists() {
         std::fs::remove_dir_all(&dir)
             .map_err(|e| format!("failed to delete Parakeet model: {e}"))?;
@@ -179,7 +207,8 @@ pub fn delete_parakeet_model(app: AppHandle) -> Result<(), crate::AppError> {
 /// Download + compile the Parakeet Core ML model into the app-managed dir.
 /// Drives the Settings "Download" button; cancellable via the JobRegistry.
 #[tauri::command]
-pub async fn download_parakeet_model(app: AppHandle, job_id: String) -> Result<(), crate::AppError> {
+pub async fn download_parakeet_model(app: AppHandle, job_id: String, model: Option<String>) -> Result<(), crate::AppError> {
+    let model = parakeet_model(model.as_deref())?;
     let dir = parakeet_models_dir(&app)?;
     let dir_str = dir.to_string_lossy().to_string();
     let cmd = app
@@ -187,7 +216,7 @@ pub async fn download_parakeet_model(app: AppHandle, job_id: String) -> Result<(
         .sidecar("saucebunny-diarize")
         .map_err(|e| format!("saucebunny-diarize sidecar not bundled: {e}. Run `npm run build:diarizer`."))?;
     let (mut rx, child) = cmd
-        .args(["--prepare-asr-models", "--models-dir", &dir_str, "--emit-progress"])
+        .args(["--prepare-asr-models", "--asr-model", model.arg, "--models-dir", &dir_str, "--emit-progress"])
         .spawn()
         .map_err(|e| format!("failed to spawn saucebunny-diarize: {e}"))?;
     app.state::<JobRegistry>().insert(job_id.clone(), child);
@@ -195,7 +224,7 @@ pub async fn download_parakeet_model(app: AppHandle, job_id: String) -> Result<(
         "transcript-phase",
         TranscriptPhaseEvent { job_id: job_id.clone(), phase: "parakeet-download".into() },
     );
-    emit_transcript_log(&app, &job_id, "info", "Downloading Parakeet model (~0.5 GB, first run only)…".into());
+    emit_transcript_log(&app, &job_id, "info", format!("Downloading {} model ({}, first run only)…", model.label, model.size));
     let mut stderr_tail = String::new();
     // QUIET IS NOT THE SAME AS STUCK, and the user could not tell them apart.
     //
@@ -455,7 +484,7 @@ fn first_downloaded_whisper(app: &AppHandle) -> Option<PathBuf> {
 /// Pick an ASR engine for dictation: Parakeet if its Core ML bundle is
 /// downloaded (best quality + ANE-fast), else any downloaded Whisper model.
 fn pick_dictation_engine(app: &AppHandle) -> Result<DictEngine, crate::AppError> {
-    if parakeet_model_downloaded(app.clone()) {
+    if parakeet_ready(app, PARAKEET_V3) {
         return Ok(DictEngine::Parakeet);
     }
     if let Some(m) = first_downloaded_whisper(app) {
@@ -3147,7 +3176,7 @@ pub(crate) fn analysis_sidecar_path(srt_path: &std::path::Path) -> std::path::Pa
 /// Rust just writes it durably, because a torn file would be a corrupt reuse.
 /// Keyed by the SRT path via co-location — analysis is a property of THIS
 /// transcript, so it should not follow the source (unlike speaker names).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_transcript_analysis(srt_path: String, json: String) -> Result<(), crate::AppError> {
     let sidecar = analysis_sidecar_path(std::path::Path::new(&srt_path));
     atomic_write(&sidecar, json.as_bytes())
@@ -4062,5 +4091,24 @@ mod whisper_speed_tests {
         let differ: Vec<usize> = (0..slow.len()).filter(|&i| slow[i] != fast[i]).collect();
         // Exactly the two values after -bs and -bo.
         assert_eq!(differ.len(), 2, "slow={slow:?} fast={fast:?}");
+    }
+}
+
+#[cfg(test)]
+mod parakeet_model_tests {
+    use super::*;
+
+    #[test]
+    fn a_parakeet_model_is_named_by_id_or_by_sidecar_value_and_none_means_v3() {
+        assert_eq!(parakeet_model(None).unwrap(), PARAKEET_V3);
+        assert_eq!(parakeet_model(Some("")).unwrap(), PARAKEET_V3);
+        assert_eq!(parakeet_model(Some("parakeet-ultra")).unwrap(), PARAKEET_ULTRA);
+        assert_eq!(parakeet_model(Some("ultra")).unwrap(), PARAKEET_ULTRA);
+        assert_eq!(parakeet_model(Some("parakeet-tdt-0.6b-v3")).unwrap(), PARAKEET_V3);
+        for unknown in ["redux", "Ultra", "../parakeet", "large-v3"] {
+            assert!(parakeet_model(Some(unknown)).is_err(), "{unknown} was accepted");
+        }
+        // FluidAudio writes each repo to its name without "-coreml".
+        assert_eq!((PARAKEET_V3.folder, PARAKEET_ULTRA.folder), ("parakeet-tdt-0.6b-v3", "parakeet-ultra"));
     }
 }

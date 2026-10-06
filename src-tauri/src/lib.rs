@@ -8,6 +8,7 @@ mod error;
 #[cfg(test)]
 mod nightly;
 mod stream_proxy;
+mod asset_protocol;
 mod stream_failure;
 mod acquisition_gate;
 mod premiere_bridge;
@@ -17,8 +18,10 @@ mod edit_export;
 mod edit_log;
 // Per-mic speech analysis from the waveform overview (Transcript Editor).
 mod speech;
+mod bleed;
 pub mod context;
 pub mod mcp;
+pub mod eval;
 pub use error::AppError;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -196,6 +199,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Replaces Tauri's own asset:// handler, which reads files on the main
+        // thread: a stalled network volume froze the app past Force Quit.
+        .register_asynchronous_uri_scheme_protocol("asset", asset_protocol::handle)
         .manage(commands::JobRegistry::default())
         .manage(commands::recording::Recorder::default())
         .manage(commands::LlmServer::default())
@@ -256,6 +262,9 @@ pub fn run() {
             commands::aaf_sequences,
             commands::aaf_diagnostics,
             commands::aaf_clear_diagnostics,
+            commands::pipeline_log,
+            commands::pipeline_heartbeat,
+            commands::pipeline_health,
             commands::aaf_resolve_media,
             commands::aaf_open,
             commands::aaf_list,
@@ -288,6 +297,13 @@ pub fn run() {
             commands::review_code,
             commands::session_kick,
             commands::aaf_speech,
+            commands::aaf_ownership,
+            commands::aaf_set_cue_ownership,
+            commands::aaf_check_voices,
+            commands::bleed_hidden,
+            commands::set_bleed_hidden,
+            commands::voiceprints_summary,
+            commands::delete_voiceprints,
             commands::aaf_export_edit,
             commands::aaf_export_edits,
             commands::mcp_setup,
@@ -414,6 +430,9 @@ pub fn run() {
             commands::session_cancel_fetch,
         ])
         .setup(|app| {
+            // The Pipeline's watchdog: the main thread and the page, both of
+            // which go quiet in a hang and cannot report it themselves.
+            commands::start_pipeline_watchdog(app.handle().clone());
             // Native menus, panels and subsequent windows must not inherit a
             // light system appearance while the web content is always dark.
             app.set_theme(Some(tauri::Theme::Dark));
