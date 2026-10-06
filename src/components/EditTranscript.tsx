@@ -1,6 +1,9 @@
 import { useMemo, useRef } from "react";
-import { paragraphHolding, paragraphStarts, placementKey, type Ghost, type TimelineParagraph as Paragraph, type PlacedWord, type TimelineLane } from "../lib/edit-model";
-import { EditGhostLine } from "./EditGhostLine";
+import { useFrame } from "../hooks/use-frame";
+import { firstAbove, paragraphHolding, sentenceAround, paragraphStarts, placementKey, runningEnds, wordUnder, type Ghost, type TimelineParagraph as Paragraph, type PlacedWord, type TimelineLane } from "../lib/edit-model";
+import type { FrameStore } from "../lib/frame-store";
+import { ghostsAbove, ghostsIn, indexGhosts, paragraphSizes } from "../lib/edit-ghost-index";
+import { EditGhost } from "./EditGhost";
 import { EditParagraph, type EditSeamInfo } from "./EditParagraph";
 import { EditWindowedParagraphs } from "./EditWindowedParagraphs";
 
@@ -14,7 +17,9 @@ export type EditSelection = { anchor: number; focus: number; collapsed: boolean;
 
 type Props = {
   speakers: TimelineLane[]; colors: Record<string, string>; fps: number; recordStart: number;
-  paragraphs: Paragraph[]; placed: PlacedWord[]; selection: EditSelection; current: string | null;
+  paragraphs: Paragraph[]; placed: PlacedWord[]; selection: EditSelection;
+  /** The record playhead, in frames: the text redraws when it crosses a word, to mark the word and move the caret. */
+  frames: FrameStore;
   /** Some source time is cut in, whether or not any of it has words. */
   hasCut?: boolean;
   sourceLabel: (source: string) => string;
@@ -26,8 +31,6 @@ type Props = {
   onMove: (paragraph: number, direction: -1 | 1) => void; onEdit: (id: string) => void;
 };
 
-const ends = (text: string) => /[.!?]["”']?$/.test(text);
-
 /**
  * The edit, as text. A click puts the caret (and the playhead) before a word;
  * a drag or ⇧-arrow selects; a double-click selects that line and a triple
@@ -35,32 +38,28 @@ const ends = (text: string) => /[.!?]["”']?$/.test(text);
  * one speaker's words, and ⌥-drag scrubs the playhead through the text.
  */
 export function EditTranscript(props: Props) {
-  const { placed, selection } = props;
+  const { placed } = props;
+  const latestEnds = useMemo(() => runningEnds(placed), [placed]), at = (frame: number) => frame / props.fps;
+  const parked = useFrame(props.frames, (frame) => firstAbove(latestEnds, at(frame) + 1e-6)), playingIndex = useFrame(props.frames, (frame) => wordUnder(placed, latestEnds, at(frame)));
+  // With no range chosen the caret is wherever the playhead is, as the workspace's is; this one is live.
+  const selection = props.selection.collapsed && props.selection.anchor !== parked ? { anchor: parked, focus: parked, collapsed: true } : props.selection;
+  const current = playingIndex < 0 ? null : placementKey(placed[playingIndex]);
   const drag = useRef<{ index: number; scrub: boolean } | null>(null);
   const root = useRef<HTMLDivElement>(null);
-  // Drawn a page at a time (EditWindowedParagraphs): a real 20-mic sequence cut in whole is 146k words.
-  const firsts = useMemo(() => paragraphStarts(props.paragraphs), [props.paragraphs]);
-  const sizes = useMemo(() => props.paragraphs.map((paragraph) => paragraph.words.length), [props.paragraphs]);
-  const playing = props.current == null ? null : placed.findIndex((item) => placementKey(item) === props.current);
-  const count = placed.length;
+  // Drawn a page at a time (EditWindowedParagraphs), removed lines included: a real 20-mic sequence cut in whole is 146k words.
+  const firsts = useMemo(() => paragraphStarts(props.paragraphs), [props.paragraphs]), ghosts = useMemo(() => indexGhosts(props.ghosts), [props.ghosts]);
+  const sizes = useMemo(() => paragraphSizes(props.paragraphs, ghosts), [props.paragraphs, ghosts]);
+  const playing = playingIndex < 0 ? null : playingIndex, count = placed.length;
   const range: [number, number] | null = selection.collapsed ? null
     : [Math.min(selection.anchor, selection.focus), Math.max(selection.anchor, selection.focus)];
   const caret = selection.collapsed ? selection.anchor : null;
   const nameOf = (id: string) => props.speakers.find((speaker) => speaker.id === id)?.name ?? id;
-  const ghostsBetween = (after: number, upTo: number) => props.ghosts?.filter((ghost) => ghost.at > after && ghost.at <= upTo) ?? [];
+  const ghostsBetween = (after: number, upTo: number) => ghostsIn(ghosts, after, upTo);
   const indexOf = (target: EventTarget | null) => {
     const found = (target as HTMLElement | null)?.closest?.("[data-index]");
     return found ? Number(found.getAttribute("data-index")) : null;
   };
   const paragraphOf = (index: number) => paragraphHolding(firsts, index) ?? -1;
-  const lineAround = (index: number): [number, number] => {
-    const paragraph = paragraphOf(index);
-    const first = firsts[paragraph], last = first + props.paragraphs[paragraph].words.length - 1;
-    let from = index, to = index;
-    while (from > first && !ends(placed[from - 1].word.text)) from--;
-    while (to < last && !ends(placed[to].word.text)) to++;
-    return [from, to];
-  };
   const keys = (event: React.KeyboardEvent) => {
     const at = range ? (event.key === "ArrowLeft" ? range[0] : range[1] + 1) : selection.anchor;
     const move = (to: number, extend: boolean) => {
@@ -95,7 +94,7 @@ export function EditTranscript(props: Props) {
     if (event.key === "Escape" && range) { event.preventDefault(); return props.onSelect({ anchor: range[0], focus: range[0], collapsed: true }, false); }
     if (event.key.toLowerCase() === "a" && event.metaKey && count) { event.preventDefault(); return props.onSelect({ anchor: 0, focus: count - 1, collapsed: false }, false); }
   };
-  const ghostLine = (ghost: Ghost) => <EditGhostLine key={ghost.id} ghost={ghost} color={props.colors[ghost.track]} name={nameOf(ghost.track)} onRestore={props.onRestore} />;
+  const ghostLine = (ghost: Ghost) => <EditGhost key={ghost.id} ghost={ghost} who={nameOf(ghost.track)} color={props.colors[ghost.track]} onRestore={props.onRestore} line />;
   const lastSegment = placed.length ? placed[placed.length - 1].segment : -1;
   return <div ref={root} className="cp-te-doc" role="region" aria-label="Edit transcript" aria-describedby="cp-te-doc-help" tabIndex={0} onKeyDown={keys}
     onPointerDown={(event) => {
@@ -117,7 +116,7 @@ export function EditTranscript(props: Props) {
     onClick={(event) => {
       const index = indexOf(event.target);
       if (index == null || event.altKey) return;
-      if (event.detail === 2) { const [from, to] = lineAround(index); props.onSelect({ anchor: from, focus: to, collapsed: false }, false); }
+      if (event.detail === 2) { const [from, to] = sentenceAround(placed, firsts, props.paragraphs, index); props.onSelect({ anchor: from, focus: to, collapsed: false }, false); }
       if (event.detail === 3) {
         const paragraph = paragraphOf(index), first = firsts[paragraph];
         props.onSelect({ anchor: first, focus: first + props.paragraphs[paragraph].words.length - 1, collapsed: false }, false);
@@ -133,10 +132,10 @@ export function EditTranscript(props: Props) {
       const previousWord = previous?.words[previous.words.length - 1];
       const source = paragraph.words[0].word.source;
       return <div key={paragraph.id} className="cp-te-para-wrap">
-        {ghostsBetween(previousWord?.segment ?? -1, previousWord && previousWord.segment === paragraph.words[0].segment ? -1 : paragraph.words[0].segment).map(ghostLine)}
+        {ghostsAbove(props.paragraphs, ghosts, index).map(ghostLine)}
         <EditParagraph paragraph={paragraph} speaker={speaker} color={props.colors[speaker.id]} fps={props.fps} recordStart={props.recordStart}
           sourceLabel={!previousWord || previousWord.word.source !== source ? props.sourceLabel(source) : null}
-          offset={first} range={range} caret={caret} caretAfter={!!selection.after} current={props.current} seams={props.seams}
+          offset={first} range={range} caret={caret} caretAfter={!!selection.after} current={current} seams={props.seams}
           seam={props.seam} onSeam={props.onSeam} ghosts={ghostsBetween} onRestore={props.onRestore} nameOf={nameOf}
           corrections={props.corrections} editing={props.editing} onCorrect={props.onCorrect}
           first={index === 0} last={index === props.paragraphs.length - 1} onMove={(direction) => props.onMove(index, direction)} />

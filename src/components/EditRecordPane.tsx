@@ -1,10 +1,13 @@
 import type { ReactNode } from "react";
+import { useFrame } from "../hooks/use-frame";
+import type { FrameStore } from "../lib/frame-store";
 import { EditScrubber } from "./EditScrubber";
 import { EditTextSettings, editTextVars, type EditTextStyle } from "./EditTextSettings";
 import { IconPause, IconPlay, IconSkipBack } from "./Icons";
 
 type Props = {
-  playhead: number; total: number; tc: string; totalTc: string; marks: number[];
+  /** The record playhead, in frames: this pane redraws as it moves, and the text inside it does not. */
+  frames: FrameStore; fps: number; total: number; tc: (seconds: number) => string; totalTc: string; marks: number[];
   playing: boolean; busy: boolean; onToggle: () => void; onStart: () => void;
   onScrub: (program: number) => void; onScrubStart: () => void; onScrubEnd: () => void;
   /** The last thing the editor did ("Lifted 2.40 s."), announced politely. */
@@ -21,14 +24,15 @@ type Props = {
  * about 1,260px.
  */
 export function EditRecordPane(props: Props) {
+  const playhead = useFrame(props.frames) / props.fps, tc = props.tc(playhead);
   return <section className="cp-te-record" aria-label="Record" style={editTextVars(props.text)}>
     <div className="cp-te-tools">
       <button type="button" className="cp-icon-btn" aria-label="Go to start" title="Go to start (Home)" onClick={props.onStart}><IconSkipBack size={14} /></button>
       <button type="button" className="cp-icon-btn cp-te-play" aria-label={props.playing ? "Pause" : "Play"} title={props.playing ? "Pause (Space)" : "Play (Space)"}
         aria-busy={props.busy || undefined} onClick={props.onToggle}>{props.playing ? <IconPause size={14} /> : <IconPlay size={14} />}</button>
-      <EditScrubber label="Record position" value={props.playhead} max={props.total} text={props.tc} marks={props.marks}
+      <EditScrubber label="Record position" value={playhead} max={props.total} text={tc} marks={props.marks}
         onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} />
-      <span className="cp-te-tools-tc">{props.tc}<span className="cp-te-tools-of"> / {props.totalTc}</span></span>
+      <span className="cp-te-tools-tc">{tc}<span className="cp-te-tools-of"> / {props.totalTc}</span></span>
       <EditTextSettings pane="Edit" style={props.text} onChange={props.onText} />
     </div>
     {props.children}

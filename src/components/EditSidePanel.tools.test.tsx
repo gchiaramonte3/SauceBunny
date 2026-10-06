@@ -39,7 +39,7 @@ const lanes = [{ id: "rosa", name: "Rosa", track: 1 }, { id: "dev", name: "Dev",
 const ROSA = "saucebunny://sequence/doc/line/1/r1";
 
 function setup() {
-  const ws = { setMessage: vi.fn(), selected: [], placed: [], caret: 0, marks: { in: null, out: null } } as unknown as Parameters<typeof EditSidePanel>[0]["ws"];
+  const ws = { setMessage: vi.fn(), selected: [], placed: [], caret: 0, caretNow: () => 0, marks: { in: null, out: null } } as unknown as Parameters<typeof EditSidePanel>[0]["ws"];
   render(<EditSidePanel editId="e1" document={document} words={words} used={new Set()} lengths={{ s1: 60 }} lanes={lanes} colors={{}} ws={ws}
     tab="ask" onTab={vi.fn()} history={null} jump={vi.fn()} pin={vi.fn()} commit={vi.fn()} tc={String} sourceName={() => "Kitchen"} nameOf={(id) => id}
     where={() => "Kitchen"} onJump={vi.fn()} onOpenEdit={vi.fn()} onSettings={vi.fn()} appLocalModelId={null} />);

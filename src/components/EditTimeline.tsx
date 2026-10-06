@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { FrameStore } from "../lib/frame-store";
+import { EditTimelinePlayhead } from "./EditTimelinePlayhead";
 import { editTc } from "../lib/edit-document";
 import type { Timeline, PlacedWord, Seam, TimelineLane } from "../lib/edit-model";
 import { isGap, phraseLabels, placementKey, programDuration, segmentLength, segmentStarts } from "../lib/edit-model";
@@ -16,7 +18,8 @@ type ToolProps = Omit<React.ComponentProps<typeof EditTimelineTools>, "allText" 
 
 type Props = {
   speakers: TimelineLane[]; edit: Timeline; seams: Seam[]; placed: PlacedWord[]; selection: Set<string>;
-  playhead: number; fps: number; recordStart: number; colors: Record<string, string>; solo: Set<string>; mute: Set<string>;
+  /** The playhead, in frames: only the line drawing it follows each frame (EditTimelinePlayhead). */
+  frames: FrameStore; fps: number; recordStart: number; colors: Record<string, string>; solo: Set<string>; mute: Set<string>;
   onSeek: (program: number) => void; onSolo: (speaker: string) => void; onMute: (speaker: string) => void; onUntrack?: (speaker: string) => void;
   seam: number | null; onSeam: (segment: number) => void;
   /** Which speakers each source has a mic for: a lane with no mic in a source shows filler there. */
@@ -56,7 +59,7 @@ const describe = (seam: Seam, fps: number, recordStart: number) => `${seam.kind 
  * Mac that always shows scrollbars does not grow one across the tracks.
  */
 export function EditTimeline(props: Props) {
-  const { speakers, edit, placed, selection, playhead, fps, colors, solo, mute, seams, zoom } = props;
+  const { speakers, edit, placed, selection, fps, colors, solo, mute, seams, zoom } = props;
   const { marks, snap, follow } = props.tools;
   const [pan, setPan] = useState(0);
   const [look, setLook] = useState<Omit<EditTimelineView, "waveforms">>({ speakerColours: true, height: "medium" });
@@ -78,11 +81,9 @@ export function EditTimeline(props: Props) {
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  // Zooming centres on the playhead; following turns the page when it runs off.
-  const latest = useRef({ playhead, total });
-  latest.current = { playhead, total };
-  useEffect(() => { setPan(Math.max(0, latest.current.playhead - latest.current.total / zoom / 2)); }, [zoom]);
-  useEffect(() => { if (follow && zoom > 1 && (playhead < start || playhead > start + span)) setPan(playhead); }, [follow, zoom, playhead, start, span]);
+  // Zooming centres on the playhead; following turns the page when it runs off (EditTimelinePlayhead).
+  const latest = useRef({ frames: props.frames, total }); latest.current = { frames: props.frames, total };
+  useEffect(() => { setPan(Math.max(0, latest.current.frames.get() / fps - latest.current.total / zoom / 2)); }, [zoom, fps]);
   const mutes = useMemo(() => Object.fromEntries(speakers.flatMap((s) => Object.keys(props.sourceSpeakers).map((source) => [`${source}:${s.id}`,
     edit.mutes.filter((m) => m.track === s.id && m.source === source).map((m): [number, number] => [m.srcIn, m.srcOut])]))), [edit.mutes, speakers, props.sourceSpeakers]);
   const words = useMemo(() => Object.fromEntries(speakers.filter((s) => text.has(s.id)).map((s) => [s.id, phraseLabels(placed, s.id, start, span, width)])),
@@ -140,7 +141,7 @@ export function EditTimeline(props: Props) {
         {band && <span className="cp-te-tl-band" style={{ left: x(band[0]), width: w(band[1] - band[0]) }} />}
         {seams.map((cut) => <span key={cut.index} className={`cp-te-tl-seam${cut.kind === "through" ? " is-through" : ""}${props.seam === cut.index ? " is-selected" : ""}`} style={{ left: x(cut.at) }} />)}
         {fade > 0 && seams.filter((cut) => cut.kind !== "through").map((cut) => <span key={`f${cut.index}`} className="cp-te-tl-fade" style={{ left: x(cut.at - fade / 2), width: w(fade) }} />)}
-        <span className="cp-te-tl-playhead" style={{ left: x(playhead) }} />
+        <EditTimelinePlayhead frames={props.frames} fps={fps} start={start} span={span} follow={follow && zoom > 1} onRunOff={setPan} />
       </div>
       {props.dead && <EditDeadLayer review={props.dead} x={x} w={w} at={(seconds) => editTc(seconds, fps, props.recordStart)} onSkip={props.onDeadSkip} />}
     </div>

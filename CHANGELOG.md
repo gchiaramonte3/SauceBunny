@@ -24,6 +24,13 @@ All notable changes to Sauce Bunny. Format loosely follows
   Remove one (× or Delete) or Clear list: that hides it from Add sequence and
   Start from and deletes nothing, and a hidden sequence comes back by itself
   when it is saved again in AAF Audio.
+- **String Outs' removed lines stop flooding the page.** Only cuts between
+  the pieces of a string out show as removed, as one line per speaker turn
+  with bleed copies left out, struck through in the text with Restore on
+  hover and in the right-click menu.
+- **String Outs plays smoothly.** Playing no longer redraws the whole editor
+  each frame: on a 146,000-word string out, from about 16 frames a second to
+  about 60.
 - **AAF Audio's Transcript panel says less.** AI search is a button at the
   end of the search field; bleed, passages to review and the last run are
   chips under it, each opening its explanation; the export footer is one row

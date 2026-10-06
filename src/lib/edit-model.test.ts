@@ -161,7 +161,7 @@ describe("transcript editor model", () => {
     const paras = paragraphs(placeWords(teWords, edit));
     const keys = new Set([...paras[1].words, ...paras[2].words].map(placementKey));
     const cut = deleteKeys(teWords, edit, keys).edit;
-    const ghosts = ghostLines(cut, teWords, teDurations);
+    const ghosts = ghostLines(cut, teWords);
     expect(ghosts.map((ghost) => ghost.track)).toEqual(["dev", "imani"]);
     expect(ghosts.map((ghost) => ghost.words.length)).toEqual([paras[1].words.length, paras[2].words.length]);
     // Restore only the second of the two lines: the first stays cut.
@@ -170,21 +170,53 @@ describe("transcript editor model", () => {
     const ids = new Set(placeWords(teWords, back).map((item) => item.word.id));
     expect(imaniLine.words.every((word) => ids.has(word.id))).toBe(true);
     expect(devLine.words.some((word) => ids.has(word.id))).toBe(false);
-    expect(ghostLines(back, teWords, teDurations).map((ghost) => ghost.track)).toEqual(["dev"]);
+    expect(ghostLines(back, teWords).map((ghost) => ghost.track)).toEqual(["dev"]);
     // And then the other one: nothing is left cut, and the edit is whole again.
-    const [rest] = ghostLines(back, teWords, teDurations);
+    const [rest] = ghostLines(back, teWords);
     const whole = restoreRange(back, rest.at, rest.source, rest.from, rest.to);
     expect(placeWords(teWords, whole)).toHaveLength(kitchen.length);
-    expect(ghostLines(whole, teWords, teDurations)).toEqual([]);
+    expect(ghostLines(whole, teWords)).toEqual([]);
   });
 
-  it("lines trimmed off the head of a source are ghosts too", () => {
-    const [first, second] = paragraphs(placeWords(teWords, teWholeScene()));
-    const cut: Timeline = { segments: [{ id: "t", source: "mg3", srcIn: second.words[0].word.start - 0.1, srcOut: teDurations.mg3 }], mutes: [] };
-    const [ghost] = ghostLines(cut, teWords, teDurations);
-    expect(ghost.at).toBe(0);
-    expect(ghost.words.map((word) => word.id)).toEqual(first.words.map((item) => item.word.id));
-    expect(placeWords(teWords, restoreRange(cut, 0, ghost.source, ghost.from, ghost.to))).toHaveLength(kitchen.length);
+  it("what lies before the first kept piece or after the last is not removed: it was never in the string out", () => {
+    const [, second] = paragraphs(placeWords(teWords, teWholeScene()));
+    const cut: Timeline = { segments: [{ id: "t", source: "mg3", srcIn: second.words[0].word.start - 0.1, srcOut: second.words[second.words.length - 1].word.end + 0.1 }], mutes: [] };
+    expect(ghostLines(cut, teWords)).toEqual([]);
+  });
+
+  it("reads a cut through interleaved mics as speaker turns, leaving bleed copies out", () => {
+    // Alex talks for four seconds; Sam's mic hears every word of it, one
+    // word behind; then Sam answers. Before, a line broke at every change of
+    // track: one row per word.
+    const word = (id: string, track: string, cue: string, text: string, start: number, heardOn?: string): TimelineWord =>
+      ({ id, source: "s", track, cue, text, start, end: start + 0.3, heardOn });
+    const said = ["so", "we", "drove", "all", "night", "long"];
+    const cutWords: TimelineWord[] = [
+      word("k0", "alex", "c0", "Before.", 0),
+      ...said.map((text, index) => word(`a${index}`, "alex", "c1", text, 2 + index * 0.5)),
+      ...said.map((text, index) => word(`b${index}`, "sam", "c2", text, 2.1 + index * 0.5)),
+      word("r0", "room", "c3", "night", 3.6, "alex"),
+      ...["and", "then", "what"].map((text, index) => word(`s${index}`, "sam", "c4", text, 6 + index * 0.5)),
+      word("k1", "alex", "c5", "After.", 9),
+    ];
+    const edit: Timeline = { segments: [{ id: "x", source: "s", srcIn: 0, srcOut: 1 }, { id: "y", source: "s", srcIn: 8.5, srcOut: 10 }], mutes: [] };
+    const ghosts = ghostLines(edit, cutWords);
+    expect(ghosts.map((ghost) => [ghost.track, ghost.words.map((item) => item.text).join(" ")])).toEqual([
+      ["alex", "so we drove all night long"],
+      ["sam", "and then what"],
+    ]);
+    // Restoring each turn in order brings the whole cut back, and nothing twice.
+    let back = edit;
+    for (const ghost of ghosts) back = restoreRange(back, ghost.at, ghost.source, ghost.from, ghost.to);
+    expect(placeWords(cutWords, back).map((item) => item.word.id).sort()).toEqual(cutWords.map((item) => item.id).sort());
+    expect(ghostLines(back, cutWords)).toEqual([]);
+  });
+
+  it("runs a speaker's cues together into one turn until a long pause", () => {
+    const word = (id: string, cue: string, start: number): TimelineWord => ({ id, source: "s", track: "alex", cue, text: id, start, end: start + 0.3 });
+    const cutWords = [word("k0", "c0", 0), word("w1", "c1", 2), word("w2", "c2", 2.6), word("w3", "c3", 6), word("k1", "c4", 9)];
+    const edit: Timeline = { segments: [{ id: "x", source: "s", srcIn: 0, srcOut: 1 }, { id: "y", source: "s", srcIn: 8.5, srcOut: 10 }], mutes: [] };
+    expect(ghostLines(edit, cutWords).map((ghost) => ghost.words.map((item) => item.id))).toEqual([["w1", "w2"], ["w3"]]);
   });
 
   it("a line from another source is a jump, never a restorable cut", () => {
@@ -219,7 +251,7 @@ describe("transcript editor model", () => {
 
   it("a lifted line is a ghost that restores into its gap without moving what follows", () => {
     const lifted = liftProgram(whole(), 1.45, 2.7);
-    const ghosts = ghostLines(lifted, words, { s: 5 });
+    const ghosts = ghostLines(lifted, words);
     const ghost = ghosts.find((item) => item.words.some((word) => word.id === "a2"))!;
     expect(ghost).toBeTruthy();
     const restored = restoreRange(lifted, ghost.at, ghost.source, ghost.from, ghost.to);

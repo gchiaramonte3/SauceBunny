@@ -922,6 +922,17 @@ The one deliberate exception to "state lives in App" is the playhead. It ticks u
 - **Action-time readers** — mark in/out, frame snapshot, seek-by-seconds, and the co-review heartbeat/presence/chase call `getPlayheadFrames()` when they fire; the shuttle edge-stop watches via a plain subscription (no re-render at all).
 - **Cross-window feed** — the popped-out panel can't subscribe across webviews, so the playhead reaches it as data, without re-rendering App: the change-driven `panel:state` snapshot carries the position as of its publish (the boot seed + the pause/seek truth), and `use-panel-bus` emits a lightweight `panel:playhead` heartbeat (4 Hz, only while a panel is detached and the playhead actually moved) that PanelApp writes into its window's store. The live clock deliberately stays OUT of the snapshot so playback never re-serializes it.
 
+**String Outs uses the same pattern, one store per clock.** Its record and its
+source each play on their own engine, so `src/lib/frame-store.ts` is a small
+factory (`createFrameStore`) rather than a second singleton, read through
+`useFrame(store, select?)`. `useEditPlayback` writes the frame there and keeps
+only rate, waiting and error as React state. Full-rate subscribers are leaves
+(the record and source timecodes and scrubbers, `EditTimelinePlayhead`);
+the texts, the caret and the Inspector subscribe through selectors that change
+only when the playhead crosses a word, and actions read `frames.get()` when
+they fire. Measured on 146k words: 65 ms of script a frame before, 2.8 ms after
+(`e2e/string-outs-scale.spec.ts`).
+
 ### What is left to extract, and what only looks extractable
 
 `App.tsx` remains the application composition root. The roadmap direction is one cohesive subsystem at a

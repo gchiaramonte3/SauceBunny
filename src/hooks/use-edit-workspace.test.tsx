@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
+import { createFrameStore } from "../lib/frame-store";
 import { expect, it, vi } from "vitest";
 import type { OpenEdit } from "../lib/edit-document";
 import type { Timeline, TimelineLane, TimelineWord } from "../lib/edit-model";
@@ -16,9 +17,10 @@ const openEdit = { document: {} as OpenEdit["document"], timeline, markers: [] }
 function setup(open: OpenEdit = openEdit, everyone?: TimelineWord[], playhead = 0, snap = true) {
   const commits: { label: string; change: EditChange }[] = [];
   const commit = vi.fn(async (label: string, change: (state: OpenEdit) => EditChange) => { commits.push({ label, change: change(open) }); return true; });
-  const seek = vi.fn();
+  // No fps here, so the playhead store holds seconds.
+  const seek = vi.fn(), frames = createFrameStore(playhead);
   const hook = renderHook(() => useEditWorkspace({ open, words, everyone, lanes, sourceLanes: { s1: ["rosa", "dev"] }, durations: { s1: 10 },
-    audible: new Map([["s1", [[1, 3], [6, 7]]]]), playhead, seek, commit, nameOf: (id) => id === "rosa" ? "Rosa" : "Dev", tc: (s) => `${s}`, snap }));
+    audible: new Map([["s1", [[1, 3], [6, 7]]]]), frames, seek, commit, nameOf: (id) => id === "rosa" ? "Rosa" : "Dev", tc: (s) => `${s}`, snap }));
   const select = (from: number, to: number) => act(() => hook.result.current.setSelection({ anchor: from, focus: to, collapsed: false }));
   return { hook, commits, select, seek };
 }
@@ -95,7 +97,7 @@ it("⌫ at a caret deletes the word it names, not the selection the last render 
 
 it("retires a dead-space review once the cut changes under it", () => {
   const hook = renderHook(({ open }) => useEditWorkspace({ open, words, lanes, sourceLanes: { s1: ["rosa", "dev"] }, durations: { s1: 10 },
-    audible: new Map([["s1", [[1, 3], [6, 7]]]]), playhead: 0, seek: vi.fn(), commit: vi.fn(), nameOf: String, tc: String }), { initialProps: { open: openEdit } });
+    audible: new Map([["s1", [[1, 3], [6, 7]]]]), frames: createFrameStore(0), seek: vi.fn(), commit: vi.fn(), nameOf: String, tc: String }), { initialProps: { open: openEdit } });
   act(() => hook.result.current.findDead("air"));
   expect(hook.result.current.dead).not.toBeNull();
   // Same cut, new objects (a marker was added): the review stands.

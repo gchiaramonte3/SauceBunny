@@ -1,3 +1,4 @@
+import type { FrameStore } from "../lib/frame-store";
 import { useEffect, useRef } from "react";
 import type { EditHead } from "../bindings/EditHead";
 import type { EditHistory } from "../bindings/EditHistory";
@@ -10,7 +11,7 @@ const AUDIO_WAIT_MS = 3_000;
 
 export type EditPipelineState = {
   editId: string; head: EditHead; history: EditHistory | null; data: EditSourceData; waveforms: boolean; inSource: boolean;
-  playback: { frame: number; rate: number; busy: boolean; error: string | null };
+  playback: { frames: FrameStore; rate: number; busy: boolean; error: string | null };
 };
 
 const short = (id: string) => id.slice(0, 8);
@@ -33,7 +34,7 @@ export function describeStringOut(state: EditPipelineState): string {
     `Record: ${count(document.segments.length, "clip")}, ${count(document.mutes.length, "mute")}, ${count(document.markers.length, "marker")}`,
     `Words: ${count(data.words.length, "word")} on ${count(lanes, "mic")} · ${data.loading ? `READING ${data.read ? `${data.read.done} of ${data.read.total}` : ""}`.trim() : "read"} · speech measured: ${data.measured ? "yes" : "no"}${data.measuring ? " (measuring now)" : ""}`,
     `Waveforms: ${state.waveforms ? `on, ${data.peaks.size} drawn` : "off"}`,
-    `Playback: ${playback.rate ? `playing at ${playback.rate}x` : "stopped"} at frame ${playback.frame}${playback.busy ? " · WAITING FOR AUDIO" : ""}${playback.error ? ` · error: ${playback.error}` : ""}`,
+    `Playback: ${playback.rate ? `playing at ${playback.rate}x` : "stopped"} at frame ${playback.frames.get()}${playback.busy ? " · WAITING FOR AUDIO" : ""}${playback.error ? ` · error: ${playback.error}` : ""}`,
     ...(data.errors.length ? ["Source problems:", ...data.errors.map((error) => `  ${error}`)] : []),
   ].join("\n");
 }
@@ -85,7 +86,7 @@ export function useEditPipeline(state: EditPipelineState) {
     let warned = false;
     const timer = window.setTimeout(() => {
       warned = true;
-      pipelineLog(STAGE, `Playback has waited ${msText(AUDIO_WAIT_MS)} for its audio at frame ${latest.current.playback.frame}.`, "warn");
+      pipelineLog(STAGE, `Playback has waited ${msText(AUDIO_WAIT_MS)} for its audio at frame ${latest.current.playback.frames.get()}.`, "warn");
     }, AUDIO_WAIT_MS);
     return () => {
       window.clearTimeout(timer);

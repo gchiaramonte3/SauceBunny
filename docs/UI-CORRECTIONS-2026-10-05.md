@@ -16,8 +16,9 @@ changes"). One item jumps the queue: **1** is a data-loss hazard found while
 reading the Transcripts page, and it is a few lines.
 
 **Status (2026-10-05):** items 1 to 8 are built (pull request A), 9, 12 and
-13 (pull request B), 11 (pull request C), and 14 (pull request D). The rest
-are taken one at a time in this order, each as its own pull request.
+13 (pull request B), 11 (pull request C), 14 (pull request D), and 15 and 19
+(pull request E). The rest are taken one at a time in this order, each as its
+own pull request.
 
 | # | Item | What it is | Effort | PR |
 |---|---|---|---|---|
@@ -356,6 +357,18 @@ Descript-style: struck-through text in the flow with Restore on hover and in
 the right-click menu. **Done when:** the scale e2e gains a partial string out
 with Removed lines on and stays inside its DOM and time budgets.
 
+**As built (E):** `ghostLines` keeps only cuts between kept pieces, builds
+lines from cues, leaves out known bleed and any cue that repeats, nearly word
+for word and at the same time, a longer one on another mic (when the resolver
+has not run, that is what interleaved mics are), and runs a speaker's cues
+together until a long pause. Words are indexed per source once and each cut is
+a binary search; removed lines are indexed once by where they go back
+(`lib/edit-ghost-index`) and counted into the windowed pages. `EditGhost`
+draws one, inline or as a line, struck through, with Restore on hover or
+focus and a right-click menu; `EditGhostLine` is gone. The scale e2e opens
+three one-minute pieces of the 3h36m sequence and checks nothing removed is
+drawn before the first word or after the last.
+
 ## 16. AAF Audio playback: windows kept, counted, never prepared twice
 
 **Found:** the owner's log has 348 `audio · Prepare` calls in about four
@@ -444,11 +457,27 @@ full passes over the words. No Edit component is memoized; each commit repeats
 `placeWords` three times; the timeline is not windowed, and each record header
 carries a select of all 98 people.
 
+**Measured (E):** on the scale fixture, playing the whole 146k-word string out
+cost 65 ms of script a frame: about 16 frames a second.
+
 **Change:** the playhead in a small store read with `useSyncExternalStore` only
 by what draws it; `React.memo` on the heavy panes with stable callbacks;
 placement and seams computed once per edit revision; the person picker's
 options rendered on open. **Done when:** on the 146,018-word scale fixture a
 playing frame costs under 4 ms of scripting, measured in the e2e.
+
+**As built (E):** 2.8 ms a frame, about 60 frames a second. The frame lives in
+a store (`lib/frame-store`, `useFrame`), not in the editor's state, and only a
+change of rate, waiting or error re-renders the editor. The timecodes,
+scrubbers and the timeline's playhead line (`EditTimelinePlayhead`,
+`EditSourceTools`) follow every frame; the record and source texts, the
+caret and the Inspector follow the word under the playhead through selectors
+(a binary search over running word ends), so they redraw a few times a
+second; Previous and Next edit follow the nearest edit points. Actions read
+the frame when they run (marks, markers, Add Edit, Insert, J, stepping, Loop's
+check), and the workspace no longer subscribes at all. The memoised panes, the
+one-pass placement and the person picker rendered on open were not needed to
+reach the goal and are not done.
 
 ## 20. String Outs as a document editor (the Descript direction)
 
