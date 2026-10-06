@@ -1124,6 +1124,22 @@ the acceptance test for whenever the verdict UI gets built.
    `saucebunny-program-capture` process is left (`pgrep -fl program-capture`).
 6. System Settings ▸ Privacy and Security ▸ Screen and System Audio Recording:
    Sauce Bunny is not listed under Screen Recording.
+7. Window ▸ **Choose window…**: the same picker, for one window. Click a
+   window (or a whole app, when a window will not pick on its own, such as a
+   remote-desktop viewer filling another display): it previews at once with
+   only that window, labelled "App · Window title". Include application audio
+   is on: play sound in that app and in another; only that app is heard. Close
+   the window: the preview stops with "the shared screen or window went away".
+8. Region ▸ **Choose screen…**: pick a display; a still of it appears and
+   nothing starts. Drag an area (or type Left/Top/Width/Height): "Captures W ×
+   H of …" reads true, and Preview shows exactly that part. Refresh still takes
+   a new one. The macOS screen-sharing indicator flashes briefly for the still.
+9. With audio on, Audio from ▸ **Only the apps I choose**: tick one app (say
+   Jump Desktop). In a session, have the other person talk: they must not hear
+   themselves, and only the ticked app is heard. With "Every app except Sauce
+   Bunny", Safari is silent too (it plays through the same macOS process).
+10. Neither Source dialog nor Share your screen is wider than its content on an
+   ultrawide display (2560 × 1080): about 640 and 720 points.
 
 ### The Pipeline on String Outs (what to send when it hangs)
 

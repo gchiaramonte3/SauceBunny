@@ -8,7 +8,7 @@ import { formatError } from "../lib/error-format";
 import type { NdiDiscovery, NdiInput } from "../hooks/use-ndi-input";
 import { PremiereConnectionStatus } from "./PremiereConnectionStatus";
 import { AvidNdiSetup } from "./AvidNdiSetup";
-import { ObsCaptureControls, type CaptureMode } from "./ObsCaptureControls";
+import { ProgramCaptureControls, type CaptureMode } from "./ProgramCaptureControls";
 import { CaptureSourceTabs } from "./CaptureSourcePicker";
 import { ObsBroadcastControls } from "./ObsBroadcastControls";
 import type { ObsBroadcast } from "../hooks/use-obs-broadcast";
@@ -38,8 +38,6 @@ type Props = {
   canManageSource?: boolean;
   previewVisible?: boolean;
   broadcast?: ObsBroadcast;
-  /** Explicit desktop region Edit, scoped to a still-owned capture source. */
-  editRequest?: { sourceId: string; serial: number };
   /** An explicit Review entry point chooses a category, never a capture. */
   sourceRequest?: { kind: "ndi" | "screen" | "window" | "region"; serial: number };
 };
@@ -51,13 +49,13 @@ const SOURCE_TABS: { id: SourceTab; label: string }[] = [
 ];
 const captureTab = (selection: ObsSelection): CaptureMode => {
   if (isPickedCapture(selection)) return selection.kind;
-  // Screen is macOS's picker now; an OBS display capture, whole or part, belongs to Region until it moves too.
+  // An OBS capture still running from before the picker belongs to the tab it was chosen on.
   return isDisplayCapture(selection) ? "region" : "window";
 };
 
 /** Connection controls only. Picture and audio belong to the existing Preview
  * stage, so opening or closing this panel cannot replace its decoder. */
-export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0, onPreviewRequested, onShared, onReconnectPicture, onCompanionSetup, returnFocus, recovery, canManageSource = true, previewVisible = true, broadcast, editRequest, sourceRequest }: Props) {
+export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0, onPreviewRequested, onShared, onReconnectPicture, onCompanionSetup, returnFocus, recovery, canManageSource = true, previewVisible = true, broadcast, sourceRequest }: Props) {
   const inspectingPreview = previewVisible && !!input.previewProgram;
   const state = inspectingPreview ? input.previewState : input.state;
   const currentProgram = inspectingPreview ? input.previewProgram : input.program;
@@ -65,15 +63,13 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
   const [captureFooter, setCaptureFooter] = useState<HTMLDivElement | null>(null);
   const [captureDrafts, setCaptureDrafts] = useState<Partial<Record<CaptureMode, ObsSelection>>>({});
   const requestedCapture = useRef<{ selection: ObsSelection; tab: CaptureMode; restoreDraft: boolean } | null>(null);
-  const editingCaptureDraft = useRef(false);
-  useEffect(() => { if (!open) { requestedCapture.current = null; editingCaptureDraft.current = false; } }, [open]);
+  useEffect(() => { if (!open) requestedCapture.current = null; }, [open]);
   const restoredSource = useRef<string | null>(null);
   useEffect(() => {
     if (!currentProgram || restoredSource.current === currentProgram.id) return;
     restoredSource.current = currentProgram.id;
     // Desktop Edit owns this draft until the user leaves or previews it. An
     // earlier authorized startup may finish, but must not replace these edits.
-    if (editingCaptureDraft.current) return;
     const capture = currentProgram.capture;
     const requested = requestedCapture.current;
     const matchesRequest = !!capture && !!requested && sameProgramSource(
@@ -106,21 +102,10 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
     appliedSourceRequest.current = sourceRequest.serial;
     // Keep an already-started request's identity so its late completion cannot
     // restore the old category over this explicit choice.
-    cancelReveal(); editingCaptureDraft.current = false;
+    cancelReveal();
     setSourceKind(sourceRequest.kind);
   }, [open, canManageSource, sourceRequest, cancelReveal]);
-  const appliedEdit = useRef<number | null>(null);
-  useEffect(() => {
-    if (!open || !canManageSource || !editRequest || appliedEdit.current === editRequest.serial) return;
-    appliedEdit.current = editRequest.serial;
-    const target = [input.snapshot.candidate, input.snapshot.published].find(source => source?.id === editRequest.sourceId && !source.retired);
-    const selection = target?.capture;
-    if (!selection || !isDisplayCapture(selection)) return;
-    cancelReveal(); requestedCapture.current = null; editingCaptureDraft.current = true;
-    setCaptureDrafts(drafts => ({ ...drafts, region: copyCaptureSelection(selection) }));
-    setSourceKind("region");
-  }, [open, canManageSource, editRequest, input.snapshot.candidate, input.snapshot.published, cancelReveal]);
-  const close = () => { previewReveal.cancel(); requestedCapture.current = null; editingCaptureDraft.current = false; onClose(); };
+  const close = () => { previewReveal.cancel(); requestedCapture.current = null; onClose(); };
   const dialog = useRef<HTMLElement>(null);
   useModalFocus(open, dialog, returnFocus);
   const generation = useRef(0), actionPending = useRef(false);
@@ -184,11 +169,11 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
     {canManageSource && input.startCapture && <div className="cp-ndi-input-tabs">
       <CaptureSourceTabs label="Source type" selected={sourceKind}
         tabs={SOURCE_TABS.map(tab => ({ ...tab, panelId: `cp-live-source-${tab.id}`, disabled: tabsDisabled }))}
-        onSelect={kind => { if (SOURCE_TABS.some(tab => tab.id === kind)) { previewReveal.cancel(); editingCaptureDraft.current = false; setSourceKind(kind as SourceTab); } }}/>
+        onSelect={kind => { if (SOURCE_TABS.some(tab => tab.id === kind)) { previewReveal.cancel(); setSourceKind(kind as SourceTab); } }}/>
     </div>}
     <div className="cp-ndi-input-body" id={`cp-live-source-${sourceKind}`} role="tabpanel" aria-label={SOURCE_TABS.find(tab => tab.id === sourceKind)?.label}>
       {sourceKind === "ndi" && <p className="cp-ndi-input-intro">Preview picture and audio from your editor. Playback stays at the source.</p>}
-      {canManageSource && captureMode && input.startCapture && <ObsCaptureControls
+      {canManageSource && captureMode && input.startCapture && <ProgramCaptureControls
         key={`${captureMode}:${currentProgram?.id ?? "draft"}`} mode={captureMode} open={open} disabled={acting || !!input.snapshot.busy} footerTarget={captureFooter}
         reportedPreviewError={error || pictureError || recovery?.error}
         initialSelection={captureDrafts[captureMode]}
@@ -196,9 +181,9 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
           previewReveal.cancel();
           if (requestedCapture.current?.tab === captureMode) requestedCapture.current.restoreDraft = false;
           setCaptureDrafts(drafts => ({ ...drafts, [captureMode]: copyCaptureSelection(selection) }));
-        }} refreshRequest={refreshRequest}
+        }}
         onPreview={async selection => {
-          editingCaptureDraft.current = false;
+         
           const request = { selection: copyCaptureSelection(selection), tab: captureMode, restoreDraft: true };
           requestedCapture.current = request;
           onPreviewRequested?.();
@@ -226,7 +211,7 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
         {discovery?.runtime === "ready" && discovery.sources.length === 0 && <p>No NDI source found. Enable output in the source application, then refresh. Setup help is below.</p>}
         {discovery?.error && discovery.runtime === "ready" && <p role="alert">{discovery.error}</p>}
         <button type="button" className="btn cp-ndi-input-preview" disabled={!canPreview}
-          onClick={() => { requestedCapture.current = null; editingCaptureDraft.current = false; onPreviewRequested?.(); void run(() => input.start(selected)); }}>Preview source</button>
+          onClick={() => { requestedCapture.current = null; onPreviewRequested?.(); void run(() => input.start(selected)); }}>Preview source</button>
       </>}
         {(currentProgram || sourceKind === "ndi") && <div className="cp-ndi-input-connection">
           {currentProgram && <strong title={currentProgram.name}>{currentProgram.name}</strong>}
@@ -249,7 +234,8 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
           disabled={acting || !input.canShare} onClick={() => void run(async () => {
             await input.share(); onShared?.(); onClose();
           })}>{currentProgram?.capture ? "Share capture with room" : "Share NDI with room"}</button>}
-        {currentProgram?.capture && currentProgram.local && canManageSource && broadcast?.sourceId === currentProgram.id
+        {/* A picker capture has no raw feed for the NDI sender yet (docs/PROGRAM-CAPTURE.md, Phase 4). */}
+        {currentProgram?.capture && !isPickedCapture(currentProgram.capture) && currentProgram.local && canManageSource && broadcast?.sourceId === currentProgram.id
           ? <ObsBroadcastControls broadcast={broadcast}
               disabled={!!input.snapshot.busy || currentProgram.stopped || !!pictureError || state.connectionCount === 0}/>
           : !currentProgram?.capture && sourceKind === "ndi" && <p>Not shared with room refers to the Sauce Bunny session, not the source application’s NDI broadcast on your network.</p>}
@@ -264,7 +250,7 @@ export function NdiInputPanel({ input, onClose, open = true, refreshRequest = 0,
       <div className="cp-ndi-input-actions">
         {canManageSource && input.previewProgram && <button type="button" className="btn btn-ghost"
           disabled={acting || input.snapshot.busy === "publishing" || input.snapshot.busy === "stopping"}
-          onClick={() => { previewReveal.cancel(); requestedCapture.current = null; editingCaptureDraft.current = false; void run(input.cancelPreview); }}>Cancel preview</button>}
+          onClick={() => { previewReveal.cancel(); requestedCapture.current = null; void run(input.cancelPreview); }}>Cancel preview</button>}
         <button type="button" className="btn" onClick={close}>Done</button>
       </div>
     </footer>

@@ -73,7 +73,7 @@ func audioSource() -> () -> [Float] {
     guard wantsAudio else { return { [] } }
     if #available(macOS 14.2, *) {
         do {
-            let created = try AudioTap(excludingProcesses: [getpid()])
+            let created = try AudioTap(.except(processes: [getpid()], bundles: []))
             tap = created
             log(["event": "audio-tap", "sourceRate": created.sourceRate])
             return { created.take() }

@@ -19,19 +19,74 @@ final class AudioTap {
     private(set) var sourceRate: Double = 0
     private(set) var peak: Float = 0
 
-    /// Every process playing sound except `excluded` (our own playback stays out).
-    init(excludingProcesses excluded: [pid_t]) throws {
-        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: excluded.compactMap(AudioTap.processObject))
-        try start(description)
+    /// Whose sound to hear. Matching is by bundle identifier and its helpers
+    /// ("com.google.Chrome" also takes "com.google.Chrome.helper"), because
+    /// most apps play from a helper process rather than the one that owns the window.
+    enum Rule {
+        /// Only these applications (and this process, when known).
+        case only(bundles: [String], process: pid_t?)
+        /// Everything except these processes and applications.
+        case except(processes: [pid_t], bundles: [String])
     }
 
-    /// Only these processes (one application and its helpers).
-    init(includingProcesses included: [pid_t]) throws {
-        let description = CATapDescription(stereoMixdownOfProcesses: included.compactMap(AudioTap.processObject))
-        try start(description)
+    /// Core Audio only knows a process once it has opened audio, and helpers come
+    /// and go mid-capture, so the rule is applied again every second. An `only`
+    /// tap with nothing to hear yet waits silently until there is something.
+    init(_ rule: Rule) throws {
+        self.rule = rule
+        control.sync { refresh() }
+        if startFailed { throw CaptureError.code("start_audio_tap_failed") }
+        let timer = DispatchSource.makeTimerSource(queue: control)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in self?.refresh() }
+        watch = timer
+        timer.resume()
+    }
+
+    private var rule: Rule?
+    private var description: CATapDescription?
+    private var matched: [AudioObjectID]?
+    private var startFailed = false
+    private var watch: DispatchSourceTimer?
+    private let control = DispatchQueue(label: "sauce.capture.audio.control")
+
+    private static func matches(_ bundle: String?, _ bundles: [String]) -> Bool {
+        guard let bundle else { return false }
+        return bundles.contains { bundle == $0 || bundle.hasPrefix($0 + ".") }
+    }
+
+    private func refresh() {
+        guard let rule else { return }
+        let found = AudioTap.processObjects().filter { object in
+            switch rule {
+            case let .only(bundles, process):
+                return (process != nil && AudioTap.pid(of: object) == process) || AudioTap.matches(AudioTap.bundle(of: object), bundles)
+            case let .except(processes, bundles):
+                return AudioTap.pid(of: object).map(processes.contains) == true || AudioTap.matches(AudioTap.bundle(of: object), bundles)
+            }
+        }
+        guard found != matched else { return }
+        if let description, tap != kAudioObjectUnknown {
+            matched = found
+            description.processes = found
+            var address = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyDescription, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            // The property's data is the description object itself, passed by reference.
+            var object = Unmanaged.passUnretained(description).toOpaque()
+            _ = AudioObjectSetPropertyData(tap, &address, 0, nil, UInt32(MemoryLayout<UnsafeMutableRawPointer>.size), &object)
+            return
+        }
+        if case .only = rule, found.isEmpty { return }
+        matched = found
+        let description: CATapDescription
+        switch rule {
+        case .only: description = CATapDescription(stereoMixdownOfProcesses: found)
+        case .except: description = CATapDescription(stereoGlobalTapButExcludeProcesses: found)
+        }
+        do { try start(description) } catch { startFailed = true }
     }
 
     private func start(_ description: CATapDescription) throws {
+        self.description = description
         description.uuid = UUID()
         description.name = "Sauce Bunny Preview source"
         description.isPrivate = true
@@ -41,7 +96,7 @@ final class AudioTap {
         var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         var address = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyFormat, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         guard AudioObjectGetPropertyData(tap, &address, 0, nil, &size, &format) == noErr,
-              let input = AVAudioFormat(streamDescription: &format) else { stop(); throw CaptureError.code("start_audio_tap_failed") }
+              let input = AVAudioFormat(streamDescription: &format) else { teardown(); throw CaptureError.code("start_audio_tap_failed") }
         sourceRate = input.sampleRate
         converter = AVAudioConverter(from: input, to: output)
         let device: [String: Any] = [
@@ -52,11 +107,11 @@ final class AudioTap {
             kAudioAggregateDeviceTapAutoStartKey: true,
             kAudioAggregateDeviceTapListKey: [[kAudioSubTapUIDKey: description.uuid.uuidString, kAudioSubTapDriftCompensationKey: true]],
         ]
-        guard AudioHardwareCreateAggregateDevice(device as CFDictionary, &aggregate) == noErr else { stop(); throw CaptureError.code("start_audio_tap_failed") }
+        guard AudioHardwareCreateAggregateDevice(device as CFDictionary, &aggregate) == noErr else { teardown(); throw CaptureError.code("start_audio_tap_failed") }
         let status = AudioDeviceCreateIOProcIDWithBlock(&proc, aggregate, queue) { [weak self] _, inputData, _, _, _ in
             self?.receive(inputData, format: input)
         }
-        guard status == noErr, let proc, AudioDeviceStart(aggregate, proc) == noErr else { stop(); throw CaptureError.code("start_audio_tap_failed") }
+        guard status == noErr, let proc, AudioDeviceStart(aggregate, proc) == noErr else { teardown(); throw CaptureError.code("start_audio_tap_failed") }
     }
 
     private func receive(_ list: UnsafePointer<AudioBufferList>, format: AVAudioFormat) {
@@ -80,11 +135,44 @@ final class AudioTap {
     func take() -> [Float] { ring.read(1_600 * 2) }
 
     func stop() {
+        watch?.cancel()
+        control.sync { rule = nil; teardown() }
+    }
+
+    private func teardown() {
         if let proc { AudioDeviceStop(aggregate, proc); AudioDeviceDestroyIOProcID(aggregate, proc) }
         proc = nil
         if aggregate != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggregate) }
         if tap != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tap) }
         aggregate = kAudioObjectUnknown; tap = kAudioObjectUnknown
+    }
+
+    /// Every process Core Audio knows about (each has opened audio at some point).
+    static func processObjects() -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var list = [AudioObjectID](repeating: kAudioObjectUnknown, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &list) == noErr else { return [] }
+        return list.filter { $0 != kAudioObjectUnknown }
+    }
+
+    static func pid(of object: AudioObjectID) -> pid_t? {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyPID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var pid: pid_t = -1
+        var size = UInt32(MemoryLayout<pid_t>.size)
+        return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &pid) == noErr ? pid : nil
+    }
+
+    static func bundle(of object: AudioObjectID) -> String? {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyBundleID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var value: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr, let value else { return nil }
+        let text = value.takeRetainedValue() as String
+        return text.isEmpty ? nil : text
     }
 
     /// The Core Audio object for a process, if it has ever opened audio.

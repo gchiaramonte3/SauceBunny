@@ -16,7 +16,9 @@ final class Picker: NSObject, SCContentSharingPickerObserver {
     func choose(_ kind: Kind, excludedWindowIDs: [Int] = [], _ done: @escaping (Outcome) -> Void) {
         let picker = SCContentSharingPicker.shared
         var configuration = SCContentSharingPickerConfiguration()
-        configuration.allowedPickerModes = kind == .window ? .singleWindow : .singleDisplay
+        // A window, or a whole application when its window will not pick on its
+        // own (a remote-desktop viewer filling another display, say).
+        configuration.allowedPickerModes = kind == .window ? [.singleWindow, .singleApplication] : .singleDisplay
         configuration.excludedBundleIDs = ["com.saucebunny.desktop", "com.saucebunny.desktop.capture"]
         configuration.excludedWindowIDs = excludedWindowIDs
         configuration.allowsChangingSelectedContent = false

@@ -4,12 +4,14 @@ import Foundation
 /// supervisor reads (src-tauri/src/commands/obs/service_wire.rs): a 14-byte
 /// header (kind u8, slot u8, generation u64 big-endian, length u32
 /// big-endian) and at most 16 KiB of payload. Kind 1 is fMP4 bytes, 2 a
-/// status object, 3 the end of a capture (and only it is empty).
+/// status object, 3 the end of a capture (and only it is empty), 4 the answer
+/// to a `choose` or `snapshot` request, 5 a still picture's JPEG bytes, sent
+/// before the answer to the `snapshot` that asked for it.
 public enum Wire {
     public static let maxChunk = 16_384
     public static let maxGeneration: UInt64 = 9_007_199_254_740_991
 
-    public enum Kind: UInt8 { case media = 1, status = 2, end = 3, choice = 4 }
+    public enum Kind: UInt8 { case media = 1, status = 2, end = 3, choice = 4, picture = 5 }
 
     /// One record per chunk: media longer than a chunk is split, never truncated.
     public static func records(_ kind: Kind, slot: UInt8, generation: UInt64, payload: Data) -> [Data] {

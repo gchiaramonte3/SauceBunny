@@ -3,11 +3,16 @@ use std::io;
 pub(super) const MAX_CHUNK: usize = 16384;
 pub(super) const MAX_GENERATION: u64 = 9_007_199_254_740_991;
 const HEADER: usize = 14;
-#[derive(Default)]
-pub(super) struct Wire { bytes: Vec<u8>, length: Option<usize> }
+/// The OBS service sends kinds 1 to 3. The picker helper (picked.rs) adds 4, a
+/// choice or snapshot answer, and 5, a still picture: it reads with
+/// `Wire::through(5)`. The first picker build read it with the OBS limit, which
+/// turned every pick into "the helper stopped" because no test crossed the seam.
+pub(super) struct Wire { bytes: Vec<u8>, length: Option<usize>, last_kind: u8 }
+impl Default for Wire { fn default() -> Self { Self::through(3) } }
 pub(super) struct Record<'a> { pub kind: u8, pub slot: usize, pub generation: u64, pub payload: &'a [u8] }
 fn invalid() -> io::Error { io::Error::new(io::ErrorKind::InvalidData, "Invalid OBS service record") }
 impl Wire {
+    pub(super) fn through(last_kind: u8) -> Self { Self { bytes: Vec::new(), length: None, last_kind } }
     pub(super) fn push(&mut self, mut input: &[u8], mut emit: impl FnMut(Record<'_>)) -> io::Result<()> {
         while !input.is_empty() {
             let target = self.length.unwrap_or(HEADER);
@@ -17,7 +22,7 @@ impl Wire {
             if self.length.is_none() {
                 let size = u32::from_be_bytes(self.bytes[10..14].try_into().map_err(|_|invalid())?) as usize;
                 let generation = u64::from_be_bytes(self.bytes[2..10].try_into().map_err(|_|invalid())?);
-                if !(1..=3).contains(&self.bytes[0]) || self.bytes[1] > 1 || !(1..=MAX_GENERATION).contains(&generation) ||
+                if !(1..=self.last_kind).contains(&self.bytes[0]) || self.bytes[1] > 1 || !(1..=MAX_GENERATION).contains(&generation) ||
                     size > MAX_CHUNK || (self.bytes[0] == 3) != (size == 0) { return Err(invalid()); }
                 self.length = Some(HEADER + size);
                 if size > 0 { continue; }
@@ -53,5 +58,13 @@ mod tests {
             assert!(wire.push(&bytes[..HEADER], |_|panic!("invalid record delivered")).is_err());
             assert_eq!(wire.bytes.len(), HEADER);
         }
+    }
+    #[test]
+    fn the_obs_reader_refuses_picker_kinds_and_the_picker_reader_takes_them() {
+        assert!(Wire::default().push(&record(4,0,1,b"{}"), |_|panic!("OBS reader took a choice record")).is_err());
+        let mut kinds = Vec::new();
+        Wire::through(5).push(&[record(5,0,7,b"jpeg"), record(4,0,7,b"{}")].concat(), |r| kinds.push((r.kind, r.generation))).unwrap();
+        assert_eq!(kinds, [(5,7),(4,7)]);
+        assert!(Wire::through(5).push(&record(6,0,1,b"x"), |_|panic!("unknown kind delivered")).is_err());
     }
 }

@@ -7,7 +7,8 @@
 .cp-capture-tabs button[aria-selected="true"] { background: var(--sel-fill); color: var(--sel-ink); }
 .cp-capture-tabs button:hover:not(:disabled):not([aria-selected="true"]) { background: var(--bg-3); color: var(--fg-1); }
 .cp-capture-tabs button:disabled { opacity: .45; cursor: default; }
-.cp-capture-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, max(160px, calc((100% - 2 * var(--s-3)) / 3))), 1fr)); gap: var(--s-3); }
+/* auto-fill, not auto-fit: one screen stays one tile wide instead of stretching across the dialog. */
+.cp-capture-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, max(160px, calc((100% - 2 * var(--s-3)) / 3))), 1fr)); gap: var(--s-3); }
 .cp-capture-source {
   display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; padding: var(--s-2);
   border: 0; border-radius: var(--r-md); background: var(--bg-2); text-align: left;

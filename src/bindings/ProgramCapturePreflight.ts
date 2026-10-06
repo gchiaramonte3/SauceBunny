@@ -7,6 +7,10 @@ export type ProgramCapturePreflight = { available: boolean, error: string | null
  */
 kinds: Array<ProgramCaptureKind>, 
 /**
- * System and application audio need macOS 14.2 (a Core Audio process tap).
+ * System audio needs macOS 14.2 (a Core Audio process tap).
  */
-systemAudio: boolean, };
+systemAudio: boolean, 
+/**
+ * A window's own application audio also needs macOS 15.2, the first to name a picked window's app.
+ */
+applicationAudio: boolean, };

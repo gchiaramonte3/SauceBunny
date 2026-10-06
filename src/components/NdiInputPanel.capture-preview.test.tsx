@@ -5,15 +5,14 @@ import type { ObsSelection } from "../bindings/ObsSelection";
 import { emptyNdiTelemetry, type NdiLocalProgram } from "../lib/ndi-program-coordinator";
 import { NdiInputPanel, type NdiPreviewInput } from "./NdiInputPanel";
 
-const selection: ObsSelection = { application: "com.generated.Editor", process: 101, window: 501,
-  crop: { x: 0, y: 0, width: 1, height: 1 }, audio: false };
+const selection: ObsSelection = { choice: "11111111111111111111111111111111", kind: "window", label: "Generated editor · Composer", audio: false };
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => ({ bridgeCompiled: true, runtime: "ready", sources: [], error: null })) }));
-vi.mock("./ObsCaptureControls", () => ({ ObsCaptureControls: (props: {
+vi.mock("./ProgramCaptureControls", () => ({ ProgramCaptureControls: (props: {
   onPreview: (selection: ObsSelection) => Promise<void>;
   onSelectionChange: (selection: ObsSelection) => void;
 }) => <>
   <button onClick={() => void props.onPreview(selection)}>Generated preview</button>
-  <button onClick={() => props.onSelectionChange({ ...selection, window: 502 })}>Choose another window</button>
+  <button onClick={() => props.onSelectionChange({ ...selection, choice: "22222222222222222222222222222222" })}>Choose another window</button>
 </> }));
 
 function program(decodedReady: boolean): NdiLocalProgram {

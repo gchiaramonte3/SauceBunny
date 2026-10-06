@@ -13,6 +13,7 @@ final class Service {
     private var order: [String] = []
     private var pendingChoose: (request: UInt64, choice: String, kind: CaptureKind)?
     private var slots: [Int: Slot] = [:]
+    private var stills: [UInt64: Snapshot] = [:]
     private var lastHeartbeat = Date()
     private let parent = getppid()
 
@@ -56,7 +57,9 @@ final class Service {
             guard let pending = pendingChoose, pending.request == request else { return }
             pendingChoose = nil
             reply(request: request, ["choice": pending.choice, "outcome": "cancelled"])
-        case let .start(slot, generation, choice, audio, region): start(slot: slot, generation: generation, choice: choice, audio: audio, region: region)
+        case let .snapshot(request, choice): snapshot(request: request, choice: choice)
+        case let .apps(request): reply(request: request, ["outcome": "apps", "apps": Service.audibleApps()])
+        case let .start(slot, generation, choice, audio, region, apps): start(slot: slot, generation: generation, choice: choice, audio: audio, region: region, apps: apps)
         case let .stop(slot, generation): stop(slot: slot, generation: generation)
         }
     }
@@ -79,6 +82,23 @@ final class Service {
         }
     }
 
+    /// A still of a pick, for drawing a region on: JPEG records, then the answer.
+    private func snapshot(request: UInt64, choice: String) {
+        guard let chosen = choices[choice], let still = Snapshot(filter: chosen.filter) else {
+            reply(request: request, ["choice": choice, "outcome": "failed", "error": "snapshot_failed"]); return
+        }
+        stills[request] = still
+        still.take { [weak self] jpeg in
+            guard let self else { return }
+            self.stills[request] = nil
+            guard let jpeg, !jpeg.isEmpty else { self.reply(request: request, ["choice": choice, "outcome": "failed", "error": "snapshot_failed"]); return }
+            self.out.write(Wire.records(.picture, slot: 0, generation: request, payload: jpeg))
+            // The size a capture of this pick encodes at, which is what a region's edges are fractions of.
+            let raster = chosen.filter.raster
+            self.reply(request: request, ["choice": choice, "outcome": "snapshot", "width": raster?.width ?? 0, "height": raster?.height ?? 0])
+        }
+    }
+
     private func remember(_ choice: String, filter: SCContentFilter, kind: CaptureKind) {
         choices[choice] = (filter, kind)
         order.removeAll { $0 == choice }
@@ -90,7 +110,7 @@ final class Service {
         }
     }
 
-    private func start(slot: Int, generation: UInt64, choice: String, audio: Bool, region: NormalizedRect?) {
+    private func start(slot: Int, generation: UInt64, choice: String, audio: Bool, region: NormalizedRect?, apps: [String]?) {
         if let previous = slots[slot] { finish(slot: slot, previous) }
         guard let chosen = choices[choice] else { fail(slot, generation, "start_choice_unknown"); return }
         let filter = chosen.filter
@@ -105,8 +125,22 @@ final class Service {
         if audio {
             guard #available(macOS 14.2, *) else { fail(slot, generation, "start_audio_unavailable"); return }
             do {
-                // Leave out this helper and the app (and so its own playback).
-                let created = try AudioTap(excludingProcesses: [getpid(), parent])
+                let rule: AudioTap.Rule
+                if let apps {
+                    // Only the applications the person chose: nobody hears themselves back.
+                    rule = .only(bundles: apps, process: nil)
+                } else if chosen.kind == .window {
+                    // A window brings only its own application's sound.
+                    guard let owner = Service.owner(of: filter) else { fail(slot, generation, "start_application_audio_unavailable"); return }
+                    rule = .only(bundles: [owner.bundle], process: owner.process)
+                } else {
+                    // Everything but Sauce Bunny: this helper, the app, and WebKit's
+                    // processes, which play the app's audio (a session's voices
+                    // included). Safari plays through them too, so it is left out
+                    // with it; choosing apps is the way to include it.
+                    rule = .except(processes: [getpid(), parent], bundles: ["com.apple.WebKit"])
+                }
+                let created = try AudioTap(rule)
                 tap = created
                 take = { created.take() }
             } catch { fail(slot, generation, "start_audio_tap_failed"); return }
@@ -131,6 +165,29 @@ final class Service {
             if #available(macOS 14.2, *) { (tap as? AudioTap)?.stop() }
             fail(slot, generation, (error as? CaptureError).map { if case .code(let code) = $0 { return code }; return "start_output_failed" } ?? "start_output_failed")
         }
+    }
+
+    /// Running applications a person can choose sound from: ordinary apps
+    /// (Dock icons), never Sauce Bunny. Names only; no window or screen content.
+    static func audibleApps() -> [[String: String]] {
+        var seen = Set<String>()
+        return NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { app -> [String: String]? in
+                guard let bundle = app.bundleIdentifier, Command.bundleIdentifier(bundle), !bundle.hasPrefix("com.saucebunny."),
+                      seen.insert(bundle).inserted else { return nil }
+                let name = String((app.localizedName ?? bundle).unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.prefix(80).map(Character.init))
+                return ["bundle": bundle, "name": name]
+            }
+            .sorted { $0["name", default: ""].localizedCaseInsensitiveCompare($1["name", default: ""]) == .orderedAscending }
+            .prefix(64).map { $0 }
+    }
+
+    /// The application that owns a picked window. A picker filter names it from macOS 15.2.
+    static func owner(of filter: SCContentFilter) -> (bundle: String, process: pid_t)? {
+        guard #available(macOS 15.2, *), let app = filter.includedWindows.first?.owningApplication ?? filter.includedApplications.first,
+              !app.bundleIdentifier.isEmpty else { return nil }
+        return (app.bundleIdentifier, app.processID)
     }
 
     private func status(slot: Int, _ entry: Slot, error: String = "", action: String = "none") {

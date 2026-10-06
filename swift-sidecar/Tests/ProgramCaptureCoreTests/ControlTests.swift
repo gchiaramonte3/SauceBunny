@@ -13,10 +13,14 @@ final class ControlTests: XCTestCase {
         XCTAssertEqual(Command.parse(#"{"op":"choose","request":3,"choice":"\#(token)","kind":"window"}"#), .choose(request: 3, choice: token, kind: .window))
         XCTAssertEqual(Command.parse(#"{"op":"cancel","request":3}"#), .cancel(request: 3))
         XCTAssertEqual(Command.parse(#"{"op":"start","slot":1,"generation":9,"choice":"\#(token)","audio":true}"#),
-                       .start(slot: 1, generation: 9, choice: token, audio: true, region: nil))
+                       .start(slot: 1, generation: 9, choice: token, audio: true, region: nil, apps: nil))
         XCTAssertEqual(Command.parse(#"{"op":"start","slot":0,"generation":9,"choice":"\#(token)","audio":false,"region":[0.25,0.25,0.5,0.5]}"#),
-                       .start(slot: 0, generation: 9, choice: token, audio: false, region: NormalizedRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)))
+                       .start(slot: 0, generation: 9, choice: token, audio: false, region: NormalizedRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5), apps: nil))
+        XCTAssertEqual(Command.parse(#"{"op":"start","slot":0,"generation":9,"choice":"\#(token)","audio":true,"apps":["com.p5sys.jump.mac.viewer","com.google.Chrome"]}"#),
+                       .start(slot: 0, generation: 9, choice: token, audio: true, region: nil, apps: ["com.p5sys.jump.mac.viewer", "com.google.Chrome"]))
+        XCTAssertEqual(Command.parse(#"{"op":"apps","request":5}"#), .apps(request: 5))
         XCTAssertEqual(Command.parse(#"{"op":"stop","slot":0,"generation":9}"#), .stop(slot: 0, generation: 9))
+        XCTAssertEqual(Command.parse(#"{"op":"snapshot","request":4,"choice":"\#(token)"}"#), .snapshot(request: 4, choice: token))
     }
 
     func testAnythingHalfRightIsIgnored() {
@@ -29,6 +33,12 @@ final class ControlTests: XCTestCase {
             #"{"op":"start","slot":0,"generation":9,"choice":"\#(token)","audio":true,"region":[0.5,0,0.6,1]}"#, // off the display
             #"{"op":"start","slot":0,"generation":9,"choice":"\#(token)","audio":true,"region":[0,0,0,1]}"#,     // empty
             #"{"op":"choose","request":1,"choice":"\#(token)","kind":"desktop"}"#,                 // unknown kind
+            #"{"op":"snapshot","request":4,"choice":"ABC"}"#,                                       // not a minted token
+            #"{"op":"snapshot","choice":"\#(token)"}"#,                                             // no request
+            #"{"op":"start","slot":0,"generation":9,"choice":"\#(token)","audio":false,"apps":["com.example.app"]}"#, // apps without audio
+            #"{"op":"start","slot":0,"generation":9,"choice":"\#(token)","audio":true,"apps":[]}"#,                    // an empty choice
+            #"{"op":"start","slot":0,"generation":9,"choice":"\#(token)","audio":true,"apps":["--all"]}"#,             // not a bundle id
+            #"{"op":"start","slot":0,"generation":9,"choice":"\#(token)","audio":true,"apps":["com.app/../x"]}"#,      // not a bundle id
             #"{"op":"launch"}"#, "not json", "", String(repeating: "P", count: Command.maxLine + 1),
         ] {
             XCTAssertNil(Command.parse(line), line)

@@ -117,3 +117,21 @@ describe("exact display capture identity", () => {
     expect(validCaptureSelection({ ...selection, displayId: 7 } as unknown as ObsSelection)).toBe(false);
   });
 });
+
+describe("a pick from macOS's picker", () => {
+  const pick: ObsSelection = { choice: "e".repeat(32), kind: "window", label: "Jump Desktop · Studio", audio: true };
+  it("hears only the chosen apps while audio is on, and a different choice is a different stream", () => {
+    const jump = { ...pick, audioApps: ["com.p5sys.jump.mac.viewer"] };
+    expect(validCaptureSelection(jump)).toBe(true);
+    expect(validCaptureSelection({ ...jump, audio: false })).toBe(false);
+    expect(validCaptureSelection({ ...pick, audioApps: [] })).toBe(false);
+    expect(validCaptureSelection({ ...pick, audioApps: ["--all"] })).toBe(false);
+    expect(validCaptureSelection({ ...pick, audioApps: Array(17).fill("com.example.app") })).toBe(false);
+    expect(sameProgramSource(source(jump), source({ ...jump, audioApps: ["com.p5sys.jump.mac.viewer"] }))).toBe(true);
+    expect(sameProgramSource(source(jump), source(pick))).toBe(false);
+    expect(sameProgramSource(source(jump), source({ ...jump, audioApps: ["com.p5sys.jump.mac.viewer", "com.google.Chrome"] }))).toBe(false);
+    const copy = copyCaptureSelection(jump);
+    expect("audioApps" in copy && copy.audioApps).toEqual(jump.audioApps);
+    expect("audioApps" in copy && copy.audioApps).not.toBe(jump.audioApps);
+  });
+});

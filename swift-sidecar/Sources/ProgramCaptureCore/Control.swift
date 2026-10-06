@@ -10,7 +10,12 @@ public enum Command: Equatable {
     /// Show the picker; the result comes back as a kind-4 record for `request`.
     case choose(request: UInt64, choice: String, kind: CaptureKind)
     case cancel(request: UInt64)
-    case start(slot: Int, generation: UInt64, choice: String, audio: Bool, region: NormalizedRect?)
+    /// One still of a pick, for drawing a region on: kind-5 records, then a kind-4 reply for `request`.
+    case snapshot(request: UInt64, choice: String)
+    /// The running applications whose sound can be chosen: a kind-4 reply for `request`.
+    case apps(request: UInt64)
+    /// `apps`: only these applications' sound (bundle identifiers); nil is the kind's default.
+    case start(slot: Int, generation: UInt64, choice: String, audio: Bool, region: NormalizedRect?, apps: [String]?)
     case stop(slot: Int, generation: UInt64)
 
     public static let maxLine = 4_096
@@ -28,6 +33,11 @@ public enum Command: Equatable {
             return .choose(request: request, choice: choice, kind: kind)
         case "cancel":
             return generation(object["request"]).map { .cancel(request: $0) }
+        case "apps":
+            return generation(object["request"]).map { .apps(request: $0) }
+        case "snapshot":
+            guard let request = generation(object["request"]), let choice = token(object["choice"]) else { return nil }
+            return .snapshot(request: request, choice: choice)
         case "start":
             guard let slot = slot(object["slot"]), let generation = generation(object["generation"]),
                   let choice = token(object["choice"]), let audio = object["audio"] as? Bool else { return nil }
@@ -36,13 +46,26 @@ public enum Command: Equatable {
                 guard let parsed = NormalizedRect(value) else { return nil }
                 region = parsed
             }
-            return .start(slot: slot, generation: generation, choice: choice, audio: audio, region: region)
+            var apps: [String]?
+            if let value = object["apps"], !(value is NSNull) {
+                guard let list = value as? [String], (1...maxApps).contains(list.count), list.allSatisfy(bundleIdentifier), audio else { return nil }
+                apps = list
+            }
+            return .start(slot: slot, generation: generation, choice: choice, audio: audio, region: region, apps: apps)
         case "stop":
             guard let slot = slot(object["slot"]), let generation = generation(object["generation"]) else { return nil }
             return .stop(slot: slot, generation: generation)
         default:
             return nil
         }
+    }
+
+    public static let maxApps = 16
+
+    /// What a bundle identifier can be: letters, digits, dots, hyphens and underscores, with at least one dot.
+    public static func bundleIdentifier(_ text: String) -> Bool {
+        (3...255).contains(text.utf8.count) && text.contains(".")
+            && text.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) && $0.isASCII || ".-_".unicodeScalars.contains($0) }
     }
 
     private static func generation(_ value: Any?) -> UInt64? {

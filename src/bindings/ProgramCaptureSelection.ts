@@ -11,6 +11,12 @@ export type ProgramCaptureSelection = { choice: string, kind: ProgramCaptureKind
  */
 label: string, audio: boolean, 
 /**
+ * Only these applications' sound (bundle identifiers), so nobody in a call
+ * hears themselves back. Absent: a window's own app, or every app but
+ * Sauce Bunny for a screen or region.
+ */
+audioApps?: Array<string>, 
+/**
  * Region only: the part of the picked display, each edge a fraction of it.
  */
 region?: ObsCrop, };

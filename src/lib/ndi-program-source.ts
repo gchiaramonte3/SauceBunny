@@ -14,12 +14,14 @@ export const isPickedCapture = (selection: ObsSelection): selection is ProgramCa
 export const isWindowCapture = (selection: ObsSelection): selection is ObsWindowSelection => "application" in selection;
 
 export const copyCaptureSelection = (selection: ObsSelection): ObsSelection => isPickedCapture(selection)
-  ? { ...selection, ...(selection.region ? { region: { ...selection.region } } : {}) }
+  ? { ...selection, ...(selection.region ? { region: { ...selection.region } } : {}), ...(selection.audioApps ? { audioApps: [...selection.audioApps] } : {}) }
   : isDisplayCapture(selection)
     ? { ...selection, geometry: { ...selection.geometry }, crop: { ...selection.crop } }
     : { ...selection, crop: { ...selection.crop } };
 
 const pickedToken = /^[0-9a-f]{32}$/;
+/** The helper's `Command.bundleIdentifier` and Rust's `bundle_identifier`. */
+const bundleIdentifier = /^(?=.*\.)[A-Za-z0-9._-]{3,255}$/;
 const validRegion = (crop: { x: number; y: number; width: number; height: number }) =>
   [crop.x, crop.y, crop.width, crop.height].every(Number.isFinite) && crop.x >= 0 && crop.y >= 0
   && crop.width > 0 && crop.height > 0 && crop.x + crop.width <= 1 && crop.y + crop.height <= 1;
@@ -28,7 +30,9 @@ function validPickedSelection(selection: ProgramCaptureSelection): boolean {
   return typeof selection.choice === "string" && pickedToken.test(selection.choice)
     && ["screen", "window", "region"].includes(selection.kind) && typeof selection.audio === "boolean"
     && typeof selection.label === "string" && selection.label.length > 0 && selection.label.length <= 160
-    && (selection.kind === "region" ? !!selection.region && validRegion(selection.region) : selection.region === undefined);
+    && (selection.kind === "region" ? !!selection.region && validRegion(selection.region) : selection.region === undefined)
+    && (selection.audioApps === undefined || (selection.audio && selection.audioApps.length >= 1 && selection.audioApps.length <= 16
+      && selection.audioApps.every(app => typeof app === "string" && bundleIdentifier.test(app))));
 }
 
 const displayUuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -93,7 +97,8 @@ export function sameProgramSource(first: NdiProgramSource, second: NdiProgramSou
   // Two picks are the same source only when they are the same pick: a new pick is a new stream.
   if (isPickedCapture(a) || isPickedCapture(b)) {
     return isPickedCapture(a) && isPickedCapture(b) && a.choice === b.choice && a.kind === b.kind
-      && JSON.stringify(a.region ?? null) === JSON.stringify(b.region ?? null);
+      && JSON.stringify(a.region ?? null) === JSON.stringify(b.region ?? null)
+      && JSON.stringify([...a.audioApps ?? []].sort()) === JSON.stringify([...b.audioApps ?? []].sort()) && !a.audioApps === !b.audioApps;
   }
   if (isDisplayCapture(a)) {
     if (!isDisplayCapture(b) || a.displayUuid !== b.displayUuid || a.displayId !== b.displayId

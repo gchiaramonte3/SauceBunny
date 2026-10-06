@@ -29,9 +29,7 @@ import { selectRoomScreenStream } from "./lib/room-screen-stream";
 import { NdiPreviewHeader } from "./components/NdiPreviewHeader";
 import { ObsBroadcastIndicator } from "./components/ObsBroadcastIndicator";
 import { useObsBroadcasts } from "./hooks/use-obs-broadcast";
-import { useObsRegionEdit, type CaptureEditRequest } from "./hooks/use-obs-region-edit";
 import { isDisplayCapture } from "./lib/ndi-program-source";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { NdiPlaybackRecovery } from "./components/NdiProgramMonitor";
 import { observePremiereLink, setPremiereVisibleInput } from "./lib/premiere-link";
 import { IconSettings } from "./components/Icons";
@@ -672,7 +670,6 @@ export default function App() {
   const [ndiPanelOpen,setNdiPanelOpen] = useState(false);
   const [ndiRecovery,setNdiRecovery] = useState<NdiPlaybackRecovery|null>(null);
   const [ndiRefreshRequest,setNdiRefreshRequest] = useState(0);
-  const [captureEditRequest, setCaptureEditRequest] = useState<CaptureEditRequest>();
   const [reviewSourceRequest, setReviewSourceRequest] = useState<{ kind: ReviewLiveSourceKind; serial: number }>();
   const [previewSelected,setPreviewSelected] = useState(false);
   const [reviewLobbyOpen,setReviewLobbyOpen] = useState(false);
@@ -685,15 +682,6 @@ export default function App() {
     setReviewSourceRequest(previous => ({ kind, serial: (previous?.serial ?? 0) + 1 }));
     openPremiere();
   };
-  useObsRegionEdit(ndiInput.snapshot, request => {
-    setCaptureEditRequest(request);
-    setActiveView("coreview");
-    setReviewLobbyOpen(false);
-    openPremiere();
-    // The click came from the desktop's explicit Edit control. Raising this
-    // settings dialog does not alter the visible source or sharing state.
-    void getCurrentWindow().show().then(() => getCurrentWindow().setFocus()).catch(() => {});
-  });
   const [sessionsRequestTick,setSessionsRequestTick] = useState(0);
   const [multitrackOpenRequest, setMultitrackOpenRequest] = useState<{ id: string; tick: number; frame?: number; trackId?: string } | null>(null);
   // AAF Audio's "Open in String Outs": which sequence, and a tick so the same one can be asked for twice.
@@ -5671,7 +5659,6 @@ export default function App() {
               {/* The room's review rail overrides detachment - a session
                   with no review panel is a session you can't comment in. */}
               <NdiInputPanel input={ndiInput} open={reviewStageActive && ndiPanelOpen} onClose={closePremiere} refreshRequest={ndiRefreshRequest}
-                editRequest={captureEditRequest}
                 sourceRequest={reviewSourceRequest}
                 broadcast={broadcastState.forSource((privateInspectionVisible ? ndiInput.previewProgram?.id : ndiProgram?.id) ?? null)}
                 returnFocus={connectPremiereRef}

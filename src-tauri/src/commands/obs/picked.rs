@@ -9,8 +9,9 @@
 //! Choosing is separate from starting. The person's time in the picker never
 //! counts against the first-media watchdog, and `start` never shows UI. The
 //! records on the helper's stdout are the OBS service's (service_wire.rs) plus
-//! kind 4, a choice result; media lands in the same `Program` ring, so the
-//! Preview monitor, the room and the coordinator are unchanged.
+//! kind 4, a choice or snapshot answer, and kind 5, a still to draw a region
+//! on; media lands in the same `Program` ring, so the Preview monitor, the
+//! room and the coordinator are unchanged.
 use std::{collections::HashMap, path::PathBuf, process::Stdio, sync::{Arc, Mutex, OnceLock}, time::Duration};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -37,6 +38,12 @@ pub struct ProgramCaptureSelection {
     /// Shown in the dialog and the room: the display's name, or "App · Window title".
     pub label: String,
     pub audio: bool,
+    /// Only these applications' sound (bundle identifiers), so nobody in a call
+    /// hears themselves back. Absent: a window's own app, or every app but
+    /// Sauce Bunny for a screen or region.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub audio_apps: Option<Vec<String>>,
     /// Region only: the part of the picked display, each edge a fraction of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -46,8 +53,19 @@ impl ProgramCaptureSelection {
     pub(super) fn valid(&self) -> bool {
         valid_token(&self.choice) && !self.label.is_empty() && self.label.chars().count() <= 160 && !self.label.chars().any(char::is_control)
             && match (&self.kind, &self.region) { (ProgramCaptureKind::Region, Some(region)) => region.valid(), (ProgramCaptureKind::Region, None) => false, (_, region) => region.is_none() }
+            && self.audio_apps.as_ref().is_none_or(|apps| self.audio && (1..=MAX_APPS).contains(&apps.len()) && apps.iter().all(|app| bundle_identifier(app)))
     }
 }
+const MAX_APPS: usize = 16;
+/// Swift's `Command.bundleIdentifier`: letters, digits, dots, hyphens and underscores, with a dot.
+fn bundle_identifier(value: &str) -> bool {
+    (3..=255).contains(&value.len()) && value.contains('.') && value.bytes().all(|b| b.is_ascii_alphanumeric() || b".-_".contains(&b))
+}
+
+/// An application whose sound can be chosen for a capture.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct ProgramCaptureApp { pub bundle: String, pub name: String }
 fn valid_token(value: &str) -> bool { value.len() == 32 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -58,8 +76,10 @@ pub struct ProgramCapturePreflight {
     pub error: Option<String>,
     /// The kinds this build can capture; the dialog shows only these tabs.
     pub kinds: Vec<ProgramCaptureKind>,
-    /// System and application audio need macOS 14.2 (a Core Audio process tap).
+    /// System audio needs macOS 14.2 (a Core Audio process tap).
     pub system_audio: bool,
+    /// A window's own application audio also needs macOS 15.2, the first to name a picked window's app.
+    pub application_audio: bool,
 }
 
 #[derive(Clone, Serialize, ts_rs::TS)]
@@ -67,13 +87,23 @@ pub struct ProgramCapturePreflight {
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct ProgramCaptureChoice { pub choice: String, pub kind: ProgramCaptureKind, pub label: String, pub width: u32, pub height: u32 }
 
+/// A still of a pick, to draw a region on, and the size a capture of it encodes at.
+#[derive(Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct ProgramCaptureSnapshot { pub image: String, pub width: u32, pub height: u32 }
+
 #[derive(Serialize, ts_rs::TS)]
 #[serde(tag = "outcome", rename_all = "lowercase")]
 #[ts(export, export_to = "../../src/bindings/")]
 pub enum ProgramCaptureChooseResult { Chosen { choice: ProgramCaptureChoice }, Cancelled }
 
-/// The kinds that ship in this build (Window and Region arrive in later phases).
-const KINDS: [ProgramCaptureKind; 1] = [ProgramCaptureKind::Screen];
+/// The kinds this build captures through the picker.
+const KINDS: [ProgramCaptureKind; 3] = [ProgramCaptureKind::Screen, ProgramCaptureKind::Window, ProgramCaptureKind::Region];
+/// The last record kind the helper sends (Swift `Wire.Kind`, pinned by program-capture-protocol-contract).
+const LAST_KIND: u8 = 5;
+/// A still is a 960x540 JPEG, a few dozen KB; anything near this is not one.
+const MAX_SNAPSHOT: usize = 2 * 1024 * 1024;
 
 fn helper_candidate(executable: &std::path::Path, developer: bool, override_path: Option<PathBuf>) -> Option<PathBuf> {
     let parent = executable.parent()?;
@@ -97,6 +127,8 @@ fn helper() -> Result<PathBuf, AppError> {
 enum Op {
     Choose { job: String, kind: ProgramCaptureKind, reply: oneshot::Sender<Result<ProgramCaptureChooseResult, AppError>> },
     Cancel { job: String },
+    Snapshot { token: String, reply: oneshot::Sender<Result<ProgramCaptureSnapshot, AppError>> },
+    Apps { reply: oneshot::Sender<Result<Vec<ProgramCaptureApp>, AppError>> },
     Start { selection: ProgramCaptureSelection, program: Arc<Program>, permit: WorkerPermit },
 }
 
@@ -147,6 +179,7 @@ pub async fn program_capture_preflight() -> Result<ProgramCapturePreflight, AppE
         error: available.err().map(|error| error.to_string()),
         kinds: KINDS.to_vec(),
         system_audio: macos_at_least(14, 2),
+        application_audio: macos_at_least(15, 2),
     })
 }
 
@@ -174,6 +207,46 @@ pub async fn program_capture_cancel_choose(job_id: String) -> Result<(), AppErro
     let sender = locked()?.service.as_ref().map(|service| service.sender.clone());
     if let Some(sender) = sender { let _ = sender.send(Op::Cancel { job: job_id }).await; }
     Ok(())
+}
+
+/// A still of a pick (a `data:` JPEG), to draw a region on. It comes from the
+/// helper's own stream on that pick, never a system screenshot.
+#[tauri::command]
+pub async fn program_capture_snapshot(choice: String) -> Result<ProgramCaptureSnapshot, AppError> {
+    if !valid_token(&choice) { return Err(AppError::invalid("Choose a screen first")); }
+    let (sender, session) = service()?;
+    if !matches!(locked()?.choices.get(&choice), Some((held, _)) if *held == session) {
+        return Err(AppError::invalid("Choose again. macOS does not let apps keep a screen choice after Sauce Bunny or its capture helper restarts."));
+    }
+    let (reply, answer) = oneshot::channel();
+    sender.send(Op::Snapshot { token: choice, reply }).await.map_err(|_| AppError::invalid("The screen capture helper stopped. Try again."))?;
+    match tokio::time::timeout(Duration::from_secs(10), answer).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err(AppError::invalid("The screen capture helper stopped. Try again.")),
+        Err(_) => Err(AppError::invalid("macOS did not return a picture of that screen. Refresh the picture to try again.")),
+    }
+}
+
+/// The running applications a person can choose sound from (names only).
+#[tauri::command]
+pub async fn program_capture_audio_apps() -> Result<Vec<ProgramCaptureApp>, AppError> {
+    let (sender, _) = service()?;
+    let (reply, answer) = oneshot::channel();
+    sender.send(Op::Apps { reply }).await.map_err(|_| AppError::invalid("The screen capture helper stopped. Try again."))?;
+    match tokio::time::timeout(Duration::from_secs(5), answer).await {
+        Ok(Ok(result)) => result,
+        _ => Err(AppError::invalid("The list of applications did not arrive. Try again.")),
+    }
+}
+
+/// A kind-4 answer to `apps`: names and bundle identifiers, each checked.
+fn audible_apps(payload: &[u8]) -> Result<Vec<ProgramCaptureApp>, AppError> {
+    #[derive(Deserialize)]
+    struct Reply { outcome: String, apps: Vec<ProgramCaptureApp> }
+    let reply: Reply = serde_json::from_slice(payload).map_err(|_| AppError::invalid("The screen capture helper answered in a way this build does not understand"))?;
+    if reply.outcome != "apps" { return Err(AppError::invalid("The list of applications did not arrive. Try again.")); }
+    Ok(reply.apps.into_iter().filter(|app| bundle_identifier(&app.bundle) && !app.name.trim().is_empty() && app.name.chars().count() <= 80
+        && !app.name.chars().any(char::is_control)).take(64).collect())
 }
 
 #[tauri::command]
@@ -218,7 +291,8 @@ fn status_error(code: &str) -> &'static str {
         "start_choice_unknown" => "Choose again. The capture helper no longer holds that choice",
         "start_invalid_region" => "The capture area is too small or outside the screen. Choose it again",
         "start_audio_unavailable" => "System audio needs macOS 14.2 or later. Turn off Include system audio",
-        "start_audio_tap_failed" => "System audio could not be recorded. Allow Sauce Bunny under System Settings, Privacy and Security, Screen and System Audio Recording, then try again",
+        "start_application_audio_unavailable" => "Application audio needs macOS 15.2 or later. Turn off Include application audio",
+        "start_audio_tap_failed" => "Audio could not be recorded. Allow Sauce Bunny under System Settings, Privacy and Security, Screen and System Audio Recording, then try again",
         "start_source_initialization_failed" => "macOS did not start the capture. Choose the screen again",
         "start_output_preparation_failed" | "start_output_failed" => "The capture encoder could not start",
         _ => "The capture could not start",
@@ -273,6 +347,23 @@ async fn send(input: &mut ChildStdin, value: serde_json::Value) -> bool {
 }
 
 struct Choosing { job: String, token: String, kind: ProgramCaptureKind, reply: oneshot::Sender<Result<ProgramCaptureChooseResult, AppError>> }
+struct Still { token: String, jpeg: Vec<u8>, reply: oneshot::Sender<Result<ProgramCaptureSnapshot, AppError>> }
+
+/// A snapshot's answer: the JPEG that arrived before it, as a `data:` URL.
+fn still(token: &str, jpeg: &[u8], payload: &[u8]) -> Result<ProgramCaptureSnapshot, AppError> {
+    use base64::Engine as _;
+    #[derive(Deserialize)]
+    struct Reply { choice: String, outcome: String, #[serde(default)] width: u32, #[serde(default)] height: u32 }
+    let reply: Reply = serde_json::from_slice(payload).map_err(|_| AppError::invalid("The screen capture helper answered in a way this build does not understand"))?;
+    if reply.choice != token { return Err(AppError::invalid("The screen capture helper answered a different request")); }
+    // A JPEG starts FF D8; anything else is not the picture the helper promised.
+    if reply.outcome != "snapshot" || jpeg.len() < 4 || jpeg.len() > MAX_SNAPSHOT || jpeg[..2] != [0xff, 0xd8]
+        || !(2..=1920).contains(&reply.width) || !(2..=1080).contains(&reply.height) {
+        return Err(AppError::invalid("Sauce Bunny could not get a picture of that screen. Refresh the picture, or choose the screen again."));
+    }
+    Ok(ProgramCaptureSnapshot { image: format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpeg)),
+        width: reply.width, height: reply.height })
+}
 
 /// A kind-4 record, checked against the request it answers. A pick is remembered for this session only.
 fn chosen(session: u64, token: &str, kind: ProgramCaptureKind, payload: &[u8]) -> Result<ProgramCaptureChooseResult, AppError> {
@@ -284,7 +375,7 @@ fn chosen(session: u64, token: &str, kind: ProgramCaptureKind, payload: &[u8]) -
         "cancelled" => Ok(ProgramCaptureChooseResult::Cancelled),
         "chosen" => {
             let label: String = reply.label.chars().filter(|c| !c.is_control()).take(160).collect();
-            let label = if label.trim().is_empty() { "Screen".to_string() } else { label };
+            let label = if label.trim().is_empty() { if kind == ProgramCaptureKind::Window { "Window" } else { "Screen" }.to_string() } else { label };
             if let Ok(mut current) = state().lock() { current.choices.insert(token.to_string(), (session, kind)); }
             Ok(ProgramCaptureChooseResult::Chosen { choice: ProgramCaptureChoice { choice: token.to_string(), kind, label, width: reply.width, height: reply.height } })
         }
@@ -299,12 +390,14 @@ async fn run(path: PathBuf, mut ops: mpsc::Receiver<Op>, session: u64) {
     let spawned = command.spawn();
     let mut slots: [Option<Active>; 2] = [None, None];
     let mut choosing: HashMap<u64, Choosing> = HashMap::new();
+    let mut stills: HashMap<u64, Still> = HashMap::new();
+    let mut listings: HashMap<u64, oneshot::Sender<Result<Vec<ProgramCaptureApp>, AppError>>> = HashMap::new();
     let failure = 'service: {
         let Ok(mut child) = spawned else { break 'service (None, "The screen capture helper could not start") };
         let (Some(mut input), Some(mut output), Some(mut errors)) = (child.stdin.take(), child.stdout.take(), child.stderr.take()) else {
             break 'service (Some(child), "The screen capture helper's pipes could not open");
         };
-        let (mut wire, mut media, mut noise) = (Wire::default(), [0u8; 16384], [0u8; 4096]);
+        let (mut wire, mut media, mut noise) = (Wire::through(LAST_KIND), [0u8; 16384], [0u8; 4096]);
         let (mut generation, mut request, mut errors_open) = (0u64, 0u64, true);
         let mut heartbeat = interval(Duration::from_millis(250));
         let reason = loop {
@@ -317,6 +410,16 @@ async fn run(path: PathBuf, mut ops: mpsc::Receiver<Op>, session: u64) {
                         let message = serde_json::json!({"op": "choose", "request": request, "choice": token, "kind": kind.name()});
                         choosing.insert(request, Choosing { job, token, kind, reply });
                         if !send(&mut input, message).await { break "The screen capture helper stopped answering"; }
+                    }
+                    Some(Op::Snapshot { token, reply }) => {
+                        request += 1;
+                        stills.insert(request, Still { token: token.clone(), jpeg: Vec::new(), reply });
+                        if !send(&mut input, serde_json::json!({"op": "snapshot", "request": request, "choice": token})).await { break "The screen capture helper stopped answering"; }
+                    }
+                    Some(Op::Apps { reply }) => {
+                        request += 1;
+                        listings.insert(request, reply);
+                        if !send(&mut input, serde_json::json!({"op": "apps", "request": request})).await { break "The screen capture helper stopped answering"; }
                     }
                     Some(Op::Cancel { job }) => {
                         let found = choosing.iter().find(|(_, choice)| choice.job == job).map(|(request, _)| *request);
@@ -332,7 +435,7 @@ async fn run(path: PathBuf, mut ops: mpsc::Receiver<Op>, session: u64) {
                         if generation > MAX_GENERATION { program.fail("Screen capture generation exhausted"); completed(&program.id); break "Screen capture generation exhausted"; }
                         let region = selection.region.as_ref().map(|r| serde_json::json!([r.x, r.y, r.width, r.height]));
                         let message = serde_json::json!({"op": "start", "slot": slot, "generation": generation, "choice": selection.choice,
-                            "audio": selection.audio, "region": region});
+                            "audio": selection.audio, "region": region, "apps": selection.audio_apps});
                         slots[slot] = Some(Active { program, _permit: permit, generation, framer: Framer::default(), progressed: Instant::now(),
                             ready: false, frames: 0, fragments: 0, closing: None });
                         if !send(&mut input, message).await { break "The screen capture helper stopped answering"; }
@@ -361,9 +464,20 @@ async fn run(path: PathBuf, mut ops: mpsc::Receiver<Op>, session: u64) {
                     let count = match read { Ok(0) | Err(_) => break "The screen capture helper stopped", Ok(count) => count };
                     let mut ended = Vec::new();
                     let pushed = wire.push(&media[..count], |record| {
+                        if record.kind == 5 {
+                            if let Some(pending) = stills.get_mut(&record.generation) {
+                                if pending.jpeg.len() + record.payload.len() <= MAX_SNAPSHOT { pending.jpeg.extend_from_slice(record.payload); }
+                                else { pending.jpeg.clear(); pending.jpeg.push(0); }
+                            }
+                            return;
+                        }
                         if record.kind == 4 {
                             if let Some(choice) = choosing.remove(&record.generation) {
                                 let _ = choice.reply.send(chosen(session, &choice.token, choice.kind, record.payload));
+                            } else if let Some(pending) = stills.remove(&record.generation) {
+                                let _ = pending.reply.send(still(&pending.token, &pending.jpeg, record.payload));
+                            } else if let Some(reply) = listings.remove(&record.generation) {
+                                let _ = reply.send(audible_apps(record.payload));
                             }
                             return;
                         }
@@ -387,6 +501,8 @@ async fn run(path: PathBuf, mut ops: mpsc::Receiver<Op>, session: u64) {
     let (child, reason) = failure;
     for active in slots.iter_mut().filter_map(Option::take) { active.fail(reason); completed(&active.program.id); }
     for (_, choice) in choosing.drain() { let _ = choice.reply.send(Err(AppError::invalid("The screen capture helper stopped. Try again."))); }
+    for (_, pending) in stills.drain() { let _ = pending.reply.send(Err(AppError::invalid("The screen capture helper stopped. Try again."))); }
+    for (_, reply) in listings.drain() { let _ = reply.send(Err(AppError::invalid("The screen capture helper stopped. Try again."))); }
     if let Some(mut child) = child {
         if tokio::time::timeout(Duration::from_secs(3), child.wait()).await.is_err() { let _ = child.kill().await; }
     }
@@ -402,7 +518,7 @@ mod tests {
     use super::*;
 
     fn selection(kind: ProgramCaptureKind, region: Option<ObsCrop>) -> ProgramCaptureSelection {
-        ProgramCaptureSelection { choice: "0123456789abcdef0123456789abcdef".into(), kind, label: "Studio Display".into(), audio: true, region }
+        ProgramCaptureSelection { choice: "0123456789abcdef0123456789abcdef".into(), kind, label: "Studio Display".into(), audio: true, audio_apps: None, region }
     }
 
     #[test]
@@ -415,6 +531,19 @@ mod tests {
         assert!(!ProgramCaptureSelection { choice: "ABC".into(), ..selection(ProgramCaptureKind::Screen, None) }.valid());
         assert!(!ProgramCaptureSelection { label: "".into(), ..selection(ProgramCaptureKind::Screen, None) }.valid());
         assert!(!ProgramCaptureSelection { label: "Display\u{7}".into(), ..selection(ProgramCaptureKind::Screen, None) }.valid());
+        let only = |apps: Vec<&str>, audio| ProgramCaptureSelection { audio, audio_apps: Some(apps.into_iter().map(String::from).collect()), ..selection(ProgramCaptureKind::Screen, None) };
+        assert!(only(vec!["com.p5sys.jump.mac.viewer"], true).valid());
+        assert!(!only(vec!["com.p5sys.jump.mac.viewer"], false).valid(), "chosen apps with audio off");
+        assert!(!only(vec![], true).valid(), "an empty choice of apps");
+        assert!(!only(vec!["--all"], true).valid() && !only(vec!["com.app/../x"], true).valid(), "not a bundle identifier");
+        assert!(!only(vec!["a.b"; MAX_APPS + 1], true).valid());
+    }
+
+    #[test]
+    fn the_app_list_keeps_only_well_formed_names_and_identifiers() {
+        let apps = audible_apps(br#"{"outcome":"apps","apps":[{"bundle":"com.p5sys.jump.mac.viewer","name":"Jump Desktop"},{"bundle":"--all","name":"Bad"},{"bundle":"com.example.x","name":"Bell\u0007"}]}"#).unwrap();
+        assert_eq!(apps, vec![ProgramCaptureApp { bundle: "com.p5sys.jump.mac.viewer".into(), name: "Jump Desktop".into() }]);
+        assert!(audible_apps(br#"{"outcome":"failed","apps":[]}"#).is_err());
     }
 
     #[test]
@@ -436,5 +565,47 @@ mod tests {
         assert_eq!(state().lock().unwrap().choices.get(token), Some(&(41, ProgramCaptureKind::Screen)));
         assert!(matches!(chosen(41, token, ProgramCaptureKind::Screen, br#"{"choice":"fedcba9876543210fedcba9876543210","outcome":"cancelled"}"#), Ok(ProgramCaptureChooseResult::Cancelled)));
         assert!(chosen(41, token, ProgramCaptureKind::Screen, br#"{"choice":"00000000000000000000000000000000","outcome":"chosen"}"#).is_err(), "an answer for a different token was accepted");
+    }
+
+    #[test]
+    fn a_snapshot_is_the_jpeg_that_preceded_its_answer_and_nothing_else() {
+        let token = "fedcba9876543210fedcba9876543210";
+        let ok = br#"{"choice":"fedcba9876543210fedcba9876543210","outcome":"snapshot","width":1920,"height":1080}"#;
+        let picture = still(token, &[0xff, 0xd8, 0xff, 0xd9], ok).unwrap();
+        assert_eq!((picture.image.as_str(), picture.width, picture.height), ("data:image/jpeg;base64,/9j/2Q==", 1920, 1080));
+        assert!(still(token, &[0xff, 0xd8, 0xff, 0xd9], br#"{"choice":"fedcba9876543210fedcba9876543210","outcome":"snapshot"}"#).is_err(),
+            "a picture with no size cannot place a region");
+        assert!(still(token, b"<svg>", ok).is_err(), "something that is not a JPEG became an image");
+        assert!(still(token, &[], ok).is_err(), "an answer with no picture became an image");
+        assert!(still(token, &[0xff, 0xd8, 0xff, 0xd9], br#"{"choice":"fedcba9876543210fedcba9876543210","outcome":"failed","error":"snapshot_failed"}"#).is_err());
+        assert!(still(token, &[0xff, 0xd8, 0xff, 0xd9], br#"{"choice":"00000000000000000000000000000000","outcome":"snapshot"}"#).is_err());
+    }
+
+    /// The seam no unit test on either side covers: the real helper's records
+    /// through this reader. The first picker build failed exactly here (the
+    /// reader refused kind 4). Runs when `swift build` has built the helper.
+    #[test]
+    fn the_real_helper_answers_through_this_reader() {
+        use std::io::{Read, Write};
+        let helper = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../swift-sidecar/.build/debug/saucebunny-program-capture");
+        if !helper.is_file() { eprintln!("skipped: {} is not built (swift build)", helper.display()); return; }
+        let mut child = std::process::Command::new(&helper).arg("--service")
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().expect("helper starts");
+        let token = "00112233445566778899aabbccddeeff";
+        writeln!(child.stdin.as_mut().expect("stdin"), r#"{{"op":"snapshot","request":3,"choice":"{token}"}}"#).expect("write");
+        let mut output = child.stdout.take().expect("stdout");
+        let (mut wire, mut answer, mut buffer) = (Wire::through(LAST_KIND), None, [0u8; 4096]);
+        while answer.is_none() {
+            let count = output.read(&mut buffer).expect("read");
+            assert!(count > 0, "the helper closed stdout without answering");
+            wire.push(&buffer[..count], |record| if record.kind == 4 { answer = Some((record.generation, record.payload.to_vec())) })
+                .expect("this reader accepts every record the helper sends");
+        }
+        let _ = child.stdin.as_mut().map(|input| input.write_all(b"Q\n"));
+        let _ = child.wait();
+        let (request, payload) = answer.expect("answered");
+        assert_eq!(request, 3);
+        assert!(still(token, &[], &payload).is_err(), "a snapshot of a choice the helper never held succeeded");
+        assert!(String::from_utf8_lossy(&payload).contains("snapshot_failed"));
     }
 }

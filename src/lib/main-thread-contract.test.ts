@@ -32,7 +32,7 @@ const MAIN_THREAD = new Set([
   "list_review_grants", "list_whisper_models", "llm_server_status", "mcp_setup", "ndi_remote_source", "ndi_status",
   "ndi_timing_probe_read", "ndi_timing_probe_start", "ndi_timing_probe_stop", "obs_audio_acceptance_cancel",
   "obs_audio_acceptance_read", "obs_audio_acceptance_start", "obs_broadcast_start", "obs_broadcast_status",
-  "obs_broadcast_stop", "obs_preflight", "open_external_url", "open_full_disk_access", "open_privacy_pane",
+  "obs_broadcast_stop", "open_external_url", "open_full_disk_access", "open_privacy_pane",
   "open_youtube_signin", "parakeet_model_downloaded", "peer_media_register_remote", "peer_media_unregister",
   "premiere_bridge_status", "premiere_bridge_stop", "premiere_enqueue_note", "premiere_marker_notes", "read_clipboard_text",
   "read_config", "reset_review_identity", "review_invited_only", "safari_fda_status", "screen_capture_access",

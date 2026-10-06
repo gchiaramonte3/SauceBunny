@@ -414,7 +414,7 @@ export const catalogEntries: CatalogEntry[] = [
       { path: "src/components/Transport.tsx", note: "Playback/readout/utility responsibilities." },
       { path: "src/components/NdiPreviewHeader.tsx", note: "Production component: sharing and unavailable sequence timecode outside the picture." },
       { path: "src/components/AvidNdiSetup.tsx", note: "Production passive Avid setup disclosure in the shared NDI gear dialog; compatibility is separately verified." },
-      { path: "src/components/ObsCaptureControls.tsx", note: "Exact application/window/crop/audio controls inside the same gear dialog. Native discovery and snapshots remain outside the catalog." },
+      { path: "src/components/ProgramCaptureControls.tsx", note: "Screen, window and region chosen through macOS's sharing picker inside the same gear dialog. The picker itself and the region still remain outside the catalog." },
       { path: "src/components/CaptureSourcePicker.tsx", note: "Controlled production tabs, thumbnail cards, audio choice and pointer/keyboard crop editor, rendered with generated fixture props." },
       { path: "src/components/ShareDialog.tsx", note: "Room screen/window/portion chooser reuses the visual recipes while retaining separate publication ownership." },
       { path: "docs/CAPTURE-CHOOSER.md", note: "Shared chooser interaction, snapshot/privacy and verification boundaries." },

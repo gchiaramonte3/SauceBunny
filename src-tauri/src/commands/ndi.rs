@@ -236,14 +236,6 @@ impl Program {
         }
         self.changed.notify_all();
     }
-    /// Native overlay actions belong only to this still-owned producer. No
-    /// metadata beyond its opaque local ID reaches the frontend event.
-    pub(super) fn request_capture_edit(&self) {
-        if self.is_stopped() || !matches!(&self.capture, Some(ObsSelection::Display(_))) { return; }
-        if let Some(app) = &self.app {
-            let _ = app.emit("obs:edit-source", super::obs::ObsEditSource { source_id:self.id.clone() });
-        }
-    }
     pub(super) fn capture_stopped(&self) {
         if self.is_stopped() { return; }
         // Revoke media and raw-output access immediately. Completion still

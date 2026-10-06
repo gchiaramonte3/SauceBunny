@@ -49,7 +49,7 @@ async function boot(page: Page, scale: number) {
   return dialog;
 }
 
-for (const viewport of [{ width: 1100, height: 700 }, { width: 1680, height: 1020 }]) {
+for (const viewport of [{ width: 1100, height: 700 }, { width: 1680, height: 1020 }, { width: 2560, height: 1080 }]) {
   for (const scale of [1, 1.25]) test(`share region keeps audio and actions separate at ${viewport.width}×${viewport.height}, ${scale * 100}% text`, async ({ page }) => {
     await page.setViewportSize(viewport); await page.emulateMedia({ reducedMotion: "reduce" });
     const dialog = await boot(page, scale);
@@ -57,7 +57,9 @@ for (const viewport of [{ width: 1100, height: 700 }, { width: 1680, height: 102
     await expect(body).toBeVisible();
     const before = (await footer.boundingBox())!;
     const bounds = (await dialog.boundingBox())!;
-    expect(bounds.width).toBeGreaterThan(800);
+    // Sized to its content, not the screen: at 960px an ultrawide display got a dialog of empty rows.
+    expect(bounds.width).toBeLessThanOrEqual(720);
+    expect(bounds.width).toBeGreaterThan(560);
     expect(bounds.x).toBeGreaterThanOrEqual(16); expect(bounds.y).toBeGreaterThanOrEqual(16);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width - 16);
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height - 16);

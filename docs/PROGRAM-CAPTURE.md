@@ -1,7 +1,9 @@
 # Program capture: Preview ▸ Source ▸ Screen / Window / Region
 
-Status: Phase 0 (spike) done 2026-10-05. Phase 1 (Screen) built 2026-10-05: Preview ▸ Source ▸ Screen
-runs on the picker; Window and Region still show the OBS controls until Phases 2 and 3 replace them.
+Status: Phase 0 (spike) done 2026-10-05. Phases 1 to 3 (Screen, Window, Region) built 2026-10-05: every
+Preview ▸ Source capture tab runs on the picker and nothing in the app reaches the OBS controls. NDI
+broadcast of a picker capture (Phase 4) and deleting the OBS code (Phase 5) remain. The owner chose the
+picker for the whole app on 2026-10-05, so co-review's Share your screen moves onto it next.
 
 ## Why this exists
 
@@ -91,3 +93,35 @@ unplug); and A/V sync against the flash/tone oracle.
   WebKit's audio process, which the tap may not exclude) does not feed back
   unless the person unmutes it; whether to exclude WebKit's processes too is
   open (it needs an undocumented call) and waits for the hand test.
+
+## Phases 2 and 3 as built
+
+- **The seam bug.** The first picker build read the helper's records with the
+  OBS service's reader, which accepted kinds 1 to 3 only, so every pick's
+  answer (kind 4) ended the service with "The screen capture helper stopped".
+  Neither side's unit tests crossed the boundary. `Wire::through(5)` fixes it,
+  and `the_real_helper_answers_through_this_reader` runs the built helper
+  through the reader (it fails with the old limit).
+- **Window**: the picker in `.singleWindow` or `.singleApplication` mode, the
+  second for windows that will not pick on their own (a remote-desktop viewer
+  filling another display). Its sound is the owning app and its helpers,
+  matched by bundle identifier; a picker filter names the app only from macOS
+  15.2, so before that application audio is off with the reason shown.
+- **Region**: a display pick, then a still to draw on. The still is a JPEG of
+  the first frame of a short stream on the pick itself (`snapshot` op, kind-5
+  records), never a system screenshot, so it needs nothing the picker did not
+  already grant. A region starts only on Preview. There is no live Edit or
+  on-screen border yet; the area is changed in the dialog and previewed again.
+- **Whose sound**: Audio from ▸ every app but Sauce Bunny (the default for a
+  screen or region), this app only (a window), or only the apps ticked (the
+  `apps` op lists running apps by name; a start carries their bundle
+  identifiers). "Every app but Sauce Bunny" leaves out WebKit's processes,
+  which play the app's own audio including a session's voices, so nobody hears
+  themselves; Safari plays through the same processes and is left out with
+  it. That avoids the undocumented responsibility call the plan raised.
+  The tap re-reads Core Audio's process list every second, because an app has
+  no audio process until it first plays and helpers come and go.
+- **Native Edit retired**: the OBS region overlay's Edit (`obs:edit-source`,
+  `use-obs-region-edit`) had no source left to edit and is gone, with the OBS
+  window list, display list and preflight commands the old tabs used.
+- **Not yet**: Broadcast to NDI is not offered for a picker capture (Phase 4).

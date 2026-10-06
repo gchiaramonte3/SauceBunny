@@ -15,6 +15,11 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(Data(records.map { $0.dropFirst(14) }.joined()), payload)
     }
 
+    func testAPictureAndItsAnswerShareTheRequestAddress() {
+        let picture = Wire.records(.picture, slot: 0, generation: 4, payload: Data([0xff, 0xd8]))
+        XCTAssertEqual([UInt8](picture[0]), [5, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0xff, 0xd8])
+    }
+
     func testOnlyAnEndRecordIsEmpty() {
         XCTAssertEqual([UInt8](Wire.records(.end, slot: 0, generation: 1, payload: Data())[0]), [3, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0])
     }
@@ -27,5 +32,6 @@ final class RasterTests: XCTestCase {
         XCTAssertEqual(Raster(sourceWidth: 5120, sourceHeight: 1440).map { [$0.width, $0.height] }, [1920, 540])
         XCTAssertNil(Raster(sourceWidth: 1, sourceHeight: 900))
         XCTAssertNil(Raster(sourceWidth: .nan, sourceHeight: 900))
+        XCTAssertEqual(Raster(sourceWidth: 5120, sourceHeight: 2160, fitting: (960, 540)).map { [$0.width, $0.height] }, [960, 404])
     }
 }

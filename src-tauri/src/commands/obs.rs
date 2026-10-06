@@ -48,15 +48,6 @@ pub struct ObsWindow {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
-pub struct ObsWindowChoice {
-    #[serde(flatten)]
-    pub window: ObsWindow,
-    #[serde(rename = "applicationName")]
-    pub application_name: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../src/bindings/")]
 pub struct ObsApplication { pub pid: i32, pub app: String, pub name: String }
 
 #[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]
@@ -128,15 +119,6 @@ impl ObsSelection {
         match self { Self::Window(value) => value.valid(), Self::Display(value) => value.valid(), Self::Picked(value) => value.valid() }
     }
 }
-#[derive(Clone, Serialize, ts_rs::TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/bindings/")]
-pub struct ObsEditSource { pub source_id: String }
-
-#[derive(Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../src/bindings/")]
-pub struct ObsPreflight { pub available: bool, pub error: Option<String> }
-
 #[derive(Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct ObsStarted { pub program: ndi::NdiStarted, pub selection: ObsSelection }
@@ -176,28 +158,10 @@ fn command(root: &Path, executable: &str) -> Command {
 }
 
 #[tauri::command]
-pub fn obs_preflight() -> ObsPreflight {
-    match runtime() { Ok(_) => ObsPreflight { available:true, error:None },
-        Err(error) => ObsPreflight { available:false, error:Some(error.to_string()) } }
-}
-
-#[tauri::command]
 pub async fn obs_applications() -> Result<Vec<ObsApplication>, AppError> { discovery::applications(&runtime()?).await }
 
 #[tauri::command]
 pub async fn obs_windows(application: String) -> Result<Vec<ObsWindow>, AppError> { discovery::windows(&runtime()?, &application).await }
-
-#[tauri::command]
-pub async fn obs_all_windows() -> Result<Vec<ObsWindowChoice>, AppError> {
-    let before = service::helper_process();
-    let mut windows = discovery::all_windows(&runtime()?, std::process::id()).await?;
-    let after = service::helper_process();
-    windows.retain(|choice| ![before, after].into_iter().flatten().any(|pid|pid == choice.window.pid as u32));
-    Ok(windows)
-}
-
-#[tauri::command]
-pub async fn obs_displays() -> Result<Vec<ObsDisplayChoice>, AppError> { discovery::displays(&runtime()?).await }
 
 #[tauri::command]
 pub async fn obs_start(app: AppHandle, selection: ObsSelection) -> Result<ObsStarted, AppError> {
