@@ -13,6 +13,8 @@
 #   ffprobe    — martin-riedl.de static arm64              (download, ~60 MB)
 #   whisper-cli         — built from whisper.cpp source    (compile, needs Xcode CLT)
 #   saucebunny-diarize  — built from swift-sidecar/        (compile, needs Xcode CLT)
+#   Sauce Bunny Capture.app — Preview's picker capture helper, built from
+#                       swift-sidecar/ into src-tauri/helpers/ (a dev build runs it from there)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -47,6 +49,9 @@ if have llama-server; then echo "already present — skipping (rebuild: npm run 
 
 step "saucebunny-aaf (self-contained AAF reader)"
 if have saucebunny-aaf; then echo "already present - skipping (rebuild: npm run build:aaf)"; else bash scripts/build-aaf.sh; fi
+
+step "Sauce Bunny Capture (Swift helper app - Preview's Screen, Window and Region on macOS's picker)"
+if [ -x "src-tauri/helpers/Sauce Bunny Capture.app/Contents/MacOS/saucebunny-program-capture" ]; then echo "already present - skipping (rebuild: npm run build:program-capture)"; else bash scripts/build-program-capture.sh; fi
 
 step "done"
 ls -lh src-tauri/binaries/ | grep -v '^total\|\.gitkeep' || true
