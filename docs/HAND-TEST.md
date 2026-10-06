@@ -1114,8 +1114,14 @@ the acceptance test for whenever the verdict UI gets built.
 4. Rename the folder in Finder. Home says "This folder was moved or renamed".
    Locate folder… and choose it: the shelf returns in the same place, and the
    clip's poster, marks and Continue entry are still there.
-5. With the drive unmounted, open the clip from Continue: it says the drive
-   is not connected, and the entry stays in Continue.
+5. With the drive unmounted, open the clip from Continue: "NEXIS is not
+   connected"; mount it and the clip opens by itself. The entry stays in
+   Continue either way.
+6. Move two clips that are both in Continue into another folder in Finder.
+   Open one: "Where is …?". Locate file…: it opens, and the other clip's
+   Continue tile now points at its new place too. ⌘Z puts both back.
+7. Locate a different file (another name or length): the sheet lists what
+   differs and waits for "Use this file anyway".
 
 ### The Pipeline on String Outs (what to send when it hangs)
 

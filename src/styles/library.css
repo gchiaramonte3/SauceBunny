@@ -768,6 +768,11 @@
   color: var(--fg-4);
 }
 .cp-lib-offline-actions { display: flex; flex: none; flex-wrap: wrap; gap: var(--s-2); }
+/* "Where is this file?" (ReconnectFileSheet), on the Library dialog shell. */
+.cp-reconnect-path { color: var(--fg-1); overflow-wrap: anywhere; }
+.cp-reconnect-differences { margin: 0 var(--s-3); padding-left: var(--s-5); color: var(--fg-1); font: var(--text-md)/var(--leading-normal) var(--font-ui); }
+/* Beats `.cp-project-dialog label`, which stacks a field above its caption. */
+.cp-project-dialog .cp-reconnect-option { flex-direction: row; align-items: center; justify-content: flex-start; gap: var(--s-2); margin: var(--s-2) var(--s-3); color: var(--fg-2); font: var(--text-md)/var(--leading-snug) var(--font-ui); text-align: left; }
 .cp-lib-offline-roots { margin-top: var(--s-3); }
 .cp-lib-offline-root { display: flex; align-items: center; gap: var(--s-2); min-height: 30px; padding: 0 var(--s-2); color: var(--fg-3); }
 .cp-lib-offline-name { display: flex; flex: 1; flex-direction: column; min-width: 0; font: var(--text-md)/var(--leading-snug) var(--font-ui); }

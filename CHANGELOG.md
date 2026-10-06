@@ -13,6 +13,11 @@ All notable changes to Sauce Bunny. Format loosely follows
   takes its posters, marks, timecodes, transcripts, Continue entries and
   project folder items with it. Offline folders stay in the Library sidebar
   instead of disappearing from it.
+- **"Where is this file?"** Opening a file that moved asks where it is
+  instead of failing: Locate file… checks the one you pick against what was
+  known about it (name and length) and asks before using a different one,
+  then reconnects the other files that moved with it, as one undo. A file on
+  a drive that is not connected opens by itself when the drive mounts.
 
 ### Fixed
 - **Continue no longer forgets a file it cannot reach.** Opening one on a

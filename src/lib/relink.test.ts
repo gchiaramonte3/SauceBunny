@@ -96,3 +96,32 @@ describe("moveStoredPaths", () => {
     expect(events, "component-held records (Continue, queue, columns, tree) were not told").toEqual([{ from, to }]);
   });
 });
+
+describe("reconnecting files", () => {
+  it("learns a folder move only from a file whose name did not change, and never moves the file itself twice", async () => {
+    const { othersThatMoved } = await import("./relink");
+    const known = [inside, `${from}/Day 3/A002.mov`, `${from}/Day 4/B001.mov`, neighbour];
+    expect(othersThatMoved(inside, moved, known)).toEqual([[`${from}/Day 3/A002.mov`, `${to}/Day 3/A002.mov`]]);
+    expect(othersThatMoved(inside, `${to}/Day 3/A001_v2.mov`, known), "a renamed file taught a folder move").toEqual([]);
+    expect(othersThatMoved(inside, inside, known)).toEqual([]);
+  });
+
+  it("finds every stored path under a folder, from the stores and from component state", async () => {
+    const { storedPathsUnder } = await import("./relink");
+    localStorage.setItem("saucebunny.libraryThumbTimes", JSON.stringify({ [inside]: 1 }));
+    localStorage.setItem("saucebunny.sourceMarks", JSON.stringify({ [`${from}/Day 3/A002.mov`]: { inFrames: 1, outFrames: 9 } }));
+    expect(storedPathsUnder(`${from}/Day 3`, [`${from}/Day 3/A003.mov`, neighbour]).sort())
+      .toEqual([inside, `${from}/Day 3/A002.mov`, `${from}/Day 3/A003.mov`].sort());
+  });
+
+  it("reconnects as one undo, and undo puts every record back", async () => {
+    const { reconnectFiles } = await import("./relink");
+    const { appUndo } = await import("./undo");
+    localStorage.setItem("saucebunny.libraryThumbTimes", JSON.stringify({ [inside]: 1, [`${from}/Day 3/A002.mov`]: 2 }));
+    reconnectFiles([[inside, moved], [`${from}/Day 3/A002.mov`, `${to}/Day 3/A002.mov`]]);
+    const posters = () => JSON.parse(localStorage.getItem("saucebunny.libraryThumbTimes") ?? "{}");
+    expect(posters()).toEqual({ [moved]: 1, [`${to}/Day 3/A002.mov`]: 2 });
+    expect(appUndo.undo()).toBe("reconnect 2 files");
+    expect(posters()).toEqual({ [inside]: 1, [`${from}/Day 3/A002.mov`]: 2 });
+  });
+});

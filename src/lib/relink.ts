@@ -1,9 +1,10 @@
-import { pathKey } from "./repath";
+import { dirOf, pathKey } from "./repath";
+import { appUndo } from "./undo";
 import { loadChosenPosters, loadSourceTimecodes, saveChosenPosters, saveSourceTimecodes } from "./library";
 import { hiddenSnapshot, hidePaths, unhidePaths } from "./library-hidden";
 import { libraryOrganization } from "./library-organization-store";
 import { loadSourceMarks, saveSourceMarks } from "./source-marks";
-import { moveHistoryPaths } from "./transcript-history";
+import { getHistory, moveHistoryPaths } from "./transcript-history";
 import { moveReviewPaths } from "./review";
 import type { RecentSource } from "./recent-sources";
 import type { QueuedClip } from "../types";
@@ -110,4 +111,50 @@ export function moveStoredPaths(from: string, to: string): void {
   moveReviewPaths((path) => movedPath(path, from, to));
   void libraryOrganization.movePaths((path) => movedPath(path, from, to));
   window.dispatchEvent(new CustomEvent<PathsMoved>(PATHS_MOVED_EVENT, { detail: { from, to } }));
+}
+
+/**
+ * Every file path the app has stored under `dir`, from every store above plus
+ * `extra` (records held in component state: Continue, the clip queue). These
+ * are the candidates for "reconnect others that moved with it".
+ */
+export function storedPathsUnder(dir: string, extra: readonly string[] = []): string[] {
+  const found = new Set<string>();
+  const root = pathKey(dir).replace(/\/+$/, "");
+  const add = (path: string | null | undefined) => { if (path && pathKey(path).startsWith(`${root}/`)) found.add(pathKey(path)); };
+  for (const key of Object.keys(loadChosenPosters())) add(key);
+  for (const key of Object.keys(loadSourceTimecodes())) add(key);
+  for (const key of Object.keys(loadSourceMarks())) add(key);
+  for (const entry of getHistory()) add(entry.sourcePath);
+  for (const path of extra) add(path);
+  return [...found];
+}
+
+/**
+ * What one located file teaches about the others (Premiere's "relink others
+ * automatically", and AAF Audio's `linked_paths::remember`). Only a file whose
+ * NAME did not change justifies a folder mapping: a renamed file says nothing
+ * about its neighbours. Returns, for each other known path under the old
+ * folder, where it would be under the new one; the caller checks they exist.
+ */
+export function othersThatMoved(from: string, to: string, known: readonly string[]): [string, string][] {
+  const name = (path: string) => pathKey(path).split("/").pop() ?? "";
+  if (name(from) !== name(to)) return [];
+  const oldDir = dirOf(pathKey(from)), newDir = dirOf(pathKey(to));
+  if (!oldDir || oldDir === newDir) return [];
+  return known.flatMap((path) => {
+    if (pathKey(path) === pathKey(from)) return [];
+    const moved = movedPath(path, oldDir, newDir);
+    return moved ? [[pathKey(path), moved] as [string, string]] : [];
+  });
+}
+
+/** Move every pair's records, as one undo step. */
+export function reconnectFiles(pairs: readonly (readonly [string, string])[]): void {
+  if (!pairs.length) return;
+  for (const [from, to] of pairs) moveStoredPaths(from, to);
+  const label = pairs.length === 1 ? "reconnect file" : `reconnect ${pairs.length} files`;
+  appUndo.push({ label, scope: "reconnect",
+    undo: () => { for (const [from, to] of [...pairs].reverse()) moveStoredPaths(to, from); },
+    redo: () => { for (const [from, to] of pairs) moveStoredPaths(from, to); } });
 }

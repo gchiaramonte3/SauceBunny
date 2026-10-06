@@ -10,7 +10,9 @@ linked media and Library project folders' "Relink…"), and Premiere Pro's Link
 Media dialog as the model.
 
 **Status (2026-10-05):** spec written. Phase 1 is built in the same pull request
-(see "As built" under phase 1); phases 2 to 4 are not built.
+(see "As built" under phase 1). Phase 2's core (2, 2a, 2c) is built in the same
+pull request; its remembered mappings (2b), identity cache (2d) and Search a
+folder… are not. Phases 3 and 4 are not built.
 
 **Rules that hold in every phase:**
 - **Offline is a state, not a deletion.** Nothing is removed from the Library,
@@ -249,6 +251,9 @@ the entry; phase 2 replaces the message with the reconnect sheet.
 
 ## Phase 2: reconnect a file when it is opened
 
+**Status (2026-10-05):** 2, 2a and 2c built (see "As built" at the end of this
+phase); 2b, 2d and Search a folder… are not.
+
 Opening anything whose file is offline (a Continue tile, a Library item, a
 transcript, a project folder item) opens a small sheet instead of an error:
 
@@ -308,6 +313,33 @@ records `{size, modifiedMs, durationSeconds, width, height}` per path in
 written off the main thread). Losing it only weakens verification to
 name-and-size; nothing depends on it existing. Library scans add size and
 modification time for every file they list.
+
+### As built (phase 2)
+
+- `src/components/ReconnectFileSheet.tsx`, opened from Continue (Home's
+  Resume and the Continue row) and the Library when `loadLocalPath` answers
+  NotFound. It asks `media_availability` first: a drive that is not
+  connected waits (`media:volumes-changed`) and opens the file by itself; a
+  moved file offers Locate file… (any video or audio file).
+- The located file is probed and compared by `fileDifferences`
+  (`src/lib/media-offline.ts`): name, and length when Continue knew it, to
+  half a second. A difference is listed and needs "Use this file anyway".
+- `othersThatMoved` (`src/lib/relink.ts`) learns the folder change only from a
+  file whose name did not change, and applies it to every stored path under
+  the old folder (`storedPathsUnder`: posters, timecodes, marks, transcript
+  history, Continue, the clip queue). A candidate moves only when it is gone
+  from the old place and present at the new one, checked in one
+  `media_availability` call.
+- `reconnectFiles` moves every pair's records as one undo step ("reconnect N
+  files").
+- Tests: `ReconnectFileSheet.test.tsx` (waits for a drive; locates and brings
+  the others; a different file needs a click; break-tested by moving a file
+  still at its old place), `relink.test.ts` (mapping, discovery, undo),
+  `e2e/reconnect-media.spec.ts` (Resume on Home, through to Continue and
+  posters moved on disk).
+- **Still to build:** remembered mappings (2b), the identity cache (2d), Search
+  a folder…, and the sheet for transcripts opened from the history (which
+  still say "Opened without its video").
 
 ---
 

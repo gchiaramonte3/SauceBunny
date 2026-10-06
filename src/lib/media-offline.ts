@@ -1,4 +1,6 @@
 import type { MediaState } from "../bindings/MediaState";
+import { secondsToClock } from "./timecode";
+import { pathKey } from "./repath";
 
 /**
  * What to tell the person about something that cannot be reached, by why
@@ -16,24 +18,6 @@ export type OfflineCopy = {
   retry: boolean;
 };
 
-/**
- * The same, for one file the person tried to open. A file that cannot be
- * reached stays where it is listed (Continue used to drop it, which threw away
- * every file on a drive that simply was not mounted yet).
- */
-export function offlineFileCopy(state: Exclude<MediaState, "online">, volume: string | null, title: string): { title: string; body: string } {
-  switch (state) {
-    case "driveOffline":
-      return { title: `${volume ?? "Its drive"} is not connected`, body: `"${title}" is on ${volume ?? "a drive"} that is not connected. Connect it and open it again.` };
-    case "notResponding":
-      return { title: `${volume ?? "Its drive"} is not responding`, body: `"${title}" is on a drive that did not answer. Try again in a moment.` };
-    case "noAccess":
-      return { title: "Sauce Bunny cannot read this file", body: `Allow access to "${title}" in System Settings, Privacy and Security, Files and Folders.` };
-    case "missing":
-      return { title: "File not found", body: `"${title}" was moved, renamed or deleted. It stays in Continue; if its folder is in the Library, Locate the folder to reconnect it.` };
-  }
-}
-
 export function offlineCopy(state: Exclude<MediaState, "online">, volume: string | null): OfflineCopy {
   switch (state) {
     case "driveOffline":
@@ -49,4 +33,24 @@ export function offlineCopy(state: Exclude<MediaState, "online">, volume: string
       return { title: "Sauce Bunny cannot read this folder",
         hint: "Allow it in System Settings, Privacy and Security, Files and Folders, then try again.", locate: false, retry: true };
   }
+}
+
+/**
+ * How a located file differs from the one that went offline, in words, or
+ * nothing when it matches. A same-named re-export is a different cut, and its
+ * review notes and marks may not apply, so a difference is shown and needs a
+ * click; it is never silently accepted. Duration is compared only when it was
+ * known, to half a second (containers round differently).
+ */
+export function fileDifferences(expected: { path: string; durationSeconds?: number | null },
+  found: { path: string; duration: number | null }): string[] {
+  const name = (path: string) => pathKey(path).split("/").pop() ?? path;
+  const out: string[] = [];
+  if (name(expected.path) !== name(found.path)) out.push(`Name: ${name(found.path)} (was ${name(expected.path)})`);
+  const was = expected.durationSeconds, now = found.duration;
+  if (was != null && was > 0 && now != null && Math.abs(now - was) > 0.5) {
+    const clock = (seconds: number) => secondsToClock(seconds, { padMinutes: true, forceHours: Math.max(was, now) >= 3600 });
+    out.push(`Length: ${clock(now)} (was ${clock(was)})`);
+  }
+  return out;
 }
