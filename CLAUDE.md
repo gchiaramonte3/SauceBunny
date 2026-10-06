@@ -414,7 +414,7 @@ with the ones still open. The table below is the index into it.
 
 | What | Where |
 |------|-------|
-| App cache | `app_cache_dir()/{media,thumbnails,scratch}/`; only `scratch/` is swept (>24h). `migrate_cache_layout` moves an older install over once |
+| App cache | `app_cache_dir()/{media,thumbnails,scratch}/`; `scratch/` is swept (>24h), and AAF Audio's playback windows in `media/aaf/` past 2 GB, least recently played first. `migrate_cache_layout` moves an older install over once |
 | Whisper models | `app_data_dir()/whisper-models/` |
 | Diarizer models | Bundled or downloaded on first run, cached locally |
 | Transcript library | `~/Documents/Sauce Bunny/Transcripts/YYYY-MM/` |

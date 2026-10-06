@@ -304,7 +304,7 @@ it("Play reuses an unfinished silent preparation instead of restarting its jobs"
   expect(invoke.mock.calls.filter(([command]) => command === "aaf_prepare_audio")).toHaveLength(1);
   expect(sources).toHaveLength(1); player.close();
 });
-it("evicts obsolete queued windows before launching their native readers", async () => {
+it("drops an evicted window's queued reads and lets its started ones finish, undecoded", async () => {
   const pending: Array<() => void> = [];
   invoke.mockImplementation((command) => command === "aaf_prepare_audio" ? new Promise((resolve) => pending.push(() => resolve({ path: "/audio/a.wav" }))) : Promise.resolve());
   const cache = new MultitrackAudioCache("doc",24,2400,new FakeContext() as unknown as AudioContext);
@@ -316,9 +316,41 @@ it("evicts obsolete queued windows before launching their native readers", async
   await Promise.all([first,second,last]);
   const old=invoke.mock.calls.filter(([command,args])=>command==="aaf_prepare_audio"&&args.startFrame===0);
   expect(old).toHaveLength(2); // c/d never escape the obsolete queue.
-  expect(invoke.mock.calls.filter(([command])=>command==="cancel_job")).toHaveLength(2);
+  // a/b at 0 had started: they finish into the native cache, are not stopped, and are not decoded.
+  expect(invoke.mock.calls.filter(([command])=>command==="cancel_job")).toHaveLength(0);
+  // Only the two windows still held are read back: 120 and 240, two mics each.
+  expect(vi.mocked(fetch)).toHaveBeenCalledTimes(4);
   const calls=invoke.mock.calls.filter(([command])=>command==="aaf_prepare_audio").length;
   cache.cancel(); await cache.get(["a","b"],240);
   expect(invoke.mock.calls.filter(([command])=>command==="aaf_prepare_audio")).toHaveLength(calls);
+  cache.clear();
+});
+it("Pause lets a started read finish, and Play takes it from there without asking again", async () => {
+  let finish!: (value: unknown) => void;
+  invoke.mockImplementation((command) => command === "aaf_prepare_audio" ? new Promise((resolve) => { finish = resolve; }) : Promise.resolve());
+  const cache = new MultitrackAudioCache("doc", 24, 2400, new FakeContext() as unknown as AudioContext);
+  const waiting = cache.get(["a"], 0).catch((cause: unknown) => cause);
+  await vi.waitFor(() => expect(invoke.mock.calls.filter(([command]) => command === "aaf_prepare_audio")).toHaveLength(1));
+  cache.cancel();
+  finish({ path: "/audio/a.wav" });
+  expect(await waiting).toBeInstanceOf(Error);
+  expect((await cache.get(["a"], 0)).get("a")).toBeDefined();
+  expect(invoke.mock.calls.filter(([command]) => command === "aaf_prepare_audio")).toHaveLength(1);
+  expect(invoke.mock.calls.filter(([command]) => command === "cancel_job")).toHaveLength(0);
+  cache.clear();
+});
+it("a read still queued when nobody waits is dropped, and asking again starts it afresh", async () => {
+  const pending: Array<() => void> = [];
+  invoke.mockImplementation((command, args) => command === "aaf_prepare_audio"
+    ? new Promise((resolve) => pending.push(() => resolve({ path: `/audio/${args.trackId}.wav` }))) : Promise.resolve());
+  const cache = new MultitrackAudioCache("doc", 24, 2400, new FakeContext() as unknown as AudioContext);
+  const first = cache.get(["a", "b", "c"], 0).catch(() => null);
+  await vi.waitFor(() => expect(pending).toHaveLength(2));
+  cache.cancel();
+  const again = cache.get(["a", "b", "c"], 0);
+  for (let index = 0; index < 30; index++) { pending.splice(0).forEach((resolve) => resolve()); await Promise.resolve(); }
+  expect((await again).size).toBe(3); await first;
+  // a and b were reused where they were; c's dropped read never reached the native side.
+  expect(invoke.mock.calls.filter(([command]) => command === "aaf_prepare_audio").map(([, args]) => args.trackId).sort()).toEqual(["a", "b", "c"]);
   cache.clear();
 });

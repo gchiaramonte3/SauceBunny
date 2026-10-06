@@ -76,9 +76,9 @@ pub async fn render(app: &AppHandle, document: &AafDocument, id: &str, start: i6
     super::audio::validate_range(document, start, duration)?;
     let _permit = super::audio::preparation(app, job).await?;
     let track = store::track(document, id)?;
-    linked::check_sources(document, track)?;
+    linked::check_window_sources(document, track, start, duration)?;
     let total = render_window(app, document, id, start, duration, job, output).await?;
-    linked::check_sources(document, track)?; store::source_ready(document)?;
+    linked::check_window_sources(document, track, start, duration)?; store::source_ready(document)?;
     Ok(total)
 }
 
@@ -168,7 +168,7 @@ pub async fn waveform(app: &AppHandle, document: &AafDocument, id: &str, start: 
     // app does on NEXIS. Only the overview request builds it; zoomed detail
     // waits for that result instead of starting its own copy.
     if !may_build { return Err(AppError::invalid(NOT_BUILT)); }
-    let _claim = super::peaks::claim(app, job, &path).await?;
+    let _claim = process::claim(app, job, &path).await?;
     let _build = super::audio::acquire(app, job, &super::peaks::BUILD).await?;
     if let Ok(waveform) = cached() { return Ok(waveform); }
     let work = WorkDir::new(app, job)?;

@@ -375,7 +375,7 @@ pub fn source_ready(document: &AafDocument) -> Result<(), AppError> {
     let metadata = std::fs::metadata(&document.source_path)
         .map_err(|_| AppError::not_found("The original AAF is unavailable. Reconnect its drive or import it again."))?;
     if metadata.len() != document.source_size || modified_ms(&metadata) != document.source_modified_ms
-        || source_fingerprint(Path::new(&document.source_path))? != document.manifest.source_fingerprint {
+        || known_fingerprint(Path::new(&document.source_path))? != document.manifest.source_fingerprint {
         return Err(AppError::invalid("The original AAF has changed. Import the new file before preparing more audio."));
     }
     Ok(())
@@ -398,6 +398,63 @@ pub fn source_fingerprint(path: &Path) -> Result<String, AppError> {
     file.read_exact(&mut buffer)?;
     hash.update(&buffer);
     Ok(format!("{:x}", hash.finalize()))
+}
+
+/// What a stat says about a file without reading it: replaced, rewritten or
+/// touched, one of these moves. The change time cannot be set by a program,
+/// unlike the modification time, so a same-size rewrite with its time put
+/// back (the case `source_fingerprint` reads both ends of a file for) still
+/// shows.
+type Stamp = (u64, u64, u64, i64, i64, i64, i64);
+fn stamp(metadata: &std::fs::Metadata) -> Stamp {
+    use std::os::unix::fs::MetadataExt;
+    (metadata.dev(), metadata.ino(), metadata.size(), metadata.mtime(), metadata.mtime_nsec(), metadata.ctime(), metadata.ctime_nsec())
+}
+
+type Fingerprints = Mutex<std::collections::HashMap<PathBuf, (Stamp, String)>>;
+static FINGERPRINTS: std::sync::OnceLock<Fingerprints> = std::sync::OnceLock::new();
+/// Enough for the AAF and every MXF of several large sequences; past it the
+/// memory starts again (each entry is about 200 bytes).
+const FINGERPRINTS_KEPT: usize = 16_384;
+
+/// `source_fingerprint`, remembered while a stat shows nothing has touched
+/// the file. Playback checks the AAF and the media under each five-second
+/// window of every mic it plays, and each fingerprint is two 64 KiB reads:
+/// round trips on NEXIS, many times a second.
+pub fn known_fingerprint(path: &Path) -> Result<String, AppError> {
+    let now = stamp(&std::fs::metadata(path)?);
+    let known = FINGERPRINTS.get_or_init(Default::default);
+    if let Some((_, value)) = known.lock().ok().and_then(|known| known.get(path).filter(|(at, _)| *at == now).cloned()) { return Ok(value); }
+    let value = source_fingerprint(path)?;
+    if let Ok(mut known) = known.lock() {
+        if known.len() >= FINGERPRINTS_KEPT { known.clear(); }
+        known.insert(path.to_path_buf(), (now, value.clone()));
+    }
+    Ok(value)
+}
+
+static PLAYBACK_DOCUMENTS: Mutex<Vec<(String, Stamp, std::sync::Arc<AafDocument>)>> = Mutex::new(Vec::new());
+
+/// A document as playback reads it: without its transcripts, and parsed again
+/// only when its file changes. Every five-second window of every mic used to
+/// parse the whole document, megabytes of transcript, which cost more than
+/// reading a window already on disk. Four are kept: String Outs plays from
+/// several sequences at once.
+pub fn playback_document(root: &Path, id: &str) -> Result<std::sync::Arc<AafDocument>, AppError> {
+    let now = stamp(&std::fs::metadata(document_path(root, id)?)?);
+    if let Ok(kept) = PLAYBACK_DOCUMENTS.lock() {
+        if let Some((_, _, document)) = kept.iter().find(|(known, at, _)| known == id && *at == now) { return Ok(document.clone()); }
+    }
+    let mut document = load(root, id)?;
+    document.transcripts = Vec::new();
+    document.ownership = None;
+    let document = std::sync::Arc::new(document);
+    if let Ok(mut kept) = PLAYBACK_DOCUMENTS.lock() {
+        kept.retain(|(known, _, _)| known != id);
+        if kept.len() >= 4 { kept.remove(0); }
+        kept.push((id.to_string(), now, document.clone()));
+    }
+    Ok(document)
 }
 
 pub fn modified_ms(metadata: &std::fs::Metadata) -> u64 {
@@ -638,6 +695,43 @@ mod tests {
         std::fs::File::options().write(true).open(&path).unwrap()
             .set_times(std::fs::FileTimes::new().set_modified(original_time)).unwrap();
         assert_ne!(identity, source_fingerprint(&path).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_remembered_fingerprint_still_sees_a_same_size_rewrite_with_its_time_put_back() {
+        let root = std::env::temp_dir().join(format!("aaf-known-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("fixture.mxf");
+        std::fs::write(&path, vec![1_u8; 150_000]).unwrap();
+        let original_time = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let first = known_fingerprint(&path).unwrap();
+        assert_eq!(first, source_fingerprint(&path).unwrap());
+        assert_eq!(known_fingerprint(&path).unwrap(), first);
+        std::fs::write(&path, vec![2_u8; 150_000]).unwrap();
+        std::fs::File::options().write(true).open(&path).unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(original_time)).unwrap();
+        assert_ne!(known_fingerprint(&path).unwrap(), first, "the memory hid a rewritten file");
+        assert_eq!(known_fingerprint(&path).unwrap(), source_fingerprint(&path).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn playback_parses_a_document_once_without_its_words_until_it_is_saved_again() {
+        let root = std::env::temp_dir().join(format!("aaf-playback-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let doc = fixture();
+        create(&root, &doc).unwrap();
+        let transcript = AafTrackTranscript { track_id: "10".into(), start_frame: 0, duration_frames: 48, engine: AafEngine::Parakeet, model_id: "test".into(),
+            status: AafTranscriptStatus::Completed, sample_rate: 16000, cues: vec![AafCue { id: "cue".into(), start_sample: 0, end_sample: 8000, text: "Hello".into(), boundary_review: false, words: None, suspect: None }],
+            timing_issues: vec![], warnings: vec![], gaps: None };
+        save_transcript(&root, &doc, transcript).unwrap();
+        let first = playback_document(&root, &doc.id).unwrap();
+        assert!(first.transcripts.is_empty(), "playback was handed the transcripts");
+        assert!(std::sync::Arc::ptr_eq(&first, &playback_document(&root, &doc.id).unwrap()), "parsed again with nothing changed");
+        let mut renamed = doc.labels.clone(); renamed[0].owner_name = "Dev".into();
+        labels(&root, &doc.id, renamed).unwrap();
+        let after = playback_document(&root, &doc.id).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&first, &after), "a saved document was not read again");
+        assert_eq!(after.labels[0].owner_name, "Dev");
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

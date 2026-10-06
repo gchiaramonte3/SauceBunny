@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { multitrackFixture, multitrackTranscript } from "../test/multitrack-fixture";
-import { clampFrame, exportMultitrack, mergeTrackTranscript, sampleFrame, sequenceDurationTimecode, sequenceEntryFrame, sequenceLabels, sequenceTimecode, transcriptRows, waveformPath } from "./multitrack";
+import { clampFrame, exportMultitrack, keepUnchanged, mergeTrackTranscript, sameTranscript, sampleFrame, sequenceDurationTimecode, sequenceEntryFrame, sequenceLabels, sequenceTimecode, transcriptRows, waveformPath } from "./multitrack";
 
 describe("multitrack sequence timing and export", () => {
   it("punches source timecode at 23.976 without adding its hour offset to TRT", () => {
@@ -71,5 +71,36 @@ describe("sequence picker labels", () => {
     expect(labels.get("b")).toBe("Group fixture · Linked BWF.aaf");
     expect(labels.get("c")).toMatch(/^Group fixture · Linked MXF\.aaf · /);
     expect(labels.get("c")).not.toBe(labels.get("d"));
+  });
+});
+
+describe("a re-read keeps what did not change", () => {
+  const page = () => ({ ...multitrackFixture(), transcripts: [multitrackTranscript("track-1"), multitrackTranscript("track-2")],
+    ownership: [{ track_id: "track-1", cue_id: "cue-1", label: "owner" as const }] });
+
+  it("keeps the page's arrays when the read found the same words, tracks and calls", () => {
+    const before = page(), next = keepUnchanged(structuredClone(before), before);
+    expect(next.transcripts).toBe(before.transcripts);
+    expect(next.ownership).toBe(before.ownership);
+    expect(next.manifest.tracks).toBe(before.manifest.tracks);
+  });
+
+  it("takes what changed and keeps the rest", () => {
+    const before = page(), saved = structuredClone(before);
+    saved.transcripts[1] = { ...saved.transcripts[1], cues: [{ ...saved.transcripts[1].cues[0], text: "Said again" }] };
+    saved.ownership = [];
+    const next = keepUnchanged(saved, before);
+    expect(next.transcripts).not.toBe(before.transcripts);
+    expect(next.transcripts[0]).toBe(before.transcripts[0]);
+    expect(next.transcripts[1].cues[0].text).toBe("Said again");
+    expect(next.ownership).toEqual([]);
+  });
+
+  it("tells one saved run from another by its cues, not by its object", () => {
+    const run = multitrackTranscript();
+    expect(sameTranscript(run, structuredClone(run))).toBe(true);
+    expect(sameTranscript(run, { ...run, cues: run.cues.map((cue) => ({ ...cue, id: `${cue.id}~2` })) })).toBe(false);
+    expect(sameTranscript(run, { ...run, cues: run.cues.map((cue) => ({ ...cue, end_sample: cue.end_sample + 1 })) })).toBe(false);
+    expect(sameTranscript(run, { ...run, model_id: "another" })).toBe(false);
   });
 });

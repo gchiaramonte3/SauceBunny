@@ -431,6 +431,37 @@ pub struct CacheStats {
     /// not regenerate), so they are reported separately and cleared only by
     /// an explicit choice.
     pub transfers: CacheCategoryStats,
+    /// AAF Audio's playback windows (`media/aaf/`, `aaf::is_playback_file`).
+    /// Its overviews and indexes beside them are not counted or cleared here:
+    /// an overview takes minutes a mic to build again on a network volume.
+    pub aaf: CacheCategoryStats,
+}
+
+/// AAF Audio's playback windows in `dir`: a flat count of `aaf::is_playback_file`.
+fn playback_category_stats(dir: &std::path::Path) -> CacheCategoryStats {
+    let mut out = CacheCategoryStats::default();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let meta = match entry.metadata() { Ok(m) => m, Err(_) => continue };
+            if meta.is_dir() || !crate::commands::aaf::is_playback_file(&entry.file_name().to_string_lossy()) { continue; }
+            out.file_count += 1;
+            out.bytes_total += meta.len();
+        }
+    }
+    out
+}
+
+/// Delete AAF Audio's playback windows in `dir`, and nothing else there.
+fn remove_playback_files(dir: &std::path::Path) -> u32 {
+    let mut removed: u32 = 0;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let meta = match entry.metadata() { Ok(m) => m, Err(_) => continue };
+            if meta.is_dir() || !crate::commands::aaf::is_playback_file(&entry.file_name().to_string_lossy()) { continue; }
+            removed += u32::from(std::fs::remove_file(entry.path()).is_ok());
+        }
+    }
+    removed
 }
 
 /// Flat (non-recursive) file count + byte total of one directory.
@@ -463,6 +494,7 @@ pub async fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppErr
     let audio = dir_category_stats(&media_cache_dir(&cache, "audio"));
     let meta_cat = dir_category_stats(&media_cache_dir(&cache, "meta"));
     let transfers = dir_category_stats(&media_cache_dir(&cache, TRANSFERS_DIRNAME));
+    let aaf = playback_category_stats(&media_cache_dir(&cache, "aaf"));
     let mut thumbnails = CacheCategoryStats::default();
     let mut scratch = CacheCategoryStats::default();
     if let Ok(entries) = std::fs::read_dir(&cache) {
@@ -480,9 +512,9 @@ pub async fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppErr
         }
     }
     let file_count = downloads.file_count + audio.file_count + meta_cat.file_count
-        + thumbnails.file_count + scratch.file_count + transfers.file_count;
+        + thumbnails.file_count + scratch.file_count + transfers.file_count + aaf.file_count;
     let bytes_total = downloads.bytes_total + audio.bytes_total + meta_cat.bytes_total
-        + thumbnails.bytes_total + scratch.bytes_total + transfers.bytes_total;
+        + thumbnails.bytes_total + scratch.bytes_total + transfers.bytes_total + aaf.bytes_total;
     Ok(CacheStats {
         file_count,
         bytes_total,
@@ -493,6 +525,7 @@ pub async fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppErr
         thumbnails,
         scratch,
         transfers,
+        aaf,
     })
 }
 
@@ -690,6 +723,7 @@ pub async fn clear_all_cache(
     for sub in ["downloads", "audio", "meta"] {
         removed += remove_files_in_dir(&media_cache_dir(&cache, sub), &active, &excluded);
     }
+    removed += remove_playback_files(&media_cache_dir(&cache, "aaf"));
     Ok(removed)
 }
 
@@ -769,6 +803,9 @@ pub async fn clear_cache_category(
         "downloads" | "audio" | "meta" | "transfers" => {
             Ok(remove_files_in_dir(&media_cache_dir(&cache, &category), &active, &excluded))
         }
+        // Playback windows only: a window being made is written elsewhere and
+        // renamed in, and one in use is already decoded in the page.
+        "aaf" => Ok(remove_playback_files(&media_cache_dir(&cache, "aaf"))),
         "thumbnails" => {
             let mut removed: u32 = 0;
             if let Ok(entries) = std::fs::read_dir(&cache) {
@@ -1600,7 +1637,7 @@ pub fn default_export_path(app: AppHandle) -> Result<String, crate::AppError> {
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-10-05-notes-quick-fixes";
+pub const BACKEND_BUILD_ID: &str = "2026-10-05-aaf-audio-prep";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {
@@ -1883,7 +1920,7 @@ mod atomic_write_tests {
 
 #[cfg(test)]
 mod cache_tests {
-    use super::{media_cache_dir, sweep_stale_files, MEDIA_CACHE_DIRNAME};
+    use super::{media_cache_dir, playback_category_stats, remove_playback_files, sweep_stale_files, MEDIA_CACHE_DIRNAME};
     use std::time::{Duration, SystemTime};
 
     /// Fresh scratch dir per test (tests run in parallel in one process, so
@@ -1933,6 +1970,23 @@ mod cache_tests {
         assert_eq!(removed, 0);
         assert!(fresh.exists());
         let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    fn aaf_playback_windows_are_counted_and_cleared_without_the_overviews_beside_them() {
+        let cache = std::env::temp_dir().join(format!("sb-aaf-cache-{}", uuid::Uuid::new_v4()));
+        let aaf = media_cache_dir(&cache, "aaf");
+        std::fs::create_dir_all(&aaf).unwrap();
+        for (name, bytes) in [("a.wav", 100), ("a.asset.json", 10), ("b.wav", 100), ("t.peaks-v1.bin", 1000), ("x.index-v2.json", 50), ("ffprobe-v1-x.json", 20)] {
+            std::fs::write(aaf.join(name), vec![0_u8; bytes]).unwrap();
+        }
+        let stats = playback_category_stats(&aaf);
+        assert_eq!((stats.file_count, stats.bytes_total), (3, 210));
+        assert_eq!(remove_playback_files(&aaf), 3);
+        assert!(!aaf.join("a.wav").exists() && !aaf.join("a.asset.json").exists() && !aaf.join("b.wav").exists());
+        // An overview takes minutes a mic to build again; Clear leaves it.
+        assert!(aaf.join("t.peaks-v1.bin").exists() && aaf.join("x.index-v2.json").exists() && aaf.join("ffprobe-v1-x.json").exists());
+        std::fs::remove_dir_all(cache).unwrap();
     }
 
     #[test]

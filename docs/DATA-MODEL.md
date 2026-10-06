@@ -132,6 +132,9 @@ app's own cache folder that prefix says nothing, so:
 ```
 app_cache_dir()/
   media/        downloads/ audio/ meta/      never swept
+    aaf/        AAF Audio's overviews and    never swept
+                indexes; its playback        past 2 GB, least recently
+                windows                      played first
   thumbnails/   poster JPEGs                 never swept
   scratch/      job temps, playback prep,    swept at 24h
                 Whisper WAVs, diarizer JSON
@@ -141,6 +144,12 @@ app_cache_dir()/
 - `media/` is **sweep-exempt**: downloaded sources and their audio, which are
   "download once, reuse forever". Bounded by a user-set cap
   (`mediaCacheCapGb`, `enforce_media_cache_cap`) and clearable from Settings.
+- `media/aaf/` holds AAF Audio's waveform overviews, PCM indexes and media
+  probe records, which are never swept (an overview takes minutes a mic to
+  build again on a network volume), and its playback windows, five seconds of
+  one mic each (`.wav`, and `.asset.json` for embedded audio). Those are swept
+  past 2 GB, least recently played first (`audio::sweep_playback`, a minute
+  apart at most), and Settings counts and clears them as AAF Audio playback.
 - `thumbnails/` is sweep-exempt too: posters are cheap to keep and expensive
   to regenerate daily. Settings' thumbnails bucket is the manual purge.
 - `scratch/` is swept at startup, on a background thread, failures non-fatal.

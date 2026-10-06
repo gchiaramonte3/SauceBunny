@@ -69,6 +69,38 @@ pub async fn until_cancelled<T>(app: &AppHandle, job: &str, work: impl std::futu
     }
 }
 
+/// Cache files being made, by path: an overview (peaks.rs), a sequence's
+/// bleed labels (ownership.rs) and a playback window (audio.rs). Whatever
+/// asks for one while another request is making it waits and reads the
+/// result, rather than reading every source again over NEXIS: AAF Audio's
+/// overview while String Outs measures the same mic, the bleed pass a run's
+/// change event and its own result both asked for, or two players asking for
+/// the same five seconds of one mic.
+static CLAIMED: Mutex<Vec<std::path::PathBuf>> = Mutex::new(Vec::new());
+
+/// This request's claim on making one cache file, released when dropped.
+pub struct Claim(std::path::PathBuf);
+impl Drop for Claim {
+    fn drop(&mut self) { if let Ok(mut held) = CLAIMED.lock() { held.retain(|path| path != &self.0); } }
+}
+
+/// Wait, cancellably, until nobody else is making this file, then claim it.
+/// Taken before a work permit, so a request waiting here holds no permit.
+pub async fn claim(app: &AppHandle, job: &str, path: &std::path::Path) -> Result<Claim, AppError> {
+    claim_until(path, || check_cancelled(app, job)).await
+}
+
+pub async fn claim_until(path: &std::path::Path, check: impl Fn() -> Result<(), AppError>) -> Result<Claim, AppError> {
+    loop {
+        check()?;
+        {
+            let mut held = CLAIMED.lock().map_err(|_| AppError::internal("Cache work is unavailable"))?;
+            if !held.iter().any(|other| other == path) { held.push(path.to_path_buf()); return Ok(Claim(path.to_path_buf())); }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 pub fn progress(app: &AppHandle, job: &str, track: Option<&str>, phase: &str, completed: i64, total: i64) {
     if app.state::<JobRegistry>().is_cancelled(job) { return; }
     let _ = app.emit("aaf-progress", AafProgress {
@@ -269,3 +301,33 @@ async fn stream_inner(app: &AppHandle, job: &str, stage: &str, name: &str, args:
 
 #[derive(serde::Deserialize)]
 struct MxfEvent { path: String, phase: String, elapsed_ms: Option<u64>, tracks: Option<usize>, error: Option<String> }
+
+#[cfg(test)]
+mod claim_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn one_request_per_cache_file_but_different_files_proceed_together() {
+        let (one, two) = (PathBuf::from("/cache/one.peaks-v2.bin"), PathBuf::from("/cache/two.peaks-v2.bin"));
+        let first = claim_until(&one, || Ok(())).await.unwrap();
+        // Another file is not held up.
+        let other = tokio::time::timeout(Duration::from_millis(50), claim_until(&two, || Ok(()))).await;
+        assert!(matches!(other, Ok(Ok(_))));
+        // The same file waits for the first request...
+        let waiting = tokio::spawn({ let one = one.clone(); async move { claim_until(&one, || Ok(())).await.is_ok() } });
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(!waiting.is_finished());
+        // ...and gets its turn once that one is done.
+        drop(first);
+        assert!(tokio::time::timeout(Duration::from_secs(2), waiting).await.is_ok_and(|done| done.is_ok_and(|claimed| claimed)));
+    }
+
+    #[tokio::test]
+    async fn a_request_waiting_its_turn_can_still_be_cancelled() {
+        let path = PathBuf::from("/cache/cancel.peaks-v2.bin");
+        let _held = claim_until(&path, || Ok(())).await.unwrap();
+        let stopped = tokio::time::timeout(Duration::from_secs(2), claim_until(&path, || Err(AppError::Cancelled))).await;
+        assert!(matches!(stopped, Ok(Err(AppError::Cancelled))));
+    }
+}

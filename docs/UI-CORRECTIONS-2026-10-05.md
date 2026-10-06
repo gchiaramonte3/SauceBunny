@@ -203,6 +203,20 @@ in flight; `reconcile` does not retry for the result it was told about;
 second caller waits for the first and reads its cache. The answer leaves out
 "unsure" words the page does not draw.
 
+**As built (F):** the page reads the document once after a run. The run's
+result is the one change a re-read may overlap without reading again (it was
+committed before the event), so `reconcile` adopts a read that already holds
+it, and a result the event's read delivered first is not merged twice. A
+re-read keeps the page's own tracks, transcripts and cue calls wherever they
+did not change (`keepUnchanged`), and the bleed pass is keyed on those two
+arrays, with one pass in flight; a label save, a shoot date or a relink
+checkpoint no longer runs it, and saving the editor's call leaves the reload
+to the document it changes. In Rust, `resolve` claims the document's cache
+file (the overview claim, by another path) before it reads the cache, reads
+the document's time before the document, and `for_page` leaves out
+non-manual unsure words from what `aaf_ownership` and `aaf_check_voices`
+send; the cache, which the assistants read, keeps them.
+
 ## 11. Models download in Settings, never on a page
 
 **Seen:** "Parakeet Ultra does not download where everything else downloads in
@@ -393,6 +407,26 @@ listener has gone (only a new document cancels); one in-flight claim per lane
 and window; the windows survive leaving the page; a disk hit checks the
 window's own clips only, from a cached fingerprint; the cache is counted,
 cleared with Clear all cache and swept oldest-first past a cap.
+
+**As built (F):** a window that has started is made to the end and kept:
+Pause, a scrub and a third window only stop waiting for it (reads still
+queued in the page are dropped, since nothing was spent on them), and only
+another document or changed media cancels. Native side, a window is claimed by
+its cache file (`process::claim`, the overview claim, moved there and now
+shared by overviews, bleed labels and windows), so a second request waits and
+reads the first one's file. Leaving the page pauses the player and keeps its
+decoded windows; changed media and another document still let them go. A
+request reads the document from a memory of it without its transcripts, kept
+while its file is unchanged (`store::playback_document`), checks only the
+media under its window (`linked::check_window_sources`), and fingerprints a
+file again only when a stat shows it touched, size, times or inode
+(`store::known_fingerprint`; the change time cannot be set by a program, so
+a same-size rewrite with its time put back is still caught). A window played
+from disk is marked used, and windows past 2 GB are swept least recently
+played first. Settings lists AAF Audio playback with its size and Clear, and
+Clear all removes the windows; overviews and indexes beside them stay. The
+cost: a scrub to a spot nothing has prepared can wait for the two windows
+already being made, at most one window's time.
 
 ## 17. Transcripts: organize AAF Audio documents like transcripts
 

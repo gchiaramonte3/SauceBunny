@@ -20,4 +20,10 @@ export type CacheStats = { file_count: number, bytes_total: number, path: string
  * not regenerate), so they are reported separately and cleared only by
  * an explicit choice.
  */
-transfers: CacheCategoryStats, };
+transfers: CacheCategoryStats, 
+/**
+ * AAF Audio's playback windows (`media/aaf/`, `aaf::is_playback_file`).
+ * Its overviews and indexes beside them are not counted or cleared here:
+ * an overview takes minutes a mic to build again on a network volume.
+ */
+aaf: CacheCategoryStats, };
