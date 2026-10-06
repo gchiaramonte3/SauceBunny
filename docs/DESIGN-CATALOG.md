@@ -44,6 +44,62 @@ code. The spec, the research behind it and what to try are in
 - **It is not a production recipe.** Its classes are `cp-te-*`, in
   `design-system/transcript-editor.css`, and are not imported by the app.
 
+### Review full screen prototype (2026-10-06)
+
+A whole-window prototype for item 18 of the October 5 corrections
+([UI-CORRECTIONS-2026-10-05.md](UI-CORRECTIONS-2026-10-05.md)): open
+`/design-system.html?prototype=review-fullscreen`, or follow the link in the
+catalog sidebar. It changes no production code; it is for the owner's pick.
+
+- **What it shows.**
+  - The picture fills the window at its own shape.
+  - One control bar sits over the bottom of the picture. The left holds a Live
+    chip, or a file's transport; the right holds the session actions. There
+    is no status prose.
+  - A thin title bar runs along the top.
+  - Both step aside after 2.5 s without the pointer. They stay up while the
+    keyboard is in them, while a menu is open, or when pinned.
+  - People use the approved 168px theater tiles, placed three ways: A down
+    the right edge, B along the bottom, C floating over the picture.
+  - "Timeline timecode unavailable" appears only when someone reaches for the
+    timeline on a live source: I, O, J, K, L, Space or an arrow.
+  - Escape stops drawing first, then leaves full screen for a sketch of the
+    windowed room, where Enter full screen returns.
+- **It holds the catalog's isolation rules.**
+  - The scenes are generated; there is no storage, invoke, media or network.
+  - It reuses the catalog's `ParticipantTile` (production markup) and
+    production's icons, `use-dismiss`, `use-menu-keys` and `lib/plural`, all
+    on the allowlist.
+- **Its rules are tested.**
+  - `review-fullscreen-model` (fit, when the controls show, timecode) has
+    unit tests.
+  - `catalog.browser.ts` has six browser checks:
+    - the fit, in every layout at two sizes
+    - the order Escape works in
+    - the bar's names, targets and auto-hide, on a fake clock
+    - the timecode notice
+    - the strip
+    - 1100×700 at 125% text, with eight people and a long name
+  - Each check was broken on purpose and failed.
+- **It is not a production recipe.** Its classes are `cp-rf-*`, in
+  `design-system/review-fullscreen.css`.
+- **To decide.** Items 2 to 4 go against what DESIGN.md says today, so each
+  needs the owner's amendment before production:
+  1. Which layout: A, B or C.
+  2. Whether full screen drops the status line and timecode window. DESIGN.md
+     ("Preview") keeps a centred `--:--:--:--` window above an NDI picture,
+     and "Timeline timecode unavailable · Playback controlled at source" on
+     the transport. The prototype shows a Live chip instead, and says the
+     timecode is unavailable only when someone tries to use it.
+  3. Whether the nav rail hides in full screen and returns on Escape. Today
+     the room keeps it in every mode ("the rail STAYS" in theater).
+  4. Whether the session bar above the picture becomes the thin title bar.
+
+  The 168px theater tile is unchanged, so the strip needs no new tile rule.
+  Production would follow the window's own full screen (`setFullscreen`, the
+  View menu), and whether Theater stays as a separate mode is part of the
+  same pick.
+
 ### Multitrack lanes (2026-09-14)
 
 The Panels family includes the real controlled `MultitrackTimeline`: four

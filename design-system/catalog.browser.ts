@@ -1187,3 +1187,124 @@ test.describe("Transcript Editor prototype", () => {
     expect(Number(await divider.getAttribute("aria-valuenow"))).toBe(before + 32);
   });
 });
+
+test.describe("Review full screen prototype", () => {
+  const open = async (page: Page, width = 1680, height = 1020) => {
+    await page.setViewportSize({ width, height });
+    await page.goto("/design-system.html?prototype=review-fullscreen");
+    await expect(page.getByTestId("review-fullscreen")).toBeVisible();
+  };
+  /** The reviewer's options, outside the design: pick one by its label. */
+  const choose = async (page: Page, label: string, checked = true) => {
+    const panel = page.getByTestId("rf-options");
+    if (!(await panel.evaluate((node) => (node as HTMLDetailsElement).open))) await panel.locator("summary").click();
+    await panel.getByLabel(label, { exact: true }).setChecked(checked);
+  };
+  const box = (locator: Locator) => locator.evaluate((node) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; });
+  const layouts = ["A · Strip on the right", "B · Strip along the bottom", "C · Floating over the picture"];
+
+  test("the picture is the page in every layout, at its own shape, with no app chrome", async ({ page }, testInfo) => {
+    for (const [width, height] of [[1680, 1020], [1100, 700]] as const) {
+      await open(page, width, height);
+      for (const layout of layouts) {
+        await choose(page, layout);
+        // The picture refits after the layout's resize lands, a frame or so later.
+        const fits = async () => {
+          const stage = await box(page.getByTestId("rf-stage")), picture = await box(page.getByTestId("rf-picture"));
+          const edge = Math.abs(picture.width - stage.width) <= 1 || Math.abs(picture.height - stage.height) <= 1;
+          return edge && picture.width <= stage.width + 1 && picture.height <= stage.height + 1 && Math.abs(picture.width / picture.height - 16 / 10) < 0.01;
+        };
+        await expect.poll(fits, { message: `${layout} at ${width}` }).toBe(true);
+        const stage = await box(page.getByTestId("rf-stage"));
+        if (layout.startsWith("C")) expect(stage.width).toBe(width);
+        await expect(page.getByRole("navigation", { name: "App" })).toHaveCount(0);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+        await page.screenshot({ path: testInfo.outputPath(`review-fullscreen-${layout[0]}-${width}.png`) });
+      }
+    }
+  });
+
+  test("Escape leaves full screen after drawing, and one button comes back", async ({ page }) => {
+    await open(page);
+    await choose(page, "Keep the controls shown");
+    const draw = page.getByRole("group", { name: "Session controls" }).getByRole("button", { name: "Draw" });
+    await draw.click();
+    await page.keyboard.press("Escape");
+    await expect(draw).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("rf-windowed")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("rf-windowed")).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "App" })).toBeVisible();
+    await page.getByRole("button", { name: "Enter full screen" }).click();
+    await expect(page.getByTestId("rf-windowed")).toHaveCount(0);
+  });
+
+  test("one control bar names every action, and steps aside until the pointer or keyboard comes back", async ({ page }) => {
+    await page.clock.install();
+    await open(page);
+    const bar = page.getByRole("group", { name: "Session controls" });
+    for (const name of ["Mute", "Turn camera off", "Share screen", "Draw", "Reactions", "Settings", "Hide people", "Exit full screen"]) {
+      await expect(bar.getByRole("button", { name, exact: true })).toBeVisible();
+    }
+    for (const button of await bar.getByRole("button").all()) expect(Math.min((await box(button)).width, (await box(button)).height)).toBeGreaterThanOrEqual(24);
+    const root = page.getByTestId("review-fullscreen");
+    await page.clock.runFor(3000);
+    await expect(root).toHaveAttribute("data-chrome", "away");
+    await expect(bar).toHaveCSS("opacity", "0");
+    await expect(page.getByTestId("rf-title")).toHaveCSS("opacity", "0");
+    await page.mouse.move(400, 300);
+    await expect(root).toHaveAttribute("data-chrome", "shown");
+    await bar.getByRole("button", { name: "Mute" }).focus();
+    await page.clock.runFor(6000);
+    await expect(root).toHaveAttribute("data-chrome", "shown");
+  });
+
+  test("timecode is said to be unavailable only when someone reaches for it", async ({ page }) => {
+    await open(page);
+    await expect(page.getByText(/timecode/i)).toHaveCount(0);
+    await page.mouse.move(400, 300);
+    await page.keyboard.press("i");
+    await expect(page.getByRole("status").filter({ hasText: "Timeline timecode isn't available here" })).toBeVisible();
+    // A file the room plays brings its own transport instead.
+    await choose(page, "A file the room plays");
+    await choose(page, "Keep the controls shown");
+    const bar = page.getByRole("group", { name: "Session controls" });
+    await expect(bar.getByRole("button", { name: "Play" })).toBeVisible();
+    await expect(bar.getByLabel("Playhead")).toBeVisible();
+    await expect(bar.locator(".cp-rf-live")).toHaveCount(0);
+  });
+
+  test("people sit in a film strip of theater tiles, badges on the tiles, and fold away", async ({ page }) => {
+    await open(page);
+    await choose(page, "Keep the controls shown");
+    const people = page.getByRole("region", { name: "People" });
+    await expect(people.locator(".cp-person")).toHaveCount(4);
+    await expect(people.getByText("Presenting")).toBeVisible();
+    await expect(people.locator(".cp-person-hand")).toHaveCount(1);
+    expect((await box(people.locator(".cp-person").first())).width).toBe(168);
+    await page.getByRole("button", { name: "Hide people" }).click();
+    await expect(people).toHaveCount(0);
+    await page.getByRole("button", { name: "Show people" }).click();
+    await expect(page.getByRole("region", { name: "People" })).toBeVisible();
+  });
+
+  test("every layout fits 1100×700 at 125% text, with a long name and eight people", async ({ page }, testInfo) => {
+    await open(page, 1100, 700);
+    await page.evaluate(() => {
+      for (const name of ["--text-xs", "--text-sm", "--text-base", "--text-md", "--text-lg", "--text-xl", "--text-2xl"]) {
+        const size = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+        document.documentElement.style.setProperty(name, `${size * 1.25}px`);
+      }
+    });
+    await choose(page, "8"); await choose(page, "A long name"); await choose(page, "Keep the controls shown");
+    for (const layout of layouts) {
+      await choose(page, layout);
+      const bar = await box(page.getByRole("group", { name: "Session controls" }));
+      expect(bar.x).toBeGreaterThanOrEqual(0);
+      expect(bar.x + bar.width).toBeLessThanOrEqual(1100);
+      expect(bar.y + bar.height).toBeLessThanOrEqual(700);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1100);
+      await page.screenshot({ path: testInfo.outputPath(`review-fullscreen-125-${layout[0]}.png`) });
+    }
+  });
+});

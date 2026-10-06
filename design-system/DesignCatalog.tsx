@@ -36,6 +36,7 @@ export function DesignCatalog() {
       </nav>
       <p className="cp-ds-sidebar-note">Local fixtures only.<br />No sessions, devices, or saved reviews.</p>
       <a className="cp-ds-doc-link" href="/design-system.html?prototype=transcript-editor" target="_blank" rel="noreferrer">Transcript Editor prototype ↗</a>
+      <a className="cp-ds-doc-link" href="/design-system.html?prototype=review-fullscreen" target="_blank" rel="noreferrer">Review full screen prototype ↗</a>
       <a className="cp-ds-doc-link" href="/docs/DESIGN-CATALOG.md" target="_blank" rel="noreferrer">Rules & migration checklist ↗</a>
       <a className="cp-ds-doc-link" href="/docs/DESIGN-SYSTEM-AUDIT.md" target="_blank" rel="noreferrer">Application coverage audit ↗</a>
     </aside>

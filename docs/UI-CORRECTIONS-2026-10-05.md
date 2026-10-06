@@ -506,6 +506,15 @@ bottom-left corner; and the sidebar and top bar stay.
 
 Needs a clickable prototype in the design catalog first, then the owner's pick.
 
+**Prototype (H):** built in the design catalog,
+`/design-system.html?prototype=review-fullscreen`. Three people layouts (A
+strip on the right, B along the bottom, C floating) around a picture that
+fills the window, with one auto-hiding bar and a thin title, and Escape back to
+the windowed room. Waiting on the pick, and on three amendments to DESIGN.md:
+the full-screen status line and timecode window, the rail hiding, and the
+session bar becoming the title (see DESIGN-CATALOG.md, "Review full screen
+prototype").
+
 ## 19. String Outs: playing does not redraw the whole editor
 
 **Found:** playback publishes a new state object every animation frame
