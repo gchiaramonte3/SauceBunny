@@ -157,6 +157,25 @@ All notable changes to Sauce Bunny. Format loosely follows
   starts with its track.
 
 ### Added
+- **Screen, Window and Region capture in Preview ▸ Source work in every
+  build.** They used to need an embedded copy of OBS that ordinary builds
+  never included ("The embedded OBS capture runtime is missing"). All three
+  now use macOS's own sharing picker: no Screen Recording permission, no
+  monthly "bypass the private window picker" alert, and a small helper
+  instead of an OBS engine. A window can be picked on its own or as a whole
+  app (for a remote-desktop viewer filling another display); a region is
+  drawn on a still of the chosen screen.
+- **Choose whose sound goes out.** Audio from: every app but Sauce Bunny, the
+  window's own app, or only the apps you tick, so nobody in a session hears
+  themselves back. Through a Core Audio tap (macOS 14.2+; a window's own app
+  needs 15.2).
+
+### Fixed
+- **Choosing a screen in the picker no longer ends in "The screen capture
+  helper stopped".** The app refused the helper's answer to a pick.
+- **The Source and Share your screen dialogs are no longer ultra-wide.** They
+  are sized to what they hold (640 and 720 points), and one screen stays one
+  tile wide instead of stretching across the dialog.
 - **The Pipeline on String Outs**, the same log AAF Audio has, at the foot of
   the page; ⌘\ opens and closes it on every page. Every call String Outs
   makes is timed: one still running says so at 2, 10, 30 and 60 seconds,

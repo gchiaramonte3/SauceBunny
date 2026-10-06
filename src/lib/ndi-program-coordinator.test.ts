@@ -3,6 +3,7 @@ import type { NdiRoomState } from "../bindings/NdiRoomState";
 import type { NdiStarted } from "../bindings/NdiStarted";
 import type { NdiStatusResult } from "../bindings/NdiStatusResult";
 import type { ObsSelection } from "../bindings/ObsSelection";
+import type { ObsWindowSelection } from "../bindings/ObsWindowSelection";
 import type { ObsStarted } from "../bindings/ObsStarted";
 import { canPublishNdi, emptyNdiTelemetry, NdiProgramCoordinator, type NdiProgramPorts } from "./ndi-program-coordinator";
 import { captureSourceIdentity, copyCaptureSelection } from "./ndi-program-source";
@@ -21,7 +22,7 @@ const ready = (p: NdiStarted, roomGeneration: number | null = 1): NdiStatusResul
   telemetry: { ...emptyNdiTelemetry(), sourceId: p.id, phase: "live", connectionCount: 1,
     receivedFrames: 30, inputWidth: 1920, inputHeight: 1080, outputFps: 30 },
 });
-const selection = (): Exclude<ObsSelection, { kind: "display" }> => ({ application: "com.apple.FinalCut", process: 240, window: 91,
+const selection = (): ObsWindowSelection => ({ application: "com.apple.FinalCut", process: 240, window: 91,
   crop: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 } });
 function harness(inRoom = true) {
   let next = 0, revision = 10;

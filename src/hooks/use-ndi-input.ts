@@ -51,7 +51,10 @@ const noRemote = (): RemoteProgram => ({ program: null, source: null, ready: fal
 export function useNdiInput() {
   const [controller] = useState(() => new NdiProgramCoordinator({
     start: name => invoke<NdiStarted>("ndi_start", { name }),
-    startCapture: selection => invoke<ObsStarted>("obs_start", { selection }),
+    // A pick from macOS's sharing picker starts on its own helper (docs/PROGRAM-CAPTURE.md).
+    startCapture: selection => "choice" in selection
+      ? invoke<ObsStarted>("program_capture_start", { selection })
+      : invoke<ObsStarted>("obs_start", { selection }),
     status: id => invoke<NdiStatusResult>("ndi_status", { id }),
     stop: id => invoke("ndi_stop", { id }),
     publish: (source, room) => invoke<number>("ndi_publish", { id: source.id, reviewKey: source.reviewKey,

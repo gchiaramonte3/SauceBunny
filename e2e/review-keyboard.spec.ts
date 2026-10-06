@@ -20,23 +20,14 @@ async function boot(page: Page, withSource = true) {
     fixture.__keyboardWrites = [];
     const original = fixture.__TAURI_INTERNALS__.invoke;
     fixture.__TAURI_INTERNALS__.invoke = (command, args) => {
-      if (["obs_start", "obs_broadcast_start", "ndi_start", "ndi_publish", "session_create", "session_start", "session_join"].includes(command)) {
+      if (["obs_start", "program_capture_start", "obs_broadcast_start", "ndi_start", "ndi_publish", "session_create", "session_start", "session_join"].includes(command)) {
         fixture.__keyboardWrites.push(command);
         return Promise.reject(new Error("Keyboard fixture never captures, publishes, or joins"));
       }
       if (command === "ndi_discover") return Promise.resolve({ bridgeCompiled: true, runtime: "ready", runtimeVersion: "Keyboard fixture", sources: [], error: null });
-      if (command === "obs_preflight") return Promise.resolve({ available: true, error: null });
-      if (command === "obs_applications") return Promise.resolve([
-        { app: "test.keyboard.alpha", pid: 101, name: "Generated Alpha" },
-        { app: "test.keyboard.beta", pid: 202, name: "Generated Beta" },
-      ]);
-      if (command === "obs_windows") return Promise.resolve([]);
-      if (command === "obs_displays") return Promise.resolve([]);
-      if (command === "obs_all_windows") return Promise.resolve([
-        { app: "test.keyboard.alpha", applicationName: "Generated Alpha", pid: 101, id: 501, title: "Alpha timeline", width: 640, height: 360 },
-        { app: "test.keyboard.beta", applicationName: "Generated Beta", pid: 202, id: 601, title: "Beta timeline", width: 640, height: 360 },
-      ]);
-      if (command === "capture_window_thumbnail") return Promise.reject(new Error("Keyboard fixture has no image"));
+      if (command === "program_capture_preflight") return Promise.resolve({ available: true, error: null, kinds: ["screen", "window", "region"], systemAudio: true, applicationAudio: true });
+      // macOS's picker is native; here the person closes it without choosing.
+      if (command === "program_capture_choose") { fixture.__keyboardWrites.push(command); return Promise.resolve({ outcome: "cancelled" }); }
       return original(command, args);
     };
   });
@@ -106,10 +97,12 @@ test("Space and Enter activate source settings while native select type-ahead st
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("tab", { name: "Window", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(dialog.getByRole("button", { name: "Preview source", exact: true })).toBeDisabled();
-  const window = dialog.getByRole("button", { name: /Beta timeline .* Window 601$/ });
-  await window.focus(); await window.press("Space");
-  await expect(window).toHaveAttribute("aria-pressed", "true");
-  await expect(dialog.getByRole("button", { name: "Preview source", exact: true })).toBeEnabled();
+  const choose = dialog.getByRole("button", { name: "Choose window…", exact: true });
+  await choose.focus(); await choose.press("Space");
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __keyboardWrites: string[] }).__keyboardWrites)).toEqual(["program_capture_choose"]);
+  await expect(choose).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Preview source", exact: true })).toBeDisabled();
+  await page.evaluate(() => { (window as unknown as { __keyboardWrites: string[] }).__keyboardWrites = []; });
   await expect(page.locator(".cp-timeline-hint")).toContainText("No marks set");
   await page.keyboard.press("Escape"); await expect(gear).toBeFocused();
   // Outside the modal's own event boundary, O used to be claimed by global

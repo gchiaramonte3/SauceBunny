@@ -32,6 +32,8 @@ fn start_message(selection: &ObsSelection, slot: usize, generation: u64) -> serd
             if value.audio { message["audioPolicy"] = serde_json::json!(1); }
             message
         },
+        // obs_start refuses a pick before it can reach this service.
+        ObsSelection::Picked(_) => serde_json::json!({"op":"stop","slot":slot,"generation":generation}),
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -218,7 +220,7 @@ impl Active {
             if result.is_err() { self.fail("Application capture returned invalid or oversized media"); }
         } else {
             #[derive(Default, Deserialize)] #[serde(rename_all="lowercase")]
-            enum Action { #[default] None, Edit, Stop }
+            enum Action { #[default] None, Stop }
             #[derive(Deserialize)] #[serde(deny_unknown_fields)]
             struct Status { width:u32, height:u32, frames:u64, error:String, #[serde(default)] action:Action }
             let Ok(status) = serde_json::from_slice::<Status>(record.payload) else {
@@ -229,7 +231,6 @@ impl Active {
                     self.request.program.capture_stopped();
                     return false;
                 }
-                Action::Edit => self.request.program.request_capture_edit(),
                 Action::None => {},
             }
             if !status.error.is_empty() {

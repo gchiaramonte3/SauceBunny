@@ -1,6 +1,8 @@
 //! Embedded OBS application capture. No OBS UI installation, external program
 //! search path, desktop fallback, or implicit room/NDI broadcast.
 mod framing;
+mod picked;
+pub use picked::*;
 #[cfg(test)]
 mod worker;
 mod service;
@@ -27,7 +29,7 @@ use tauri::AppHandle;
 use crate::AppError;
 use super::ndi;
 
-#[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct ObsCrop { pub x: f64, pub y: f64, pub width: f64, pub height: f64 }
 impl ObsCrop {
@@ -42,15 +44,6 @@ impl ObsCrop {
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct ObsWindow {
     pub id: u32, pub pid: i32, pub app: String, pub title: String, pub width: u32, pub height: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../src/bindings/")]
-pub struct ObsWindowChoice {
-    #[serde(flatten)]
-    pub window: ObsWindow,
-    #[serde(rename = "applicationName")]
-    pub application_name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, ts_rs::TS)]
@@ -120,21 +113,12 @@ pub(super) fn valid_display_uuid(value: &str) -> bool {
 #[derive(Clone, Debug, Deserialize, Serialize, ts_rs::TS)]
 #[serde(untagged)]
 #[ts(export, export_to = "../../src/bindings/")]
-pub enum ObsSelection { Window(ObsWindowSelection), Display(ObsDisplaySelection) }
+pub enum ObsSelection { Window(ObsWindowSelection), Display(ObsDisplaySelection), Picked(ProgramCaptureSelection) }
 impl ObsSelection {
     fn valid(&self) -> bool {
-        match self { Self::Window(value) => value.valid(), Self::Display(value) => value.valid() }
+        match self { Self::Window(value) => value.valid(), Self::Display(value) => value.valid(), Self::Picked(value) => value.valid() }
     }
 }
-#[derive(Clone, Serialize, ts_rs::TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/bindings/")]
-pub struct ObsEditSource { pub source_id: String }
-
-#[derive(Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../src/bindings/")]
-pub struct ObsPreflight { pub available: bool, pub error: Option<String> }
-
 #[derive(Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct ObsStarted { pub program: ndi::NdiStarted, pub selection: ObsSelection }
@@ -174,32 +158,16 @@ fn command(root: &Path, executable: &str) -> Command {
 }
 
 #[tauri::command]
-pub fn obs_preflight() -> ObsPreflight {
-    match runtime() { Ok(_) => ObsPreflight { available:true, error:None },
-        Err(error) => ObsPreflight { available:false, error:Some(error.to_string()) } }
-}
-
-#[tauri::command]
 pub async fn obs_applications() -> Result<Vec<ObsApplication>, AppError> { discovery::applications(&runtime()?).await }
 
 #[tauri::command]
 pub async fn obs_windows(application: String) -> Result<Vec<ObsWindow>, AppError> { discovery::windows(&runtime()?, &application).await }
 
 #[tauri::command]
-pub async fn obs_all_windows() -> Result<Vec<ObsWindowChoice>, AppError> {
-    let before = service::helper_process();
-    let mut windows = discovery::all_windows(&runtime()?, std::process::id()).await?;
-    let after = service::helper_process();
-    windows.retain(|choice| ![before, after].into_iter().flatten().any(|pid|pid == choice.window.pid as u32));
-    Ok(windows)
-}
-
-#[tauri::command]
-pub async fn obs_displays() -> Result<Vec<ObsDisplayChoice>, AppError> { discovery::displays(&runtime()?).await }
-
-#[tauri::command]
 pub async fn obs_start(app: AppHandle, selection: ObsSelection) -> Result<ObsStarted, AppError> {
     if !selection.valid() { return Err(AppError::invalid("Select an exact screen or visible window and a valid crop.")); }
+    // A pick from macOS's picker is started by program_capture_start, on its own helper.
+    if matches!(selection, ObsSelection::Picked(_)) { return Err(AppError::invalid("Start a chosen screen with program_capture_start")); }
     let generation = ndi::producer_generation()?;
     let root = runtime()?;
     let name = match &selection {
@@ -212,6 +180,7 @@ pub async fn obs_start(app: AppHandle, selection: ObsSelection) -> Result<ObsSta
                 .ok_or_else(||AppError::invalid("The selected application window is no longer visible"))?;
             if chosen.title.is_empty() { chosen.app.clone() } else { chosen.title.clone() }
         }
+        ObsSelection::Picked(_) => return Err(AppError::invalid("Start a chosen screen with program_capture_start")),
         ObsSelection::Display(target) => {
             discovery::displays(&root).await?.into_iter()
                 .find(|d|d.display_uuid == target.display_uuid && d.display_id == target.display_id && d.geometry == target.geometry)
@@ -235,7 +204,10 @@ pub fn obs_broadcast_start(id: String, attempt: u64) -> Result<ObsBroadcastStatu
 #[tauri::command]
 pub fn obs_broadcast_stop(id: String, attempt: u64) -> Result<ObsBroadcastStatus, AppError> { renderer::stop(&id, attempt) }
 
-pub(super) async fn wait_stopped(id: &str) -> Result<(), AppError> { service::wait_stopped(id).await }
+pub(super) async fn wait_stopped(id: &str) -> Result<(), AppError> {
+    service::wait_stopped(id).await?;
+    picked::wait_stopped(id).await
+}
 
 /// Native output seam, not a renderer command or a network broadcast. The
 /// caller owns the feed/cancellation handle and must drain EOF before claiming

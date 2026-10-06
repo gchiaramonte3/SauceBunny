@@ -4,7 +4,7 @@ use std::{collections::HashMap, path::Path, process::Stdio, time::Duration};
 use serde::{de::DeserializeOwned, Deserialize};
 use tokio::io::AsyncReadExt;
 use crate::AppError;
-use super::{command, valid_application, valid_display_uuid, ObsApplication, ObsWindow, ObsWindowChoice, ObsDisplayChoice};
+use super::{command, valid_application, valid_display_uuid, ObsApplication, ObsWindow, ObsDisplayChoice};
 
 const MAX_BYTES: u64 = 64 * 1024;
 const MAX_ENTRIES: usize = 1024;
@@ -101,35 +101,6 @@ pub(super) async fn windows(root: &Path, application: &str) -> Result<Vec<ObsWin
         if let Some(previous) = identities.insert(window.id, window.clone()) {
             if previous != window { return Err(AppError::invalid("Conflicting application window identities")); }
         } else { windows.push(window); }
-    }
-    Ok(windows)
-}
-
-/// One metadata-only OS snapshot. Application names label the cards, but only
-/// the exact bundle/PID/window tuple can become a capture selection.
-pub(super) async fn all_windows(root: &Path, own_process: u32) -> Result<Vec<ObsWindowChoice>, AppError> {
-    #[derive(Deserialize)] struct Windows { windows: Vec<ObsWindowChoice> }
-    let response: Windows = query(root, "--all-windows", "Application window").await?;
-    if response.windows.len() > MAX_ENTRIES { return Err(AppError::invalid("Application window list exceeded its safety limit")); }
-    let mut identities = HashMap::new();
-    let mut applications = HashMap::new();
-    let mut windows = Vec::new();
-    for choice in response.windows {
-        let window = &choice.window;
-        if !valid_application(&window.app) || window.pid <= 0 || window.id == 0 ||
-            !(2..=16384).contains(&window.width) || !(2..=16384).contains(&window.height) ||
-            window.title.len() > 4096 || window.title.contains('\0') || choice.application_name.is_empty() ||
-            choice.application_name.len() > 4096 || choice.application_name.contains('\0') {
-            return Err(AppError::invalid("Invalid application window list"));
-        }
-        if let Some(previous) = applications.insert(window.pid, (window.app.clone(), choice.application_name.clone())) {
-            if previous != (window.app.clone(), choice.application_name.clone()) {
-                return Err(AppError::invalid("Conflicting application identities"));
-            }
-        }
-        if let Some(previous) = identities.insert(window.id, choice.clone()) {
-            if previous != choice { return Err(AppError::invalid("Conflicting application window identities")); }
-        } else if window.pid as u32 != own_process { windows.push(choice); }
     }
     Ok(windows)
 }

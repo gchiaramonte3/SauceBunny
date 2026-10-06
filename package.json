@@ -19,6 +19,7 @@
     "build:diarizer": "bash scripts/build-diarizer.sh",
     "build:diarizer:universal": "bash scripts/build-diarizer.sh --universal",
     "build:dictate": "bash scripts/build-dictate.sh",
+    "build:program-capture": "bash scripts/build-program-capture.sh",
     "build:capture": "bash scripts/build-capture.sh",
     "build:aaf": "bash scripts/build-aaf.sh",
     "build:video": "bash scripts/build-video.sh",

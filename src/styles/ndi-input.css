@@ -29,14 +29,26 @@
 }
 .cp-ndi-input-header h2 { margin: 0; font-size: var(--text-xl); font-weight: var(--weight-bold); }
 .cp-ndi-input-header > button { margin-left: auto; }
-.cp-modal.cp-ndi-input-capture { width: min(960px, calc(100vw - var(--s-8))); }
+/* Sized to what a capture tab holds (a choose button, then a still to draw a
+   region on), not to the screen: at 960px an ultrawide display showed a row of
+   empty space. A region's still is 240px tall at most, so 640px fits it. */
+.cp-modal.cp-ndi-input-capture { width: min(640px, calc(100vw - var(--s-8))); }
 .cp-ndi-input-tabs { flex: none; padding: var(--s-2) var(--s-4) 0; }
-.cp-capture-pagination,
 .cp-capture-snapshot-note { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); margin-top: var(--s-2); }
 .cp-capture-snapshot-note { flex-wrap: wrap; color: var(--fg-3); font-size: var(--text-base); }
 .cp-capture-preview-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-3); margin-top: var(--s-4); }
 .cp-capture-preview-foot .cp-ndi-input-preview { margin-top: 0; flex: none; }
 .cp-ndi-input .cp-capture-selected { color: var(--fg-1); }
+.cp-capture-audio-source { display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-4); }
+.cp-capture-audio-source > label { color: var(--fg-1); font-weight: var(--weight-bold); }
+.cp-capture-audio-apps {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--s-1) var(--s-3);
+  max-height: 180px; overflow: auto; margin: 0; padding: var(--s-2) var(--s-3); border: 1px solid var(--line-1); border-radius: var(--r-md);
+}
+.cp-capture-audio-apps legend { padding: 0 var(--s-1); color: var(--fg-3); }
+.cp-capture-audio-apps > label { display: flex; align-items: center; gap: var(--s-2); min-height: 26px; color: var(--fg-1); overflow-wrap: anywhere; }
+.cp-capture-audio-apps > p, .cp-capture-audio-apps > button { grid-column: 1 / -1; }
+.cp-capture-audio-apps > button { justify-self: start; }
 .cp-premiere-beta {
   display: inline-block;
   flex: none;
@@ -75,8 +87,6 @@
 }
 .cp-ndi-input-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s-2); margin: var(--s-3) 0 var(--s-4); }
 .cp-ndi-input-settings { white-space: normal; max-width: 100%; }
-.cp-obs-crop { margin-top: var(--s-3); }
-.cp-obs-crop summary { cursor: pointer; min-height: 26px; display: list-item; }
 .cp-obs-broadcast { margin-top: var(--s-4); }
 .cp-obs-broadcast > button { margin-top: var(--s-2); }
 .cp-ndi-sender-setup { margin-bottom: var(--s-3); }

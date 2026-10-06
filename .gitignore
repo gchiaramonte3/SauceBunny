@@ -23,6 +23,8 @@ swift-sidecar/.swiftpm
 # refresh added another version to history). Fetched/built locally via
 # `npm run setup` (see scripts/setup.sh); CI stubs them for cargo check.
 src-tauri/binaries/*
+# The Preview capture helper app, built by scripts/build-program-capture.sh
+src-tauri/helpers/
 !src-tauri/binaries/.gitkeep
 src-tauri/video-runtime/saucebunny-video/
 src-tauri/audio-runtime/saucebunny-audio-analysis

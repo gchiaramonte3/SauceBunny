@@ -259,13 +259,33 @@ for key in CFBundleIdentifier CFBundleShortVersionString LSMinimumSystemVersion 
   if [ -n "${v}" ]; then pass "Info.plist ${key} = ${v}"; else fail "Info.plist missing ${key}"; fi
 done
 # TCC prompts show these strings; a missing one means the OS denies silently.
-for key in NSCameraUsageDescription NSMicrophoneUsageDescription NSLocalNetworkUsageDescription; do
+for key in NSCameraUsageDescription NSMicrophoneUsageDescription NSLocalNetworkUsageDescription NSAudioCaptureUsageDescription; do
   if [ -n "$(plist_get "${key}")" ]; then pass "Info.plist ${key} present"; else fail "Info.plist missing ${key} — the OS will deny access with no prompt"; fi
 done
 if [ "$(plist_get 'NSBonjourServices:0')" = "_ndi._tcp" ]; then
   pass "Info.plist declares NDI Bonjour discovery"
 else
   fail "Info.plist NSBonjourServices does not declare _ndi._tcp — packaged discovery can be denied"
+fi
+
+# The Preview source helper (macOS sharing picker), a nested app Tauri copies
+# and never signs (docs/PROGRAM-CAPTURE.md). Without it Screen says the helper
+# is missing, which is the OBS-era failure this replaced.
+CAPTURE_APP="$APP/Contents/Helpers/Sauce Bunny Capture.app"
+if [ "$ALLOW_STUBS" -eq 1 ]; then
+  warn "Preview capture helper check skipped for stub-sidecar CI build"
+elif [ ! -x "$CAPTURE_APP/Contents/MacOS/saucebunny-program-capture" ]; then
+  fail "Preview capture helper missing: $CAPTURE_APP (run scripts/build-program-capture.sh before bundling)"
+else
+  CAPTURE_SIGNATURE="$(codesign -dv "$CAPTURE_APP" 2>&1 || true)"
+  case "$CAPTURE_SIGNATURE" in
+    *"Identifier=com.saucebunny.desktop.capture"*) pass "Preview capture helper bundled and signed" ;;
+    *) fail "Preview capture helper is not signed as com.saucebunny.desktop.capture" ;;
+  esac
+  case "$CAPTURE_SIGNATURE" in
+    *"runtime"*) pass "Preview capture helper has the hardened runtime" ;;
+    *) fail "Preview capture helper lacks the hardened runtime (notarization will reject it)" ;;
+  esac
 fi
 
 # ── 8. Signature ────────────────────────────────────────────────────

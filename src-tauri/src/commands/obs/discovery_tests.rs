@@ -78,58 +78,6 @@ fn window_list(values: Vec<Value>) -> Value {
         "visibleWindowCount":5,"matchingWindowCount":2,"matchingApplicationCount":2,
         "diagnosticBundle":"com.example.editor","diagnosticWindowCount":2})
 }
-fn choice(id: u32, pid: i32, app: &str, name: &str) -> Value {
-    let mut value = window(id, pid);
-    value["app"] = json!(app); value["applicationName"] = json!(name); value
-}
-
-#[tokio::test]
-async fn all_windows_is_one_explicit_query_with_exact_cross_application_choices_and_self_exclusion() {
-    let _isolation = isolate().await;
-    let first = choice(1,10,"com.example.alpha","Editor");
-    let second = choice(2,20,"com.example.beta","Editor");
-    let own = choice(3,30,"com.saucebunny.test","Sauce Bunny");
-    let probe = Probe::json(window_list(vec![first.clone(),second,first,own]),0);
-    probe.script("[ \"$#\" = 1 ] && [ \"$1\" = --all-windows ] || exit 9\nexec /bin/cat \"$0.response\"\n");
-    let result = all_windows(&probe.root,30).await.unwrap();
-    assert_eq!(result.len(),2);
-    assert_eq!((result[0].window.id,result[0].window.pid,result[1].window.id,result[1].window.pid),(1,10,2,20));
-    assert_eq!(result[0].application_name,result[1].application_name);
-    assert_ne!(result[0].window.app,result[1].window.app);
-    let wire = serde_json::to_value(&result[0]).unwrap();
-    assert_eq!(wire["applicationName"],"Editor"); assert_eq!(wire["id"],1);
-    assert!(wire.get("window").is_none());
-}
-
-#[tokio::test]
-async fn all_windows_rejects_invalid_fields_conflicts_and_untrusted_capture_claims() {
-    let _isolation = isolate().await;
-    for (field,value) in [("app",json!("--all")),("pid",json!(0)),("id",json!(0)),
-        ("width",json!(1)),("height",json!(16385)),("title",json!("Secret\0")),
-        ("applicationName",json!("")),("applicationName",json!("Editor\0")),("applicationName",json!("é".repeat(2049)))] {
-        let mut invalid = choice(1,10,"com.example.alpha","Editor"); invalid[field] = value;
-        let probe = Probe::json(window_list(vec![invalid]),0);
-        assert!(all_windows(&probe.root,30).await.unwrap_err().to_string().contains("Invalid application window list"),"{field}");
-    }
-    for second in [choice(1,20,"com.example.beta","Other"), choice(2,10,"com.example.beta","Other"),
-        choice(2,10,"com.example.alpha","Changed name")] {
-        let probe = Probe::json(window_list(vec![choice(1,10,"com.example.alpha","Editor"),second]),0);
-        assert!(all_windows(&probe.root,30).await.unwrap_err().to_string().contains("Conflicting"));
-    }
-    let mut response = window_list(vec![]); response["capturedUserContent"] = json!(true);
-    assert!(all_windows(&Probe::json(response,0).root,30).await.is_err());
-    assert!(all_windows(&Probe::json(window_list(vec![]),7).root,30).await.is_err());
-    assert!(all_windows(&Probe::json(window_list(vec![]),0).root,30).await.unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn all_windows_limits_apply_before_duplicate_collapse_and_do_not_return_a_partial_list() {
-    let _isolation = isolate().await;
-    let values = vec![choice(1,10,"a.b","A");MAX_ENTRIES+1];
-    assert!(all_windows(&Probe::json(window_list(values),0).root,30).await.unwrap_err().to_string().contains("safety limit"));
-    let mut response = window_list(vec![]); response["error"] = json!("window_list_too_large");
-    assert!(all_windows(&Probe::json(response,4).root,30).await.unwrap_err().to_string().contains("safety limit"));
-}
 
 #[tokio::test]
 async fn applications_preserve_process_identity_and_only_return_local_app_metadata() {
@@ -322,14 +270,14 @@ async fn discovery_admission_never_spawns_a_third_helper_and_releases_after_canc
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }).await.expect("both admitted fixture helpers should start");
-    let third = Probe::json(window_list(vec![]),0);
+    let third = Probe::json(apps(vec![]),0);
     third.script("printf '%s' \"$$\" > \"$0.pid\"\nexec /bin/cat \"$0.response\"\n");
     let start = tokio::time::Instant::now();
-    assert!(all_windows(&third.root,30).await.unwrap_err().to_string().contains("discovery is busy"));
+    assert!(applications(&third.root).await.unwrap_err().to_string().contains("discovery is busy"));
     assert!(start.elapsed() < Duration::from_secs(2));
     assert!(!third.binary.with_extension("pid").exists(),"overload must not spawn another helper");
     first_query.abort(); assert!(first_query.await.unwrap_err().is_cancelled());
-    assert!(all_windows(&third.root,30).await.unwrap().is_empty(),"cancel releases one slot");
+    assert!(applications(&third.root).await.unwrap().is_empty(),"cancel releases one slot");
     assert_eq!(DISCOVERY_SLOTS.available_permits(),1);
     let failed = Probe::json(apps(vec![]),7);
     assert!(applications(&failed.root).await.is_err());
