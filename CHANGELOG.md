@@ -24,6 +24,10 @@ All notable changes to Sauce Bunny. Format loosely follows
   Remove one (× or Delete) or Clear list: that hides it from Add sequence and
   Start from and deletes nothing, and a hidden sequence comes back by itself
   when it is saved again in AAF Audio.
+- **Models download in Settings.** Settings ▸ Transcription lists Parakeet
+  Ultra beside TDT v3, each with Download, Cancel and Delete. AAF Audio no
+  longer downloads anything: it says which model is missing, with Download
+  in Settings…, and notices when Settings installs it.
 - **String Outs' dividers move.** Drag the lines beside Ask, between the source
   and the record, and above the timeline, or use the arrow keys; double-click
   or Home resets, and the sizes are kept. The record pane keeps its room at

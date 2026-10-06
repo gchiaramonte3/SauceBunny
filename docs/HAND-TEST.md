@@ -1150,6 +1150,22 @@ the acceptance test for whenever the verdict UI gets built.
    Home and a double-click reset it. Relaunch: the sizes are kept. Narrow the
    window to its minimum: the record pane keeps its room, the source gives way.
 
+### October 5: models download in Settings (item 11)
+
+1. Settings ▸ Transcription ▸ Parakeet lists Parakeet Ultra (Recommended) and
+   Parakeet TDT 0.6B v3, each with its size. Download Ultra: the row shows a
+   bar and Cancel; Cancel stops it with no error, and Download starts again.
+   Let it finish: Installed. Delete asks once ("Delete ≈0.6 GB?") before it
+   deletes.
+2. With Ultra deleted, open AAF Audio and choose Parakeet ▸ Parakeet Ultra:
+   the model menu says "(not downloaded)", one line under the controls says
+   "Parakeet Ultra is not downloaded." with Download in Settings…, and there
+   is no download button on the page. Download in Settings… opens Settings on
+   Transcription. Install Ultra there and close Settings: the line is gone
+   without relaunching.
+3. A track's Regenerate… with a missing model says the same, and its Download
+   in Settings… closes the dialog and opens Settings.
+
 ### The Pipeline on String Outs (what to send when it hangs)
 
 1. In String Outs, press ⌘\: the Pipeline opens at the foot of the page with

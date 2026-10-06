@@ -12,6 +12,12 @@ export const PARAKEET_MODELS = [
 
 export type ParakeetModelId = (typeof PARAKEET_MODELS)[number]["id"];
 
+/** Settings emits this after installing or deleting a model, so AAF Audio sees it without a relaunch. */
+export const PARAKEET_MODELS_CHANGED = "panel:parakeet-models-changed";
+
+/** A model's name for copy ("Parakeet Ultra is not downloaded."). */
+export const parakeetName = (id: ParakeetModelId) => PARAKEET_MODELS.find((model) => model.id === id)?.name ?? "Parakeet";
+
 export const isParakeetModel = (id: string | undefined): id is ParakeetModelId => PARAKEET_MODELS.some((model) => model.id === id);
 
 /** The best installed model, or Ultra (to download) when none is. */

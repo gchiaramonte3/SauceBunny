@@ -12,6 +12,7 @@ import { loadJson, saveJson } from "../lib/storage";
 import { DEVICE_CHOICE_KEY } from "../lib/media-devices";
 import { AvSettingsPane } from "./AvSettingsPane";
 import { ModelDownloadProgress } from "./ModelDownloadProgress";
+import { ParakeetModelRows } from "./ParakeetModelRows";
 import { ColorSwatches } from "./ColorSwatches";
 import { KeybindingEditor } from "./KeybindingEditor";
 import { loadKeybindings, KEYBINDINGS_STORAGE_KEY, type KeybindingOverrides } from "../lib/keybindings";
@@ -507,72 +508,6 @@ export function SettingsModal(props: Props) {
   // Transcription-engine tree (host → models). Both open by default.
   const [whisperOpen, setWhisperOpen] = useState(true);
   const [parakeetOpen, setParakeetOpen] = useState(true);
-  // Parakeet engine state. null = not yet checked. The model downloads via the
-  // diarize sidecar (--prepare-asr-models), which has no byte-level progress, so
-  // this is a simple busy/ready flag rather than the percent bar Whisper uses.
-  const [parakeetReady, setParakeetReady] = useState<boolean | null>(null);
-  const [parakeetBusy, setParakeetBusy] = useState(false);
-  const [parakeetError, setParakeetError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    invoke<boolean>("parakeet_model_downloaded")
-      .then(setParakeetReady)
-      .catch(() => setParakeetReady(false));
-  }, [open]);
-
-  /**
-   * The running download's job id, so Cancel has something to cancel.
-   *
-   * It was minted and then dropped on the floor. The backend registers the
-   * child in the JobRegistry and its own comment says "cancellable via the
-   * JobRegistry" - the handle just never left this function, so a download
-   * that stalled could only be escaped by quitting the app.
-   *
-   * Assigned BEFORE the await, which is this repo's standing rule: an await
-   * between starting work and holding its handle is a window where Stop finds
-   * nothing to stop.
-   */
-  const parakeetJobRef = useRef<string | null>(null);
-
-  const cancelParakeet = useCallback(async () => {
-    const id = parakeetJobRef.current;
-    if (!id) return;
-    try { await invoke("cancel_job", { jobId: id }); } catch { /* already gone */ }
-  }, []);
-
-  const downloadParakeet = useCallback(async () => {
-    setParakeetBusy(true);
-    setParakeetError(null);
-    try {
-      const id = newJobId();
-      parakeetJobRef.current = id;
-      await invoke("download_parakeet_model", { jobId: id });
-      // Confirm against disk rather than assuming success, so the row never
-      // shows "Installed/In use" without the model actually being present.
-      setParakeetReady(await invoke<boolean>("parakeet_model_downloaded").catch(() => true));
-    } catch (e) {
-      setParakeetError(formatError(e));
-    } finally {
-      setParakeetBusy(false);
-      parakeetJobRef.current = null;
-    }
-  }, []);
-
-  const deleteParakeet = useCallback(async () => {
-    setParakeetError(null);
-    try {
-      await invoke("delete_parakeet_model");
-      setParakeetReady(false);
-      // If Parakeet was the active engine, fall back to Whisper so there's
-      // always a usable engine selected.
-      if (defaults.transcriptionEngine === "parakeet") {
-        setDefaults({ ...defaults, transcriptionEngine: "whisper" });
-      }
-    } catch (e) {
-      setParakeetError(formatError(e));
-    }
-  }, [defaults, setDefaults]);
 
   // ── Backup: export / import / reset all settings (Settings → General) ──
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
@@ -1558,97 +1493,14 @@ export function SettingsModal(props: Props) {
                     onToggle={() => setParakeetOpen((o) => !o)}
                   >
                     <div className="cp-source-hint muted" style={{ marginBottom: 12 }}>
-                      <strong>Parakeet TDT v3</strong> (NVIDIA) runs fully on-device on Apple
-                      Silicon via Core ML and emits <strong>word-level</strong> timestamps.
-                      Multilingual, with tighter caption sync than Whisper's segment timing.
-                      One-time download is about 0.5 GB.
+                      <strong>Parakeet</strong> (NVIDIA) runs fully on-device on Apple Silicon
+                      via Core ML and emits <strong>word-level</strong> timestamps. Multilingual,
+                      with tighter caption sync than Whisper's segment timing. AAF Audio uses
+                      Ultra when it is installed; Clip and dictation use TDT v3.
                     </div>
-                    {(() => {
-                      // Parakeet has a single model; "active" mirrors the Whisper
-                      // row — installed AND the engine in use.
-                      const parakeetActive = parakeetReady === true && defaults.transcriptionEngine === "parakeet";
-                      return (
-                    <div className={"cp-model-row" + (parakeetActive ? " selected" : "")}>
-                      <div className="cp-model-info-wrap">
-                        <div className="cp-model-head">
-                          <IconSparkles size={13} stroke="var(--fg-3)" />
-                          <span className="name">Parakeet TDT v3</span>
-                          <span className="size">≈0.5 GB</span>
-                          {parakeetReady && <span className="badge installed">Installed</span>}
-                          {parakeetActive && <span className="badge selected">In use</span>}
-                        </div>
-                        {parakeetBusy && <ModelDownloadProgress name="Parakeet TDT v3" />}
-                      </div>
-                      <div className="cp-model-actions">
-                        {parakeetReady === null ? (
-                          <span className="size">checking…</span>
-                        ) : !parakeetReady ? (
-                          parakeetBusy ? (
-                            /* A half-gigabyte download with no percentage and
-                               no way out was indistinguishable from a hang.
-                               Cancel is the honest control: the partial is
-                               discarded and Download starts again. */
-                            <button
-                              className="btn btn-ghost"
-                              onClick={() => { void cancelParakeet(); }}
-                              title="Stop downloading the Parakeet model. Nothing is kept; you can start again."
-                            >
-                              Cancel
-                            </button>
-                          ) : (
-                            <button className="btn btn-ghost" onClick={downloadParakeet}>
-                              Download
-                            </button>
-                          )
-                        ) : (
-                          <>
-                            {!parakeetActive && (
-                              <button
-                                className="btn btn-ghost"
-                                onClick={() => setDefaults({ ...defaults, transcriptionEngine: "parakeet" })}
-                              >
-                                Use as default
-                              </button>
-                            )}
-                            {/* Armed like the other two model deletes. The size
-                                is deliberately NOT in the label: Parakeet has
-                                no model list, so it carries no size_bytes, and
-                                the only figure available is the "~0.5 GB" that
-                                transcript.rs states in two places already. A
-                                third copy in a third language is exactly the
-                                drift duplicated-tables-contract exists to stop,
-                                and the arming does the load-bearing work here
-                                without it. */}
-                            <button
-                              className={"btn btn-ghost" + (armedDelete === "parakeet" ? " armed" : "")}
-                              onClick={() => {
-                                if (armedDelete === "parakeet") { setArmedDelete(null); deleteParakeet(); return; }
-                                setArmedDelete("parakeet");
-                              }}
-                              title="Remove the Parakeet model from disk. It downloads again the next time you pick it."
-                              aria-label={armedDelete === "parakeet"
-                                ? "Confirm deleting the Parakeet model"
-                                : "Delete the Parakeet model"}
-                            >
-                              {armedDelete === "parakeet" ? "Delete the model?" : "Delete"}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                      );
-                    })()}
-                    {parakeetBusy && (
-                      <div className="cp-source-hint muted" style={{ marginTop: 10 }}>
-                        Downloading the Parakeet model. This runs once and can take a few
-                        minutes. You can keep using the app meanwhile.
-                      </div>
-                    )}
-                    {parakeetError && (
-                      <div className="cp-source-hint err" role="alert" style={{ marginTop: 10 }}>
-                        {parakeetError}
-                      </div>
-                    )}
+                    <ParakeetModelRows engineInUse={defaults.transcriptionEngine === "parakeet"} armed={armedDelete} onArm={setArmedDelete}
+                      onUseAsDefault={() => setDefaults({ ...defaults, transcriptionEngine: "parakeet" })}
+                      onInUseDeleted={() => setDefaults({ ...defaults, transcriptionEngine: "whisper" })} />
                   </CollapsibleSection>
                 </CollapsibleSection>
 
