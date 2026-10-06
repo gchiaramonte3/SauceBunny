@@ -31,7 +31,7 @@ function setup() {
   return { props, ...render(<MultitrackTranscript {...props} />) };
 }
 function submit(query = "bad weather") {
-  fireEvent.click(screen.getByRole("checkbox", { name: "Search with AI" }));
+  fireEvent.click(screen.getByRole("button", { name: "Search with AI" }));
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: query } });
   fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
 }
@@ -40,7 +40,7 @@ it("leaves ordinary text search instant and does not start AI on mount, toggle o
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "budget" } });
   expect(screen.getByText("The production budget is approved.")).toBeTruthy();
   expect(screen.queryByText(/postpone the picnic/)).toBeNull();
-  fireEvent.click(screen.getByRole("checkbox", { name: "Search with AI" }));
+  fireEvent.click(screen.getByRole("button", { name: "Search with AI" }));
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "bad weather" } });
   // The bleed labels and the Hide bleed switch load on mount (local, no model); nothing else may.
   expect(vi.mocked(invoke).mock.calls.filter(([name]) => !local.has(name))).toEqual([]); expect(streamChat).not.toHaveBeenCalled();
@@ -55,7 +55,7 @@ it("searches by meaning with the chosen model, preserves exact seek and leaves u
   expect(screen.queryByRole("button", { name: /storm knocked/ })).toBeNull();
   expect(vi.mocked(streamChat).mock.calls[0][0]).toEqual(server);
   expect(vi.mocked(streamChat).mock.calls[0][1][0].content).not.toContain("Sam's unrelated words");
-  fireEvent.click(screen.getByRole("checkbox", { name: "Search with AI" }));
+  fireEvent.click(screen.getByRole("button", { name: "Search with AI" }));
   expect(screen.getByText("No matching transcript text.")).toBeTruthy();
 });
 it("scopes All voices to all original passages and uses the existing cloud setting neither for upload nor inference", async () => {
@@ -72,7 +72,7 @@ it.each(["edit", "toggle", "tab", "hide", "replace", "unmount", "stop"])("reject
   const view = setup(); submit(); await waitFor(() => expect(streamChat).toHaveBeenCalledTimes(1));
   const signal = vi.mocked(streamChat).mock.calls[0][3];
   if (change === "edit") fireEvent.change(screen.getByRole("searchbox"), { target: { value: "budget" } });
-  if (change === "toggle") fireEvent.click(screen.getByRole("checkbox", { name: "Search with AI" }));
+  if (change === "toggle") fireEvent.click(screen.getByRole("button", { name: "Search with AI" }));
   if (change === "tab") fireEvent.click(screen.getByRole("tab", { name: "A2 Sam mic" }));
   if (change === "hide") view.rerender(<MultitrackTranscript {...view.props} active={false} />);
   if (change === "replace") view.rerender(<MultitrackTranscript {...view.props} document={{ ...view.props.document, transcripts: [] }} />);
@@ -94,7 +94,8 @@ it("keeps failures actionable, never mistakes invalid output or absent models fo
   setup(); vi.mocked(streamChat).mockResolvedValue("I think so."); submit();
   await screen.findByRole("alert"); expect(screen.getByRole("alert").textContent).toContain("unreadable search result");
   vi.mocked(invoke).mockResolvedValue([]);
-  fireEvent.click(screen.getByRole("button", { name: /^Search$/ }));
+  // No Search button: Return in the field searches again.
+  fireEvent.submit(screen.getByRole("searchbox").closest("form")!);
   await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("No local AI model is installed"));
   expect(vi.mocked(invoke).mock.calls.some(([name]) => name === "download_llm_model")).toBe(false);
 });

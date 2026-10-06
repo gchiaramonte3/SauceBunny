@@ -30,9 +30,7 @@
    bleed lines from All voices and search. */
 .cp-multitrack-cue.is-bleed .cp-multitrack-cue-text,
 .cp-multitrack-word-bleed { color: var(--fg-4); }
-.cp-multitrack-bleed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
 .cp-multitrack-bleed-warnings { flex-basis: 100%; margin: 0; padding-left: 18px; color: var(--fg-2); font-size: var(--text-base); line-height: var(--leading-snug); }
-.cp-multitrack-bleed label { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); font-size: var(--text-base); }
 /* A word the recognizer was unsure of: dotted, not coloured, so it reads as
    "check me" without competing with selection or the current cue. Longhands,
    per text-decoration-contract. */
@@ -126,10 +124,14 @@
 .cp-multitrack-info { flex: none; }
 .cp-multitrack-search { padding: 0 20px; }
 .cp-multitrack-search input[type=search] { width: 100%; }
-.cp-multitrack-search-options { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
-.cp-multitrack-search-options label { display: flex; align-items: center; gap: 6px; min-height: 26px; color: var(--fg-3); font-size: var(--text-base); cursor: pointer; }
-.cp-multitrack-search-options input { width: auto; flex: none; margin: 0; }
-.cp-multitrack-search-options .btn { min-height: 26px; padding: 2px 8px; font-size: var(--text-base); white-space: nowrap; }
+.cp-multitrack-search-field { position: relative; }
+.cp-multitrack-search-field input[type=search] { padding-right: 36px; }
+/* Inside the field's end, centred without a transform. */
+.cp-multitrack-ai.cp-icon-btn, .cp-multitrack-search-stop.btn { position: absolute; top: 0; bottom: 0; right: 4px; margin: auto 0; height: 26px; }
+.cp-multitrack-ai.cp-icon-btn { width: 26px; color: var(--fg-3); }
+.cp-multitrack-ai.cp-icon-btn.active { background: var(--bg-5); color: var(--fg-0); }
+.cp-multitrack-search-stop.btn { right: 34px; min-height: 26px; padding: 0 8px; font-size: var(--text-base); }
+.cp-multitrack-search-field.is-busy input[type=search] { padding-right: 96px; }
 .cp-multitrack-search > p { margin: 6px 0 0; overflow-wrap: anywhere; }
 .cp-multitrack-transcript-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 16px; }
 .cp-multitrack-transcript-empty { margin: 48px 12px; text-align: center; }
@@ -235,9 +237,23 @@ button.cp-multitrack-saved-status { cursor: pointer; }
 .cp-multitrack-saved-status.needs-review { color: var(--warning); }
 .cp-multitrack-saved-status.is-empty { color: var(--fg-3); }
 /* What a status glyph means (MultitrackTrackStatus): portalled, so the lane list's scroll cannot clip it. */
-.cp-multitrack-status-popover { position: fixed; z-index: var(--z-popover); display: grid; gap: var(--s-2); width: 300px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: var(--s-3); border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); color: var(--fg-2); font-size: var(--text-base); line-height: var(--leading-normal); }
+.cp-multitrack-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 20px 0; }
+.cp-multitrack-chip { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 10px; border: 1px solid var(--line-2); border-radius: var(--r-pill); background: transparent; color: var(--fg-2); font-family: var(--font-ui); font-size: var(--text-sm); white-space: nowrap; cursor: pointer; }
+.cp-multitrack-chip:hover { background: var(--bg-4); color: var(--fg-1); }
+.cp-multitrack-chip[aria-expanded="true"] { background: var(--bg-5); color: var(--fg-0); }
+.cp-multitrack-chip.is-status { cursor: default; color: var(--fg-3); }
+.cp-multitrack-chip.is-status:hover { background: transparent; color: var(--fg-3); }
+.cp-multitrack-chip.is-alert { border-color: var(--danger); color: var(--danger-text); }
+.cp-multitrack-chips-error { margin: 6px 20px 0; }
+.cp-multitrack-chip-popover label { display: flex; align-items: center; gap: 6px; color: var(--fg-1); }
+.cp-multitrack-chip-actions:empty { display: none; }
+.cp-multitrack-chip-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.cp-multitrack-status-popover, .cp-multitrack-chip-popover, .cp-multitrack-export-popover { position: fixed; z-index: var(--z-popover); display: grid; gap: var(--s-2); width: 300px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: var(--s-3); border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); color: var(--fg-2); font-size: var(--text-base); line-height: var(--leading-normal); }
 .cp-multitrack-status-popover h3 { margin: 0; color: var(--fg-1); font-size: var(--text-md); font-weight: var(--weight-bold); }
-.cp-multitrack-status-popover p { margin: 0; }
+.cp-multitrack-status-popover p, .cp-multitrack-chip-popover p, .cp-multitrack-export-popover p { margin: 0; }
+/* A list of exports, so tighter than the explaining popovers it shares a surface with. */
+.cp-multitrack-export-popover { gap: 2px; width: 260px; padding: 6px; }
+.cp-multitrack-export-popover .cp-multitrack-date, .cp-multitrack-export-popover > p { padding: 4px 9px; }
 .cp-multitrack-status-popover .cp-multitrack-status-meta { color: var(--fg-3); font-size: var(--text-sm); }
 .cp-multitrack-status-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
 .cp-multitrack-track-switches { gap: 4px; }
@@ -328,8 +344,6 @@ button.cp-multitrack-saved-status { cursor: pointer; }
 .cp-multitrack-transcript-pane { position: relative; min-width: 0; min-height: 0; display: flex; }
 .cp-multitrack-transcript-pane > aside { flex: 1; }
 .cp-multitrack-resize { left: -5px; top: 0; bottom: 0; }
-.cp-multitrack-run-info { margin: 8px 20px 12px; color: var(--fg-3); font-size: var(--text-base); line-height: var(--leading-normal); }
-.cp-multitrack-run-info p { margin: 8px 0; overflow-wrap: anywhere; }
 .cp-multitrack-run-details h3 { margin: 16px 0 6px; color: var(--fg-1); font-size: var(--text-md); font-weight: var(--weight-semibold); }
 .cp-multitrack-run-details ul { margin: 6px 0; padding-left: 16px; overflow-wrap: anywhere; }
 .cp-multitrack-run-details p { overflow-wrap: anywhere; }
@@ -358,10 +372,9 @@ button.cp-multitrack-saved-status { cursor: pointer; }
 .cp-multitrack-transcript-pane { grid-column: 2; grid-row: 1 / span 2; display: grid; grid-template-rows: subgrid; }
 .cp-multitrack-transcript { grid-row: 1 / span 2; display: grid; grid-template-rows: subgrid; }
 .cp-multitrack-export { display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; gap: 8px; padding: 10px 12px; }
-.cp-multitrack-export-current { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; }
+.cp-multitrack-export-current { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 8px; }
+.cp-multitrack-export-more.btn { min-width: 30px; padding: 0 8px; }
 .cp-multitrack-export-current .btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cp-multitrack-export-all { display: flex; gap: var(--s-2) var(--s-1); flex-wrap: wrap; }
-.cp-multitrack-export-all .btn { flex: 1; white-space: nowrap; min-height: 28px; padding: 4px 8px; font-size: var(--text-base); }
 .cp-multitrack-export > p { margin: 0; max-height: 64px; overflow: auto; overflow-wrap: anywhere; }
 .cp-multitrack-person-nav { min-width: 0; border-bottom: 1px solid var(--line-1); margin-bottom: 12px; padding: 0 8px; }
 .cp-multitrack-track-menu { position: fixed; z-index: var(--z-popover); width: 260px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 6px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); color: var(--fg-2); font-size: var(--text-md); }

@@ -1,9 +1,8 @@
-import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useId, useRef, useState } from "react";
 import type { AafTrackTranscript } from "../bindings/AafTrackTranscript";
-import { useDismiss } from "../hooks/use-dismiss";
 import { passagesToReview } from "../lib/multitrack";
 import { plural } from "../lib/plural";
+import { AnchoredPopover } from "./AnchoredPopover";
 import { IconAlert, IconCircleCheck, IconInfo } from "./Icons";
 
 /**
@@ -20,20 +19,7 @@ export function MultitrackTrackStatus({ transcript, owner, duration, onReview, o
   /** Open Transcript info, the run's details. */
   onInfo?: () => void;
 }) {
-  const [open, setOpen] = useState(false), [position, setPosition] = useState({ left: 0, top: 0 });
-  const trigger = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null), id = useId();
-  const close = useCallback(() => { setOpen(false); trigger.current?.focus(); }, []);
-  useDismiss(panel, close, open);
-  useLayoutEffect(() => {
-    if (!open) return;
-    const place = () => {
-      const anchor = trigger.current?.getBoundingClientRect(), bounds = panel.current?.getBoundingClientRect();
-      if (anchor && bounds) setPosition({ left: Math.max(8, Math.min(anchor.left, innerWidth - bounds.width - 8)), top: Math.max(8, Math.min(anchor.bottom + 6, innerHeight - bounds.height - 8)) });
-    };
-    place(); panel.current?.querySelector<HTMLButtonElement>("button")?.focus();
-    window.addEventListener("resize", place); window.addEventListener("scroll", place, true);
-    return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
-  }, [open]);
+  const [open, setOpen] = useState(false), trigger = useRef<HTMLButtonElement>(null), id = useId();
   if (!transcript) return <span className="cp-multitrack-saved-status" aria-hidden="true" />;
   const review = passagesToReview(transcript);
   const kind = review > 0 ? "review" : transcript.status === "empty" ? "empty" : "saved";
@@ -46,11 +32,10 @@ export function MultitrackTrackStatus({ transcript, owner, duration, onReview, o
   return <>
     <button ref={trigger} type="button" className={`cp-multitrack-saved-status ${kind === "review" ? "needs-review" : kind === "empty" ? "is-empty" : "is-saved"}`}
       aria-label={label} title={label} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
-      onMouseDown={(event) => event.stopPropagation()} onClick={() => { if (open) close(); else setOpen(true); }}>
+      onMouseDown={(event) => event.stopPropagation()} onClick={() => setOpen((value) => !value)}>
       {kind === "review" ? <IconAlert size={16} /> : kind === "empty" ? <IconInfo size={16} /> : <IconCircleCheck size={16} />}
     </button>
-    {open && createPortal(<div ref={panel} id={id} className="cp-multitrack-status-popover" role="dialog" aria-label={label} style={position}
-      onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); } }}>
+    {open && <AnchoredPopover anchor={trigger} id={id} className="cp-multitrack-status-popover" label={label} onClose={() => setOpen(false)}>
       <h3>{title}</h3>
       <p>{kind === "review"
         ? `${plural(review, "passage was", "passages were")} saved without a place on the timeline: the engine gave ${review === 1 ? "it" : "them"} no time, or a time outside the audio it was given. The words are kept; nothing is lost.`
@@ -61,6 +46,6 @@ export function MultitrackTrackStatus({ transcript, owner, duration, onReview, o
         {kind === "review" && onReview && <button type="button" className="btn" onClick={() => { setOpen(false); onReview(transcript.track_id); }}>Review {plural(review, "passage", "passages")}</button>}
         {onInfo && <button type="button" className="btn btn-ghost" onClick={() => { setOpen(false); onInfo(); }}>Transcript info</button>}
       </div>
-    </div>, document.body)}
+    </AnchoredPopover>}
   </>;
 }
