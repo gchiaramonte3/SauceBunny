@@ -48,7 +48,7 @@ for (const viewport of [{ width: 1100, height: 700 }, { width: 1680, height: 102
       for (const [token, size] of sizes) root.style.setProperty(token, size);
     }, scale);
     const starter = page.getByRole("region", { name: "Choose a review source" });
-    await expect(starter.getByRole("heading", { name: "What would you like to share?" })).toBeVisible();
+    await expect(starter.getByRole("heading", { name: "Nothing on screen yet" })).toBeVisible();
     await expect(starter.getByRole("button")).toHaveCount(6);
     await expect(page.locator(".cp-empty-resume")).toHaveCount(0);
     for (const button of await starter.getByRole("button").all()) {
@@ -59,7 +59,7 @@ for (const viewport of [{ width: 1100, height: 700 }, { width: 1680, height: 102
     }
     await page.screenshot({ path: test.info().outputPath("review-source-start.png") });
     for (const kind of ["Screen", "Window", "Region", "NDI"]) {
-      await starter.getByRole("button", { name: new RegExp(`^${kind} `) }).click();
+      await starter.getByRole("button", { name: kind, exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Source settings", exact: true });
       await expect(dialog).toBeVisible();
       await expect(dialog.getByRole("tab", { name: kind, exact: true })).toHaveAttribute("aria-selected", "true");
@@ -70,20 +70,21 @@ for (const viewport of [{ width: 1100, height: 700 }, { width: 1680, height: 102
   });
 }
 
-test("Review start Link and Local file use the existing loading flow", async ({ page }) => {
+test("Review start Paste a link and Open file use the existing loading flow", async ({ page }) => {
   await boot(page);
   const starter = page.getByRole("region", { name: "Choose a review source" });
-  await starter.getByRole("button", { name: /^Link / }).click();
+  const paste = starter.getByRole("button", { name: "Paste a link", exact: true });
+  await paste.click();
   const field = starter.getByRole("textbox", { name: "Video URL" });
   await expect(field).toBeFocused();
   await field.fill("https://youtube.com/watch?v=aaaa");
   await field.press("Escape");
-  await expect(starter.getByRole("button", { name: /^Link / })).toBeFocused();
-  await starter.getByRole("button", { name: /^Link / }).click();
+  await expect(paste).toBeFocused();
+  await paste.click();
   await field.press("Enter");
   await expect(page.getByRole("textbox", { name: "Comment", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Clear", exact: true }).click();
-  await starter.getByRole("button", { name: /^Local file / }).click();
+  await starter.getByRole("button", { name: "Open file…", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Comment", exact: true })).toBeVisible();
 });
 

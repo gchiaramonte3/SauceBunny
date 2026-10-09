@@ -17,14 +17,17 @@ type Props = {
   /** The string out has no lane for this mic, so its words were never read. */
   unread: boolean;
   selected: boolean; onSelect: (only: boolean) => void; soloed: boolean; quiet: boolean; onSolo: () => void; shown: boolean; onText: () => void;
+  /** Where this track lands on the record when it is on: Avid's patch, and the record tracks it can go to. */
+  patch?: { layer: number; tracks: number; onPatch: (layer: number) => void };
   clips: AafClip[]; seconds: (frames: number) => number; start: number; span: number; x: (t: number) => string; w: (d: number) => string;
   waveforms: boolean; peaks: [number, number][] | undefined; duration: number; cues: Cue[]; scrub: Scrub;
 };
 
 /**
  * One track of the SOURCE sequence as AAF Audio lists it: the mic's track
- * selector, the group disclosure and ↳ for an alternate, whose mic it is, S
- * and T, and the sequence's own clips, gaps and all. It wears String Outs'
+ * selector, the group disclosure and ↳ for an alternate, whose mic it is, the
+ * record track it is patched to while it is on (→ A1), S and T, and the
+ * sequence's own clips, gaps and all. It wears String Outs'
  * lane look so switching Source and Record reads as one timeline.
  */
 export function EditSourceTrack(props: Props) {
@@ -40,6 +43,10 @@ export function EditSourceTrack(props: Props) {
       <button type="button" className="cp-te-tl-track" aria-pressed={props.selected} aria-label={`Source track ${props.label}`}
         title={`Source track ${props.label} (⌥-click: only this). On tracks are what Insert brings.`} onClick={(event) => props.onSelect(event.altKey)}>{props.label}</button>
       <span className="cp-te-swatch" aria-hidden="true" /><span className="cp-te-tl-name" title={props.unread ? `${props.owner}. Not read into this string out` : props.owner}>{props.owner}</span>
+      {props.patch && <select className="cp-select xs cp-te-tl-patchto" aria-label={`Record track for ${props.owner}`} title={`Record track for ${props.owner}`}
+        value={props.patch.layer} onChange={(event) => props.patch?.onPatch(Number(event.target.value))}>
+        {Array.from({ length: Math.max(props.patch.tracks, props.patch.layer) + 1 }, (_, index) => index + 1).map((layer) =>
+          <option key={layer} value={layer}>{`→ A${layer}`}</option>)}</select>}
       <span className="cp-te-tl-switches">
         <button type="button" className="cp-te-tl-toggle" aria-pressed={props.soloed} aria-label={`Solo ${props.owner}`} title={`Solo ${props.owner}`} disabled={props.unread} onClick={props.onSolo}>S</button>
         <button type="button" className="cp-te-tl-toggle" aria-pressed={props.shown} aria-label={`Text on ${props.owner}`} title={`Text on ${props.owner}`} disabled={props.unread} onClick={props.onText}>T</button>

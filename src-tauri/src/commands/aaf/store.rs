@@ -125,8 +125,28 @@ pub fn import_gated(root: &Path, document: AafDocument, gate: Gate) -> Result<Aa
         return Ok(existing);
     }
     if document_path(root, &document.id)?.exists() { return Err(AppError::invalid("AAF Audio document already exists")); }
+    // A new sequence over media already transcribed (a re-export, another
+    // day's cut) starts with those words rather than nothing (carry.rs).
+    let mut document = document;
+    let earlier = earlier_documents(root, &document)?;
+    let _ = super::carry::carry(&mut document, &earlier);
     write_gated(root, &document, gate)?;
     Ok(document)
+}
+
+/// How many earlier documents a new import looks through for words it can carry, newest first.
+const CARRY_FROM_AT_MOST: usize = 40;
+
+/// The newest earlier documents with a transcript that share any of `incoming`'s source media.
+fn earlier_documents(root: &Path, incoming: &AafDocument) -> Result<Vec<AafDocument>, AppError> {
+    let sources: std::collections::HashSet<&str> = incoming.manifest.tracks.iter().flat_map(|track| track.clips.iter()).filter_map(|clip| clip.source_id.as_deref()).collect();
+    if sources.is_empty() { return Ok(Vec::new()); }
+    let mut items = list(root)?;
+    items.sort_by_key(|item| std::cmp::Reverse(item.modified_ms.unwrap_or(0)));
+    Ok(items.into_iter().filter(|item| item.id != incoming.id).take(CARRY_FROM_AT_MOST)
+        .filter_map(|item| load(root, &item.id).ok())
+        .filter(|doc| !doc.transcripts.is_empty() && doc.manifest.tracks.iter().flat_map(|track| track.clips.iter()).any(|clip| clip.source_id.as_deref().is_some_and(|id| sources.contains(id))))
+        .collect())
 }
 
 /// Reopen an unchanged source without deleting or combining historical imports.
@@ -386,6 +406,24 @@ fn summarize_with_identity(root: &Path, id: &str, path: &Path) -> Result<(AafDoc
         modified_ms: Some(modified_ms(&std::fs::metadata(path)?)) }, identity))
 }
 
+/// What hearing, measuring and transcribing a document needs from its
+/// original AAF: nothing, when its audio is linked media.
+///
+/// A linked document's audio is MXF on NEXIS (or wherever it was relinked),
+/// and every read of it is checked against that file's own fingerprint
+/// (`linked::check_sources`). The AAF was read once, at import, and the
+/// document already holds everything it said. Requiring it here meant that
+/// tidying an AAF away after import - which editors do as a matter of course -
+/// silenced the sequence everywhere: 14 of 16 documents on one editor's Mac
+/// answered "The original AAF is unavailable" while all of their MXF was
+/// online. Embedded audio is different: it is read out of the AAF itself, so
+/// those reads still call `source_ready` (`pcm::get`, and the embedded branch
+/// of `linked_audio::render_window`). Import, relink, recording dates and
+/// export read the AAF and keep `source_ready` too.
+pub fn audio_source_ready(document: &AafDocument) -> Result<(), AppError> {
+    if super::linked_audio::needed(document) { Ok(()) } else { source_ready(document) }
+}
+
 pub fn source_ready(document: &AafDocument) -> Result<(), AppError> {
     let metadata = std::fs::metadata(&document.source_path)
         .map_err(|_| AppError::not_found("The original AAF is unavailable. Reconnect its drive or import it again."))?;
@@ -420,8 +458,8 @@ pub fn source_fingerprint(path: &Path) -> Result<String, AppError> {
 /// unlike the modification time, so a same-size rewrite with its time put
 /// back (the case `source_fingerprint` reads both ends of a file for) still
 /// shows.
-type Stamp = (u64, u64, u64, i64, i64, i64, i64);
-fn stamp(metadata: &std::fs::Metadata) -> Stamp {
+pub(super) type Stamp = (u64, u64, u64, i64, i64, i64, i64);
+pub(super) fn stamp(metadata: &std::fs::Metadata) -> Stamp {
     use std::os::unix::fs::MetadataExt;
     (metadata.dev(), metadata.ino(), metadata.size(), metadata.mtime(), metadata.mtime_nsec(), metadata.ctime(), metadata.ctime_nsec())
 }
@@ -467,6 +505,28 @@ pub fn playback_document(root: &Path, id: &str) -> Result<std::sync::Arc<AafDocu
     if let Ok(mut kept) = PLAYBACK_DOCUMENTS.lock() {
         kept.retain(|(known, _, _)| known != id);
         if kept.len() >= 4 { kept.remove(0); }
+        kept.push((id.to_string(), now, document.clone()));
+    }
+    Ok(document)
+}
+
+static READ_DOCUMENTS: Mutex<Vec<(String, Stamp, std::sync::Arc<AafDocument>)>> = Mutex::new(Vec::new());
+
+/// A whole document, transcripts included, for READING: parsed again only
+/// when its file changes. String Outs reads every mic's words with a call per
+/// mic, and each call parsed the whole document: HEAT 1's is 95 MB with 48
+/// transcripts, so its 98 mics took 25 s, again on every tab switch. Two are
+/// kept, since each holds every transcript. Anything that writes loads its
+/// own copy with `load`.
+pub fn read_document(root: &Path, id: &str) -> Result<std::sync::Arc<AafDocument>, AppError> {
+    let now = stamp(&std::fs::metadata(document_path(root, id)?)?);
+    if let Ok(kept) = READ_DOCUMENTS.lock() {
+        if let Some((_, _, document)) = kept.iter().find(|(known, at, _)| known == id && *at == now) { return Ok(document.clone()); }
+    }
+    let document = std::sync::Arc::new(load(root, id)?);
+    if let Ok(mut kept) = READ_DOCUMENTS.lock() {
+        kept.retain(|(known, _, _)| known != id);
+        if kept.len() >= 2 { kept.remove(0); }
         kept.push((id.to_string(), now, document.clone()));
     }
     Ok(document)
@@ -647,6 +707,32 @@ mod tests {
     }
 
     #[test]
+    fn a_re_exported_sequence_over_the_same_media_starts_with_its_words() {
+        let root = std::env::temp_dir().join(format!("aaf-carry-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        // Day 1: one mic, playing its source from 10 s.
+        let audio = |start_frame: i64, second: f64| AafClip { start_frame, duration_frames: 240 - start_frame, kind: "audio".into(), master_id: None, source_id: Some("mob:1".into()),
+            source_start_sample: Some((second * 48_000.0) as i64), sample_rate: Some(48_000), warnings: vec![] };
+        let mut day1 = fixture();
+        day1.manifest.tracks[0].clips = vec![audio(0, 10.0)];
+        let day1 = import(&root, day1).unwrap();
+        let transcript = AafTrackTranscript { track_id: "10".into(), start_frame: 0, duration_frames: 240, engine: AafEngine::Parakeet, model_id: "m".into(),
+            status: AafTranscriptStatus::Completed, sample_rate: 16000, cues: vec![AafCue { id: "c".into(), start_sample: 16_000, end_sample: 32_000, text: "Hello there.".into(), boundary_review: false, words: None, suspect: None }],
+            timing_issues: vec![], warnings: vec![], gaps: None };
+        save_transcript(&root, &day1, transcript).unwrap();
+        // Day 2: another AAF, the same source two seconds later in the cut.
+        let mut day2 = AafDocument { id: "d".repeat(64), source_path: "/tmp/day2.aaf".into(), ..fixture() };
+        day2.manifest.source_fingerprint = "e".repeat(64);
+        day2.manifest.tracks[0].clips = vec![audio(48, 10.0)];
+        let day2 = import(&root, day2).unwrap();
+        assert_ne!(day2.id, day1.id);
+        let carried = &day2.transcripts[0];
+        assert_eq!((carried.cues[0].text.as_str(), carried.cues[0].start_sample), ("Hello there.", 16_000 + 2 * 16_000 * 1001 / 1000));
+        assert!(carried.warnings[0].starts_with("Carried from an earlier import"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn the_editors_call_on_a_cue_is_stored_replaced_and_cleared() {
         use crate::bleed::AafOwnershipLabel::{Bleed, Overtalk, Owner};
         let root = std::env::temp_dir().join(format!("aaf-ownership-{}", uuid::Uuid::new_v4()));
@@ -771,6 +857,27 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn reading_parses_a_document_once_with_its_words_until_it_is_saved_again() {
+        let root = std::env::temp_dir().join(format!("aaf-read-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let doc = fixture();
+        create(&root, &doc).unwrap();
+        let cue = |text: &str| AafCue { id: "cue".into(), start_sample: 0, end_sample: 8000, text: text.into(), boundary_review: false, words: None, suspect: None };
+        let transcript = |text: &str| AafTrackTranscript { track_id: "10".into(), start_frame: 0, duration_frames: 48, engine: AafEngine::Parakeet, model_id: "test".into(),
+            status: AafTranscriptStatus::Completed, sample_rate: 16000, cues: vec![cue(text)], timing_issues: vec![], warnings: vec![], gaps: None };
+        save_transcript(&root, &doc, transcript("Hello")).unwrap();
+        let first = read_document(&root, &doc.id).unwrap();
+        assert_eq!(first.transcripts[0].cues[0].text, "Hello", "reading was not handed the words");
+        assert!(std::sync::Arc::ptr_eq(&first, &read_document(&root, &doc.id).unwrap()), "parsed again with nothing changed");
+        // A new transcript is what String Outs must not miss.
+        let saved = load(&root, &doc.id).unwrap();
+        save_transcript(&root, &saved, transcript("Hello again")).unwrap();
+        let after = read_document(&root, &doc.id).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(&first, &after), "a saved document was not read again");
+        assert_eq!(after.transcripts[0].cues[0].text, "Hello again");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn document_ids_cannot_escape_the_store() {
         assert!(document_path(Path::new("/tmp/store"), &"a".repeat(64)).is_ok());
         for bad in ["../doc", "", "/tmp/doc", "abcdef"] {
@@ -863,6 +970,18 @@ mod tests {
         doc.manifest.graph=Some(serde_json::from_value(serde_json::json!({"sequence_id":"top", "sources":[],"positions":[],"markers":[],"picture_tracks":[],"path_mappings":[],
             "lanes":[{"track_id":"10","parent_track_id":null,"branch_id":null,"group_name":null,"availability":"ready"}]})).unwrap());
         doc
+    }
+
+    #[test]
+    fn a_group_lists_every_angle_up_to_the_readers_bound() {
+        // A real reality group: 75 cameras, which the reader once cut to 16.
+        let group = |count: usize| { let mut doc = with_graph(fixture()); doc.manifest.graph.as_mut().unwrap().picture_tracks = serde_json::from_value(serde_json::json!([{
+            "slot_id": 10, "physical_track_number": 1, "name": "V1", "component": "Sequence", "clips": [{ "start_frame": 0, "duration_frames": 240, "kind": "clip",
+            "name": null, "master_mob_id": null, "file_mob_id": null, "tape_name": null, "source_start_frame": null, "source_timecode_fps": null, "source_drop_frame": null,
+            "group": true, "angles": (0..count).map(|n| format!("CAM {n}")).collect::<Vec<_>>(), "effect": null, "descriptor": null }] }])).unwrap(); doc.manifest };
+        assert!(validate_manifest(&group(75)).is_ok());
+        assert!(validate_manifest(&group(MAX_ANGLES)).is_ok());
+        assert!(validate_manifest(&group(MAX_ANGLES + 1)).is_err());
     }
 
     #[test]

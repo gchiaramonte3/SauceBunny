@@ -1,9 +1,11 @@
 import { useMemo } from "react";
 import type { AafPictureClip } from "../bindings/AafPictureClip";
 import type { AafPictureTrack } from "../bindings/AafPictureTrack";
+import type { FrameStore } from "../lib/frame-store";
 import { fpsToRateKey, framesToTc } from "../lib/marker-time";
+import { MultitrackPlayhead } from "./MultitrackPlayhead";
 
-type Props = { tracks?: AafPictureTrack[]; viewStart: number; viewEnd: number; span: number; frame: number };
+type Props = { tracks?: AafPictureTrack[]; viewStart: number; viewEnd: number; span: number; frames: FrameStore };
 
 /** Source timecode at a picture clip's in point, from its tape's own timecode. */
 export function pictureSourceTimecode(clip: AafPictureClip): string | null {
@@ -13,22 +15,32 @@ export function pictureSourceTimecode(clip: AafPictureClip): string | null {
   return rate ? framesToTc(clip.source_start_frame, rate, drop) : null;
 }
 
+/** How many angle names a tooltip spells out; a 75-camera group says the rest as a count. */
+const ANGLES_NAMED = 12;
+
 /** A group (multicam) clip as an editor names it: the group, then its angles with the one that plays first. */
 export function pictureGroupText(clip: AafPictureClip): string | null {
   if (!clip.group) return null;
   const angles = clip.angles ?? [];
-  return `${clip.group_name ? `Group ${clip.group_name}` : "Group clip"}${angles.length ? `, ${angles.length} ${angles.length === 1 ? "angle" : "angles"}: ${angles.join(", ")}` : ""}`;
+  const named = angles.slice(0, ANGLES_NAMED).join(", ") + (angles.length > ANGLES_NAMED ? `, and ${angles.length - ANGLES_NAMED} more` : "");
+  return `${clip.group_name ? `Group ${clip.group_name}` : "Group clip"}${angles.length ? `, ${angles.length} ${angles.length === 1 ? "angle" : "angles"}: ${named}` : ""}`;
+}
+
+/** What a picture block is called. An unnamed group (Avid often exports one
+ *  with no name) goes by the angle that plays, the one Avid ticks in its menu. */
+export function pictureClipName(clip: AafPictureClip): string | null {
+  return clip.name ?? clip.tape_name ?? (clip.group ? clip.angles?.[0] ?? null : null);
 }
 
 export function pictureClipTitle(clip: AafPictureClip): string {
   const timecode = pictureSourceTimecode(clip);
-  return [clip.name ?? clip.tape_name ?? "Picture clip", clip.tape_name ? `Tape ${clip.tape_name}` : null,
+  return [pictureClipName(clip) ?? "Picture clip", clip.tape_name ? `Tape ${clip.tape_name}` : null,
     timecode ? `Source ${timecode}` : null, pictureGroupText(clip),
     clip.kind === "muted" ? "Muted in Avid" : null, clip.effect ? `Effect ${clip.effect}` : null].filter(Boolean).join(" · ");
 }
 
 /** V1 as named blocks where the picture cuts are. Metadata only: no video is decoded or shown. */
-export function MultitrackPictureLane({ tracks, viewStart, viewEnd, span, frame }: Props) {
+export function MultitrackPictureLane({ tracks, viewStart, viewEnd, span, frames }: Props) {
   const track = tracks?.find((candidate) => candidate.physical_track_number === 1 && candidate.clips.length) ?? tracks?.find((candidate) => candidate.clips.length);
   const blocks = useMemo(() => (track?.clips ?? [])
     .filter((clip) => clip.start_frame < viewEnd && clip.start_frame + clip.duration_frames > viewStart)
@@ -45,10 +57,10 @@ export function MultitrackPictureLane({ tracks, viewStart, viewEnd, span, frame 
     <div className="cp-multitrack-picture-clips" role="list" aria-label={`Picture cuts on ${label}`}>
       {blocks.map(({ clip, style }, index) => <span role="listitem" key={`${clip.start_frame}:${index}`} style={style} title={pictureClipTitle(clip)}
         className={`cp-multitrack-picture-clip${clip.kind === "muted" ? " is-muted" : ""}${clip.group ? " is-group" : ""}`}>
-        <span className="cp-multitrack-picture-clip-name">{clip.name ?? clip.tape_name ?? "Clip"}</span>
+        <span className="cp-multitrack-picture-clip-name">{pictureClipName(clip) ?? "Clip"}</span>
         {clip.group && !!clip.angles?.length && <span className="cp-multitrack-picture-angles" aria-hidden="true">{clip.angles.length}</span>}
       </span>)}
-      {frame >= viewStart && frame < viewEnd && <span className="cp-multitrack-playhead" style={{ left: `${(frame - viewStart) / span * 100}%` }} />}
+      <MultitrackPlayhead frames={frames} viewStart={viewStart} viewEnd={viewEnd} span={span} />
     </div>
   </div>;
 }

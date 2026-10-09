@@ -12,13 +12,14 @@ import { documentName, trackOwner } from "./multitrack";
  * joins by matching owners, so Rosa's lane draws on Rosa's mic in every
  * sequence; a person new to the edit gets a lane.
  *
- * A lane is not a record track. Record tracks are PATCHED, as in Avid: a new
- * string out has none, and each person goes on the next track down when
- * their words are first cut in (`giveTracks`), so a string out of Harry and
- * Jane has Harry on A1, Jane on A2 and nothing else. Everyone is listed
- * (`featured: false` until patched), so Ask and the source pane can find
- * anyone's words, a group angle's included. On the Media Composer 64-track
- * ceiling this matters: HEAT 2 has 21 tracks and 99 people.
+ * A lane is not a record track. Record tracks are layers, as in Avid: A1,
+ * A2… each hold whatever was cut onto them, and a clip says which track each
+ * person in it sits on (edit-model `layers`). A person is IN the record once
+ * something of theirs is cut in (`giveTracks`), which is what loads their
+ * words and mics. Everyone is listed (`featured: false` until then), so Ask
+ * and the source pane can find anyone's words, a group angle's included. On
+ * the Media Composer 64-track ceiling this matters: HEAT 2 has 21 tracks and
+ * 99 people.
  */
 
 const slug = (name: string) => name.toLowerCase().normalize("NFC").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "") || "track";
@@ -44,20 +45,14 @@ export function hourOne(timecodeFps: number, dropFrame: boolean): number {
 
 const hourOf = (document: AafDocument) => hourOne(document.manifest.timecode_fps || Math.ceil(document.manifest.edit_rate.numerator / document.manifest.edit_rate.denominator), document.manifest.drop_frame);
 
-export function editFromSequence(document: AafDocument, title: string, whole: boolean): EditDocument {
+/** A new string out with `document` as its source: an empty record, as a new Avid sequence is. */
+export function editFromSequence(document: AafDocument, title: string): EditDocument {
   const rate = document.manifest.edit_rate;
   const empty: EditDocument = {
     schema_version: EDIT_SCHEMA_VERSION, title: title.trim() || documentName(document), edit_rate: { numerator: rate.numerator, denominator: rate.denominator },
     start_timecode_frames: hourOf(document), sources: [], tracks: [], segments: [], mutes: [], markers: [],
   };
-  const edit = addSource(empty, document);
-  const source = edit.sources[0].id;
-  if (!whole || document.manifest.duration_frames <= 0) return edit;
-  // The whole sequence, as the sequence has it: everyone with a track of
-  // their own in it is patched, top-down in its order; group angles are not.
-  const own = document.manifest.tracks.filter((track) => !alternativeLane(document, track.id))
-    .flatMap((track) => edit.tracks.filter((lane) => lane.source_tracks[source] === track.id).map((lane) => lane.id));
-  return { ...giveTracks(edit, own), segments: [{ kind: "source", id: `whole-${source}`, source, in_frame: 0, out_frame: document.manifest.duration_frames }] };
+  return addSource(empty, document);
 }
 
 /**
@@ -112,14 +107,13 @@ export function peopleOf(tracks: EditTrack[]): TimelineLane[] {
   return tracks.filter((track) => track.kind === "sound").map((track) => ({ id: track.id, name: track.name, track: onTrack(track) ? ++number : 0, angle: track.featured === true }));
 }
 
-/** Patched lanes first, in track order, then everyone else in the order they were listed. */
-const arrange = (tracks: EditTrack[]) => [...tracks.filter(onTrack), ...tracks.filter((lane) => !onTrack(lane))];
-
 /**
- * Patch these people onto record tracks, top-down in the order given: each
- * one not on a track yet goes on the next track below the last one in use,
- * so asking for Harry and then Jane puts Harry on A1 and Jane on A2. Nobody
- * already patched moves. The same document when everyone given has a track.
+ * Mark these people as in the record: their words, mics and waveforms load
+ * from now on. Which record track a clip of theirs sits on is the clip's own
+ * (a segment's `layers`); the order here is only the track a clip from before
+ * layers puts them on, top-down in the order given, so asking for Harry and
+ * then Jane numbers Harry 1 and Jane 2. Nobody already in moves. The same
+ * document when everyone given is already in.
  */
 export function giveTracks(edit: EditDocument, laneIds: Iterable<string>): EditDocument {
   const joining = [...new Set(laneIds)].filter((id) => edit.tracks.some((lane) => lane.id === id && !onTrack(lane)));
@@ -129,23 +123,3 @@ export function giveTracks(edit: EditDocument, laneIds: Iterable<string>): EditD
   return { ...edit, tracks: [...patched, ...added, ...edit.tracks.filter((lane) => !onTrack(lane) && !joining.includes(lane.id))] };
 }
 
-/**
- * The patch panel: put this person on record track `position` (0 for A1).
- * Whoever was there, and everyone below, moves down one; the person leaves
- * the track they were on. Clips keep playing their own people, so a clip of
- * Jane follows Jane to her new track.
- */
-export function patchAt(edit: EditDocument, laneId: string, position: number): EditDocument {
-  const lane = edit.tracks.find((item) => item.id === laneId);
-  if (!lane) return edit;
-  const patched = edit.tracks.filter((item) => onTrack(item) && item.id !== laneId);
-  if (onTrack(lane) && edit.tracks.filter(onTrack).indexOf(lane) === position) return edit;
-  patched.splice(Math.max(0, Math.min(position, patched.length)), 0, { ...lane, featured: true });
-  return { ...edit, tracks: [...patched, ...edit.tracks.filter((item) => !onTrack(item) && item.id !== laneId)] };
-}
-
-/** Take a person off their record track; the tracks below move up. Their clips stay, silent on no track. */
-export function unpatch(edit: EditDocument, laneId: string): EditDocument {
-  if (!edit.tracks.some((lane) => lane.id === laneId && onTrack(lane))) return edit;
-  return { ...edit, tracks: arrange(edit.tracks.map((lane) => lane.id === laneId ? { ...lane, featured: false } : lane)) };
-}

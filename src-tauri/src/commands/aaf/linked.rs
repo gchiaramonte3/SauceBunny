@@ -1,6 +1,6 @@
 //! Resolves only local, explicitly selected or AAF-referenced media. No mounts,
 //! network protocols, filename-only relinks, or changes to source recordings.
-use super::{diagnostics, linked_paths, linked_probe::ProbeCache, model::*, process, store};
+use super::{diagnostics, linked_paths, linked_probe::ProbeCache, model::*, process};
 use crate::AppError;
 use serde::Deserialize;
 use std::{collections::{BTreeMap, BTreeSet}, path::{Path, PathBuf}};
@@ -270,33 +270,49 @@ pub fn refresh_lanes(tracks: &[AafTrack], graph: &mut AafGraph) {
     }
 }
 
-pub fn check_sources(document: &AafDocument, track: &AafTrack) -> Result<(), AppError> {
-    check_clips(document, track, |_| true)
+/// Confirm the media every clip of this lane reads, from a child process
+/// (media_probe.rs): a volume that stops answering fails the read instead of
+/// holding an app thread in the kernel.
+pub async fn check_sources(app: &AppHandle, job: &str, document: &AafDocument, track: &AafTrack) -> Result<(), AppError> {
+    super::media_probe::verify(app, job, track_media(document, track)?).await
 }
 
 /// `check_sources` for the clips under [start, start + duration) only: what a
 /// playback window or an extract reads. Checking every source the lane uses
 /// anywhere in the sequence was most of the cost of a window already on disk.
-pub fn check_window_sources(document: &AafDocument, track: &AafTrack, start: i64, duration: i64) -> Result<(), AppError> {
-    check_clips(document, track, |clip| clip.start_frame < start + duration && clip.start_frame + clip.duration_frames > start)
+pub async fn check_window_sources(app: &AppHandle, job: &str, document: &AafDocument, track: &AafTrack, start: i64, duration: i64) -> Result<(), AppError> {
+    super::media_probe::verify(app, job, window_media(document, track, start, duration)?).await
 }
 
-fn check_clips(document: &AafDocument, track: &AafTrack, read: impl Fn(&AafClip) -> bool) -> Result<(), AppError> {
+/// The files a whole lane reads, each with the fingerprint its binding
+/// promises. No I/O here.
+pub fn track_media(document: &AafDocument, track: &AafTrack) -> Result<Vec<super::media_probe::Expect>, AppError> {
+    clips_media(document, track, |_| true)
+}
+
+/// The files the clips under a window read. No I/O here.
+pub fn window_media(document: &AafDocument, track: &AafTrack, start: i64, duration: i64) -> Result<Vec<super::media_probe::Expect>, AppError> {
+    clips_media(document, track, |clip| clip.start_frame < start + duration && clip.start_frame + clip.duration_frames > start)
+}
+
+fn clips_media(document: &AafDocument, track: &AafTrack, read: impl Fn(&AafClip) -> bool) -> Result<Vec<super::media_probe::Expect>, AppError> {
     if track.clips.iter().any(|c| c.kind == "unavailable") { return Err(AppError::invalid("This lane contains unsupported processing. See AAF Audio settings.")); }
+    let mut media = Vec::new();
     if let Some(graph) = &document.manifest.graph {
         let used: std::collections::HashSet<&str> = track.clips.iter().filter(|clip| read(clip)).filter_map(|clip| clip.source_id.as_deref()).collect();
         for source in graph.sources.iter().filter(|s| used.contains(s.id.as_str())) {
             if source.status != "ready" { return Err(AppError::not_found("Audio is unavailable. Refresh or locate media first.")); }
             let binding = source.resolved.as_ref().ok_or_else(|| AppError::not_found("Audio is offline. Locate media first."))?;
-            if store::known_fingerprint(Path::new(&binding.path))? != binding.fingerprint { return Err(AppError::invalid("Linked media changed. Locate media again before processing.")); }
+            media.push(super::media_probe::Expect { path: PathBuf::from(&binding.path), fingerprint: binding.fingerprint.clone() });
         }
     }
-    Ok(())
+    Ok(media)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::store;
     fn source() -> AafSource {
         AafSource { id:"source:1".into(), mob_id:"urn:smpte:umid:abcd".into(), slot_id:1,
             locators:vec![], ancestors:vec![], channel:1, channels:2, sample_rate:48000,
@@ -320,6 +336,25 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
     #[test]
+    fn linked_audio_plays_after_its_aaf_is_tidied_away() {
+        // The AAF named here does not exist: it was moved after import, as
+        // editors do. Its audio is linked media, which is all a playback
+        // window, a waveform or a transcription reads.
+        let mut document:AafDocument=serde_json::from_value(serde_json::json!({ "schema_version":2, "id":"d".repeat(64), "source_path":"/fixtures/moved-away.aaf", "source_size":1, "source_modified_ms":1,
+            "manifest":{ "schema_version":2, "name":"Kitchen", "source_fingerprint":"e".repeat(64), "edit_rate":{ "numerator":24, "denominator":1 },
+                "start_frame":0, "duration_frames":200, "timecode_fps":24, "drop_frame":false, "tracks":[], "warnings":[],
+                "graph":{ "sequence_id":"top", "sources":[], "positions":[], "markers":[], "picture_tracks":[], "path_mappings":[], "lanes":[] } },
+            "labels":[], "transcripts":[] })).unwrap();
+        // With no linked media the audio is embedded, read out of the AAF itself: it still needs the file.
+        assert!(store::audio_source_ready(&document).is_err(), "embedded audio must still require its AAF");
+        assert!(store::source_ready(&document).is_err());
+        let mut linked=source(); linked.status="ready".into();
+        document.manifest.graph.as_mut().unwrap().sources=vec![linked];
+        assert!(store::audio_source_ready(&document).is_ok(), "linked media must not depend on the AAF it was imported from");
+        // Import, relink and export read the AAF, and keep refusing without it.
+        assert!(store::source_ready(&document).is_err());
+    }
+    #[test]
     fn a_window_checks_only_the_media_under_it() {
         let path=std::env::temp_dir().join(format!("aaf-window-{}",uuid::Uuid::new_v4()));
         std::fs::write(&path,b"first recording").unwrap();
@@ -335,11 +370,13 @@ mod tests {
                 "graph":{ "sequence_id":"top", "sources":[], "positions":[], "markers":[], "picture_tracks":[], "path_mappings":[], "lanes":[] } },
             "labels":[], "transcripts":[] })).unwrap();
         document.manifest.graph.as_mut().unwrap().sources=vec![ready,offline];
-        // The first clip's media is there; the second's is not. Only a window over the second fails.
-        assert!(check_window_sources(&document,&track,0,50).is_ok());
-        assert!(check_window_sources(&document,&track,99,2).is_err());
-        assert!(check_window_sources(&document,&track,100,50).is_err());
-        assert!(check_sources(&document,&track).is_err());
+        // The first clip's media is there; the second's is not. Only a window over the second fails,
+        // and a window over the first asks about that one file, with the fingerprint its binding promises.
+        let first=window_media(&document,&track,0,50).unwrap();
+        assert_eq!(first, vec![super::super::media_probe::Expect { path: path.clone(), fingerprint: store::source_fingerprint(&path).unwrap() }]);
+        assert!(window_media(&document,&track,99,2).is_err());
+        assert!(window_media(&document,&track,100,50).is_err());
+        assert!(track_media(&document,&track).is_err());
         std::fs::remove_file(path).unwrap();
     }
     #[test]

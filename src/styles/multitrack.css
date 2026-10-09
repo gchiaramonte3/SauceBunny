@@ -61,7 +61,7 @@
 .cp-multitrack-media-status > [role="status"] { flex: 1 1 auto; min-width: 0; font-variant-numeric: tabular-nums; }
 /* The marked transcription range and lone In/Out marks are marks.css's
    .cp-mark-range and .cp-mark, the shape Clip and the reader draw. */
-.cp-multitrack-ruler { position: relative; display: flex; justify-content: space-between; align-items: center; gap: 8px; clip-path: inset(0 -8px); padding: 0 8px; color: var(--fg-3); font-size: var(--text-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cp-multitrack-ruler { position: relative; display: flex; justify-content: space-between; align-items: center; gap: 8px; clip-path: inset(0 -8px); padding: 0 8px; color: var(--fg-3); font-size: var(--text-sm); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; }
 .cp-multitrack-lane { border-bottom: 1px solid var(--line-1); }
 .cp-multitrack-lane-label { min-width: 0; }
 .cp-multitrack-track-switches { display: flex; align-items: center; justify-content: space-between; }
@@ -129,6 +129,8 @@
 .cp-multitrack-transcript-head h2 { margin: 0; color: var(--fg-1); font-size: var(--text-xl); font-weight: var(--weight-semibold); }
 .cp-multitrack-transcript-head > span { margin-left: auto; color: var(--fg-3); font-size: var(--text-base); }
 .cp-multitrack-info { flex: none; }
+/* Follow: the line being played stays in view. A small switch beside the info button. */
+.cp-multitrack-follow { flex: none; min-height: 24px; padding: 0 8px; font-size: var(--text-sm); }
 .cp-multitrack-search { padding: 0 20px; }
 .cp-multitrack-search input[type=search] { width: 100%; }
 .cp-multitrack-search-field { position: relative; }
@@ -158,7 +160,9 @@
 .cp-multitrack-export .cp-multitrack-error { grid-column: 1 / -1; margin: 0; }
 @media (max-width: 1050px) {
   .cp-multitrack-workspace { grid-template-columns: minmax(360px, 1fr) minmax(250px, 300px); }
-  .cp-multitrack-ruler-row, .cp-multitrack-lane { grid-template-columns: 156px minmax(0, 1fr); }
+  /* A narrower header, as the variable below reads it: the rule here once set the columns
+     directly and was overridden by the always-on one further down, so it never applied. */
+  .cp-multitrack-timeline { --multitrack-head-w: 280px; }
   .cp-multitrack-ruler span:nth-child(even) { display: none; }
   .cp-multitrack-transport { gap: 10px; padding-inline: 16px; }
   .cp-multitrack-export { padding: 16px 12px; gap: 8px; }
@@ -227,7 +231,7 @@
 .cp-multitrack-density { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .cp-multitrack-page .cp-multitrack-density .cp-select { min-height: 26px; height: 26px; font-size: var(--text-base); }
 .cp-multitrack-lanes { overscroll-behavior: contain; }
-.cp-multitrack-ruler-row, .cp-multitrack-lane { grid-template-columns: 360px minmax(0, 1fr); }
+.cp-multitrack-ruler-row, .cp-multitrack-lane { grid-template-columns: var(--multitrack-head-w, 360px) minmax(0, 1fr); }
 .cp-multitrack-lane-heading { padding: 6px 12px; }
 .cp-multitrack-lane { min-height: 30px; height: 30px; box-sizing: border-box; }
 .cp-multitrack-density-medium .cp-multitrack-lane { height: 54px; }

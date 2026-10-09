@@ -27,7 +27,7 @@ export function EditToolbar(props: Props) {
       title={`${props.source ? "Hide" : "Show"} the source text`}>Source text</button>
     <span className="cp-te-toolbar-gap" />
     <button type="button" className={`btn btn-ghost cp-te-btn${props.showRemoved ? " is-on" : ""}`} aria-pressed={props.showRemoved} onClick={props.onShowRemoved}
-      title={`${props.showRemoved ? "Hide" : "Show"} removed lines`}>Removed lines</button>
+      title={`${props.showRemoved ? "Hide" : "Show"} removed lines, and lines muted for a whole clip`}>Removed lines</button>
     <div className="cp-te-undo" role="group" aria-label="Undo history">
       <button type="button" className="cp-icon-btn" disabled={!props.undo} onClick={props.onUndo}
         aria-label={props.undo ? `Undo ${props.undo}` : "Undo"} title={props.undo ? `Undo ${props.undo} (⌘Z)` : "Nothing to undo"}><IconUndo size={15} /></button>

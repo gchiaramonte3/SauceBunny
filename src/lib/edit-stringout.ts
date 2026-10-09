@@ -3,6 +3,9 @@ import type { EditDocument } from "../bindings/EditDocument";
 import type { EditMarker } from "../bindings/EditMarker";
 import type { EditSegment } from "../bindings/EditSegment";
 import { addSource, editFromSequence, giveTracks } from "./edit-new";
+import { exchangesOf, placeExchange } from "./edit-exchanges";
+import type { TimelineWord } from "./edit-model";
+import { focusOnMarkers } from "./edit-focus";
 
 /**
  * Rules-based string-outs (plan Phase 7, step 2): one edit per person, their
@@ -47,14 +50,14 @@ export function bitesFor(document: AafDocument, trackIds: string[], rules: Strin
   return bites.filter((bite) => bite.to - bite.from >= rules.minimum);
 }
 
-const snippet = (text: string) => text.length <= 120 ? text : `${text.slice(0, 117).trimEnd()}…`;
+export const snippet = (text: string) => text.length <= 120 ? text : `${text.slice(0, 117).trimEnd()}…`;
 
 /** A bite with the edit lane (person) it belongs to. */
 export type LaneBite = StringoutBite & { lane: string };
 
 /** Every person's bites, each tagged with their edit lane, in scene order. */
 export function laneBites(document: AafDocument, rules: StringoutRules = stringoutDefaults): LaneBite[] {
-  const frame = editFromSequence(document, "", false);
+  const frame = editFromSequence(document, "");
   const source = frame.sources[0]?.id;
   if (!source) return [];
   return frame.tracks.flatMap((person) => {
@@ -71,7 +74,7 @@ export function laneBites(document: AafDocument, rules: StringoutRules = stringo
  * the scene, a bite's head never replays the previous bite's tail.
  */
 export function layoutBites(document: AafDocument, title: string, bites: LaneBite[], rules: StringoutRules = stringoutDefaults): EditDocument | null {
-  const frame = editFromSequence(document, title, false);
+  const frame = editFromSequence(document, title);
   const source = frame.sources[0]?.id;
   if (!source || !bites.length) return null;
   const rate = frame.edit_rate, fps = rate.numerator / rate.denominator, length = document.manifest.duration_frames;
@@ -95,14 +98,14 @@ export function layoutBites(document: AafDocument, title: string, bites: LaneBit
 
 /** A string-out for one person (an edit lane, by name), or null when they say nothing that qualifies. */
 export function stringoutFor(document: AafDocument, lane: string, rules: StringoutRules = stringoutDefaults): EditDocument | null {
-  const person = editFromSequence(document, "", false).tracks.find((track) => track.name === lane);
+  const person = editFromSequence(document, "").tracks.find((track) => track.name === lane);
   if (!person) return null;
   return layoutBites(document, `SO_${document.manifest.name}_${lane}`, laneBites(document, rules).filter((bite) => bite.lane === person.id), rules);
 }
 
 /** Every person in the sequence who has transcribed words, as a string-out each. */
 export function stringoutsFor(document: AafDocument, rules: StringoutRules = stringoutDefaults): EditDocument[] {
-  const lanes = editFromSequence(document, "", false).tracks.map((track) => track.name);
+  const lanes = editFromSequence(document, "").tracks.map((track) => track.name);
   return lanes.map((lane) => stringoutFor(document, lane, rules)).filter((edit): edit is EditDocument => edit !== null);
 }
 
@@ -131,37 +134,52 @@ export type EditBite = { source: string; track: string; from: number; to: number
 /**
  * A new string out from lines of an existing one's sources, in the order
  * given: same sources, lanes, rate and start timecode, so it relinks and
- * exports exactly as the one it came from. Handles, filler and a marker per
- * bite as the per-person string outs have. `lengths` bounds each source in
+ * exports exactly as the one it came from. `lengths` bounds each source in
  * seconds, so a tail handle never runs past the end of the media.
+ *
+ * Lines that run on from each other in one source are one exchange
+ * (edit-exchanges.ts): one clip over the whole back-and-forth with every
+ * participant's mic open, a marker on each line, and filler only between
+ * exchanges. `words` (every mic's, as String Outs reads them) let a listener
+ * who reacts on their own mic join the exchange and keep its edges out of
+ * any word; without them each exchange plays only its speakers.
  *
  * It is a new sequence of chunks, patched from nothing: only the people it
  * cites get record tracks, top-down in the order they first speak (Harry on
- * A1, Jane on A2, nobody else), and each bite plays on its own person's
- * track, the others filler under it.
+ * A1, Jane on A2, nobody else). Each clip is then focused on the people its
+ * markers name (edit-focus): a listener's mic stays on its track, silenced,
+ * so a crowd of open mics does not bury the line Ask chose.
  */
-export function layoutEditBites(base: EditDocument, bites: EditBite[], title: string, lengths: Record<string, number>, rules: StringoutRules = stringoutDefaults): EditDocument {
+export function layoutEditBites(base: EditDocument, bites: EditBite[], title: string, lengths: Record<string, number>, words: TimelineWord[] = [],
+  rules: StringoutRules = stringoutDefaults): EditDocument {
   const rate = base.edit_rate, fps = rate.numerator / rate.denominator;
+  const lanes = new Set(base.tracks.map((track) => track.id));
+  const lines = bites.filter((bite) => base.sources.some((source) => source.id === bite.source));
+  const exchanges = exchangesOf(lines.map((line) => ({ source: line.source, lanes: lanes.has(line.track) ? [line.track] : [], from: line.from, to: line.to })), rules.join);
+  const candidates = [...new Set(lines.map((line) => line.track).filter((lane) => lanes.has(lane)))];
   const segments: EditSegment[] = [], markers: EditMarker[] = [];
-  let at = 0;
   const last = new Map<string, { inFrame: number; outFrame: number }>();
-  bites.forEach((bite, index) => {
-    const person = base.tracks.findIndex((track) => track.id === bite.track);
-    if (!base.sources.some((source) => source.id === bite.source)) return;
-    const end = lengths[bite.source] != null ? Math.floor(lengths[bite.source] * fps) : Infinity;
-    const inFrame = Math.max(0, Math.floor((bite.from - rules.head) * fps)), outFrame = Math.min(end, Math.ceil((bite.to + rules.tail) * fps));
-    // Going forward in the same source, a head never replays the previous tail.
-    const previous = last.get(bite.source);
-    const start = previous && inFrame >= previous.inFrame ? Math.max(inFrame, previous.outFrame) : inFrame;
-    if (outFrame <= start) return;
-    if (segments.length && rules.gapFrames > 0) { segments.push({ kind: "gap", id: `gap-${index}`, frames: rules.gapFrames }); at += rules.gapFrames; }
-    const lane = base.tracks[person];
-    segments.push({ kind: "source", id: `bite-${index}`, source: bite.source, in_frame: start, out_frame: outFrame, ...(lane ? { tracks: [lane.id] } : {}) });
-    markers.push({ id: `bite-${index}`, frame: at, track: lane?.id ?? null, name: lane?.name ?? "Bite", comment: snippet(bite.text), color: MARKER_COLORS[Math.max(0, person) % MARKER_COLORS.length] });
-    at += outFrame - start;
-    last.set(bite.source, { inFrame, outFrame });
-  });
+  let at = 0;
+  for (const exchange of exchanges) {
+    const end = lengths[exchange.source] != null ? Math.floor(lengths[exchange.source] * fps) : Infinity;
+    const placed = placeExchange(exchange, { fps, head: rules.head, tail: rules.tail, end, words, candidates, previous: last.get(exchange.source) });
+    if (!placed) continue;
+    const first = exchange.members[0], length = placed.outFrame - placed.inFrame;
+    if (segments.length && rules.gapFrames > 0) { segments.push({ kind: "gap", id: `gap-${first}`, frames: rules.gapFrames }); at += rules.gapFrames; }
+    segments.push({ kind: "source", id: `bite-${first}`, source: exchange.source, in_frame: placed.inFrame, out_frame: placed.outFrame,
+      ...(placed.lanes.length ? { tracks: placed.lanes } : {}) });
+    for (const index of exchange.members) {
+      const line = lines[index], person = base.tracks.findIndex((track) => track.id === line.track), lane = base.tracks[person];
+      // Where the line's own handle would have started it, inside the exchange.
+      const offset = Math.min(length - 1, Math.max(0, Math.floor((line.from - rules.head) * fps) - placed.inFrame));
+      markers.push({ id: `bite-${index}`, frame: at + offset, track: lane?.id ?? null, name: lane?.name ?? "Bite", comment: snippet(line.text),
+        color: MARKER_COLORS[Math.max(0, person) % MARKER_COLORS.length] });
+    }
+    at += length;
+    last.set(exchange.source, placed);
+  }
+  markers.sort((a, b) => a.frame - b.frame);
   const unpatched = { ...base, tracks: base.tracks.map((lane) => ({ ...lane, featured: false })) };
-  return { ...giveTracks(unpatched, bites.filter((bite) => segments.some((segment) => segment.kind === "source" && segment.tracks?.includes(bite.track))).map((bite) => bite.track)),
-    title: title.trim() || base.title, segments, mutes: [], markers };
+  return focusOnMarkers({ ...giveTracks(unpatched, segments.flatMap((segment) => segment.kind === "source" ? segment.tracks ?? [] : [])),
+    title: title.trim() || base.title, segments, mutes: [], markers }).document;
 }

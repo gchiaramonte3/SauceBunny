@@ -133,6 +133,7 @@ describe("Ultrafast costs about six times as much, so it is never on by accident
   });
 
   it("reaches OpenAI only, and stops the moment it is turned off", async () => {
+    setCloudModel("openai", "gpt-6-astra");
     setUltrafast(true);
     expect(await tierSent("openai")).toBe("ultrafast");
     expect(await tierSent("anthropic")).toBeNull();

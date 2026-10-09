@@ -39,7 +39,8 @@ describe("useEditPlayback", () => {
     expect(engines).toHaveLength(1);
     expect(engines[0].fps).toBeCloseTo(23.976, 3);
     expect(engines[0].calls.map(([name]) => name)).toEqual(["setDocument", "setLevel", "setJoinFade", "toggle"]);
-    expect(engines[0].calls[0]).toEqual(["setDocument", document, ["T1"], {}]);
+    // No record track is quiet until something is soloed or muted.
+    expect(engines[0].calls[0]).toEqual(["setDocument", document, ["T1"], {}, []]);
     act(() => engines[0].notify({ frame: 12, rate: 1, busy: false, error: null }));
     expect(result.current).toMatchObject({ playing: true });
     expect(result.current.frames.get()).toBe(12);
@@ -63,7 +64,7 @@ describe("useEditPlayback", () => {
     rerender({ audible: ["T1"], active: true });
     expect(engines[0].calls.filter(([name]) => name === "setDocument")).toHaveLength(1);
     rerender({ audible: [], active: true });
-    expect(engines[0].calls.at(-1)).toEqual(["setDocument", document, [], {}]);
+    expect(engines[0].calls.at(-1)).toEqual(["setDocument", document, [], {}, []]);
     act(() => { result.current.setVolume(.5); result.current.setTrackLevel("T1", 2); });
     expect(engines[0].calls).toContainEqual(["setLevel", .5, false]);
     expect(engines[0].calls).toContainEqual(["setTrackLevel", "T1", 2]);

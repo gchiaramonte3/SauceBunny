@@ -85,6 +85,9 @@ const allowedProduction = new Set([
   // The glyph beside a mic owner and its click-through popover: a portal, the
   // shared dismiss hook and a count formatter. Actions are callbacks it is given.
   "src/components/MultitrackTrackStatus", "src/lib/plural", "src/components/AnchoredPopover",
+  // The playhead, held outside React state so playback redraws only the line:
+  // a tiny value store, its subscription hook, and the line that reads it.
+  "src/lib/frame-store", "src/hooks/use-frame", "src/components/MultitrackPlayhead",
 ]);
 const pureHelpers = [...allowedProduction].flatMap(path => [".tsx", ".ts"].map(extension => resolve(root, path + extension)).filter(existsSync));
 

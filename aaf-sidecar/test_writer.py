@@ -1,6 +1,7 @@
 """AAF edit writer. Generated, linked (no essence) fixtures shaped like Media
 Composer's "Link to (Don't Export) Media" exports. No media is needed."""
 from fractions import Fraction
+import math
 from pathlib import Path
 from types import SimpleNamespace
 import json
@@ -12,6 +13,9 @@ import unittest
 from unittest.mock import patch
 
 import aaf2
+from aaf2.components import Selector, SourceClip
+from aaf2.misc import TaggedValueHelper
+from picture import is_muted
 import reader
 import writer
 from graph import GraphTimeline
@@ -26,10 +30,10 @@ GROUP_IN = (1000, 6000)                          # where each segment sits in th
 PICK1, PICK2 = (0, 0), (1, 2)                    # selected recorder per audio track, per segment
 
 
-def chain(f, name, kind, channel, length, url, legacy):
+def chain(f, name, kind, channel, length, url, legacy, rate=RATE):
     """Tape SourceMob -> file SourceMob (linked MXF) -> MasterMob slot."""
     tape = f.create.SourceMob(name + ' tape'); tape.descriptor = f.create.TapeDescriptor(); f.content.mobs.append(tape)
-    ts = tape.create_timeline_slot(RATE); ts.segment = f.create.SourceClip(media_kind=kind, length=length)
+    ts = tape.create_timeline_slot(rate); ts.segment = f.create.SourceClip(media_kind=kind, length=length)
     ts['PhysicalTrackNumber'].value = channel
     fm = f.create.SourceMob(name); f.content.mobs.append(fm)
     if kind.lower().endswith('sound'):
@@ -41,20 +45,20 @@ def chain(f, name, kind, channel, length, url, legacy):
         d = f.create.CDCIDescriptor()
         for k, v in {'StoredWidth': 1920, 'StoredHeight': 1080, 'FrameLayout': 'FullFrame', 'VideoLineMap': [42, 0],
                      'ImageAspectRatio': '16/9', 'ComponentWidth': 8, 'HorizontalSubsampling': 2,
-                     'SampleRate': RATE, 'Length': length}.items():
+                     'SampleRate': rate, 'Length': length}.items():
             d[k].value = v
     loc = f.create.NetworkLocator(); loc['URLString'].value = url; d['Locator'].append(loc); fm.descriptor = d
-    fs = fm.create_timeline_slot(RATE); fs['PhysicalTrackNumber'].value = channel
+    fs = fm.create_timeline_slot(rate); fs['PhysicalTrackNumber'].value = channel
     fs.segment = tape.create_source_clip(ts.slot_id, 0, length, kind)
     return fm, fs
 
 
-def master(f, name, tracks, length, legacy=False):
+def master(f, name, tracks, length, legacy=False, rate=RATE):
     mm = f.create.MasterMob(name); f.content.mobs.append(mm)
     for kind, channel in tracks:
         kind = ('Legacy' + kind.capitalize()) if legacy else kind
-        fm, fs = chain(f, name, kind, channel, length, f'file://NEXIS/Avid%20MediaFiles/MXF/1/{name}{channel}.mxf', legacy)
-        ms = mm.create_timeline_slot(RATE); ms['PhysicalTrackNumber'].value = channel
+        fm, fs = chain(f, name, kind, channel, length, f'file://NEXIS/Avid%20MediaFiles/MXF/1/{name}{channel}.mxf', legacy, rate)
+        ms = mm.create_timeline_slot(rate); ms['PhysicalTrackNumber'].value = channel
         ms.segment = fm.create_source_clip(fs.slot_id, 0, length, kind)
     return mm
 
@@ -148,7 +152,11 @@ GROUP_LENGTH, GROUP_IN_SLOT = 4000, 100           # the group clip's length, and
 def group_clip_fixture(path):
     """V1, A1 and A2 cut from one Media Composer group clip: a CompositionMob
     whose Selectors hold every angle, one of them a submaster, as HEAT 2's V1
-    does. The show also holds a clip nothing refers to."""
+    does. The show also holds a clip nothing refers to. As in Media
+    Composer's own export, the mob the edit cuts from is the group's sync mob,
+    which names the group clip a bin shows with a `_MATCH` attribute; that
+    group clip refers back to it, and nothing on the timeline refers to the
+    group clip. A master clip's `_MATCH` names a mob the show does not hold."""
     with aaf2.open(str(path), 'w') as f:
         recs = [master(f, f'Show {r}', [('sound', 1), ('sound', 2)], 24000) for r in ('R1', 'R2', 'R3', 'R4')]
         cams = [master(f, f'Show {c}', [('picture', 1)], 24000) for c in CAMS]
@@ -165,12 +173,18 @@ def group_clip_fixture(path):
             slot.segment = selector(f, 'sound', [(m, m.slots[channel - 1].slot_id) for m in recs[:3]], channel - 1, 1000, GROUP_LENGTH)
             slot.segment['Alternates'].append(sub.create_source_clip(sub_slot.slot_id, 1000, GROUP_LENGTH, 'sound'))
             sound.append(slot.slot_id)
+        clip = f.create.CompositionMob('Show group clip'); clip['UsageCode'].value = 'Usage_LowerLevel'
+        f.content.mobs.append(clip)
+        clip.create_timeline_slot(RATE).segment = group.create_source_clip(picture.slot_id, 0, GROUP_LENGTH, 'picture')
+        match(f, group, clip.mob_id)
+        nowhere = aaf2.mobid.MobID.new()
+        match(f, recs[0], nowhere)
         comp = f.create.CompositionMob('Show edit'); comp['UsageCode'].value = 'Usage_TopLevel'; f.content.mobs.append(comp)
         total = LEAD + SEG1 + TAIL
         tc = comp.create_timeline_slot(RATE); tc.segment = f.create.Timecode(fps=24, drop=False, length=total)
         tc.segment.start = 86400 * 18; tc['PhysicalTrackNumber'].value = 1
         info = {'sequence_id': str(comp.mob_id), 'total': total, 'group': str(group.mob_id), 'submaster': str(sub.mob_id),
-                'unused': str(unused.mob_id), 'recorders': [str(m.mob_id) for m in recs], 'cams': [str(m.mob_id) for m in cams]}
+                'unused': str(unused.mob_id), 'group_clip': str(clip.mob_id), 'nowhere': str(nowhere), 'recorders': [str(m.mob_id) for m in recs], 'cams': [str(m.mob_id) for m in cams]}
         for name, kind, group_slot, number in (('V1', 'picture', picture.slot_id, 1), ('A1', 'sound', sound[0], 1),
                                                ('A2', 'sound', sound[1], 2)):
             track = comp.create_empty_sequence_slot(RATE, media_kind=kind); track['PhysicalTrackNumber'].value = number
@@ -180,6 +194,16 @@ def group_clip_fixture(path):
             track.segment.length = total
             info[name] = track.slot_id
     return info
+
+
+def match(f, mob, target):
+    """Media Composer's `_MATCH` mob attribute: a PortableObject naming another mob."""
+    reference = f.create.from_name('Avid MC Mob Reference')
+    reference['Mob Reference MobID'].value = target
+    reference['Mob Reference Position'].value = 0
+    attribute = f.create.TaggedValue('_MATCH', '__PortableObject')
+    attribute['PortableObject'].value = reference
+    mob['MobAttributeList'].append(attribute)
 
 
 class WriterTests(unittest.TestCase):
@@ -276,6 +300,87 @@ class WriterTests(unittest.TestCase):
         self.assertEqual(clips[2], [('audio', 0, 10), ('gap', 10, 30), ('audio', 40, 60)])
         self.assertEqual(clips[1], [('audio', 0, 100)])
 
+    def test_a_track_plays_its_override_across_a_segment_and_the_others_play_on(self):
+        """A record track as a layer: A1 plays A2's mic from 150 frames later
+        for the second segment alone, A2 is untouched, and the self-check
+        compares A1 against what the override asked for."""
+        path, info = self.source()
+        segments = [{'kind': 'source', 'source': 's1', 'in_frame': LEAD, 'out_frame': LEAD + 40},
+                    {'kind': 'source', 'source': 's1', 'in_frame': LEAD + 40, 'out_frame': LEAD + 100}]
+        override = {'segment_index': 1, 'track_index': 1, 'source': 's1', 'slot': info['A2'], 'in_frame': LEAD + 190}
+        result = writer.write_edit(self.request(path, info, segments, schema_version=2, overrides=[override],
+                                                mutes=[{'segment_index': 1, 'track_index': 1, 'from_frame': 50, 'to_frame': 60}]))
+        self.assertTrue(result['verify']['ok'])
+        original, out = self.read(path), self.read(result['output'], result['sequence_id'])
+        a1 = next(t for t in result['tracks'] if t['label'] == 'A1')['slot_id']
+        a2 = next(t for t in result['tracks'] if t['label'] == 'A2')['slot_id']
+        # First segment: A1 plays its own mic. Second: A2's mic from LEAD + 190, then the mute.
+        self.assertEqual(self.played(out, a1, 10), self.played(original, info['A1'], LEAD + 10))
+        self.assertEqual(self.played(out, a1, 40), self.played(original, info['A2'], LEAD + 190))
+        self.assertEqual(self.played(out, a1, 89), self.played(original, info['A2'], LEAD + 239))
+        self.assertEqual(self.played(out, a1, 92), 'gap')
+        self.assertEqual(self.played(out, a2, 45), self.played(original, info['A2'], LEAD + 45))
+        # Without version 2 the request is refused, never written as the segment's own audio.
+        with self.assertRaises(reader.ReaderError):
+            writer.write_edit(self.request(path, info, segments, overrides=[override], out='old.aaf'))
+        self.assertFalse((self.root / 'old.aaf').exists())
+        # An override past the end of its slot, or on a picture track, is refused.
+        for bad in ({**override, 'in_frame': 10 ** 6}, {**override, 'slot': info['V1']}, {**override, 'slot': 'x'}):
+            with self.assertRaises(reader.ReaderError):
+                writer.write_edit(self.request(path, info, segments, schema_version=2, overrides=[bad], out='bad.aaf'))
+
+    def test_a_track_that_carries_on_across_another_tracks_cut_is_one_clip(self):
+        """A segment boundary falls wherever ANY track was cut. A2 and V1 carry
+        on across A1's cut here, so Media Composer gets one clip on each, as
+        String Outs draws them; a deliberate Add Edit (`cuts`) stays an edit,
+        and a mute inside a joined run still lands where it was asked for."""
+        path, info = self.source()
+        segments = [{'kind': 'source', 'source': 's1', 'in_frame': LEAD, 'out_frame': LEAD + 40},
+                    {'kind': 'source', 'source': 's1', 'in_frame': LEAD + 40, 'out_frame': LEAD + 100}]
+        override = {'segment_index': 1, 'track_index': 1, 'source': 's1', 'slot': info['A2'], 'in_frame': LEAD + 190}
+
+        def pieces(result, label):
+            slot_id = next(t for t in result['tracks'] if t['label'] == label)['slot_id']
+            with aaf2.open(result['output'], 'r') as f:
+                return [(type(c).__name__ == 'Filler', c.length) for c in self.top(f).slot_at(slot_id).segment.components]
+        joined = writer.write_edit(self.request(path, info, segments, schema_version=2, overrides=[override],
+                                                mutes=[{'segment_index': 1, 'track_index': 2, 'from_frame': 10, 'to_frame': 20}]))
+        self.assertTrue(joined['verify']['ok'])
+        self.assertEqual(pieces(joined, 'A1'), [(False, 40), (False, 60)])
+        self.assertEqual(pieces(joined, 'A2'), [(False, 50), (True, 10), (False, 40)])
+        self.assertEqual(pieces(joined, 'V1'), [(False, 100)])
+        cut = writer.write_edit(self.request(path, info, segments, schema_version=2, overrides=[override],
+                                             cuts=[{'segment_index': 1, 'track_index': 2}], out='cut.aaf'))
+        self.assertTrue(cut['verify']['ok'])
+        self.assertEqual(pieces(cut, 'A2'), [(False, 40), (False, 60)])
+        for bad in ([{'segment_index': 2, 'track_index': 0}], [{'segment_index': 0, 'track_index': 3}], ['x'], 'x'):
+            with self.assertRaises(reader.ReaderError):
+                writer.write_edit(self.request(path, info, segments, cuts=bad, out='bad.aaf'))
+
+    def test_a_picture_track_plays_the_picture_of_its_audio_tracks_moment(self):
+        """Two voices from different moments, stacked: V2 carries the picture
+        of A2's moment over the second segment, the self-check compares it,
+        and a group angle cannot be chosen on a picture track."""
+        path, info = self.source()
+        segments = [{'kind': 'source', 'source': 's1', 'in_frame': LEAD, 'out_frame': LEAD + 40},
+                    {'kind': 'source', 'source': 's1', 'in_frame': LEAD + 40, 'out_frame': LEAD + 100}]
+        tracks = [{'kind': 'sound', 'physical_track_number': 1, 'source_slots': {'s1': info['A1']}},
+                  {'kind': 'sound', 'physical_track_number': 2, 'source_slots': {'s1': info['A2']}},
+                  {'kind': 'picture', 'physical_track_number': 1, 'source_slots': {'s1': info['V1']}},
+                  {'kind': 'picture', 'physical_track_number': 2, 'source_slots': {'s1': info['V1']}}]
+        overrides = [{'segment_index': 1, 'track_index': 1, 'source': 's1', 'slot': info['A2'], 'in_frame': LEAD + 200},
+                     {'segment_index': 1, 'track_index': 3, 'source': 's1', 'slot': info['V1'], 'in_frame': LEAD + 200}]
+        mutes = [{'segment_index': 0, 'track_index': 3, 'from_frame': 0, 'to_frame': 40}]
+        result = writer.write_edit(self.request(path, info, segments, tracks=tracks, schema_version=2, overrides=overrides, mutes=mutes))
+        self.assertTrue(result['verify']['ok'])
+        self.assertEqual([t['label'] for t in result['tracks']], ['A1', 'A2', 'V1', 'V2'])
+        with aaf2.open(result['output'], 'r') as f:
+            v2 = self.top(f).slot_at(result['tracks'][3]['slot_id']).segment
+            self.assertEqual([type(c).__name__ for c in v2.components][0], 'Filler')
+        with self.assertRaises(reader.ReaderError):
+            writer.write_edit(self.request(path, info, segments, tracks=tracks, schema_version=2, out='bad.aaf',
+                                           overrides=[{**overrides[1], 'choices': ['x:1']}]))
+
     def test_markers_round_trip_through_the_reader_and_the_avid_text(self):
         path, info = self.source()
         markers = [{'frame': 0, 'track_index': 1, 'name': 'Rosa', 'comment': 'Opens on the breakup\tline', 'color': 'red'},
@@ -334,30 +439,145 @@ class WriterTests(unittest.TestCase):
         with self.assertRaises(reader.ReaderError):
             writer.validate(bad)
 
-    def test_an_angle_that_cannot_be_cut_is_left_out_of_its_group_not_the_export(self):
-        # HEAT 2: one camera of the V1 multigroup is slow motion (a Motion
-        # Control time warp). Keep groups used to refuse the whole export.
-        path, info = self.source()
+    def conformed(self, path, info, *, rates=('48000/1001', '60000/1001'), real_speed=True):
+        """Segment 2's V1 group as HEAT 1's is: the cameras start on group
+        frame 6001, two more run at 47.952 and 59.94 and play at real speed
+        through Motion Control (SpeedRatio 1/2 and 2/5, placed as Media
+        Composer places them, with the attributes it gives them), and the
+        group records its angle order. With `real_speed` False the extra
+        cameras run at the group's own rate, so the same SpeedRatio is slow
+        motion."""
+        G = GROUP_IN[1] + 1
         with aaf2.open(str(path), 'rw') as f:
-            warp = f.create.OperationDef('11111111-1111-1111-1111-111111111199', 'Motion Control')
-            warp.media_kind = 'picture'; warp['NumberInputs'].value = 1; warp['IsTimeWarp'].value = True; f.dictionary.register_def(warp)
-            top = next(f.content.toplevel())
-            group = top.slot_at(info['V1']).segment.components[2]
-            slow = group['Alternates'].value[0]
-            wrapped = f.create.OperationGroup(warp, length=slow.length, media_kind='picture')
-            group['Alternates'].value = []
-            wrapped['InputSegments'].append(slow)
-            group['Alternates'].append(wrapped)
+            warp = f.create.OperationDef('6e5edbd3-5e2b-4f53-9c86-35c5b0a3a8f1', 'Motion Control')
+            warp.media_kind = 'picture'; warp['NumberInputs'].value = 1; warp['IsTimeWarp'].value = True
+            speed = f.create.ParameterDef('72559a80-24d7-11d3-8a50-0050040ef7d2', 'SpeedRatio', 'SpeedRatio', f.dictionary.lookup_typedef('Rational'))
+            f.dictionary.register_def(speed); warp['ParametersDefined'].append(speed); f.dictionary.register_def(warp)
+            group = self.top(f).slot_at(info['V1']).segment.components[2]
+            plain = [group['Selected'].value, *group['Alternates'].value]
+            for clip in plain:
+                clip.start = G
+            extra = []
+            for rate in rates:
+                ratio = Fraction(RATE) / Fraction(rate)
+                camera = master(f, f'HFR {rate}', [('picture', 1)], 60000, rate=rate if real_speed else RATE)
+                start = math.floor(G / ratio) if real_speed else G
+                phase = math.ceil(start * ratio) / ratio - start if real_speed else 0
+                clip = camera.create_source_clip(camera.slots[0].slot_id, start, math.ceil(phase + SEG2 / ratio), 'picture')
+                inner = f.create.Sequence(media_kind='picture'); inner['Components'].append(clip); inner.length = clip.length
+                # Media Composer's own (HEAT 1): the Sequence says which rate its frames are counted in.
+                tags = TaggedValueHelper(inner['ComponentAttributeList'])
+                tags['_MIXMATCH_RATE_NUM'], tags['_MIXMATCH_RATE_DENOM'] = map(int, rate.split('/'))
+                op = f.create.OperationGroup(warp, length=SEG2, media_kind='picture')
+                TaggedValueHelper(op['ComponentAttributeList'])['_MIXMATCH_MOTIONADAPTER'] = 2
+                op['InputSegments'].append(inner)
+                op['Parameters'].append(f.create.ConstantValue(speed, aaf2.rational.AAFRational(str(ratio))))
+                extra.append(op)
+                info.setdefault('hfr', []).append(str(camera.mob_id))
+            # Angle order CAM A, CAM B, 47.952, 59.94; CAM B plays.
+            group['Alternates'].value = [plain[1], *extra]
+            TaggedValueHelper(group['ComponentAttributeList'])['_AAF_SELECTED'] = 1
+        return G
+
+    def test_a_camera_conformed_to_the_group_rate_keeps_its_place_in_the_group(self):
+        # HEAT 1's V1 group has 75 angles and 45 are cameras like these. The
+        # writer used to leave each one out with a warning, so Avid opened a
+        # group of 30 (and HEAT 2's "slow-motion" camera was the same thing).
+        path, info = self.source()
+        G = self.conformed(path, info)
         result = writer.write_edit(self.request(path, info, [{'kind': 'source', 'source': 's1', 'in_frame': LEAD + SEG1 + 5, 'out_frame': LEAD + SEG1 + 50}]))
         self.assertTrue(result['verify']['ok'])
-        self.assertTrue(any('Motion Control changes speed' in w and 'left out of its group' in w for w in result['warnings']), result['warnings'])
+        self.assertGreaterEqual(result['verify']['groups_checked'], 1)
+        self.assertFalse(any('left out' in w for w in result['warnings']), result['warnings'])
         with aaf2.open(result['output'], 'r') as f:
             v1 = self.top(f).slot_at(result['tracks'][0]['slot_id']).segment.components[0]
             self.assertEqual(value_name(v1), 'Selector')
             self.assertEqual(str(v1['Selected'].value.mob_id), info['cams'][1])
-            self.assertEqual(v1['Alternates'].value, [])
-            # The slow camera's clip is not copied just because the attempt reached it.
-            self.assertIsNone(f.content.mobs.get(aaf2.mobid.MobID(info['cams'][0])))
+            self.assertEqual(v1['Selected'].value.start, G + 5)
+            alternates = v1['Alternates'].value
+            self.assertEqual([value_name(a) for a in alternates], ['SourceClip', 'OperationGroup', 'OperationGroup'])
+            self.assertEqual(str(alternates[0].mob_id), info['cams'][0])
+            self.assertEqual(writer.selected_index(v1, len(alternates)), 1)
+            # Media Composer's trim: the head rounds down and the tail rounds
+            # up, so 45 frames of 59.94 against a half-frame phase hold 113.
+            for op, mob_id, ratio, rate in zip(alternates[1:], info['hfr'], (Fraction(1, 2), Fraction(2, 5)), (48000, 60000)):
+                self.assertEqual(op.length, 45)
+                self.assertEqual(Fraction(op['Parameters'].value[0].value), ratio)
+                self.assertEqual(writer.attributes(op), (('_MIXMATCH_MOTIONADAPTER', '2'),))
+                inner = op['InputSegments'].value[0]
+                self.assertEqual(value_name(inner), 'Sequence')                       # Avid's one-clip Sequence
+                # Without its rate, Media Composer counts the camera's frames at
+                # the group's rate: wrong frames, then filler past the group's end.
+                self.assertEqual(writer.attributes(inner), (('_MIXMATCH_RATE_DENOM', '1001'), ('_MIXMATCH_RATE_NUM', str(rate))))
+                clip = inner.components[0]
+                self.assertEqual(str(clip.mob_id), mob_id)
+                first, last = math.floor((G + 5) / ratio), math.ceil((G + 50) / ratio)
+                self.assertEqual((clip.start, clip.length, inner.length), (first, last - first, last - first))
+            self.assertEqual(alternates[2]['InputSegments'].value[0].length, 113)
+            for mob_id in info['hfr']:
+                self.assertIsNotNone(f.content.mobs.get(aaf2.mobid.MobID(mob_id)))
+
+    def test_playing_another_angle_moves_the_recorded_angle_and_keeps_the_order(self):
+        # Avid lists a group's angles in order, without the one that plays,
+        # and records where that one goes (_AAF_SELECTED). A copy that plays
+        # another angle keeps the order and moves the index.
+        path, info = self.source()
+        with aaf2.open(str(path), 'rw') as f:
+            group = self.top(f).slot_at(info['A1']).segment.components[2]          # R2 plays; R1, R3 alternate
+            TaggedValueHelper(group['ComponentAttributeList'])['_AAF_SELECTED'] = 1
+        result = writer.write_edit(self.request(path, info, [{'kind': 'source', 'source': 's1', 'in_frame': LEAD + SEG1 + 20, 'out_frame': LEAD + SEG1 + 80}],
+                                                tracks=self.featured(info, 2)))
+        self.assertTrue(result['verify']['ok'])
+        with aaf2.open(result['output'], 'r') as f:
+            top = self.top(f)
+            kept, featured = (top.slot_at(t['slot_id']).segment.components[0] for t in result['tracks'])
+            for sel, plays in ((kept, 1), (featured, 2)):
+                angles, at = writer.angles_of(sel)
+                self.assertEqual(at, plays)
+                self.assertEqual([writer.angle_key(a)[0] for a in angles], info['recorders'])
+                self.assertEqual(str(sel['Selected'].value.mob_id), info['recorders'][plays])
+
+    def test_an_angle_that_changes_speed_stops_the_export_rather_than_leaving_the_group(self):
+        path, info = self.source()
+        self.conformed(path, info, rates=('48000/1001',), real_speed=False)
+        with self.assertRaises(reader.ReaderError) as caught:
+            writer.write_edit(self.request(path, info, [{'kind': 'source', 'source': 's1', 'in_frame': LEAD + SEG1 + 5, 'out_frame': LEAD + SEG1 + 50}]))
+        self.assertIn('Angle 3 of 3 in this group cannot be copied exactly', str(caught.exception))
+        self.assertIn('Motion Control changes speed', str(caught.exception))
+        self.assertFalse((self.root / 'out.aaf').exists())
+
+    def test_the_self_check_sees_an_angle_missing_from_a_group(self):
+        path, info = self.source()
+        self.conformed(path, info)
+        result = writer.write_edit(self.request(path, info, [{'kind': 'source', 'source': 's1', 'in_frame': LEAD + SEG1 + 5, 'out_frame': LEAD + SEG1 + 50}]))
+        with aaf2.open(str(path), 'r') as src, aaf2.open(result['output'], 'rw') as out:
+            sources = {'s1': SimpleNamespace(identity='source', sequence=self.top(src))}
+            top = out.content.mobs.get(aaf2.mobid.MobID(result['sequence_id']))
+            self.assertGreaterEqual(writer.check_groups(top, sources, {}), 1)
+            v1 = top.slot_at(result['tracks'][0]['slot_id']).segment.components[0]
+            v1['Alternates'].value = v1['Alternates'].value[:-1]                    # Avid would open a group of 3
+            with self.assertRaises(reader.ReaderError) as caught:
+                writer.check_groups(top, sources, {})
+            self.assertIn('do not match any group in the source', str(caught.exception))
+
+    def test_the_self_check_sees_a_conform_lose_its_rate(self):
+        """The trim of a conformed camera once dropped the `_MIXMATCH_RATE_*`
+        attributes off its Sequence. Every frame still compared equal, since the
+        reader counts by the clip's own slot, and Media Composer cut the wrong
+        frames and substituted filler: only the group check can see it."""
+        path, info = self.source()
+        self.conformed(path, info)
+        result = writer.write_edit(self.request(path, info, [{'kind': 'source', 'source': 's1', 'in_frame': LEAD + SEG1 + 5, 'out_frame': LEAD + SEG1 + 50}]))
+        with aaf2.open(str(path), 'r') as src, aaf2.open(result['output'], 'rw') as out:
+            sources = {'s1': SimpleNamespace(identity='source', sequence=self.top(src))}
+            top = out.content.mobs.get(aaf2.mobid.MobID(result['sequence_id']))
+            self.assertGreaterEqual(writer.check_groups(top, sources, {}), 1)
+            v1 = top.slot_at(result['tracks'][0]['slot_id']).segment.components[0]
+            inner = v1['Alternates'].value[-1]['InputSegments'].value[0]
+            inner['ComponentAttributeList'].value = []
+            with self.assertRaises(reader.ReaderError) as caught:
+                writer.check_groups(top, sources, {})
+            self.assertIn('do not match any group in the source', str(caught.exception))
 
     def featured(self, info, recorder, channel=1):
         """A1's layout plus a track of its own for one group angle: `recorder`
@@ -533,6 +753,74 @@ class WriterTests(unittest.TestCase):
         self.assertEqual(error.exception.code, 'verify_failed')
         self.assertIn('A1 at frame 3', str(error.exception))
 
+    def kept_mute(self, approach='B', **extra):
+        path, info = self.source()
+        segments = [{'kind': 'source', 'source': 's1', 'in_frame': LEAD, 'out_frame': LEAD + 100}]
+        mutes = [{'segment_index': 0, 'track_index': 2, 'from_frame': 10, 'to_frame': 40, 'keep': True}]
+        return path, info, self.request(path, info, segments, approach=approach, mutes=mutes, **extra)
+
+    def test_a_mute_the_editor_made_reaches_avid_as_its_muted_clip(self):
+        """Read off Media Composer's own export of two muted clips (MUTE TEST,
+        Media Composer 24.12, 2026-10-07): a Selector marked _DISABLE_CLIP_FLAG
+        1 and _AAF_SELECTED 0, selecting Filler, with the clip untouched as its
+        one alternate. Filler instead would leave nothing for Unmute Clip."""
+        for approach in ('C', 'B'):
+            with self.subTest(approach=approach):
+                path, info, request = self.kept_mute(approach, out=f'kept-{approach}.aaf')
+                kept = writer.write_edit(request)
+                plain = writer.write_edit(dict(request, mutes=[], output_path=str(self.root / f'plain-{approach}.aaf')))
+                self.assertTrue(kept['verify']['ok'])
+                # It plays as silence, exactly where it did as filler.
+                out = self.read(kept['output'], kept['sequence_id'])
+                clips = {t['physical_track_number']: [(c['kind'], c['start_frame'], c['duration_frames']) for c in t['clips']] for t in self.main(out)}
+                self.assertEqual(clips[2], [('audio', 0, 10), ('gap', 10, 30), ('audio', 40, 60)])
+                with aaf2.open(kept['output'], 'r') as f, aaf2.open(plain['output'], 'r') as g:
+                    slot = kept['tracks'][2]['slot_id']
+                    wrappers = [c for c in self.top(f).slot_at(slot).segment.components if isinstance(c, Selector) and is_muted(c)]
+                    self.assertEqual([w.length for w in wrappers], [30])
+                    wrapper = wrappers[0]
+                    # Media Composer's attributes, in its order and its encoding, byte for byte.
+                    self.assertEqual([(t.name, t['Value'].data.hex()) for t in wrapper['ComponentAttributeList'].value], [
+                        ('_DISABLE_CLIP_FLAG', '4c0007010100000000060e2b340104010101000000'),
+                        ('_AAF_SELECTED', '4c0007010100000000060e2b340104010100000000')])
+                    self.assertEqual((value_name(wrapper['Selected'].value), wrapper['Selected'].value.length, str(wrapper.media_kind)), ('Filler', 30, 'Sound'))
+                    self.assertEqual(len(wrapper['Alternates'].value), 1)
+                    # Unmuted, it plays what the edit without the mute plays there.
+                    opened = writer.VerifyTimeline.open(f, kept['sequence_id'], 10000, opened=True)
+                    unmuted = writer.VerifyTimeline.open(g, plain['sequence_id'], 10000)
+                    track = lambda timeline, result: next(t for t in timeline.tracks if t['id'] == str(result['tracks'][2]['slot_id']))
+                    self.assertEqual(list(writer.reader_frames(opened, track(opened, kept), 0, 100)),
+                                     list(writer.reader_frames(unmuted, track(unmuted, plain), 0, 100)))
+
+    def test_a_mute_nobody_made_is_still_filler(self):
+        # A track with nobody on it in a clip is filler, as an Avid track the edit never touched.
+        path, info, request = self.kept_mute()
+        request['mutes'][0].pop('keep')
+        result = writer.write_edit(request)
+        with aaf2.open(result['output'], 'r') as f:
+            parts = self.top(f).slot_at(result['tracks'][2]['slot_id']).segment.components
+            self.assertFalse(any(isinstance(c, Selector) and is_muted(c) for c in parts))
+            self.assertIn('Filler', [value_name(c) for c in parts])
+
+    def test_the_self_check_opens_a_muted_clip(self):
+        """Silence alone would pass a muted clip holding the wrong frames, or
+        nothing: Unmute in Avid would bring back something else."""
+        real = writer.mute_clip
+        def late(component, dst, kind):
+            first_clip(component).start += 1
+            return real(component, dst, kind)
+        def hollow(component, dst, kind):
+            return real(dst.create.Filler(media_kind=kind, length=component.length), dst, kind)
+        for broken in (late, hollow):
+            with self.subTest(broken=broken.__name__):
+                path, info, request = self.kept_mute(out=f'{broken.__name__}.aaf')
+                with patch.object(writer, 'mute_clip', broken):
+                    with self.assertRaises(reader.ReaderError) as error:
+                        writer.write_edit(request)
+                self.assertEqual(error.exception.code, 'verify_failed')
+                self.assertIn('(muted)', str(error.exception))
+                self.assertFalse((self.root / f'{broken.__name__}.aaf').exists())
+
     def test_requests_are_validated_strictly(self):
         path, info = self.source()
         good = [{'kind': 'source', 'source': 's1', 'in_frame': LEAD, 'out_frame': LEAD + 30}]
@@ -632,7 +920,7 @@ class WriterTests(unittest.TestCase):
                 self.assertEqual((cold['pack'], warm['pack']), ({'built': True}, {'built': False}))
                 self.assertEqual(walked, [1])                                   # only the new sequence is re-walked
                 expected = self.mob_ids(full['output']) - {full['sequence_id']}
-                self.assertTrue({info['group'], info['submaster'], *info['recorders'], *info['cams']} <= expected)
+                self.assertTrue({info['group'], info['group_clip'], info['submaster'], *info['recorders'], *info['cams']} <= expected)
                 self.assertNotIn(info['unused'], expected)
                 # The pack is exactly the closure of the group clip, nothing else from the show.
                 self.assertEqual(self.mob_ids(next(packs.glob('*.aaf'))), expected)
@@ -664,6 +952,32 @@ class WriterTests(unittest.TestCase):
         self.assertFalse((self.root / 'broken.aaf').exists())
         self.assertEqual(list(packs.glob('*.aaf')), [])
         self.assertEqual(writer.write_edit(self.packed(path, info, 'rebuilt.aaf', packs))['pack'], {'built': True})
+
+    def test_the_group_clip_avid_plays_a_group_through_travels_with_it(self):
+        """Media Composer plays a group by following its sync mob's `_MATCH` to
+        the group clip. Left behind, Avid refused to play the group: "PlayPipe::
+        DoComp() encountered a missing mob" (HEAT 1, 2026-10-07)."""
+        path, info = self.grouped()
+        for packs in (None, self.root / 'packs'):
+            with self.subTest(pack=packs is not None):
+                if packs:
+                    packs.mkdir()
+                result = writer.write_edit(self.packed(path, info, f'out-{packs is not None}.aaf', packs, 'C', None))
+                copied = self.mob_ids(result['output'])
+                self.assertIn(info['group_clip'], copied)
+                self.assertNotIn(info['nowhere'], copied)       # a chain ending outside the show, as Avid left it
+                with aaf2.open(result['output'], 'r') as f:
+                    group = f.content.mobs.get(aaf2.mobid.MobID(info['group']))
+                    self.assertEqual([str(key) for key, slot in writer.mob_references(group) if slot is None], [info['group_clip']])
+        # Break test: the same file without the group clip is refused by the self-check.
+        broken = self.root / 'broken.aaf'
+        broken.write_bytes(Path(result['output']).read_bytes())
+        drop_mob(broken, info['group_clip'])
+        with aaf2.open(str(path), 'r') as source, aaf2.open(str(broken), 'r') as out:
+            with self.assertRaises(reader.ReaderError) as error:
+                writer.check_references(out, out.content.mobs, [source])
+        self.assertEqual(error.exception.code, 'verify_failed')
+        self.assertIn(info['group_clip'], str(error.exception))
 
     def test_a_changed_source_gets_a_new_pack(self):
         path, info = self.grouped()
@@ -776,6 +1090,18 @@ class WriterTests(unittest.TestCase):
 
 def value_name(component):
     return type(component).__name__
+
+
+def first_clip(component):
+    """The first SourceClip under a component, depth first."""
+    if isinstance(component, SourceClip):
+        return component
+    children = [value_of(component, 'Selected')] + [child for key in ('InputSegments', 'Components', 'Alternates') for child in (value_of(component, key) or [])]
+    return next((found for found in (first_clip(child) for child in children if child is not None) if found is not None), None)
+
+
+def value_of(component, key):
+    return component[key].value if key in component else None
 
 
 def drop_mob(path, mob_id):

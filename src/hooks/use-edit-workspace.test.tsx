@@ -30,7 +30,7 @@ it("never cuts through overtalk: silences the speaker's own words and asks about
   const index = hook.result.current.placed.findIndex((item) => item.word.id === "anyway");
   select(index, index);
   act(() => hook.result.current.remove(false));
-  expect(commits.map((item) => item.label)).toEqual(["Silence Rosa"]);
+  expect(commits.map((item) => item.label)).toEqual(["Mute Rosa"]);
   expect(commits[0].change?.timeline?.mutes.map((mute) => mute.track)).toEqual(["rosa"]);
   expect(commits[0].change?.timeline?.segments).toEqual(timeline.segments);
   expect(hook.result.current.prompt?.result.crosstalk.map((item) => item.id)).toEqual(["yeah"]);
@@ -56,7 +56,7 @@ it("finds dead space only where no mic is audible and no word is said", () => {
 
 it("asks before an Extract takes words from a track that is not selected, and Lift leaves them", () => {
   const { hook, commits } = setup();
-  act(() => hook.result.current.toggleTrack("rosa", true));
+  act(() => hook.result.current.toggleTrack(1, true));
   act(() => hook.result.current.setMarks({ in: 1.9, out: 2.6 }));
   act(() => hook.result.current.takeMarked(true));
   expect(commits).toEqual([]);
@@ -66,12 +66,37 @@ it("asks before an Extract takes words from a track that is not selected, and Li
   expect(hook.result.current.extractGuard).toBeNull();
 });
 
+it("Lift on one track takes it there alone, and restoring a lifted word undoes the Lift around it", () => {
+  const { hook, commits } = setup();
+  act(() => hook.result.current.toggleTrack(1, true));
+  act(() => hook.result.current.setMarks({ in: 1, out: 3 }));
+  act(() => hook.result.current.takeMarked(false));
+  const lifted = commits[0].change!.timeline!;
+  expect(lifted.mutes).toEqual([]);
+  expect(lifted.segments.map((segment) => [segment.srcIn, segment.srcOut, segment.overrides ?? null])).toEqual([
+    [0, 1, null], [1, 3, { rosa: { source: null } }], [3, 10, null]]);
+  const again = setup({ ...openEdit, timeline: lifted });
+  const shown = again.hook.result.current.placed;
+  expect(shown.filter((item) => item.muted).map((item) => item.word.id)).toEqual(["so", "anyway"]);
+  // One word: it and the air after it come back; "so", still lifted, stays out.
+  const one = shown.findIndex((item) => item.word.id === "anyway");
+  again.select(one, one);
+  act(() => again.hook.result.current.remove(true));
+  expect(again.commits[0].label).toBe("Unmute Rosa");
+  expect(again.commits[0].change!.timeline!.segments.map((segment) => [segment.srcIn, segment.srcOut, segment.overrides ?? null])).toEqual([
+    [0, 1, null], [1, 1.4, { rosa: { source: null } }], [1.4, 10, null]]);
+  // Both: the whole Lift is undone and the clip is one again.
+  again.select(shown.findIndex((item) => item.word.id === "so"), one);
+  act(() => again.hook.result.current.remove(true));
+  expect(again.commits[1].change!.timeline!.segments.map((segment) => [segment.srcIn, segment.srcOut, segment.overrides ?? null])).toEqual([[0, 10, null]]);
+});
+
 it("extracts without asking when every track with words in the range is selected, or when told to", () => {
   const { hook, commits } = setup();
   act(() => hook.result.current.setMarks({ in: 1.9, out: 2.6 }));
   act(() => hook.result.current.takeMarked(true));
   expect(commits.map((item) => item.label)).toEqual(["Extract"]);
-  act(() => hook.result.current.toggleTrack("rosa", true));
+  act(() => hook.result.current.toggleTrack(1, true));
   act(() => hook.result.current.setMarks({ in: 1.9, out: 2.6 }));
   act(() => hook.result.current.takeMarked(true, true));
   expect(commits.map((item) => item.label)).toEqual(["Extract", "Extract"]);
@@ -107,21 +132,7 @@ it("retires a dead-space review once the cut changes under it", () => {
   expect(hook.result.current.dead).toBeNull();
 });
 
-it("an empty string out takes a whole source in one step", async () => {
-  const empty = { ...openEdit, timeline: { segments: [], mutes: [] } } satisfies OpenEdit;
-  const { hook, commits } = setup(empty);
-  await act(async () => hook.result.current.addWhole("s1"));
-  expect(commits).toHaveLength(1);
-  expect(commits[0].label).toBe("Add Whole Sequence");
-  const [segment] = commits[0].change!.timeline!.segments;
-  expect(segment).toMatchObject({ source: "s1", srcIn: 0, srcOut: 10 });
-  expect(hook.result.current.message).toBe("Added the whole sequence.");
-  // A source with no known length is not guessed at.
-  await act(async () => hook.result.current.addWhole("unknown"));
-  expect(commits).toHaveLength(1);
-});
-
-it("patches whoever's words are cut in to the next track down, a group angle included, and says so", () => {
+it("puts whoever's words are cut in on a record track, a group angle included, and says which", () => {
   const document = { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } },
     { id: "ana", name: "Ana", kind: "sound", source_tracks: { s1: "branch-a" }, featured: false }] } as unknown as OpenEdit["document"];
   const { hook, commits } = setup({ ...openEdit, document });
@@ -130,8 +141,8 @@ it("patches whoever's words are cut in to the next track down, a group angle inc
   expect(commits[0].change?.document?.tracks.map((track) => track.featured)).toEqual([undefined, true]);
   // The new clip plays the person whose words they are, and nobody else.
   expect(commits[0].change?.timeline?.segments).toHaveLength(2);
-  expect(commits[0].change?.timeline?.segments.at(-1)?.tracks).toEqual(["ana"]);
-  expect(hook.result.current.message).toBe("Inserted 1 word at 10. Ana is now on a track.");
+  expect(commits[0].change?.timeline?.segments.at(-1)).toMatchObject({ tracks: ["ana"], layers: { ana: 1 } });
+  expect(hook.result.current.message).toBe("Inserted 1 word at 10 on A1.");
 });
 
 const patched = { ...openEdit, document: { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } }] } as unknown as OpenEdit["document"] };
@@ -139,7 +150,7 @@ const patched = { ...openEdit, document: { tracks: [{ id: "rosa", name: "Rosa", 
 it("Insert lands at the record playhead, not at the text's caret, and parks the playhead after the new clip", () => {
   // Parked inside "later" (6-7 s): with Snap on, the splice moves to the gap before it.
   const { hook, commits, seek } = setup(patched, undefined, 6.4);
-  const take = { from: 8, to: 9, lanes: ["rosa"] };
+  const take = { in: 8, out: 9, playhead: 0, lanes: ["rosa"] };
   act(() => hook.result.current.insert("s1", [], false, take));
   const segments = commits[0].change!.timeline!.segments;
   expect(segments.map((segment) => [segment.srcIn, segment.srcOut])).toEqual([[0, 4.25], [8, 9], [4.25, 10]]);
@@ -153,18 +164,49 @@ it("Insert lands at the record playhead, not at the text's caret, and parks the 
 it("a record In mark wins over the playhead, and the edit clears the record marks", () => {
   const { hook, commits } = setup(patched, undefined, 9);
   act(() => hook.result.current.setMarks({ in: 3.5, out: null }));
-  act(() => hook.result.current.insert("s1", [], false, { from: 8, to: 9, lanes: ["rosa"] }));
+  act(() => hook.result.current.insert("s1", [], false, { in: 8, out: 9, playhead: 0, lanes: ["rosa"] }));
   expect(commits[0].change!.timeline!.segments[0].srcOut).toBeCloseTo(3.5);
   expect(hook.result.current.marks).toEqual({ in: null, out: null });
 });
 
-it("Overwrite replaces what is under the playhead for the clip's length, and the edit keeps its length", () => {
+it("Overwrite replaces what is under the playhead for the clip's length on the chosen tracks alone, and the edit keeps its length", () => {
   const { hook, commits } = setup(patched, undefined, 4);
-  act(() => hook.result.current.overwrite("s1", [], { from: 8, to: 9, lanes: ["rosa"] }));
+  act(() => hook.result.current.overwrite("s1", [], { in: 8, out: 9, playhead: 0, lanes: ["rosa"] }));
   expect(commits[0].label).toBe("Overwrite");
   const segments = commits[0].change!.timeline!.segments;
-  expect(segments.map((segment) => [segment.srcIn, segment.srcOut])).toEqual([[0, 4], [8, 9], [5, 10]]);
-  expect(hook.result.current.message).toBe("Overwrote 1.0 s at 4.");
+  // Rosa plays 8 to 9 s for that second; Dev, whose track was not chosen, keeps what he had.
+  expect(segments.map((segment) => [segment.srcIn, segment.srcOut, segment.overrides ?? null])).toEqual([
+    [0, 4, null], [4, 5, { rosa: { source: "s1", srcIn: 8 } }], [5, 10, null]]);
+  expect(hook.result.current.message).toBe("Overwrote 1.0 s at 4 on A1.");
+});
+
+it("marks decide an edit by Avid's three-point rule: the record pair wins, a lone record Out backtimes, and a missing source mark is refused", () => {
+  const shape = (change: EditChange) => change!.timeline!.segments.map((segment) => [segment.srcIn, segment.srcOut, segment.overrides ?? null]);
+  // Record In 2 and Out 3, one source mark (In 8): a one-second Overwrite from 8.
+  const pair = setup(patched, undefined, 7);
+  act(() => pair.hook.result.current.setMarks({ in: 2, out: 3 }));
+  act(() => pair.hook.result.current.overwrite("s1", [], { in: 8, out: null, playhead: 0, lanes: ["rosa"] }));
+  expect(shape(pair.commits[0].change)).toEqual([[0, 2, null], [2, 3, { rosa: { source: "s1", srcIn: 8 } }], [3, 10, null]]);
+  // Backtimed from the source Out instead: the second before 9.5.
+  const back = setup(patched, undefined, 7);
+  act(() => back.hook.result.current.setMarks({ in: 2, out: 3 }));
+  act(() => back.hook.result.current.overwrite("s1", [], { in: null, out: 9.5, playhead: 0, lanes: ["rosa"] }));
+  expect(shape(back.commits[0].change)[1]).toEqual([2, 3, { rosa: { source: "s1", srcIn: 8.5 } }]);
+  // A record Out alone: the clip ENDS there.
+  const ends = setup(patched, undefined, 0, false);
+  act(() => ends.hook.result.current.setMarks({ in: null, out: 5 }));
+  act(() => ends.hook.result.current.insert("s1", [], false, { in: 8, out: 9, playhead: 0, lanes: ["rosa"] }));
+  expect(shape(ends.commits[0].change)).toEqual([[0, 4, null], [8, 9, null], [4, 10, null]]);
+  // Nothing marked in the source and only a record In: refused, in a sentence, and nothing changes.
+  const bare = setup(patched, undefined, 0);
+  act(() => bare.hook.result.current.setMarks({ in: 2, out: null }));
+  act(() => bare.hook.result.current.insert("s1", [], false, { in: null, out: null, playhead: 4, lanes: ["rosa"] }));
+  expect(bare.commits).toHaveLength(0);
+  expect(bare.hook.result.current.message).toMatch(/^Nothing is marked in the source/);
+  // But with both record marks, the source playhead gives the start (Avid's Single-Mark Editing).
+  act(() => bare.hook.result.current.setMarks({ in: 2, out: 3 }));
+  act(() => bare.hook.result.current.overwrite("s1", [], { in: null, out: null, playhead: 4, lanes: ["rosa"] }));
+  expect(shape(bare.commits[0].change)[1]).toEqual([2, 3, { rosa: { source: "s1", srcIn: 4 } }]);
 });
 
 it("the record caret is wherever the playhead is until a range is chosen", () => {
@@ -187,27 +229,82 @@ it("an inserted group angle's own next word bounds the air kept after their line
   expect(added.srcOut).toBeCloseTo(4.525);
 });
 
-it("takes anyone off their track, the tracks below moving up, and records nothing for someone with none", () => {
-  const document = { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } },
-    { id: "ana", name: "Ana", kind: "sound", source_tracks: { s1: "branch-a" }, featured: true },
-    { id: "kai", name: "Kai", kind: "sound", source_tracks: { s1: "3" }, featured: false }] } as unknown as OpenEdit["document"];
-  const { hook, commits } = setup({ ...openEdit, document });
-  act(() => hook.result.current.untrack("rosa"));
-  act(() => hook.result.current.untrack("kai"));
-  expect(commits.map((item) => item.change?.document?.tracks.map((track) => [track.id, track.featured]) ?? null)).toEqual([
-    [["ana", true], ["rosa", false], ["kai", false]],
-    null,
-  ]);
+it("Insert puts material only on record tracks that are on, as Avid's track selectors do", () => {
+  const both = { ...openEdit, document: { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } }, { id: "dev", name: "Dev", kind: "sound", source_tracks: { s1: "2" } }] } as unknown as OpenEdit["document"] };
+  const { hook, commits } = setup(both, undefined, 9);
+  // Dev's record track off: a clip of both people lands on Rosa's alone.
+  act(() => hook.result.current.toggleTrack(1, true));
+  act(() => hook.result.current.insert("s1", [], false, { in: 8, out: 9, playhead: 0, lanes: ["rosa", "dev"] }));
+  const clip = commits[0].change!.timeline!.segments.find((segment) => segment.srcIn === 8);
+  expect(clip?.tracks).toEqual(["rosa"]);
+  // Every track it would go to off: nothing is cut in, and the editor is told why.
+  const none = setup(both, undefined, 9);
+  act(() => none.hook.result.current.toggleTrack(1, true));
+  act(() => none.hook.result.current.insert("s1", [], false, { in: 8, out: 9, playhead: 0, lanes: ["dev"], patch: { dev: 2 } }));
+  expect(none.commits).toHaveLength(0);
+  expect(none.hook.result.current.message).toMatch(/every record track it would go to is turned off/);
 });
 
-it("the patch panel puts someone on a track, and a person already there is no change", () => {
-  const document = { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" }, featured: true },
-    { id: "kai", name: "Kai", kind: "sound", source_tracks: { s1: "3" }, featured: false }] } as unknown as OpenEdit["document"];
-  const { hook, commits } = setup({ ...openEdit, document });
-  act(() => hook.result.current.patch("kai", 0));
-  act(() => hook.result.current.patch("rosa", 0));
-  expect(commits.map((item) => item.change?.document?.tracks.map((track) => [track.id, track.featured]) ?? null)).toEqual([
-    [["kai", true], ["rosa", true]],
-    null,
-  ]);
+it("a record track is a layer: an Overwrite onto it replaces whoever was on it there, and says where it went", () => {
+  const both = { ...openEdit, document: { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } }, { id: "dev", name: "Dev", kind: "sound", source_tracks: { s1: "2" } }] } as unknown as OpenEdit["document"] };
+  // Dev already plays on A2 here: putting another moment of Dev on A1 would take the A2 line away, so it is refused.
+  const doubled = setup(both, undefined, 4);
+  act(() => doubled.hook.result.current.overwrite("s1", [], { in: 8, out: 9, playhead: 0, lanes: ["dev"], patch: { dev: 1 } }));
+  expect(doubled.commits).toHaveLength(0);
+  expect(doubled.hook.result.current.message).toBe("Dev already plays on A2 there. Patch Dev to A2, or overwrite somewhere else.");
+  // Only Rosa cut in: Dev's lav patched to A1, where Rosa is. For that second A1 plays Dev, and Rosa is lifted there.
+  const rosaOnly = { ...both, timeline: { ...timeline, segments: timeline.segments.map((segment) => ({ ...segment, tracks: ["rosa"] })) } };
+  const { hook, commits } = setup(rosaOnly, undefined, 4);
+  act(() => hook.result.current.overwrite("s1", [], { in: 8, out: 9, playhead: 0, lanes: ["dev"], patch: { dev: 1 } }));
+  const middle = commits[0].change!.timeline!.segments[1];
+  expect([middle.srcIn, middle.srcOut, middle.overrides, middle.layers]).toEqual([4, 5, { rosa: { source: null }, dev: { source: "s1", srcIn: 8 } }, { dev: 1 }]);
+  expect(hook.result.current.message).toBe("Overwrote 1.0 s at 4 on A1.");
+  // Two people patched to one track: refused, in a sentence.
+  act(() => hook.result.current.insert("s1", [], false, { in: 8, out: 9, playhead: 0, lanes: ["rosa", "dev"], patch: { rosa: 2, dev: 2 } }));
+  expect(commits).toHaveLength(1);
+  expect(hook.result.current.message).toBe("Rosa and Dev are both patched to A2. Patch one of them to another track.");
+});
+
+it("will not unsilence a lifted person onto a track someone else holds there now", () => {
+  const both = { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } }, { id: "dev", name: "Dev", kind: "sound", source_tracks: { s1: "2" } }] } as unknown as OpenEdit["document"];
+  // Rosa's "later" (6-7 s) was lifted, and Dev was then overwritten onto her A1 there.
+  const layered: Timeline = { segments: [
+    { id: "a", source: "s1", srcIn: 0, srcOut: 6, tracks: ["rosa"] },
+    { id: "b", source: "s1", srcIn: 6, srcOut: 7, tracks: ["rosa"], overrides: { rosa: { source: null }, dev: { source: "s1", srcIn: 2 } }, layers: { dev: 1 } },
+    { id: "c", source: "s1", srcIn: 7, srcOut: 10, tracks: ["rosa"] },
+  ], mutes: [] };
+  const { hook, commits, select } = setup({ ...openEdit, document: both, timeline: layered });
+  const index = hook.result.current.placed.findIndex((item) => item.word.id === "later");
+  expect(hook.result.current.placed[index].muted).toBe(true);
+  select(index, index);
+  act(() => hook.result.current.remove(true));
+  expect(commits).toHaveLength(0);
+  expect(hook.result.current.message).toBe("Dev is on A1 there now, where Rosa was. Move one of them to another track first.");
+});
+
+it("refuses a patch past A64 when the edit is made, not later at the save", () => {
+  const both = { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } }, { id: "dev", name: "Dev", kind: "sound", source_tracks: { s1: "2" } }] } as unknown as OpenEdit["document"];
+  const { hook, commits } = setup({ ...openEdit, document: both });
+  act(() => hook.result.current.insert("s1", [], false, { in: 8, out: 9, playhead: 0, lanes: ["rosa"], patch: { rosa: 65 } }));
+  expect(commits).toHaveLength(0);
+  expect(hook.result.current.message).toBe("Media Composer takes 64 audio tracks, and Rosa is patched past A64. Patch fewer people, or patch them to lower tracks.");
+});
+
+it("Match Frame takes the clip under the playhead on the lowest selected track, a selected clip first, and the source frame under it", () => {
+  const both = { tracks: [{ id: "rosa", name: "Rosa", kind: "sound", source_tracks: { s1: "1" } }, { id: "dev", name: "Dev", kind: "sound", source_tracks: { s1: "2" } }] } as unknown as OpenEdit["document"];
+  // Rosa on A1 from 2 s of the source; over the same stretch Dev on A2 plays from 8 s.
+  const layered: Timeline = { segments: [{ id: "a", source: "s1", srcIn: 2, srcOut: 6, tracks: ["rosa"], overrides: { dev: { source: "s1", srcIn: 8 } }, layers: { rosa: 1, dev: 2 } }], mutes: [] };
+  const { hook } = setup({ ...openEdit, document: both, timeline: layered }, undefined, 1.5);
+  expect(hook.result.current.matchTarget()).toEqual({ source: "s1", lane: "rosa", at: 3.5, layer: 1 });
+  act(() => hook.result.current.toggleTrack(2, true));
+  expect(hook.result.current.matchTarget()).toEqual({ source: "s1", lane: "dev", at: 9.5, layer: 2 });
+  act(() => hook.result.current.toggleTrack(1, true));
+  act(() => hook.result.current.pickClip({ layer: 2, from: 0 }, false));
+  expect(hook.result.current.matchTarget()?.lane).toBe("dev");
+  // Past the end: nothing to match, and it says so.
+  const after = setup({ ...openEdit, document: both, timeline: layered }, undefined, 9);
+  let none: ReturnType<typeof after.hook.result.current.matchTarget> | undefined;
+  act(() => { none = after.hook.result.current.matchTarget(); });
+  expect(none).toBeNull();
+  expect(after.hook.result.current.message).toBe("There is no clip under the playhead to match.");
 });

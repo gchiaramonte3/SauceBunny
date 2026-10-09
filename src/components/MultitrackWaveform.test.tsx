@@ -5,6 +5,7 @@ import { multitrackFixture } from "../test/multitrack-fixture";
 import { TRACK_GAIN_MAX } from "../lib/multitrack-gain";
 import { MultitrackTimeline } from "./MultitrackTimeline";
 import { TimelineWaveform } from "./TimelineWaveform";
+import { createFrameStore } from "../lib/frame-store";
 
 const contexts = new Map<HTMLCanvasElement, { clearRect: ReturnType<typeof vi.fn>; fillRect: ReturnType<typeof vi.fn> }>();
 beforeEach(() => {
@@ -23,7 +24,7 @@ function fixture() {
   const document = multitrackFixture();
   const peaks = [[-0.25, 0.25], [-0.125, 0.125]];
   return { document, waveforms: { "track-1": peaks, "track-2": [[-0.25, 0.25]] }, waveformErrors: {},
-    selected: new Set<string>(), solo: new Set<string>(), onSelect: vi.fn(), onRename: vi.fn(), onSeek: vi.fn(), frame: 0 };
+    selected: new Set<string>(), solo: new Set<string>(), onSelect: vi.fn(), onRename: vi.fn(), onSeek: vi.fn(), frames: createFrameStore(0) };
 }
 
 it("redraws only the adjusted track from cached peaks, including attenuation, silence and reset", () => {
@@ -45,7 +46,7 @@ it("redraws only the adjusted track from cached peaks, including attenuation, si
   expect(slice).toHaveBeenCalledTimes(1);
   expect(props.waveforms["track-1"]).toEqual([[-0.25, 0.25], [-0.125, 0.125]]);
   const draws = first.clearRect.mock.calls.length;
-  view.rerender(<MultitrackTimeline {...props} levels={{ "track-1": 0 }} frame={24} />);
+  view.rerender(<MultitrackTimeline {...props} levels={{ "track-1": 0 }} frames={createFrameStore(24)} />);
   expect(first.clearRect).toHaveBeenCalledTimes(draws);
 });
 

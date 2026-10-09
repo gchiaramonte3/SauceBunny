@@ -1,4 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useFrame } from "../hooks/use-frame";
+import type { FrameStore } from "../lib/frame-store";
 import type { AafDocument } from "../bindings/AafDocument";
 import { hasTranscriptContent, passagesToReview, sequenceTimecode, trackOwner, transcriptRows, untimedTranscriptRows } from "../lib/multitrack";
 import { cueLabels, cueOwnership } from "../lib/multitrack-ownership";
@@ -16,15 +18,28 @@ import { MultitrackRunChip } from "./MultitrackRunChip";
 import { MultitrackRunDetails } from "./MultitrackRunDetails";
 import { IconInfo, IconSparkles } from "./Icons";
 import type { MultitrackRunReport } from "../hooks/use-multitrack-transcription";
-import { useAiTranscriptSearch } from "../hooks/use-ai-transcript-search";
+import { useAiTranscriptSearch, type ScanScope } from "../hooks/use-ai-transcript-search";
+import { loadAiProvider } from "../lib/ai-provider";
 
 const passageKey = (kind: string, trackId: string, id: string) => JSON.stringify([kind, trackId, id]);
+
+/** A found line's address (saucebunny://sequence/{doc}/line/{track}/{cue}) as its passage's key in this list. */
+function lineKey(address: string): string | null {
+  const found = /\/line\/([^/]+)\/([^/]+)$/.exec(address);
+  if (!found) return null;
+  try { return passageKey("cue", decodeURIComponent(found[1]), decodeURIComponent(found[2])); } catch { return null; }
+}
 
 /** A track's status glyph asked for its passages to review (`trackId`) or for Transcript info. */
 export type TranscriptRequest = { tick: number; trackId: string | null; info?: boolean };
 
-export function MultitrackTranscript({ document, frame, solo, onSeek, report, error, loading, active = true, aiModelId, initialAll = false, selectedTracks, request }: {
-  document: AafDocument; frame: number; solo: Set<string>; onSeek: (frame: number, trackId: string) => void;
+export function MultitrackTranscript({ document, frames, solo, onSeek, onMarkLine, onSolo, range, report, error, loading, active = true, aiModelId, initialAll = false, selectedTracks, request }: {
+  /** In and Out as timecode, for an AI search on a cloud provider to stay inside. */
+  range?: { from: string | null; to: string | null };
+  /** ⇧-click: mark the line In to Out (frames, Out included). ⌥-click: solo the mic it was said on. */
+  onMarkLine?: (from: number, to: number) => void; onSolo?: (trackId: string) => void;
+  /** The playhead, read as it moves: the list redraws when the line under it changes, not on every frame. */
+  document: AafDocument; frames: FrameStore; solo: Set<string>; onSeek: (frame: number, trackId: string) => void;
   report?: MultitrackRunReport | null; error?: string | null; loading?: boolean;
   active?: boolean; aiModelId?: string | null; initialAll?: boolean; selectedTracks?: ReadonlySet<string>; request?: TranscriptRequest;
 }) {
@@ -55,7 +70,9 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
     ...rows.filter((row) => !hide || !row.owned.bleed).map((row) => ({ key: passageKey("cue", row.trackId, row.id), text: `${row.owner}: ${row.text}` })),
     ...untimed.map((row) => ({ key: passageKey("untimed", row.trackId, row.id), text: `${row.owner}: ${row.text}` })),
   ], [rows, untimed, hide]);
-  const search = useAiTranscriptSearch(passages, active, aiModelId);
+  // A cloud search scans only the person tab's lines inside In to Out (decision 5 of docs/ASK-RANGE-SPEC-2026-10-06.md).
+  const scope: ScanScope = { sequence: document.id, people: person ? [person.name] : [], from: range?.from ?? null, to: range?.to ?? null, keyOf: lineKey };
+  const search = useAiTranscriptSearch(passages, active, aiModelId, scope);
   const { query, enabled, result } = search;
   const handled = useRef(0), review = useRef<HTMLElement>(null), [reviewTick, setReviewTick] = useState(0);
   useEffect(() => {
@@ -75,6 +92,24 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
   // Cue clocks and run information are fixed until their input changes. Only
   // the current-cue class follows the audition clock on each playback tick.
   const visible = useMemo(() => filtered.slice(0, limit).map((cue) => ({ ...cue, timecode: sequenceTimecode(document.manifest, cue.startFrame) })), [filtered, limit, document.manifest]);
+  // The lines under the playhead, as one string, so the list redraws only when that set changes.
+  const current = useFrame(frames, (frame) => {
+    let under = "\n";
+    for (const cue of visible) if ((!solo.size || solo.has(cue.trackId)) && frame >= cue.startFrame && frame < cue.endFrame) under += `${cue.trackId}:${cue.id}\n`;
+    return under;
+  });
+  // Follow: the line being played stays in view, the list growing to reach it when it lies past the lines shown.
+  const [follow, setFollow] = useState(true), body = useRef<HTMLDivElement>(null);
+  const playing = useFrame(frames, (frame) => {
+    if (!follow) return -1;
+    for (let index = 0; index < filtered.length; index++) {
+      const cue = filtered[index];
+      if ((!solo.size || solo.has(cue.trackId)) && frame >= cue.startFrame && frame < cue.endFrame) return index;
+    }
+    return -1;
+  });
+  useEffect(() => { if (playing >= limit) setLimit(Math.ceil((playing + 1) / 200) * 200); }, [playing, limit]);
+  useEffect(() => { if (playing >= 0) body.current?.querySelector<HTMLElement>(".cp-multitrack-cue.is-current")?.scrollIntoView?.({ block: "nearest" }); }, [playing, current]);
   const visibleUntimed = useMemo(() => filteredUntimed.slice(0, limit).map((cue) => ({ ...cue, timecode: sequenceTimecode(document.manifest, cue.chunk_start_frame) })), [filteredUntimed, limit, document.manifest]);
   const reviewCount = useMemo(() => document.transcripts.reduce((count, track) => count + passagesToReview(track), 0), [document.transcripts]);
   const reviewAll = () => { setChoice("all"); setLimit(200); search.changeQuery(""); setReviewTick((tick) => tick + 1); };
@@ -82,6 +117,7 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
   return <aside className="cp-multitrack-transcript" aria-label="Track transcripts">
     <div className="cp-multitrack-transcript-content">
     <header className="cp-multitrack-transcript-head"><h2>Transcript</h2><span>{document.transcripts.length} / {document.manifest.tracks.length} tracks</span>
+      <button type="button" className="btn btn-ghost cp-multitrack-follow" aria-pressed={follow} title="Keep the line being played in view" onClick={() => setFollow((on) => !on)}>Follow</button>
       <button type="button" className="btn-icon cp-multitrack-info" aria-label="Transcript info" title="Transcript info" aria-haspopup="dialog" onClick={() => setInfo(true)}><IconInfo size={14} /></button></header>
     <MultitrackTranscriptTabs people={people} selected={selected} panelId={panelId} onSelect={(id) => { setChoice(id === "all" ? "all" : people.find((item) => item.id === id)?.trackIds[0] ?? id); setLimit(200); search.changeQuery(""); }} />
     {/* What is always true is out of sight; what changes is a chip, and each chip's popover explains it. */}
@@ -90,7 +126,9 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
         <input type="search" aria-label="Search track transcripts" placeholder={enabled ? "Describe it, then press Return" : "Search transcripts…"} value={query} maxLength={1000} onChange={(event) => { search.changeQuery(event.target.value); setLimit(200); }} />
         {enabled && search.busy && <button type="button" className="btn btn-ghost cp-multitrack-search-stop" aria-label="Stop search" onClick={search.stop}>Stop</button>}
         <button type="button" className={`cp-icon-btn cp-multitrack-ai${enabled ? " active" : ""}`} aria-pressed={enabled} aria-label="Search with AI"
-          title="Search with AI: describe what you are looking for, then press Return. Runs on this Mac." onClick={() => search.changeEnabled(!enabled)}><IconSparkles size={14} /></button>
+          title={loadAiProvider() === "local" ? "Search with AI: describe what you are looking for, then press Return. Runs on this Mac."
+            : "Search with AI: describe what you are looking for, then press Return. Uses the cloud model chosen in Settings, on this person's lines inside In to Out."}
+          onClick={() => search.changeEnabled(!enabled)}><IconSparkles size={14} /></button>
       </div>
       {enabled && result.message && <p className="cp-multitrack-note" role={result.phase === "error" ? "alert" : "status"}>{result.message}</p>}
     </form>
@@ -100,10 +138,11 @@ export function MultitrackTranscript({ document, frame, solo, onSeek, report, er
       <MultitrackRunChip report={report} error={error} loading={loading} onInfo={() => setInfo(true)} />
     </div>}
     {bleedError && <p className="cp-multitrack-note cp-multitrack-chips-error" role="alert">{bleedError}</p>}
-    <div id={panelId} className="cp-multitrack-transcript-body" role="tabpanel" aria-label={person?.name ?? "All voices"} tabIndex={0}>
+    <div ref={body} id={panelId} className="cp-multitrack-transcript-body" role="tabpanel" aria-label={person?.name ?? "All voices"} tabIndex={0}>
       {!rows.length && !untimed.length ? <div className="cp-multitrack-transcript-empty"><h3>{loading ? "Waiting for the first completed track" : report && !report.saved ? "No new transcript was saved" : scoped.transcripts.length ? "No speech found in completed tracks" : person ? `No transcript for ${person.name} yet` : "Read each mic in context"}</h3><p>{report?.failures.length ? "Open Transcript info (i) for the failed tracks, then check those tracks and generate again." : "Check tracks, choose an engine, then generate. Saved results appear here."}</p></div>
         : !filtered.length && !filteredUntimed.length ? <p className="cp-multitrack-note">{enabled && result.phase !== "ready" ? "No matching passages found so far." : "No matching transcript text."}</p>
-          : visible.map((cue) => <button className={`cp-multitrack-cue${(!solo.size || solo.has(cue.trackId)) && frame >= cue.startFrame && frame < cue.endFrame ? " is-current" : ""}${cue.owned.bleed ? " is-bleed" : ""}`} key={`${cue.trackId}:${cue.id}`} onClick={() => onSeek(cue.startFrame, cue.trackId)}
+          : visible.map((cue) => <button className={`cp-multitrack-cue${current.includes(`\n${cue.trackId}:${cue.id}\n`) ? " is-current" : ""}${cue.owned.bleed ? " is-bleed" : ""}`} key={`${cue.trackId}:${cue.id}`} title="Click to play from here. ⇧-click marks the line, ⌥-click solos its mic"
+            onClick={(event) => { if (event.shiftKey && onMarkLine) onMarkLine(cue.startFrame, cue.endFrame - 1); else if (event.altKey && onSolo) onSolo(cue.trackId); else onSeek(cue.startFrame, cue.trackId); }}
             onContextMenu={(event) => { event.preventDefault(); setCueMenu({ trackId: cue.trackId, cueId: cue.id, owner: cue.owner, heardOn: cue.owned.heardOn, heardOnName: cue.owned.heardOn ? trackOwner(document, cue.owned.heardOn) : null, bleed: cue.owned.bleed, manual: cue.owned.manual, x: event.clientX, y: event.clientY }); }}>
             <span className="cp-multitrack-cue-meta"><strong>{cue.owner}</strong><span>{cue.timecode}</span></span><MultitrackCueText text={cue.text} words={cue.words} labels={cue.labels} />{cue.boundary_review && <span className="cp-multitrack-note">Check processing boundary</span>}{cue.suspect && <span className="cp-multitrack-note">{cue.suspect}</span>}
             {cue.owned.bleed && <span className="cp-multitrack-note">{cue.owned.heardOn ? `Heard on ${trackOwner(document, cue.owned.heardOn)}'s mic` : "Heard on another mic"}{cue.owned.manual ? " (your call)" : ""}</span>}

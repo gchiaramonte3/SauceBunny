@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { editTc } from "../lib/edit-document";
 import { placementKey, type Ghost, type TimelineParagraph as Paragraph, type PlacedWord, type TimelineLane } from "../lib/edit-model";
 import { EditGhost } from "./EditGhost";
@@ -14,7 +15,8 @@ type Props = {
   /** Removed lines that belong between two segments, when removed lines are shown. */
   ghosts: (after: number, upTo: number) => Ghost[]; onRestore: (ghost: Ghost) => void; nameOf: (id: string) => string;
   corrections: Record<string, string>; editing: string | null; onCorrect: (id: string, text: string | null) => void;
-  onMove: (direction: -1 | 1) => void; first: boolean; last: boolean;
+  /** This paragraph's index, for onMove. */
+  index: number; onMove: (paragraph: number, direction: -1 | 1) => void; first: boolean; last: boolean;
 };
 
 const dots = (gap: number) => gap >= 1.5 ? "•••" : gap >= 0.8 ? "••" : gap >= 0.35 ? "•" : "";
@@ -25,7 +27,16 @@ const dots = (gap: number) => gap >= 1.5 ? "•••" : gap >= 0.8 ? "••" :
  * out stays in place, struck through, until you restore it or hide removed
  * lines; with them hidden, a ¦ still marks where the cut is.
  */
-export function EditParagraph(props: Props) {
+/**
+ * Memoised, and that is measured rather than preemptive: playing a whole
+ * 50-mic sequence (457,253 words) cost the page 58-90% of a core, because each
+ * new word under the playhead re-rendered every word on the drawn pages. The
+ * document hands each paragraph only what concerns it (the current word,
+ * range and caret when they fall inside it, null otherwise) and stable
+ * callbacks, so a playhead step re-renders the two paragraphs it leaves and
+ * enters and nothing else.
+ */
+export const EditParagraph = memo(function EditParagraph(props: Props) {
   const { paragraph, speaker, color, fps, offset, range, caret, current } = props;
   const start = paragraph.words[0].programStart;
   const caretMark = <span className="cp-te-caret" aria-hidden="true" />;
@@ -39,7 +50,9 @@ export function EditParagraph(props: Props) {
   const between = (previous: PlacedWord | null, item: PlacedWord) => {
     // A cut at the top of the paragraph: its removed lines are drawn above it by the document.
     if (!previous) return paragraph.cutBefore && !props.ghosts(item.segment - 1, item.segment).length ? mark(item.segment) : null;
-    if (previous.segment !== item.segment) {
+    // A segment boundary this person's audio runs straight through (an edit
+    // on someone else's track alone) is no cut in their line.
+    if (previous.segment !== item.segment && previous.clip !== item.clip) {
       const ghosts = props.ghosts(previous.segment, item.segment);
       if (ghosts.length) return ghosts.map((ghost) => <EditGhost key={ghost.id} ghost={ghost} who={ghost.track !== paragraph.track ? props.nameOf(ghost.track) : null}
         color={color} onRestore={props.onRestore} />);
@@ -55,8 +68,8 @@ export function EditParagraph(props: Props) {
       <span className="cp-te-para-tc">{editTc(start, fps, props.recordStart)}</span>
       {props.sourceLabel && <span className="cp-te-para-source" title="Comes from this source">{props.sourceLabel}</span>}
       <span className="cp-te-para-moves">
-        <button type="button" className="cp-te-para-move" disabled={props.first} aria-label={`Move ${speaker.name}'s paragraph up`} title="Move up (⌥↑)" onClick={() => props.onMove(-1)}>↑</button>
-        <button type="button" className="cp-te-para-move" disabled={props.last} aria-label={`Move ${speaker.name}'s paragraph down`} title="Move down (⌥↓)" onClick={() => props.onMove(1)}>↓</button>
+        <button type="button" className="cp-te-para-move" disabled={props.first} aria-label={`Move ${speaker.name}'s paragraph up`} title="Move up (⌥↑)" onClick={() => props.onMove(props.index, -1)}>↑</button>
+        <button type="button" className="cp-te-para-move" disabled={props.last} aria-label={`Move ${speaker.name}'s paragraph down`} title="Move down (⌥↓)" onClick={() => props.onMove(props.index, 1)}>↓</button>
       </span>
     </header>
     <p className="cp-te-para-text">
@@ -76,11 +89,11 @@ export function EditParagraph(props: Props) {
                 if (event.key === "Escape") props.onCorrect(item.word.id, props.corrections[item.word.id] ?? null);
               }}
               onBlur={(event) => props.onCorrect(item.word.id, event.currentTarget.value.trim() || null)} />
-            : <span className={className} data-index={index} title={item.muted ? `Silenced (${speaker.name} only)` : undefined}>{text}</span>}
+            : <span className={className} data-index={index} title={item.muted ? `Muted (${speaker.name} only)` : undefined}>{text}</span>}
           {caret === index + 1 && props.caretAfter && caretMark}{" "}
         </span>;
       })}
       {props.last && caret === offset + paragraph.words.length && !props.caretAfter && caretMark}
     </p>
   </section>;
-}
+});

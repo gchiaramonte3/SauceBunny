@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { IconFilm, IconLink, IconScreenShare, IconPanelRight, IconFullscreen, IconVideo } from "./Icons";
+import { useEffect, useId, useRef, useState } from "react";
+import { IconFilm, IconImport, IconLink, IconScreenShare, IconPanelRight, IconFullscreen, IconVideo } from "./Icons";
 import "../styles/review-source-start.css";
 
 export type ReviewLiveSourceKind = "screen" | "window" | "region" | "ndi";
@@ -10,53 +10,67 @@ type Props = {
   onChooseLiveSource: (kind: ReviewLiveSourceKind) => void;
 };
 
-/** Source selection only. Capture and room publication keep their explicit
- * confirmation steps in the existing source settings flow. */
+const LIVE = [
+  { kind: "screen", label: "Screen", icon: IconScreenShare },
+  { kind: "window", label: "Window", icon: IconPanelRight },
+  { kind: "region", label: "Region", icon: IconFullscreen },
+  { kind: "ndi", label: "NDI", icon: IconVideo },
+] as const;
+
+/**
+ * The empty Review monitor: an empty state, not a menu. One line saying
+ * nothing is up yet, the two ways in that load something here (a file, a
+ * link), and the four live sources as tiles below a quiet rule. It replaced
+ * a bordered menu of six described rows boxed inside the monitor, which read
+ * as a settings page and repeated what the toolbar and the session panel
+ * already offer. It sits in the monitor's box, which shrinks with the
+ * window, and answers to that box (container queries in its stylesheet):
+ * the glyph, then the line under the title, give way before anything scrolls.
+ *
+ * Source selection only. Capture and room publication keep their explicit
+ * confirmation steps in the existing source settings flow.
+ */
 export function ReviewSourceStart({ inSession, onImportFile, onLoadUrl, onChooseLiveSource }: Props) {
   const [enteringLink, setEnteringLink] = useState(false);
   const [url, setUrl] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const linkButton = useRef<HTMLButtonElement>(null);
+  const id = useId();
   useEffect(() => { if (enteringLink) input.current?.focus(); }, [enteringLink]);
   const back = () => { setEnteringLink(false); requestAnimationFrame(() => linkButton.current?.focus()); };
-  const sources = [
-    { kind: "screen", label: "Screen", detail: "An entire display", icon: IconScreenShare },
-    { kind: "window", label: "Window", detail: "One application window", icon: IconPanelRight },
-    { kind: "region", label: "Region", detail: "An area you select", icon: IconFullscreen },
-    { kind: "ndi", label: "NDI", detail: "An editor or network feed", icon: IconVideo },
-  ] as const;
-  return <section className="cp-review-source-start" aria-label="Choose a review source">
-    <header>
-      <h3>{enteringLink ? "Share a link" : "What would you like to share?"}</h3>
-      <p>{enteringLink ? "Paste the video URL below." : inSession
-        ? "Choose a source for your session. Live sources preview privately before sharing."
-        : "Start with a file, a link or a live source. Your preview stays on this Mac."}</p>
-    </header>
-    {enteringLink ? <form className="cp-review-source-link" onSubmit={event => {
+  return <section className="cp-review-start" aria-label="Choose a review source">
+    <span className="cp-review-start-glyph" aria-hidden="true">{enteringLink ? <IconLink size={20} /> : <IconFilm size={20} />}</span>
+    <h3>{enteringLink ? "Paste a link" : inSession ? "Choose what the room sees" : "Nothing on screen yet"}</h3>
+    <p className="cp-review-start-line">{enteringLink ? "A video page, or a direct link to a file."
+      : inSession ? "Live sources preview privately before you share them." : "Open a file or a link, or share something live."}</p>
+    {enteringLink ? <form className="cp-review-start-link" onSubmit={event => {
       event.preventDefault();
       if (url.trim()) onLoadUrl(url.trim());
     }} onKeyDown={event => {
       event.stopPropagation();
       if (event.key === "Escape") { event.preventDefault(); back(); }
     }}>
-      <label htmlFor="review-start-url">Video URL</label>
-      <input ref={input} id="review-start-url" type="url" placeholder="https://…" required
+      <label htmlFor={`${id}-url`} className="cp-visually-hidden">Video URL</label>
+      <input ref={input} id={`${id}-url`} className="cp-input" type="url" placeholder="https://" required
         value={url} onChange={event => setUrl(event.target.value)} autoComplete="off" spellCheck={false} />
-      <div className="cp-review-source-link-actions">
+      <div className="cp-review-start-link-actions">
         <button type="button" className="btn btn-ghost" onClick={back}>Back</button>
-        <button type="submit" className="btn" disabled={!url.trim()}>Open link</button>
+        <button type="submit" className="btn btn-primary" disabled={!url.trim()}>Open link</button>
       </div>
-    </form> : <div className="cp-review-source-choices">
-      <button type="button" className="btn cp-review-source-choice" onClick={onImportFile}>
-        <span aria-hidden><IconFilm size={20} /></span><span><strong>Local file</strong>{" "}<small>A video or audio file</small></span>
-      </button>
-      <button ref={linkButton} type="button" className="btn cp-review-source-choice" onClick={() => setEnteringLink(true)}>
-        <span aria-hidden><IconLink size={20} /></span><span><strong>Link</strong>{" "}<small>Paste a video URL</small></span>
-      </button>
-      {sources.map(({ kind, label, detail, icon: Glyph }) => <button key={kind} type="button"
-        className="btn cp-review-source-choice" onClick={() => onChooseLiveSource(kind)}>
-        <span aria-hidden><Glyph size={20} /></span><span><strong>{label}</strong>{" "}<small>{detail}</small></span>
-      </button>)}
-    </div>}
+    </form> : <>
+      <div className="cp-review-start-actions">
+        <button type="button" className="btn btn-primary" onClick={onImportFile}><IconImport size={14} />Open file…</button>
+        <button ref={linkButton} type="button" className="btn btn-ghost" onClick={() => setEnteringLink(true)}><IconLink size={14} />Paste a link</button>
+      </div>
+      <div className="cp-review-start-live" role="group" aria-labelledby={`${id}-live`}>
+        <p id={`${id}-live`} className="cp-review-start-or">Or share live</p>
+        <div className="cp-review-start-tiles">
+          {LIVE.map(({ kind, label, icon: Glyph }) => <button key={kind} type="button" className="cp-review-start-tile"
+            onClick={() => onChooseLiveSource(kind)}>
+            <Glyph size={18} /><span>{label}</span>
+          </button>)}
+        </div>
+      </div>
+    </>}
   </section>;
 }

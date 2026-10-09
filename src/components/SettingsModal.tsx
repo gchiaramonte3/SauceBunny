@@ -1819,7 +1819,7 @@ export function SettingsModal(props: Props) {
               </section>
             )}
 
-            {tab === "ai-apis" && <AiApiSettings />}
+            {tab === "ai-apis" && <AiApiSettings onOpenAiSummary={() => setTab("ai-summary")} />}
             {tab === "integrations" && <PremiereSetup telemetry={props.ndiTelemetry} />}
 
             {tab === "commands" && (

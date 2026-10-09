@@ -365,7 +365,7 @@ class GraphTimeline(Timeline):
 
     def manifest(self, fingerprint):
         result = super().manifest(fingerprint)
-        result.update(schema_version=3, graph={'sequence_id': str(self.mob.mob_id),
+        result.update(schema_version=4, graph={'sequence_id': str(self.mob.mob_id),
             'sources': list(self.external.values()), 'picture_tracks': self.picture_tracks, 'markers': self.markers,
             'lanes': [{'track_id': t['id'], 'parent_track_id': t.get('parent_track_id'),
                        'branch_id': t.get('branch_id'), 'group_name': t.get('group_name'),

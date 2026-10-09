@@ -111,3 +111,25 @@ it("exports String Outs with what the string out is doing and every AAF Audio do
   expect(text).toContain("Main thread: answering");
   expect(text).toContain("CONTEXT 2 of 2");
 });
+it("a new row at a full log adds one line and leaves every other line's text alone", async () => {
+  // The log keeps the newest 1,500 rows. Keyed by position, every new row
+  // shifted every position, and React rewrote all 1,500 lines' text.
+  const rows: AafDiagnosticEvent[] = Array.from({ length: 1500 }, (_, index) => ({ ...event, id: `row-${index}`, timestamp_ms: 1_000 + index, level: "info", message: `row ${index}`, active: null }));
+  mocks.invoke.mockImplementation((command: string) => Promise.resolve(command === "aaf_diagnostics" ? { ...snapshot, events: rows } : "ok"));
+  render(<MultitrackPipeline />);
+  fireEvent.click(screen.getByLabelText("Pipeline log"));
+  await waitFor(() => expect(screen.getByText(/row 1499$/)).toBeTruthy());
+  const kept = screen.getByText(/· row 1499$/);
+  const changes: MutationRecord[] = [];
+  const observer = new MutationObserver((records) => changes.push(...records));
+  observer.observe(document.body, { subtree: true, characterData: true, childList: true });
+  act(() => receive({ payload: { ...event, id: "row-new", timestamp_ms: 9_000, level: "info", message: "row new", active: null } }));
+  await waitFor(() => expect(screen.getByText(/· row new$/)).toBeTruthy());
+  observer.disconnect();
+  // The line that was newest is the same element with the same words; the oldest left.
+  expect(kept.isConnected).toBe(true);
+  expect(kept.textContent).toMatch(/· row 1499$/);
+  expect(screen.queryByText(/· row 0$/)).toBeNull();
+  // Nothing rewrote text in place: one line came, one line went.
+  expect(changes.filter((record) => record.type === "characterData")).toHaveLength(0);
+});

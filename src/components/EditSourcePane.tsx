@@ -25,12 +25,21 @@ type Props = {
   range: [number, number] | null; onRange: (range: [number, number] | null) => void; match: string | null;
   /** Something is marked, as text or as In and Out on the source timeline. */
   canInsert: boolean;
+  /** Whose tracks an edit brings, and whether that follows the selected words or was chosen. */
+  brings?: { names: string[]; following: boolean; onFollow: () => void; onChoose: () => void };
   /** The source's In and Out (seconds), shown on its rail and, when set by I and O, on the words between them. */
   marks: { in: number | null; out: number | null };
   /** The source playhead, in frames: the head follows each frame, the text the word under it. */
   frames: FrameStore; playing: boolean; onPlay: () => void; onScrub: (seconds: number) => void; onScrubStart: () => void; onScrubEnd: () => void;
   text: EditTextStyle; onText: (style: EditTextStyle) => void; onPlace: (how: "insert" | "append" | "overwrite") => void;
 };
+
+/** "Cara", "Cara and Dev", "Cara, Dev and 12 more". */
+function listNames(names: string[]) {
+  if (names.length <= 2) return names.join(" and ");
+  if (names.length <= 3) return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
+}
 
 /**
  * The SOURCE side of source/record: one source, read-only, with its own
@@ -68,6 +77,8 @@ export function EditSourcePane(props: Props) {
   useEffect(() => {
     if (props.match) body.current?.querySelector(".cp-te-src-word.is-match")?.scrollIntoView({ block: "center" });
   }, [props.match]);
+  // The anchor is an index into THIS tab's words, so a new tab or source starts without one.
+  useEffect(() => { anchor.current = null; }, [props.tab, source.id]);
   useEffect(() => {
     if (props.playing && current) body.current?.querySelector(".cp-te-src-word.is-current")?.scrollIntoView({ block: "nearest" });
   }, [current, props.playing]);
@@ -76,6 +87,14 @@ export function EditSourcePane(props: Props) {
     return found ? Number(found.getAttribute("data-src-index")) : null;
   };
   const extend = (to: number) => props.onRange([Math.min(anchor.current ?? to, to), Math.max(anchor.current ?? to, to)]);
+  // Shift extends what is selected. With no anchor (a selection made by
+  // reveal, or none kept across a tab) it extends from the far end of the
+  // current range rather than starting over at the clicked word.
+  const anchorFor = (index: number, shift: boolean) => {
+    if (!shift) return index;
+    if (anchor.current != null) return anchor.current;
+    return range ? (index < range[0] ? range[1] : range[0]) : index;
+  };
   return <section className="cp-te-source" aria-label={`Source: ${source.short}`} style={editTextVars(props.text)}>
     <EditSourceTools source={source} fps={fps} frames={props.frames} marks={props.marks} playing={props.playing} onPlay={props.onPlay}
       onScrub={props.onScrub} onScrubStart={props.onScrubStart} onScrubEnd={props.onScrubEnd} text={props.text} onText={props.onText} />
@@ -86,7 +105,7 @@ export function EditSourcePane(props: Props) {
         if (index == null || event.button !== 0) return;
         props.onScrub(placed[index].word.start);
         if (event.altKey) { scrubbing.current = true; return; }
-        if (!event.shiftKey || anchor.current == null) anchor.current = index;
+        anchor.current = anchorFor(index, event.shiftKey);
         extend(index);
       }}
       onPointerMove={(event) => {
@@ -98,13 +117,13 @@ export function EditSourcePane(props: Props) {
       }}
       onPointerUp={() => { scrubbing.current = false; }}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && range) { event.preventDefault(); event.stopPropagation(); props.onRange(null); return; }
+        if (event.key === "Escape" && range) { event.preventDefault(); event.stopPropagation(); anchor.current = null; props.onRange(null); return; }
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();
         const step = event.key === "ArrowLeft" ? -1 : 1;
         const from = range ? (anchor.current === range[0] ? range[1] : range[0]) : -1;
         const to = Math.max(0, Math.min(count - 1, from + step));
-        if (!event.shiftKey || anchor.current == null) anchor.current = to;
+        anchor.current = anchorFor(to, event.shiftKey);
         extend(to);
       }}>
       {/* Words arrive a mic at a time; only once every mic is read does an empty pane mean nobody was transcribed. */}
@@ -131,12 +150,18 @@ export function EditSourcePane(props: Props) {
       }} />
     </div>
     <footer className="cp-te-src-foot">
+      {props.brings && <p className="cp-te-src-brings">
+        <span className="cp-te-src-brings-who">{props.brings.names.length ? `Brings ${listNames(props.brings.names)}` : "Brings no tracks"}{props.brings.following ? ", following the text" : ""}</span>
+        {props.brings.following
+          ? <button type="button" className="btn btn-ghost btn-compact" title="Turn source tracks on or off in the timeline, as Avid's track selectors" onClick={props.brings.onChoose}>Choose tracks</button>
+          : <button type="button" className="btn btn-ghost btn-compact" title="Bring the mics of whoever said the selected words" onClick={props.brings.onFollow}>Follow the text</button>}
+      </p>}
       <span className="cp-te-pane-note" aria-live="polite">{range ? `${(range[1] - range[0] + 1).toLocaleString()} selected`
         : `${inEdit.toLocaleString()}/${count.toLocaleString()}${person ? ` of ${person.name}'s words` : ""} used`}</span>
       <div className="cp-te-src-actions">
         {([["insert", "Insert", "V", "Insert at the record playhead (V)"], ["overwrite", "Overwrite", "B", "Overwrite at the record playhead (B)"], ["append", "Append", null, "Append to the end of the record"]] as const).map(([how, label, key, title]) =>
           <button key={how} type="button" className="btn btn-ghost cp-te-btn" disabled={!props.canInsert} onClick={() => props.onPlace(how)}
-            title={props.canInsert ? title : "Select words or mark In and Out in the source first"}>{label}{key && <kbd className="cp-te-kbd">{key}</kbd>}</button>)}
+            title={props.canInsert ? title : "Select words, or mark an In or an Out in the source first"}>{label}{key && <kbd className="cp-te-kbd">{key}</kbd>}</button>)}
       </div>
     </footer>
   </section>;

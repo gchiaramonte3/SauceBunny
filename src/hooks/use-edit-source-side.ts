@@ -5,6 +5,7 @@ import type { AskCitation } from "../lib/edit-ask";
 import { placeWords, type TimelineWord } from "../lib/edit-model";
 import { ALL_VOICES, firstSpeaker, sourceOrder, sourcePeople } from "../lib/edit-source-view";
 import { measure } from "../lib/pipeline";
+import { fromWords } from "../lib/edit-words-cache";
 import { alternativeLane } from "../lib/multitrack-graph";
 import type { EditSourceInfo } from "../components/EditSourcePane";
 import { useEditPlayback } from "./use-edit-playback";
@@ -15,7 +16,29 @@ export type EditMarks = { in: number | null; out: number | null };
  * else the marked time, and the lanes whose mics are on, in the sequence's
  * own track order (so they patch top-down the way the sequence has them).
  */
-export type EditSourceTake = { source: string; words: TimelineWord[]; from: number; to: number; lanes: string[] };
+/**
+ * What the source offers an edit: its marks (either may be unset, as in
+ * Avid), its playhead, the people it brings, and the record track each lands
+ * on (the patch).
+ */
+export type EditSourceTake = { source: string; words: TimelineWord[]; in: number | null; out: number | null; playhead: number; lanes: string[]; patch: Record<string, number> };
+
+/**
+ * The patch, as Avid's patch panel: each source track brought lands on a
+ * record track. One patched by hand keeps its track; the rest go top-down from
+ * A1 onto tracks nobody was patched to, so a single lav lands on A1 whoever
+ * it is, and two land on A1 and A2.
+ */
+export function patchFor(lanes: string[], chosen: Record<string, number>): Record<string, number> {
+  const taken = new Set(lanes.flatMap((lane) => chosen[lane] != null ? [chosen[lane]] : []));
+  let next = 1;
+  return Object.fromEntries(lanes.map((lane) => {
+    if (chosen[lane] != null) return [lane, chosen[lane]];
+    while (taken.has(next)) next++;
+    taken.add(next);
+    return [lane, next];
+  }));
+}
 
 /** Marks to open with, from AAF Audio's "Open in String Outs": seconds into that sequence. */
 export type EditSourceMarks = { documentId: string; in: number | null; out: number | null; tick: number };
@@ -50,12 +73,16 @@ export function useEditSourceSide({ document, sources, documents, words, colors,
   const [selectors, setSelectors] = useState<Record<string, string[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [solo, setSolo] = useState<Set<string>>(() => new Set());
+  /** Record tracks patched by hand, per source: person to track number. */
+  const [patches, setPatches] = useState<Record<string, Record<string, number>>>({});
   const source = sources.find((item) => item.id === chosen) ?? sources[0] ?? null;
   const aaf = source ? documents.get(source.id) : undefined;
   const frames = source ? Math.round(source.duration * fps) : 0;
   const whole: EditDocument = useMemo(() => ({ ...document, segments: source && frames > 0 ? [{ kind: "source", id: "whole", source: source.id, in_frame: 0, out_frame: frames }] : [], mutes: [], markers: [] }),
     [document, source, frames]);
-  const own = useMemo(() => source ? measure("String Outs", `Placing the source's words (of ${words.length.toLocaleString("en-US")})`, () => placeWords(words, { segments: [{ id: "whole", source: source.id, srcIn: 0, srcOut: source.duration }], mutes: [] })) : [], [words, source]);
+  // Kept with the word list, so a tab reopened over the same words places none.
+  const own = useMemo(() => source ? fromWords(words, `source\n${source.id}\n${source.duration}`, () => measure("String Outs", `Placing the source's words (of ${words.length.toLocaleString("en-US")})`,
+    () => placeWords(words, { segments: [{ id: "whole", source: source.id, srcIn: 0, srcOut: source.duration }], mutes: [] }))) : [], [words, source]);
   const people = useMemo(() => source ? sourcePeople(document.tracks, source.id, colors, aaf) : [], [document.tracks, source, colors, aaf]);
   const tab = source ? tabs[source.id] ?? firstSpeaker(people, own) : ALL_VOICES;
   const shown = useMemo(() => measure("String Outs", `Ordering ${own.length.toLocaleString("en-US")} source words for ${tab === ALL_VOICES ? "All voices" : "one person"}`, () => sourceOrder(own, tab)), [own, tab]);
@@ -67,15 +94,26 @@ export function useEditSourceSide({ document, sources, documents, words, colors,
     const mic = track.source_tracks[source.id];
     return mic ? [[mic, track.id] as [string, string]] : [];
   }) : []), [document.tracks, source]);
-  // Main tracks on, group alternates off. Without the sequence itself (still
-  // loading, or it failed) the lanes say which mics are angles.
-  const selected = useMemo(() => new Set(source && selectors[source.id] ? selectors[source.id]
-    : aaf ? aaf.manifest.tracks.filter((track) => !alternativeLane(aaf, track.id)).map((track) => track.id)
-    : [...laneOf].filter(([, lane]) => document.tracks.find((track) => track.id === lane)?.featured !== false).map(([mic]) => mic)), [source, selectors, aaf, laneOf, document.tracks]);
-  // The source monitor plays the source: its mics that are on, and whoever
-  // said the selected words, whatever the record has patched.
+  // Source track selectors, as Avid's: an edit brings exactly the source
+  // tracks that are on. Until the editor turns any on or off they FOLLOW THE
+  // TEXT: the mics of whoever said the selected words, or with only marks the
+  // person whose tab is read (every main mic in All voices). Every main mic
+  // on by default, as Avid loads a clip, brought a whole room into each cut:
+  // one word of Cara's became that word under all fifty people, because every
+  // lav in the room heard her.
+  const following = !source || !selectors[source.id];
+  const mains = useMemo(() => aaf ? aaf.manifest.tracks.filter((track) => !alternativeLane(aaf, track.id)).map((track) => track.id)
+    : [...laneOf].filter(([, lane]) => document.tracks.find((track) => track.id === lane)?.featured !== false).map(([mic]) => mic), [aaf, laneOf, document.tracks]);
+  const micsOf = useMemo(() => (lanes: Set<string>) => [...laneOf].filter(([, lane]) => lanes.has(lane)).map(([mic]) => mic), [laneOf]);
   const speaking = chosenWords.map((word) => word.track);
-  const audible = solo.size ? [...solo] : [...new Set([...[...laneOf].filter(([mic]) => selected.has(mic)).map(([, lane]) => lane), ...speaking])];
+  const selected = useMemo(() => new Set(!following && source ? selectors[source.id]
+    : speaking.length ? micsOf(new Set(speaking))
+    : tab !== ALL_VOICES ? micsOf(new Set([tab])) : mains),
+  // `speaking` is derived from chosenWords; the words, not the array, are what change.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [following, source, selectors, chosenWords, micsOf, tab, mains]);
+  // The source monitor plays the source: the mics that are on, whatever the record has patched.
+  const audible = solo.size ? [...solo] : [...new Set([...laneOf].filter(([mic]) => selected.has(mic)).map(([, lane]) => lane))];
   // The source's playhead moves in `playback.frames`; what draws it reads it there (use-frame).
   const playback = useEditPlayback({ document: whole, audible, active: active && !!source });
   const marks: EditMarks = chosenWords.length ? { in: Math.min(...chosenWords.map((word) => word.start)), out: Math.max(...chosenWords.map((word) => word.end)) }
@@ -119,10 +157,16 @@ export function useEditSourceSide({ document, sources, documents, words, colors,
   const mark = (edge: "in" | "out", at = playback.frames.get() / fps) => setMarks(edge === "in"
     ? { in: at, out: marks.out != null && marks.out > at ? marks.out : null }
     : { in: marks.in != null && marks.in < at ? marks.in : null, out: at });
+  // Exactly the source tracks that are on (see `selected`), in track order, and where each lands.
+  const order = aaf ? aaf.manifest.tracks.map((track) => track.id) : [...laneOf.keys()];
+  const bringing = [...new Set(order.filter((mic) => laneOf.has(mic) && selected.has(mic)).map((mic) => laneOf.get(mic)!))];
+  const patch = patchFor(bringing, source ? patches[source.id] ?? {} : {});
   return {
     mode, setMode, source, aaf, sources, choose: (id: string) => { playback.pause(); setChosen(id); },
     people, tab, setTab: (next: string) => source && setTabs((state) => ({ ...state, [source.id]: next })),
-    own, shown, range, setRange, marks, playback, laneOf, selected, expanded, solo,
+    own, shown, range, setRange, marks, playback, laneOf, selected, following, expanded, solo,
+    /** Back to source tracks that follow the selected words. */
+    followText: () => source && setSelectors((state) => { const next = { ...state }; delete next[source.id]; return next; }),
     markIn: () => mark("in"), markOut: () => mark("out"),
     clearMarks: () => setRange(null),
     clearEdge: (edge: "in" | "out") => setMarks({ ...marks, [edge]: null }),
@@ -153,16 +197,44 @@ export function useEditSourceSide({ document, sources, documents, words, colors,
       if (into.id === source?.id) void playback.seek(Math.round(line.from * fps), false); else { playback.pause(); pendingSeek.current = line.from; }
       return true;
     },
-    /** The source's contribution to an insert, or null when nothing is marked. */
-    take: (): EditSourceTake | null => {
-      if (!source || marks.in == null || marks.out == null || marks.out <= marks.in) return null;
-      // The mics that are on, and whoever said the words selected: a line
-      // chosen in someone's tab always comes with them, a group angle too.
-      const speaking = new Set(chosenWords.map((word) => word.track));
-      const order = aaf ? aaf.manifest.tracks.map((track) => track.id) : [...laneOf.keys()];
-      const lanes = [...new Set(order.filter((mic) => laneOf.has(mic) && (selected.has(mic) || speaking.has(laneOf.get(mic)!))).map((mic) => laneOf.get(mic)!))];
-      return { source: source.id, words: chosenWords, from: marks.in, to: marks.out, lanes };
+    /**
+     * Match Frame, as Avid's: the source a record clip came from, parked on the
+     * matched frame with an In marked there, that person's mic the one source
+     * track on, and patched back to the record track they came from, so V or B
+     * puts more of the same moment where it was.
+     */
+    match: (target: { source: string; lane: string; at: number; layer: number }) => {
+      const into = sources.find((item) => item.id === target.source);
+      if (!into) return false;
+      const mic = document.tracks.find((track) => track.id === target.lane)?.source_tracks[into.id];
+      setChosen(into.id);
+      setTabs((state) => ({ ...state, [into.id]: target.lane }));
+      setRanges((state) => Object.fromEntries(Object.entries(state).filter(([key]) => !key.startsWith(`${into.id}\n`))));
+      setExplicit((state) => ({ ...state, [into.id]: { in: target.at, out: null } }));
+      if (mic) setSelectors((state) => ({ ...state, [into.id]: [mic] }));
+      setPatches((state) => ({ ...state, [into.id]: { ...state[into.id], [target.lane]: target.layer } }));
+      if (into.id === source?.id) void playback.seek(Math.round(target.at * fps), false); else { playback.pause(); pendingSeek.current = target.at; }
+      return true;
     },
+    /** Whether the source has anything marked for an edit: words, an In or an Out. */
+    marked: marks.in != null || marks.out != null,
+    /**
+     * The source's contribution to an Insert or Overwrite, or null with no
+     * source. Its marks need not be a pair: which marks decide the edit is
+     * Avid's three-point rule (edit-three-point.ts), applied with the record's.
+     */
+    take: (): EditSourceTake | null => {
+      if (!source) return null;
+      return { source: source.id, words: chosenWords, in: marks.in, out: marks.out, playhead: playback.frames.get() / fps, lanes: bringing, patch };
+    },
+    /** The record track each person brought lands on. */
+    patch,
+    /** Patch a person to a record track, or back to top-down (null). */
+    setPatch: (lane: string, layer: number | null) => source && setPatches((state) => {
+      const mine = { ...state[source.id] };
+      if (layer == null) delete mine[lane]; else mine[lane] = layer;
+      return { ...state, [source.id]: mine };
+    }),
   };
 }
 

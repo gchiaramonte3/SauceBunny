@@ -1,150 +1,65 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { formatError } from "../lib/error-format";
-import { IconCheck, IconAlert } from "./Icons";
+import { useState, type CSSProperties } from "react";
+import { IconInfo } from "./Icons";
 import { AssistantAccess } from "./AssistantAccess";
-import { OpenAiSpeed } from "./OpenAiSpeed";
-import {
-  loadAiProvider, setAiProvider, loadCloudModel, setCloudModel,
-  hasApiKey, setApiKey, deleteApiKey, cloudChat,
-  DEFAULT_CLOUD_MODEL, type AiProvider, type CloudProvider,
-} from "../lib/ai-provider";
+import { CloudProviderCard, type CloudProviderInfo } from "./CloudProviderCard";
+import { loadAiProvider, setAiProvider, type AiProvider } from "../lib/ai-provider";
 
-/** Open a key-management page in the default browser. Rust validates the
- *  scheme; a failure here is not worth interrupting a settings pane for. */
-function openExternal(url: string) {
-  invoke("open_external_url", { url }).catch(() => { /* ignore */ });
-}
-
-const CLOUD: { id: CloudProvider; label: string; keyHint: string; keyUrl: string; modelHint: string }[] = [
-  { id: "anthropic", label: "Claude · Anthropic", keyHint: "sk-ant-…", keyUrl: "https://console.anthropic.com/settings/keys", modelHint: "e.g. claude-sonnet-5, claude-opus-4-8" },
-  { id: "openai", label: "ChatGPT · OpenAI", keyHint: "sk-…", keyUrl: "https://platform.openai.com/api-keys", modelHint: "e.g. gpt-4o, gpt-4o-mini" },
+const CLOUD: Record<Exclude<AiProvider, "local">, CloudProviderInfo> = {
+  anthropic: { id: "anthropic", label: "Claude · Anthropic", company: "Anthropic", keyHint: "sk-ant-…", keyUrl: "https://console.anthropic.com/settings/keys" },
+  openai: { id: "openai", label: "ChatGPT · OpenAI", company: "OpenAI", keyHint: "sk-…", keyUrl: "https://platform.openai.com/api-keys" },
+};
+const CHOICES: { id: AiProvider; label: string }[] = [
+  { id: "local", label: "Local · Qwen" }, { id: "anthropic", label: "Claude" }, { id: "openai", label: "ChatGPT" },
 ];
 
-function CloudProviderCard({ p }: { p: (typeof CLOUD)[number] }) {
-  const [present, setPresent] = useState<boolean | null>(null);
-  const [keyInput, setKeyInput] = useState("");
-  const [model, setModel] = useState(() => loadCloudModel(p.id));
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
-  // `p.id` is fixed for the life of a card — CLOUD is a module constant and the
-  // list is keyed by id, so each instance owns one provider forever. Naming the
-  // dependency is therefore a no-op at runtime and states the truth, which is
-  // better than an empty array that quietly claims this depends on nothing.
-  useEffect(() => { hasApiKey(p.id).then(setPresent).catch(() => setPresent(false)); }, [p.id]);
-
-  async function save() {
-    const k = keyInput.trim();
-    if (!k) return;
-    setBusy(true); setMsg(null);
-    try { await setApiKey(p.id, k); setKeyInput(""); setPresent(true); setMsg({ ok: true, text: "Saved to your Keychain." }); }
-    catch (e) { setMsg({ ok: false, text: formatError(e) }); }
-    finally { setBusy(false); }
-  }
-  async function remove() {
-    setBusy(true); setMsg(null);
-    try { await deleteApiKey(p.id); setPresent(false); setMsg({ ok: true, text: "Key removed." }); }
-    catch (e) { setMsg({ ok: false, text: formatError(e) }); }
-    finally { setBusy(false); }
-  }
-  async function test() {
-    setBusy(true); setMsg(null);
-    try {
-      setCloudModel(p.id, model);
-      const reply = await cloudChat(p.id, "You are a connection test.", [{ role: "user", content: "Reply with the single word OK." }]);
-      setMsg({ ok: true, text: `Connected. Replied: ${reply.trim().slice(0, 40)}` });
-    } catch (e) { setMsg({ ok: false, text: formatError(e) }); }
-    finally { setBusy(false); }
-  }
-
-  return (
-    <div className="cp-aiapi-card">
-      <div className="cp-aiapi-cardhead">
-        <span className="cp-aiapi-name">{p.label}</span>
-        {present && <span className="cp-aiapi-set"><IconCheck size={12} /> Key saved</span>}
-      </div>
-      <label className="cp-aiapi-label" htmlFor={`aiapi-key-${p.id}`}>API key</label>
-      <div className="cp-aiapi-row">
-        <input
-          id={`aiapi-key-${p.id}`}
-          type="password" className="cp-aiapi-input" value={keyInput}
-          onChange={(e) => setKeyInput(e.target.value)}
-          placeholder={present ? "•••••••••• (saved)" : p.keyHint}
-          autoComplete="off" spellCheck={false}
-        />
-        <button type="button" className="btn" disabled={busy || !keyInput.trim()} onClick={save}>Save</button>
-        {present && <button type="button" className="btn btn-ghost" disabled={busy} onClick={remove}>Remove</button>}
-      </div>
-      <label className="cp-aiapi-label" htmlFor={`aiapi-model-${p.id}`}>Model</label>
-      <div className="cp-aiapi-row">
-        <input
-          id={`aiapi-model-${p.id}`}
-          type="text" className="cp-aiapi-input" value={model}
-          onChange={(e) => setModel(e.target.value)} onBlur={() => setCloudModel(p.id, model)}
-          placeholder={DEFAULT_CLOUD_MODEL[p.id]} spellCheck={false}
-        />
-        <button type="button" className="btn btn-ghost" disabled={busy || !present} onClick={test}>Test</button>
-      </div>
-      <div className="cp-aiapi-hints">
-        <span>{p.modelHint}</span>
-        <button type="button" className="cp-aiapi-link" onClick={() => openExternal(p.keyUrl)}>Get a key ↗</button>
-      </div>
-      {p.id === "openai" && <OpenAiSpeed />}
-      {/* status for a success, alert for a failure: saving a key is a
-          deliberate act whose result the user is waiting on, and a wrong key
-          reported only in colour is reported to nobody. */}
-      {msg && (
-        <p
-          className={"cp-aiapi-msg" + (msg.ok ? " ok" : " err")}
-          role={msg.ok ? "status" : "alert"}
-        >
-          {msg.ok ? <IconCheck size={12} /> : <IconAlert size={12} />} {msg.text}
-        </p>
-      )}
-    </div>
-  );
-}
+type Props = { onOpenAiSummary: () => void };
 
 /**
- * Settings ▸ AI APIs — pick which provider the AI Summary + reader Analysis
- * features use. Local Qwen is the default (nothing leaves the Mac); Claude or
- * ChatGPT are opt-in with the user's own key (Keychain-stored). Choosing a
- * cloud provider is the consent that transcript text is sent to it.
+ * Settings ▸ AI APIs: which provider the AI features use, and that
+ * provider's settings beneath it. Local Qwen is the default (nothing leaves
+ * the Mac); Claude or ChatGPT are opt-in with the user's own key
+ * (Keychain-stored). Choosing a cloud provider is the consent that
+ * transcript text is sent to it.
+ *
+ * Both providers' cards used to show whatever was chosen, so the choice
+ * looked like tabs that did nothing. Only the chosen one is shown now; the
+ * other's key stays in the Keychain.
  */
-export function AiApiSettings() {
+export function AiApiSettings({ onOpenAiSummary }: Props) {
   const [provider, setProvider] = useState<AiProvider>(() => loadAiProvider());
   function choose(p: AiProvider) { setProvider(p); setAiProvider(p); }
+  const active = CHOICES.findIndex((choice) => choice.id === provider);
 
   return (
     <section>
       <h3 className="cp-pane-title">AI APIs</h3>
       <p className="cp-pane-sub">
-        By default, AI Summary and the reader's Analysis run the local Qwen model, so nothing
-        leaves your Mac. You can instead use Claude or ChatGPT with your own API key. The key
-        is stored in the macOS Keychain, never in plain text.
+        Choose what runs AI Summary, Analysis, and Ask and Search with AI. Local keeps everything on your Mac.
+        Claude and ChatGPT use your own API key.
       </p>
-
-      <label className="cp-aiapi-label">Use for AI features</label>
-      <div className="cp-aiapi-providers" role="radiogroup" aria-label="AI provider">
-        {(["local", "anthropic", "openai"] as AiProvider[]).map((p) => (
-          <button
-            key={p} type="button" role="radio" aria-checked={provider === p}
-            className={"cp-aiapi-choice" + (provider === p ? " active" : "")}
-            onClick={() => choose(p)}
-          >
-            {p === "local" ? "Local · Qwen" : p === "anthropic" ? "Claude" : "ChatGPT"}
-          </button>
-        ))}
+      <div className="cp-pane-row cp-aiapi-provider">
+        <div className="k">Provider<span className="desc">Used by every AI feature in the app.</span></div>
+        <div className="v">
+          <div className="cp-segmented" role="radiogroup" aria-label="AI provider"
+            style={{ "--seg-active": active, "--seg-count": CHOICES.length } as CSSProperties}>
+            {CHOICES.map((choice) => <button key={choice.id} type="button" role="radio" aria-checked={provider === choice.id}
+              className={provider === choice.id ? "active" : ""} onClick={() => choose(choice.id)}>{choice.label}</button>)}
+          </div>
+        </div>
       </div>
-      {provider !== "local" && (
-        <p className="cp-aiapi-warn">
-          <IconAlert size={13} />
-          With a cloud provider selected, the transcript text you analyze is sent to that provider each time.
-        </p>
-      )}
 
-      {CLOUD.map((p) => <CloudProviderCard key={p.id} p={p} />)}
+      {provider === "local"
+        ? <div className="cp-aiapi-card" role="group" aria-labelledby="aiapi-local-name">
+          <div className="cp-aiapi-cardhead"><span id="aiapi-local-name" className="cp-aiapi-name">Local · Qwen</span><span className="cp-aiapi-status">On this Mac</span></div>
+          <p className="cp-aiapi-note"><IconInfo size={13} /> AI features run on your Mac with the local model. Nothing is sent anywhere, and no key is needed.</p>
+          <div className="cp-pane-row">
+            <div className="k">Local model<span className="desc">Downloaded and chosen in AI Summary.</span></div>
+            <div className="v"><button type="button" className="btn btn-ghost" onClick={onOpenAiSummary}>Open AI Summary</button></div>
+          </div>
+        </div>
+        : <CloudProviderCard key={provider} p={CLOUD[provider]} />}
+
+      <p className="cp-aiapi-section">Other apps</p>
       <AssistantAccess />
     </section>
   );

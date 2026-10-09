@@ -4,16 +4,22 @@ import { MultitrackAudioCache } from "./multitrack-audio-cache";
 import { nextShuttleRate } from "./shuttle";
 import { formatError } from "./error-format";
 import { clampTrackGain } from "./multitrack-gain";
+import { AudioOutput } from "./audio-output";
 
 export type AuditionState = { frame: number; rate: number; busy: boolean; error: string | null };
 // Existing Web Audio scheduling headroom, not a readiness wait.
 const SCHEDULE_LEAD_SECONDS = 0.015;
 /** Every microphone starts on one AudioContext clock. No independent media-element clocks. */
 export class MultitrackAudio {
-  private context: AudioContext;
+  /** Made again after a long silence, a device change or a stopped clock (audio-output.ts). */
+  private output: AudioOutput;
+  private get context(): AudioContext { return this.output.context; }
   private cache: MultitrackAudioCache;
-  private master: GainNode;
+  private master!: GainNode;
   private trackLevels = new Map<string, GainNode>();
+  /** The levels asked for, kept to rebuild a new output with. */
+  private level: { volume: number; muted: boolean } | null = null;
+  private levels = new Map<string, number>();
   private voices = new Set<AudioBufferSourceNode>();
   private buffers = new Map<string, AudioBuffer>();
   private bufferStart = -1;
@@ -32,13 +38,27 @@ export class MultitrackAudio {
   private state: AuditionState = { frame: 0, rate: 0, busy: false, error: null };
   private next: { buffers: Map<string, AudioBuffer>; start: number; when: number; request: number } | null = null;
   constructor(documentId: string, private fps: number, private duration: number, private ids: string[], private notify: (state: AuditionState) => void) {
-    this.context = new AudioContext(); this.master = this.context.createGain(); this.master.connect(this.context.destination);
-    this.cache = new MultitrackAudioCache(documentId, fps, duration, this.context);
-    this.context.onstatechange = () => {
-      if (!this.closed && this.state.rate && this.context.state !== "running") {
+    this.output = new AudioOutput("AAF Audio", (context) => this.wire(context));
+    this.cache = new MultitrackAudioCache(documentId, fps, duration, () => this.context);
+  }
+  /** The master every voice plays through, on a new output, with the levels asked for so far. */
+  private wire(context: AudioContext) {
+    for (const gain of this.trackLevels.values()) gain.disconnect();
+    this.trackLevels.clear();
+    this.master = context.createGain(); this.master.connect(context.destination);
+    if (this.level) this.master.gain.value = this.level.muted ? 0 : this.level.volume;
+    context.onstatechange = () => {
+      if (!this.closed && this.state.rate && context.state !== "running") {
         this.fail(new Error("Audio output was interrupted. Press Play to resume."));
       }
     };
+  }
+  /** Before anything sounds: an output idle a minute or more, or on a device that changed, is made again. */
+  private freshen() {
+    const reason = this.output.staleness();
+    if (!reason) return;
+    this.stopVoices();
+    this.output.replace(reason);
   }
   private async resumeOutput() {
     if (this.context.state === "running") return;
@@ -58,14 +78,15 @@ export class MultitrackAudio {
     const covered = this.state.rate === 1 ? (this.next?.start ?? this.bufferStart) + this.cache.windowFrames : this.duration;
     return clampFrame(Math.min(frame, covered), this.duration);
   }
-  setLevel(volume: number, muted: boolean) { this.master.gain.value = muted ? 0 : volume; }
+  setLevel(volume: number, muted: boolean) { this.level = { volume, muted }; this.master.gain.value = muted ? 0 : volume; }
   private trackGain(id: string) {
     let gain = this.trackLevels.get(id);
-    if (!gain) { gain = this.context.createGain(); gain.connect(this.master); this.trackLevels.set(id, gain); }
+    if (!gain) { gain = this.context.createGain(); gain.gain.value = this.levels.get(id) ?? 1; gain.connect(this.master); this.trackLevels.set(id, gain); }
     return gain;
   }
   /** Audition only: change current and queued voices without seeking or decoding. */
   setTrackLevel(id: string, volume: number) {
+    this.levels.set(id, clampTrackGain(volume));
     this.trackGain(id).gain.value = clampTrackGain(volume);
   }
   setScrubbing(enabled: boolean) { this.scrubEnabled = enabled; if (!enabled) { clearTimeout(this.grainTimer); clearTimeout(this.scrubTimer); if (this.state.rate !== 1) this.stopVoices(); } }
@@ -84,7 +105,7 @@ export class MultitrackAudio {
     this.publish({ frame, rate: 0, busy: false });
   }
   suspend() { this.pause(); this.cache.clear(); this.buffers.clear(); this.bufferStart = -1; }
-  close() { this.suspend(); this.closed = true; this.context.onstatechange = null; for (const gain of this.trackLevels.values()) gain.disconnect(); this.trackLevels.clear(); void this.context.close(); }
+  close() { this.suspend(); this.closed = true; for (const gain of this.trackLevels.values()) gain.disconnect(); this.trackLevels.clear(); this.output.close(); }
   /** Decode the parked window plus one look-ahead silently. No context resume,
    * voices or playhead movement; Play reuses pending/completed cache entries. */
   async warm(frame: number) {
@@ -102,6 +123,7 @@ export class MultitrackAudio {
     if (this.state.rate || this.state.busy) this.pause();
     this.publish({ frame: clampFrame(frame, this.duration) });
     if (!this.scrubEnabled) return;
+    this.freshen();
     // Silent warming does not unlock Web Audio. The actual pointer gesture
     // must resume it even when PCM is already cached, using the latest frame.
     if (this.scrubEnabled && this.context.state !== "running") {
@@ -132,7 +154,7 @@ export class MultitrackAudio {
   }
   private hasBuffers(frame: number) { return this.cache.start(frame) === this.bufferStart && this.ids.every((id) => this.buffers.has(id)); }
   async seek(frame: number, rate = 0, soundScrub = true) {
-    this.pause(false); const target = clampFrame(frame, this.duration), request = ++this.request;
+    this.pause(false); this.freshen(); const target = clampFrame(frame, this.duration), request = ++this.request;
     this.requestedRate = rate;
     this.publish({ frame: target, error: null });
     try {
@@ -191,6 +213,14 @@ export class MultitrackAudio {
   }
   private tick = () => {
     if (!this.state.rate || this.state.busy || this.closed) return;
+    // A clock that has stopped plays nothing and says nothing: make the output again and carry on.
+    if (this.output.stalled()) {
+      const at = this.currentFrame(), rate = this.state.rate;
+      this.output.replace("its clock stopped while playing");
+      void this.seek(at, rate);
+      return;
+    }
+    this.output.touch();
     const frame = this.currentFrame(); this.publish({ frame });
     if (this.next?.request === this.request && this.context.currentTime >= this.next.when) {
       const next = this.next; this.next = null; this.buffers = next.buffers; this.bufferStart = next.start;
@@ -218,6 +248,7 @@ export class MultitrackAudio {
     if (!this.scrubEnabled || !this.hasBuffers(frame) || this.context.state !== "running") return;
     const source = frame / this.fps, plan = planGrain(this.grainState, performance.now(), source, this.duration / this.fps);
     if (!plan) return;
+    this.output.touch();
     const offset = Math.max(0, plan.offsetSec - this.bufferStart / this.fps), when = this.context.currentTime;
     for (const id of this.ids) { const buffer = this.buffers.get(id); if (buffer) this.voice(id, buffer, when, offset, Math.min(plan.durationSec, buffer.duration - offset), plan.gain / Math.max(1, this.ids.length), plan.fadeSec); }
     this.grainState = { lastFiredAtMs: performance.now(), lastSourceSec: source };

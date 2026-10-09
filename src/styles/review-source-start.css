@@ -1,22 +1,111 @@
-/* Review's empty monitor uses the same type, controls and neutral surfaces as
-   the surrounding app. No changes to Clip's first-run or resume experience. */
-.cp-empty.cp-empty-custom { padding: 24px; box-sizing: border-box; overflow: auto; }
-.cp-review-source-start { width: min(100%, 520px); flex-shrink: 0; margin: auto; text-align: left; }
-.cp-review-source-start header { margin-bottom: 24px; }
-.cp-empty .cp-review-source-start h3 { font-size: var(--text-2xl); }
-.cp-review-source-start p { margin: 8px 0 0; color: var(--fg-3); font-size: var(--text-base); line-height: var(--leading-normal); }
-.cp-review-source-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.cp-review-source-choice.btn { width: 100%; min-width: 0; min-height: 66px; height: auto; display: flex; justify-content: flex-start; gap: 14px; padding: 14px 16px; text-align: left; white-space: normal; text-transform: none; letter-spacing: normal; }
-.cp-review-source-choice > span:first-child { display: flex; color: var(--fg-3); }
-.cp-review-source-choice > span:last-child { min-width: 0; }
-.cp-review-source-choice strong { display: block; font-size: var(--text-md); font-weight: var(--weight-semibold); }
-.cp-review-source-choice small { display: block; margin-top: 3px; font-size: var(--text-sm); color: var(--fg-3); font-weight: normal; line-height: var(--leading-snug); }
-.cp-review-source-link { display: grid; gap: 10px; }
-.cp-review-source-link label { color: var(--fg-2); font-size: var(--text-base); }
-.cp-review-source-link input { width: 100%; min-width: 0; box-sizing: border-box; }
-.cp-review-source-link-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 8px; }
-@media (max-width: 900px) {
-  .cp-empty.cp-empty-custom { padding: 16px; }
-  .cp-review-source-start header { margin-bottom: 16px; }
-  .cp-review-source-choice.btn { padding: 10px 12px; gap: 10px; }
+/* Review's empty monitor (ReviewSourceStart.tsx): an empty state, centred on
+   the monitor's own canvas with nothing boxed around it. A glyph, one line,
+   the two ways in that load something here, and the live sources as tiles
+   under a quiet rule. It lives in the monitor's 16:9 box, which shrinks with
+   the window, so it answers to THAT box through container queries rather
+   than to the viewport: the glyph, then the line, then the title give way,
+   and the tiles fold into a row of chips, before anything has to scroll.
+   No changes to Clip's first-run or resume experience. */
+.cp-empty.cp-empty-custom {
+  padding: 24px;
+  box-sizing: border-box;
+  overflow: auto;
+  container: cp-review-empty / size;
+}
+.cp-review-start {
+  margin: auto;
+  flex-shrink: 0;
+  width: min(100%, 380px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.cp-review-start-glyph {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-lg);
+  background: var(--bg-2);
+  color: var(--fg-3);
+}
+.cp-empty .cp-review-start h3 { font-size: var(--text-3xl); line-height: var(--leading-tight); }
+.cp-review-start-line { margin: 6px 0 0; font-size: var(--text-md); line-height: var(--leading-normal); color: var(--fg-4); }
+.cp-review-start-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+.cp-review-start-actions .btn { height: 32px; padding: 0 14px; }
+
+.cp-review-start-live { width: 100%; margin-top: 22px; }
+/* "Or share live" between two hairlines. */
+.cp-review-start-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+  font-size: var(--text-base);
+  color: var(--fg-5);
+}
+.cp-review-start-or::before,
+.cp-review-start-or::after { content: ""; flex: 1; height: 1px; background: var(--line-1); }
+.cp-review-start-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.cp-review-start-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  height: 68px;
+  padding: 0 6px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-card);
+  background: var(--bg-2);
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: background-color var(--dur-instant) var(--ease-out), border-color var(--dur-instant) var(--ease-out), color var(--dur-instant) var(--ease-out);
+}
+.cp-review-start-tile:hover { background: var(--bg-3); border-color: var(--line-2); color: var(--fg-1); }
+.cp-review-start-tile:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; color: var(--fg-1); }
+.cp-review-start-tile span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.cp-review-start-link { display: grid; gap: 10px; width: 100%; margin-top: 18px; }
+.cp-review-start-link input { width: 100%; min-width: 0; box-sizing: border-box; }
+.cp-review-start-link-actions { display: flex; justify-content: center; gap: 8px; }
+
+/* Narrow: two tiles to a row. */
+@container cp-review-empty (max-width: 360px) {
+  .cp-review-start-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* Short: the glyph goes first. Container sizes are its content box, inside
+   the 24px padding; the whole composition is about 290px tall. */
+@container cp-review-empty (max-height: 300px) {
+  .cp-review-start-glyph { display: none; }
+}
+/* Shorter: the line under the title goes, and the tiles become chips. */
+@container cp-review-empty (max-height: 240px) {
+  .cp-review-start-line { display: none; }
+  .cp-review-start-actions { margin-top: 12px; }
+  .cp-review-start-live { margin-top: 14px; }
+  .cp-review-start-or { margin-bottom: 8px; }
+  .cp-review-start-tile { flex-direction: row; gap: 6px; height: 32px; border-radius: var(--r-md); }
+  .cp-review-start-tile svg { width: 14px; height: 14px; }
+}
+/* Shorter still: the title goes too. */
+@container cp-review-empty (max-height: 170px) {
+  .cp-empty .cp-review-start h3 { display: none; }
+  .cp-review-start-actions { margin-top: 0; }
+}
+/* Shortest, or short and narrow enough that the chips take two rows: what
+   remains is the two actions. The live sources are still one click away in
+   the session panel's "Choose live source…". */
+@container cp-review-empty (max-height: 130px) or ((max-width: 360px) and (max-height: 200px)) {
+  .cp-review-start-live { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-review-start-tile { transition: none; }
 }

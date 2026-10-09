@@ -11,7 +11,10 @@
 //! folder. What only the running app knows (the playhead, the selection,
 //! what is open) is not here.
 pub mod address;
+pub mod conversations;
+pub mod cuts;
 mod files;
+pub mod rows;
 mod sequences;
 mod string_outs;
 pub mod timecode;
@@ -71,17 +74,28 @@ pub struct Line {
     /// owner's own, or when the mics were never measured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bleed_from: Option<String>,
+    /// Where it sits in the sequence, in frames from its start, in and out.
+    #[serde(skip)]
+    pub span: [i64; 2],
+    /// How many other mics carried the same words at the same moment and were
+    /// folded into this one (`sequences::fold_copies`); omitted when none.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub copies: usize,
 }
+
+fn is_zero(count: &usize) -> bool { *count == 0 }
 
 /// The stores, with AAF Audio documents kept parsed between calls (one can
 /// run to hundreds of megabytes) until the file on disk changes.
 pub struct Context {
     pub roots: Roots,
     documents: Mutex<HashMap<String, (std::time::SystemTime, Arc<AafDocument>)>>,
+    /// The short line ids handed to a model, for turning its citations back into addresses.
+    pub ids: rows::LineIds,
 }
 
 impl Context {
-    pub fn new(roots: Roots) -> Self { Self { roots, documents: Mutex::new(HashMap::new()) } }
+    pub fn new(roots: Roots) -> Self { Self { roots, documents: Mutex::new(HashMap::new()), ids: rows::LineIds::default() } }
 
     /// An AAF Audio document by id, re-read only when its file has changed.
     /// The bleed resolver's answer for a document, from the app's cache in its
@@ -117,19 +131,60 @@ impl Context {
 }
 
 /// How to find one of several things a model may name by id, address or name.
+/// Names compare without case or accents; a name that matches nothing exactly
+/// or in part is taken when one name alone is a close spelling of it (a
+/// model hears "Jillio" and writes "Jilio"), and otherwise the miss names the
+/// closest, so the model can ask again with the right one.
 pub(crate) fn pick<'a, T>(items: &'a [T], wanted: &str, id: impl Fn(&T) -> &str, name: impl Fn(&T) -> &str, kind: &str) -> Result<&'a T, AppError> {
     let key = wanted.trim();
     if let Some(found) = items.iter().find(|item| id(item) == key) { return Ok(found); }
-    let lower = key.to_lowercase();
-    let exact: Vec<&T> = items.iter().filter(|item| name(item).to_lowercase() == lower).collect();
+    let lower = fold(key);
+    let exact: Vec<&T> = items.iter().filter(|item| fold(name(item)) == lower).collect();
     if exact.len() == 1 { return Ok(exact[0]); }
-    let partial: Vec<&T> = items.iter().filter(|item| name(item).to_lowercase().contains(&lower)).collect();
+    let partial: Vec<&T> = items.iter().filter(|item| fold(name(item)).contains(&lower)).collect();
     match (exact.len(), partial.len()) {
         (0, 1) => Ok(partial[0]),
-        (0, 0) => Err(AppError::not_found(format!("No {kind} called \"{key}\". The {kind}s are: {}.", list_names(items.iter().map(&name))))),
+        (0, 0) => {
+            // Close spellings: within two edits (one for a name of four letters or fewer).
+            let mut near: Vec<(usize, &T)> = items.iter().map(|item| (distance(&fold(name(item)), &lower), item)).collect();
+            near.sort_by_key(|(edits, _)| *edits);
+            let reach = if lower.chars().count() <= 4 { 1 } else { 2 };
+            // A different number is a different thing: "Heat 3" is not HEAT 2, and "P21" is not P2.
+            let numbers = |text: &str| text.chars().filter(char::is_ascii_digit).collect::<String>();
+            let close: Vec<&(usize, &T)> = near.iter().filter(|(edits, item)| *edits <= reach && numbers(&fold(name(item))) == numbers(&lower)).collect();
+            if close.len() == 1 || (close.len() > 1 && close[0].0 < close[1].0) { return Ok(close[0].1); }
+            let closest = list_names(near.iter().take(3).map(|(_, item)| name(item)));
+            Err(AppError::not_found(format!("No {kind} called \"{key}\". Closest: {closest}. The {kind}s are: {}.", list_names(items.iter().map(&name)))))
+        }
         _ => Err(AppError::invalid(format!("\"{key}\" could be more than one {kind}: {}. Use one of their addresses.",
             list_names(if exact.len() > 1 { exact.into_iter().map(&name).collect::<Vec<_>>() } else { partial.into_iter().map(&name).collect() }.into_iter())))),
     }
+}
+
+/// A name as names are compared: lower case, Latin accents dropped, spaces collapsed.
+pub(crate) fn fold(text: &str) -> String {
+    let plain: String = text.trim().to_lowercase().chars().map(|c| match c {
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' => 'a', 'ç' | 'ć' | 'č' => 'c', 'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ę' => 'e',
+        'ì' | 'í' | 'î' | 'ï' | 'ī' => 'i', 'ñ' | 'ń' => 'n', 'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' => 'o',
+        'ù' | 'ú' | 'û' | 'ü' | 'ū' => 'u', 'ý' | 'ÿ' => 'y', 'ś' | 'š' => 's', 'ź' | 'ż' | 'ž' => 'z', 'ł' => 'l', other => other,
+    }).collect();
+    plain.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Edits (insert, delete, change one letter) from one spelling to another.
+fn distance(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut previous = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let next = (previous + usize::from(ca != cb)).min(row[j] + 1).min(row[j + 1] + 1);
+            previous = row[j + 1];
+            row[j + 1] = next;
+        }
+    }
+    row[b.len()]
 }
 
 fn list_names<'a>(names: impl Iterator<Item = &'a str>) -> String {

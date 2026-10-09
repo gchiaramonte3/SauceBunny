@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { RulerMarks } from "./RulerMarks";
 
 type Props = {
@@ -26,6 +26,8 @@ export function EditScrubber({ label, value, max, text, marks = [], range, onScr
     return Math.max(0, Math.min(max, ((clientX - box.left) / box.width) * max));
   };
   const end = () => { if (held.current) { held.current = false; onScrubEnd?.(); } };
+  // The record's rail redraws on every frame while it plays; its ticks change only when the edit does.
+  const ticks = useMemo(() => marks.map((mark, index) => <span key={index} className="cp-te-scrub-mark" style={{ left: `${(mark / span) * 100}%` }} />), [marks, span]);
   return <div ref={rail} className="cp-te-scrub" role="slider" tabIndex={0} aria-label={label}
     aria-valuemin={0} aria-valuemax={Math.round(max)} aria-valuenow={Math.round(value)} aria-valuetext={text}
     title={label}
@@ -50,7 +52,7 @@ export function EditScrubber({ label, value, max, text, marks = [], range, onScr
     }}>
     {range && <RulerMarks from={range.in} to={range.out} x={(t) => `${(t / span) * 100}%`} w={(d) => `${(d / span) * 100}%`} />}
     <span className="cp-te-scrub-track" aria-hidden="true">
-      {marks.map((mark, index) => <span key={index} className="cp-te-scrub-mark" style={{ left: `${(mark / span) * 100}%` }} />)}
+      {ticks}
       <span className="cp-te-scrub-fill" />
       <span className="cp-te-scrub-thumb" />
     </span>

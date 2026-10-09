@@ -22,30 +22,57 @@ pub const TOOLS: &[Tool] = &[
         description: "Every AAF Audio sequence: multi-mic AAFs from Avid whose mics are transcribed one by one. Start here.",
         input: || object(json!({}), &[]) },
     Tool { name: "get_sequence", title: "Get a sequence",
-        description: "One sequence: its tracks in Avid order (A1, then A1's group alternates, then A2) with who owns each mic and whether it is transcribed, the people on it, V1's picture groups, and its markers. Timecodes are the sequence's own.",
-        input: || object(json!({ "sequence": { "type": "string", "description": SEQUENCE } }), &["sequence"]) },
+        description: "One sequence: its tracks in Avid order (A1, then A1's group alternates, then A2) with who owns each mic and whether it is transcribed, the people on it, V1's picture groups, and its markers. Timecodes are the sequence's own. brief: just its name, timecodes and people's names, a fraction of the size.",
+        input: || object(json!({ "sequence": { "type": "string", "description": SEQUENCE },
+            "brief": { "type": "boolean", "description": "Only the name, start and end timecode, and the people's names." } }), &["sequence"]) },
     Tool { name: "list_people", title: "List people",
         description: "The people in one sequence, or in every sequence: their tracks and how much each says.",
         input: || object(json!({ "sequence": { "type": "string", "description": SEQUENCE } }), &[]) },
     Tool { name: "read_transcript", title: "Read a transcript",
-        description: "A sequence's transcript as lines (what one mic heard as one sentence) in time order, each with who said it, their track, timecode in and out, and the string outs that use it. Narrow it to one person and a timecode range; it comes in pages.",
+        description: "A sequence's transcript as rows, one line (what one mic heard as one sentence) each, in time order: its id, timecode in and out, who said it and their track, the words, and the string outs that use it. Narrow it to some people and a timecode range and it comes in one page; a whole sequence comes in pages. The same words heard on several mics come once, marked \"also on N mics\".",
         input: || object(json!({
             "sequence": { "type": "string", "description": SEQUENCE },
+            "people": { "type": "array", "items": { "type": "string" }, "description": "Only these people's mics (names, keys or addresses)." },
             "person": { "type": "string", "description": PERSON },
             "from": { "type": "string", "description": "Start timecode, HH:MM:SS:FF in the sequence's own timecode." },
             "to": { "type": "string", "description": "End timecode, HH:MM:SS:FF." },
+            "include_bleed": { "type": "boolean", "description": "Whether to keep lines a mic only picked up from someone else's mic (marked heard from). Defaults to true, or to false when the editor hides bleed." },
+            "keep_copies": { "type": "boolean", "description": "Keep every mic's copy of the same words instead of one (default false)." },
             "cursor": { "type": "integer", "minimum": 0, "description": CURSOR },
-            "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Lines per page (default 200)." },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Lines per page (default: as many as fit, for a range or people; 200 otherwise)." },
         }), &["sequence"]) },
     Tool { name: "search_transcripts", title: "Search transcripts",
-        description: "Lines that contain every word asked for (a word also matches the start of a longer one: \"tire\" finds \"tired\"), or an exact phrase in double quotes, across sequences or within some, optionally only for some people. Case-insensitive. Best match first.",
+        description: "Lines that contain every word asked for (a word also matches the start of a longer one: \"tire\" finds \"tired\"), or an exact phrase in double quotes, across sequences or within some, optionally only for some people and a timecode range. With any, a line with any of the words counts, most words first: try several wordings of one idea at once. Case-insensitive. Best match first.",
         input: || object(json!({
             "query": { "type": "string", "description": "Words to find, or a \"quoted phrase\"." },
+            "any": { "type": "boolean", "description": "Match lines with any of the words, not all of them." },
+            "from": { "type": "string", "description": "Start timecode, HH:MM:SS:FF, in the sequence's own timecode (search one sequence with it)." },
+            "to": { "type": "string", "description": "End timecode, HH:MM:SS:FF." },
             "people": { "type": "array", "items": { "type": "string" }, "description": "Only these people (names or keys)." },
             "sequences": { "type": "array", "items": { "type": "string" }, "description": "Only these sequences." },
             "limit": { "type": "integer", "minimum": 1, "maximum": 500, "description": "Most matches to return (default 50)." },
             "include_bleed": { "type": "boolean", "description": "Whether to return lines a mic only picked up from someone else's mic (marked bleed_from); those repeat the owner's line. Defaults to true, or to false when the editor hides bleed in Sauce Bunny." },
         }), &["query"]) },
+    Tool { name: "find_conversations", title: "Find conversations",
+        description: "Where two or more people talk to each other in a sequence: the stretches where they take turns (the speaker changing at least min_turns times) with no pause longer than gap seconds, each with its lines as rows. Anyone else who speaks inside a stretch comes too, marked not asked for. Found on the Mac, instantly: use it before reading or scanning a long range for something two people say to each other.",
+        input: || object(json!({
+            "sequence": { "type": "string", "description": SEQUENCE },
+            "people": { "type": "array", "items": { "type": "string" }, "minItems": 2, "description": "Two or more people (names, keys or addresses)." },
+            "from": { "type": "string", "description": "Start timecode, HH:MM:SS:FF in the sequence's own timecode." },
+            "to": { "type": "string", "description": "End timecode, HH:MM:SS:FF." },
+            "gap": { "type": "number", "minimum": 0, "description": "Seconds of silence that still count as one exchange (default 8)." },
+            "min_turns": { "type": "integer", "minimum": 1, "description": "Changes of speaker a stretch needs (default 2)." },
+            "with_others": { "type": "boolean", "description": "Whether to include other people's lines inside a stretch (default true)." },
+        }), &["sequence", "people"]) },
+    Tool { name: "measure_cut", title: "Measure a cut",
+        description: "How long a cut built from these lines would run, before anything is built: each beat's lines in play order (row ids, exactly as a tool gave them), timed with String Outs' own layout (a short handle around each stretch, lines close together in one sequence playing as one stretch, a pause between beats). Returns seconds per beat and in all, and warnings: a line used twice, an id that names nothing, a line that was heard on someone else's mic, a missed target. Use it to fit a cut to a running time.",
+        input: || object(json!({
+            "beats": { "type": "array", "minItems": 1, "items": { "type": "object", "properties": {
+                "title": { "type": "string", "description": "What the beat does, in a few words." },
+                "lines": { "type": "array", "items": { "type": "string" }, "description": "Line ids in the order they play." },
+            }, "required": ["title", "lines"], "additionalProperties": false }, "description": "The beats in order." },
+            "target_seconds": { "type": "number", "minimum": 1, "description": "The running time asked for, in seconds." },
+        }), &["beats"]) },
     Tool { name: "list_string_outs", title: "List string outs",
         description: "Every string out: a cut built from chunks of sequences, sent back to Avid as an AAF. Title, running time, the sequences it uses and who is on A1 and down.",
         input: || object(json!({}), &[]) },
@@ -75,11 +102,109 @@ fn strings(args: &Value, key: &str) -> Vec<String> {
 }
 fn value(result: impl serde::Serialize) -> Result<Value, AppError> { Ok(serde_json::to_value(result)?) }
 
+fn read_page(ctx: &Context, args: &Value) -> Result<sequences::Page, AppError> {
+    let people = strings(args, "people");
+    let mut wanted: Vec<&str> = people.iter().map(String::as_str).collect();
+    if let Some(one) = text(args, "person") { wanted.push(one); }
+    sequences::read(ctx, required(args, "sequence")?, sequences::Read {
+        people: wanted, from: text(args, "from"), to: text(args, "to"), cursor: number(args, "cursor", 0),
+        limit: args.get("limit").and_then(Value::as_u64).map(|value| value as usize),
+        include_bleed: args.get("include_bleed").and_then(Value::as_bool).unwrap_or_else(|| !ctx.hides_bleed()),
+        keep_copies: args.get("keep_copies").and_then(Value::as_bool).unwrap_or(false),
+    })
+}
+
+fn conversations(ctx: &Context, args: &Value) -> Result<super::conversations::Conversations, AppError> {
+    let people = strings(args, "people");
+    super::conversations::find(ctx, required(args, "sequence")?, super::conversations::Ask {
+        people: people.iter().map(String::as_str).collect(), from: text(args, "from"), to: text(args, "to"),
+        gap: args.get("gap").and_then(Value::as_f64).unwrap_or(super::conversations::DEFAULT_GAP_SECONDS),
+        min_turns: number(args, "min_turns", super::conversations::DEFAULT_MIN_TURNS),
+        with_others: args.get("with_others").and_then(Value::as_bool).unwrap_or(true),
+        include_bleed: args.get("include_bleed").and_then(Value::as_bool).unwrap_or_else(|| !ctx.hides_bleed()),
+    })
+}
+
+fn search(ctx: &Context, args: &Value) -> Result<sequences::Search, AppError> {
+    sequences::search(ctx, required(args, "query")?, &strings(args, "people"), &strings(args, "sequences"), number(args, "limit", 50),
+        args.get("include_bleed").and_then(Value::as_bool).unwrap_or_else(|| !ctx.hides_bleed()),
+        sequences::Within { from: text(args, "from"), to: text(args, "to"), any: args.get("any").and_then(Value::as_bool).unwrap_or(false) })
+}
+
+/// A tool's result as a model reads it: rows for the line-heavy tools (rows.rs), compact JSON for the rest.
+pub enum Output { Rows(String), Json(Value) }
+
+impl Output {
+    pub fn text(&self) -> String { match self { Output::Rows(text) => text.clone(), Output::Json(value) => value.to_string() } }
+}
+
+/// Run one tool for a model: the line-heavy tools answer in rows with short
+/// ids (each id kept in `ctx.ids`, so a citation can be turned back into an
+/// address); every other tool answers as `call` does.
+pub fn answer(ctx: &Context, name: &str, args: &Value) -> Result<Output, AppError> {
+    match name {
+        "read_transcript" => {
+            let page = read_page(ctx, args)?;
+            let titles = string_out_titles(ctx, &page.lines);
+            let shown = if page.lines.is_empty() { "no lines".to_string() } else { format!("lines {}-{} of {}", page.cursor + 1, page.cursor + page.lines.len(), page.total) };
+            let mut head = format!("{} ({}){} · {shown}", page.name, page.sequence, page.person.as_ref().map(|who| format!(" · {who}")).unwrap_or_default());
+            if let Some(next) = page.next_cursor { head.push_str(&format!(" · more: cursor {next}")); }
+            Ok(Output::Rows(format!("{head}\n{}", super::rows::rows(&page.lines, &ctx.ids, &titles))))
+        }
+        "search_transcripts" => {
+            let found = search(ctx, args)?;
+            let lines: Vec<&super::Line> = found.matches.iter().map(|item| &item.line).collect();
+            let titles = string_out_titles(ctx, lines.iter().copied());
+            let several = found.matches.iter().any(|item| item.sequence != found.matches[0].sequence);
+            let body: Vec<String> = found.matches.iter().map(|item| {
+                let row = super::rows::row(&item.line, &ctx.ids, &titles);
+                if several { format!("[{}] {row}", item.sequence) } else { row }
+            }).collect();
+            let place = if several || found.matches.is_empty() { String::new() } else { format!(" in {}", found.matches[0].sequence) };
+            Ok(Output::Rows(format!("Search \"{}\"{place}: {} of {} matches, best first\n{}", found.query, found.matches.len(), found.total, body.join("\n"))))
+        }
+        "find_conversations" => Ok(Output::Rows(super::conversations::rows(ctx, &conversations(ctx, args)?))),
+        _ => call(ctx, name, args).map(Output::Json),
+    }
+}
+
+/**
+ * What a scan reads (docs/ASK-RANGE-SPEC-2026-10-06.md, section 6), as rows
+ * in groups that should stay together in one chunk: with two or more people,
+ * and unless `conversations_only` is false, each conversation between them
+ * (others in it marked); otherwise each line of the slice on its own.
+ */
+pub fn scan_groups(ctx: &Context, args: &Value) -> Result<Vec<Vec<String>>, AppError> {
+    let people = strings(args, "people");
+    let named: Vec<&str> = people.iter().map(String::as_str).collect();
+    let include_bleed = args.get("include_bleed").and_then(Value::as_bool).unwrap_or_else(|| !ctx.hides_bleed());
+    let sequence = required(args, "sequence")?;
+    if args.get("conversations_only").and_then(Value::as_bool).unwrap_or(named.len() >= 2) {
+        let found = conversations(ctx, args)?;
+        let all: Vec<&super::Line> = found.stretches.iter().flat_map(|stretch| stretch.lines.iter()).collect();
+        let titles = string_out_titles(ctx, all.iter().copied());
+        return Ok(found.stretches.iter().map(|stretch| stretch.lines.iter().zip(&stretch.asked).map(|(line, asked)| {
+            let row = super::rows::row(line, &ctx.ids, &titles);
+            if *asked { row } else { format!("{row} [not asked for]") }
+        }).collect()).collect());
+    }
+    let document = ctx.document(&sequences::resolve(ctx, sequence)?)?;
+    let (_, lines) = sequences::slice(ctx, &document, &sequences::Read { people: named, from: text(args, "from"), to: text(args, "to"), cursor: 0, limit: None, include_bleed, keep_copies: false })?;
+    let titles = string_out_titles(ctx, &lines);
+    Ok(lines.iter().map(|line| vec![super::rows::row(line, &ctx.ids, &titles)]).collect())
+}
+
+/// The titles of the string outs these lines are in, read only when one is.
+fn string_out_titles<'a>(ctx: &Context, lines: impl IntoIterator<Item = &'a super::Line>) -> std::collections::HashMap<String, String> {
+    if lines.into_iter().any(|line| !line.in_string_outs.is_empty()) { string_outs::titles(ctx) } else { Default::default() }
+}
+
 /// Run one tool. Results are objects, so every door can hand them over as structured data.
 pub fn call(ctx: &Context, name: &str, args: &Value) -> Result<Value, AppError> {
     match name {
         "list_sequences" => value(json!({ "sequences": sequences::list(ctx)? })),
-        "get_sequence" => value(sequences::detail(ctx, required(args, "sequence")?)?),
+        "get_sequence" => if args.get("brief").and_then(Value::as_bool).unwrap_or(false) { value(sequences::brief(ctx, required(args, "sequence")?)?) }
+            else { value(sequences::detail(ctx, required(args, "sequence")?)?) },
         "list_people" => match text(args, "sequence") {
             Some(wanted) => { let id = sequences::resolve(ctx, wanted)?; let document = ctx.document(&id)?;
                 value(json!({ "sequence": Address::Sequence(id).to_string(), "name": document.manifest.name, "people": sequences::people(&document) })) }
@@ -92,10 +217,14 @@ pub fn call(ctx: &Context, name: &str, args: &Value) -> Result<Value, AppError> 
                 value(json!({ "sequences": all }))
             }
         },
-        "read_transcript" => value(sequences::read(ctx, required(args, "sequence")?, sequences::Read {
-            person: text(args, "person"), from: text(args, "from"), to: text(args, "to"), cursor: number(args, "cursor", 0), limit: number(args, "limit", sequences::PAGE_LINES),
-        })?),
-        "search_transcripts" => value(sequences::search(ctx, required(args, "query")?, &strings(args, "people"), &strings(args, "sequences"), number(args, "limit", 50), args.get("include_bleed").and_then(serde_json::Value::as_bool).unwrap_or_else(|| !ctx.hides_bleed()))?),
+        "read_transcript" => value(read_page(ctx, args)?),
+        "search_transcripts" => value(search(ctx, args)?),
+        "find_conversations" => value(conversations(ctx, args)?),
+        "measure_cut" => {
+            let beats: Vec<super::cuts::Beat> = args.get("beats").and_then(Value::as_array).map(|items| items.iter().map(|beat| super::cuts::Beat {
+                title: beat.get("title").and_then(Value::as_str).unwrap_or_default().to_string(), lines: strings(beat, "lines") }).collect()).unwrap_or_default();
+            value(super::cuts::measure(ctx, &beats, args.get("target_seconds").and_then(Value::as_f64))?)
+        }
         "list_string_outs" => value(json!({ "string_outs": string_outs::list(ctx)? })),
         "get_string_out" => value(string_outs::detail(ctx, required(args, "string_out")?)?),
         "get_history" => value(string_outs::history(ctx, required(args, "string_out")?)?),

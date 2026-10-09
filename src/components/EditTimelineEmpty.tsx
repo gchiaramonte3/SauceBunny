@@ -1,23 +1,18 @@
 type Props = {
   /** Sources with mics in this string out. */
-  sources: string[]; sourceName: (id: string) => string;
-  /** Seconds, 0 until the sequence has been read. */
-  durationOf: (source: string) => number;
-  onAddWhole?: (source: string) => void;
+  sources: string[];
 };
 
 /**
- * Over the lanes of a string out with nothing cut in. A sequence added to an
- * empty string out brings its mics as lanes and nothing on them, which read as
- * a timeline that had failed to load. "Add all of" waits for the sequence's
- * length, since until then it has nothing to add.
+ * Over the lanes of a string out with nothing cut in. A record is built from
+ * the source, as an Avid sequence is: there is no adding a whole sequence to
+ * it, because a record holding every track of the group read as anything but
+ * a record.
  */
-export function EditTimelineEmpty({ sources, sourceName, durationOf, onAddWhole }: Props) {
+export function EditTimelineEmpty({ sources }: Props) {
   return <div className="cp-te-tl-empty">
-    {sources.length ? <div className="cp-te-tl-empty-card">
-      <p>Nothing is cut in yet. Select lines in Source and press Insert (V) or Append, or start from a whole sequence.</p>
-      {onAddWhole && <div className="cp-te-tl-empty-actions">{sources.map((source) => <button key={source} type="button" className="btn btn-ghost"
-        disabled={durationOf(source) <= 0} title={durationOf(source) <= 0 ? "Reading the sequence's length…" : undefined} onClick={() => onAddWhole(source)}>Add all of {sourceName(source)}</button>)}</div>}
-    </div> : <div className="cp-te-tl-empty-card"><p>Nothing to cut from yet. Choose a sequence from Add sequence, above.</p></div>}
+    <div className="cp-te-tl-empty-card"><p>{sources.length
+      ? "Nothing is cut in yet. Mark In and Out in the source, turn on the tracks you want, and press Insert (V) or Overwrite (B)."
+      : "Nothing to cut from yet. Choose a sequence from Add sequence, above."}</p></div>
   </div>;
 }

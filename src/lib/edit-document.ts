@@ -1,9 +1,10 @@
 import type { AafSpeech } from "../bindings/AafSpeech";
 import type { EditDocument } from "../bindings/EditDocument";
 import type { EditMarker } from "../bindings/EditMarker";
+import type { EditOverride } from "../bindings/EditOverride";
 import type { EditRate } from "../bindings/EditRate";
 import type { EditSegment } from "../bindings/EditSegment";
-import { GAP, isGap, programToSource, segmentLength, segmentStarts, type Timeline, type TimelineWord } from "./edit-model";
+import { GAP, isGap, lanePlay, programToSource, segmentLength, segmentStarts, type LaneOverride, type SourceSpan, type Timeline, type TimelineSegment, type TimelineWord } from "./edit-model";
 import { framesToTc, secondsToFrames } from "./timecode";
 
 /**
@@ -16,8 +17,14 @@ import { framesToTc, secondsToFrames } from "./timecode";
 /**
  * The document format edit_doc.rs reads. The undo log refuses a newer one on
  * open (edit_log.rs), which is where the downgrade guard for this format lives.
+ * A string out is stamped with the oldest version that can hold it: 1, unless
+ * a track was edited alone or a clip names its record tracks, which needs 2
+ * (edit_doc.rs `OVERRIDES_SCHEMA_VERSION`).
+ * So every string out that does not use it still opens in an older build,
+ * and one that does is refused there rather than opened without its overrides.
  */
 export const EDIT_SCHEMA_VERSION = 1;
+export const OVERRIDES_SCHEMA_VERSION = 2;
 
 export const fps = (rate: EditRate) => rate.numerator / rate.denominator;
 
@@ -34,20 +41,25 @@ export type TimelineMarker = { id: string; at: number; track: string | null; nam
  * Markers ride on the material under them, as Avid's do: a change that moves
  * that material moves the marker, and one that removes it removes the marker.
  * A source range that plays twice keeps the marker on the appearance nearest
- * where it was.
+ * where it was. A marker on someone's track rides on what THEY play there,
+ * which an overwrite on their track alone can make other than the clip's own.
  */
 export function rippleMarkers(before: Timeline, after: Timeline, markers: TimelineMarker[]): TimelineMarker[] {
   if (before.segments === after.segments || !markers.length) return markers;
   const was = segmentStarts(before), now = segmentStarts(after);
+  const material = (segment: TimelineSegment, lane: string | null): SourceSpan | null =>
+    isGap(segment) ? null : (lane ? lanePlay(segment, lane) : null) ?? { source: segment.source, srcIn: segment.srcIn, srcOut: segment.srcOut };
   return markers.flatMap((marker) => {
     const under = programToSource(before, marker.at);
     if (!under) return [];
     const segment = before.segments[under.segment], offset = marker.at - was[under.segment];
+    const mine = material(segment, marker.track), at = mine ? mine.srcIn + offset : 0;
     let best: number | null = null;
     after.segments.forEach((next, index) => {
-      const position = isGap(segment)
+      const there = material(next, marker.track);
+      const position = !mine
         ? next.id === segment.id && offset <= segmentLength(next) + 1e-6 ? now[index] + offset : null
-        : next.source === segment.source && under.source >= next.srcIn - 1e-6 && under.source <= next.srcOut + 1e-6 ? now[index] + under.source - next.srcIn : null;
+        : there && there.source === mine.source && at >= there.srcIn - 1e-6 && at <= there.srcOut + 1e-6 ? now[index] + at - there.srcIn : null;
       if (position != null && (best == null || Math.abs(position - marker.at) < Math.abs(best - marker.at))) best = position;
     });
     return best == null ? [] : [{ ...marker, at: best }];
@@ -61,7 +73,11 @@ export function fromDocument(document: EditDocument): OpenEdit {
   const rate = document.edit_rate;
   const segments = document.segments.map((segment) => segment.kind === "gap"
     ? { id: segment.id, source: GAP, srcIn: 0, srcOut: toSeconds(segment.frames, rate) }
-    : { id: segment.id, source: segment.source, srcIn: toSeconds(segment.in_frame, rate), srcOut: toSeconds(segment.out_frame, rate), ...(segment.tracks ? { tracks: segment.tracks } : {}) });
+    : { id: segment.id, source: segment.source, srcIn: toSeconds(segment.in_frame, rate), srcOut: toSeconds(segment.out_frame, rate), ...(segment.tracks ? { tracks: segment.tracks } : {}),
+      ...(segment.overrides ? { overrides: Object.fromEntries(Object.entries(segment.overrides).flatMap(([lane, over]) => !over ? []
+        : [[lane, over.source == null ? { source: null } : { source: over.source, srcIn: toSeconds(over.in_frame, rate) }] as [string, LaneOverride]])) } : {}),
+      ...(segment.layers ? { layers: Object.fromEntries(Object.entries(segment.layers).flatMap(([lane, layer]) => layer == null ? [] : [[lane, layer]])) } : {}),
+      ...(segment.cuts?.length ? { cuts: segment.cuts } : {}) });
   const mutes = document.mutes.map((mute) => ({ source: mute.source, track: mute.track, srcIn: toSeconds(mute.in_frame, rate), srcOut: toSeconds(mute.out_frame, rate) }));
   const markers = document.markers.map((marker) => ({ id: marker.id, at: toSeconds(marker.frame, rate), track: marker.track, name: marker.name, comment: marker.comment, color: marker.color }));
   return { document, timeline: { segments, mutes }, markers };
@@ -84,7 +100,13 @@ export function toDocument(base: EditDocument, timeline: Timeline, markers: Time
       const inFrame = toFrames(segment.srcIn, rate), outFrame = toFrames(segment.srcOut, rate);
       // A clip's own track list, minus any lane the string out no longer has.
       const tracks = segment.tracks?.filter((lane) => lanes.has(lane));
-      if (outFrame > inFrame) segments.push({ kind: "source", id: segment.id, source: segment.source, in_frame: Math.max(0, inFrame), out_frame: outFrame, ...(tracks ? { tracks } : {}) });
+      const kept = Object.entries(segment.overrides ?? {}).filter(([lane]) => lanes.has(lane));
+      const overrides: Record<string, EditOverride> = Object.fromEntries(kept.map(([lane, over]) =>
+        [lane, over.source == null ? { source: null, in_frame: 0 } : { source: over.source, in_frame: Math.max(0, toFrames(over.srcIn, rate)) }]));
+      const layers = Object.fromEntries(Object.entries(segment.layers ?? {}).filter(([lane]) => lanes.has(lane)));
+      const cuts = (segment.cuts ?? []).filter((lane) => lanes.has(lane));
+      if (outFrame > inFrame) segments.push({ kind: "source", id: segment.id, source: segment.source, in_frame: Math.max(0, inFrame), out_frame: outFrame,
+        ...(tracks ? { tracks } : {}), ...(kept.length ? { overrides } : {}), ...(Object.keys(layers).length ? { layers } : {}), ...(cuts.length ? { cuts } : {}) });
     }
   }
   const total = segments.reduce((sum, segment) => sum + (segment.kind === "gap" ? segment.frames : segment.out_frame - segment.in_frame), 0);
@@ -94,7 +116,8 @@ export function toDocument(base: EditDocument, timeline: Timeline, markers: Time
     out_frame: Math.ceil((mute.srcOut * rate.numerator) / rate.denominator),
   })).filter((mute) => mute.out_frame > mute.in_frame);
   const saved: EditMarker[] = markers.map((marker) => ({ id: marker.id, frame: Math.min(total, Math.max(0, toFrames(marker.at, rate))), track: marker.track, name: marker.name, comment: marker.comment, color: marker.color }));
-  return { ...base, segments, mutes, markers: saved };
+  const schema = segments.some((segment) => segment.kind === "source" && (segment.overrides || segment.layers || segment.cuts)) ? OVERRIDES_SCHEMA_VERSION : EDIT_SCHEMA_VERSION;
+  return { ...base, schema_version: schema, segments, mutes, markers: saved };
 }
 
 /**

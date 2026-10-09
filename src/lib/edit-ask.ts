@@ -15,7 +15,18 @@ export type AskLine = { id: number; source: string; track: string; words: Timeli
 
 /** A cited line, resolved to what it says and where, so a saved chat still makes sense later. */
 export type AskCitation = { source: string; track: string; from: number; to: number; text: string; wordIds: string[] };
-export type AskAction = { kind: "build"; title: string; lines: AskCitation[] } | { kind: "remove"; lines: AskCitation[] };
+/** One beat of a story cut: what it does, and its lines in play order. */
+export type AskBeat = { title: string; purpose: string; lines: AskCitation[] };
+/**
+ * A proposal: a string out of these lines, removing these, or a story cut of
+ * beats (docs/STORY-CUT-SPEC-2026-10-08.md), timed against a target when one
+ * was asked for.
+ */
+export type AskAction = { kind: "build"; title: string; lines: AskCitation[] } | { kind: "remove"; lines: AskCitation[] }
+  | { kind: "cut"; title: string; target: number | null; beats: AskBeat[] };
+
+/** Every line an action names, in play order: a cut's beat by beat. */
+export const actionLines = (action: AskAction): AskCitation[] => action.kind === "cut" ? action.beats.flatMap((beat) => beat.lines) : action.lines;
 export type AskMessage = {
   id: string; role: "you" | "ask"; text: string; lines: AskCitation[]; action: AskAction | null;
   /** How the action was applied, if it was: here, or as a new string out. */
@@ -211,4 +222,19 @@ export function askBuildTitle(question: string, mentions: AskMention[]): string 
 export function cite(line: AskLine): AskCitation {
   return { source: line.source, track: line.track, from: line.words[0].start, to: line.words[line.words.length - 1].end,
     text: line.words.map((word) => word.text).join(" "), wordIds: line.words.map((word) => word.id) };
+}
+
+/**
+ * Asking a question again, from the question or from its failed answer: the
+ * question, and the conversation to ask it after. When it is the last thing
+ * asked and its answer failed (or never came), that attempt is replaced, so
+ * the conversation reads as one try and the model is not shown it twice.
+ */
+export function askAgain(list: AskMessage[], id: string): { question: string; base: AskMessage[] } | null {
+  let at = list.findIndex((message) => message.id === id);
+  if (at > 0 && list[at].role === "ask") at -= 1;
+  const question = list[at];
+  if (!question || question.role !== "you") return null;
+  const last = at === list.length - 1 || (at === list.length - 2 && !!list[at + 1].failed);
+  return { question: question.text, base: last ? list.slice(0, at) : list };
 }

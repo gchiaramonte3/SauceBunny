@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { MultitrackAudio } from "./multitrack-audio";
 import { MultitrackAudioCache } from "./multitrack-audio-cache";
 import { trackDbToGain, TRACK_GAIN_MAX } from "./multitrack-gain";
@@ -40,6 +40,42 @@ describe("one-clock PCM audition", () => {
     await player.seek(0, 1);
     expect(sources).toHaveLength(0);
     expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ rate: 0, busy: false, error: expect.stringMatching(/audio output/i) });
+    player.close();
+  });
+  it("plays on a new output after a minute without sound, at the levels it had", async () => {
+    // 2026-10-08: after a long idle the app played nothing. The Mac's output was a remote-desktop
+    // session's virtual device, which goes and comes back; the old output stayed "running" on nothing.
+    let now = 1_000_000; const clock = vi.spyOn(performance, "now").mockImplementation(() => now); onTestFinished(() => clock.mockRestore());
+    const changed = vi.fn(), player = new MultitrackAudio("doc", 24, 240, ["a"], changed);
+    player.setLevel(0.5, false); player.setTrackLevel("a", 2);
+    await player.seek(0, 1); player.pause();
+    const first = context;
+    now += 39 * 60_000; sources.length = 0;
+    await player.seek(0, 1);
+    expect(context).not.toBe(first);
+    expect(first.close).toHaveBeenCalled();
+    // The master rebuilt at the volume asked for, the track's level carried over, and it plays.
+    expect(context.gains[0].gain.value).toBe(0.5);
+    expect(context.gains.some((gain) => gain.gain.value === 2)).toBe(true);
+    expect(sources.length).toBeGreaterThan(0);
+    expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ rate: 1, error: null });
+    // Playing again straight away keeps the same output.
+    const second = context; player.pause(); await player.seek(0, 1);
+    expect(context).toBe(second);
+    player.close();
+  });
+  it("makes the output again and carries on when its clock stops while playing", async () => {
+    let now = 1_000_000; const clock = vi.spyOn(performance, "now").mockImplementation(() => now); onTestFinished(() => clock.mockRestore());
+    const changed = vi.fn(), player = new MultitrackAudio("doc", 24, 240, ["a"], changed);
+    await player.seek(24, 1);
+    const first = context, tick = () => vi.mocked(requestAnimationFrame).mock.calls.at(-1)![0](0);
+    tick();
+    // Two seconds on the page's clock, watched every second, none on the audio clock: it has stopped.
+    now += 1_000; tick();
+    expect(context).toBe(first);
+    now += 1_000; tick();
+    await vi.waitFor(() => expect(context).not.toBe(first));
+    await vi.waitFor(() => expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ rate: 1, error: null }));
     player.close();
   });
   it("parks playback on output interruption and resumes only on a new Play", async () => {

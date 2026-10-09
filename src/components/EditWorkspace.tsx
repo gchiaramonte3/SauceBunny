@@ -23,7 +23,19 @@ export function EditWorkspace({ editId, active, onClose, onOpenEdit, onSettings,
   // View ▸ Waveforms. Off by default: drawing a mic means building its
   // waveform from every file it uses, minutes a track on a network volume.
   const [waveforms, setWaveforms] = useState(false);
-  const data = useEditSources(session.head?.document ?? null, waveforms);
+  // Tracks whose own W is on, as Avid's per-track waveform setting; ⌥-click W does every track.
+  const [waveLanes, setWaveLanes] = useState<ReadonlySet<string>>(() => new Set());
+  const data = useEditSources(session.head?.document ?? null, waveforms, waveLanes);
+  /** A record track's W: the waveforms of whoever is on it, on or off together. */
+  const onWave = (lanes: string[], all: boolean) => {
+    if (all) { setWaveforms(!waveforms); setWaveLanes(new Set()); return; }
+    if (waveforms || !lanes.length) return;
+    setWaveLanes((current) => {
+      const next = new Set(current), on = lanes.every((lane) => current.has(lane));
+      for (const lane of lanes) if (on) next.delete(lane); else next.add(lane);
+      return next;
+    });
+  };
   if (!session.head || !session.open) {
     return <div className="cp-te cp-te-loading">
       {session.error ? <><p className="cp-te-errors" role="alert">{session.error}</p><button type="button" className="btn btn-ghost" onClick={onClose}>All string outs</button></>
@@ -32,7 +44,7 @@ export function EditWorkspace({ editId, active, onClose, onOpenEdit, onSettings,
   }
   const document = session.head.document;
   return <>
-    <EditEditor key={editId} editId={editId} head={session.head} open={session.open} history={session.history} data={data} active={active} waveforms={waveforms} onWaveforms={setWaveforms}
+    <EditEditor key={editId} editId={editId} head={session.head} open={session.open} history={session.history} data={data} active={active} waveforms={waveforms} onWaveforms={(on) => { setWaveforms(on); if (!on) setWaveLanes(new Set()); }} waveLanes={waveLanes} onWave={onWave}
       commit={session.commit} undo={() => void session.undo()} redo={() => void session.redo()} jump={(state) => void session.jump(state)}
       pin={(state, name) => void session.pin(state, name)} onClose={onClose} onOpenEdit={onOpenEdit} onSettings={onSettings} appLocalModelId={appLocalModelId} sourceMarks={sourceMarks}
       addSource={<EditAddSource exclude={document.sources.map((source) => source.document_id)} onError={setAddError}

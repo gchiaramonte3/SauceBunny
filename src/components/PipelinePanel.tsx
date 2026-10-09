@@ -148,7 +148,12 @@ export function PipelinePanel({ page, active, open, onOpenChange, documentId, er
   // Built when the rows change, not when the activity pill does: String Outs
   // opened a string out with 121 calls in a row and paid for every row twice
   // a call, which was most of its 28 seconds.
-  const lines = useMemo(() => rows.map((row, index): ClientLog => ({ id: index, ts: ROW_TIME.format(row.timestamp_ms),
+  // Keyed by the row's own id, never its position: the log keeps the newest
+  // 1,500 rows, so once full every new row moved every position by one and
+  // React rewrote the time, tag and text of all 1,500 lines (twice: AAF Audio
+  // and String Outs each mount a Pipeline). Playing a 50-mic string out logs a
+  // row per audio window, and that rewrite held the page at 10 fps.
+  const lines = useMemo(() => rows.map((row): ClientLog => ({ id: row.id, ts: ROW_TIME.format(row.timestamp_ms),
     tag: row.level === "err" ? "err" : row.level === "warn" ? "warn" : row.level === "ok" ? "ok" : "info",
     source: row.stage === "health" ? "HEALTH" : row.stage === "String Outs" || row.stage === "AAF Audio" ? "PAGE" : "AAF", message: `${row.stage} · ${row.message}` })), [rows]);
   const busy = loading || jobs.size > 0 || activity.busy;

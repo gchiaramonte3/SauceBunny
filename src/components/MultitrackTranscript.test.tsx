@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { MultitrackTranscript } from "./MultitrackTranscript";
 import { multitrackFixture, multitrackTranscript } from "../test/multitrack-fixture";
 import { exportMultitrack, transcriptRows } from "../lib/multitrack";
 import * as multitrack from "../lib/multitrack";
+import { createFrameStore } from "../lib/frame-store";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
@@ -16,7 +17,7 @@ function fixture() {
 }
 it("preserves and searches unplaced text without creating a false seek control", () => {
   const document = fixture(), seek = vi.fn();
-  render(<MultitrackTranscript document={document} frame={0} solo={new Set()} onSeek={seek} />);
+  render(<MultitrackTranscript document={document} frames={createFrameStore(0)} solo={new Set()} onSeek={seek} />);
   expect(screen.getByText("Words that must not disappear.")).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Words that must not disappear/ })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /This is the first answer/ }));
@@ -31,7 +32,7 @@ it("preserves and searches unplaced text without creating a false seek control",
 });
 it("exports an all-untimed result and does not mislabel it as no speech", () => {
   const document = fixture(); document.transcripts[0].cues = [];
-  render(<MultitrackTranscript document={document} frame={0} solo={new Set()} onSeek={vi.fn()} />);
+  render(<MultitrackTranscript document={document} frames={createFrameStore(0)} solo={new Set()} onSeek={vi.fn()} />);
   expect(screen.queryByText(/No speech found/)).toBeNull();
   expect((screen.getByRole("button", { name: "Export Alex" }) as HTMLButtonElement).disabled).toBe(false);
   // A chip, not a paragraph: it takes the reader to the passages, on All voices.
@@ -41,7 +42,7 @@ it("exports an all-untimed result and does not mislabel it as no speech", () => 
   expect(screen.getByRole("region", { name: "Text needing timing review" })).toBeTruthy();
 });
 it("says a run's result in one chip that opens Transcript info, and nothing when there is no run", () => {
-  const props = { document: multitrackFixture(), frame: 0, solo: new Set<string>(), onSeek: vi.fn() };
+  const props = { document: multitrackFixture(), frames: createFrameStore(0), solo: new Set<string>(), onSeek: vi.fn() };
   const view = render(<MultitrackTranscript {...props} />);
   expect(screen.queryByText(/tracks saved|Generating/)).toBeNull();
   view.rerender(<MultitrackTranscript {...props} loading />);
@@ -52,7 +53,7 @@ it("says a run's result in one chip that opens Transcript info, and nothing when
 });
 it("opens on a person, supports all voices and reaches every person from the tabs", () => {
   const document = fixture(); document.transcripts.push({ ...multitrackTranscript("track-2"), cues: [{ ...multitrackTranscript().cues[0], text: "Sam's answer." }] });
-  const seek = vi.fn(); render(<MultitrackTranscript document={document} frame={250} solo={new Set()} onSeek={seek} />);
+  const seek = vi.fn(); render(<MultitrackTranscript document={document} frames={createFrameStore(250)} solo={new Set()} onSeek={seek} />);
   expect(screen.getByRole("tab", { name: "A1 Alex" }).getAttribute("aria-selected")).toBe("true");
   expect(screen.queryByText("Sam's answer.")).toBeNull();
   fireEvent.click(screen.getByRole("tab", { name: "A2 Sam mic" }));
@@ -64,7 +65,7 @@ it("opens on a person, supports all voices and reaches every person from the tab
   expect(screen.getByRole("tab", { name: "A3 Room" }).getAttribute("aria-selected")).toBe("true");
 });
 it("reveals the first saved text automatically until a person is explicitly selected", () => {
-  const document = multitrackFixture(), props = { frame: 0, solo: new Set<string>(), onSeek: vi.fn() };
+  const document = multitrackFixture(), props = { frames: createFrameStore(0), solo: new Set<string>(), onSeek: vi.fn() };
   const view = render(<MultitrackTranscript {...props} document={document} />);
   const saved = { ...document, transcripts: [multitrackTranscript("track-2")] };
   view.rerender(<MultitrackTranscript {...props} document={saved} />);
@@ -78,7 +79,7 @@ it("opens on actual transcript content, skipping blank placeholders without hidi
   blank.cues[0].text = "[BLANK_AUDIO]";
   speech.cues[0].text = "[inaudible]";
   document.transcripts = [blank, speech];
-  render(<MultitrackTranscript document={document} frame={0} solo={new Set()} onSeek={vi.fn()} />);
+  render(<MultitrackTranscript document={document} frames={createFrameStore(0)} solo={new Set()} onSeek={vi.fn()} />);
   expect(screen.getByRole("tabpanel", { name: "Sam mic" })).toBeTruthy();
   expect(screen.getByText("[inaudible]")).toBeTruthy();
   fireEvent.click(screen.getByRole("tab", { name: "All voices" }));
@@ -87,7 +88,7 @@ it("opens on actual transcript content, skipping blank placeholders without hidi
   expect(document.transcripts[0].cues[0].text).toBe("[BLANK_AUDIO]");
 });
 it("shows an honest failed-run summary and keeps the details behind the info button", () => {
-  const { container } = render(<MultitrackTranscript document={multitrackFixture()} frame={0} solo={new Set()} onSeek={vi.fn()} report={{ requested: 3, saved: 0, review: 0, empty: 0, stopped: false, failures: [{ trackId: "track-1", message: "Speech cue is outside its prepared audio range" }] }} />);
+  const { container } = render(<MultitrackTranscript document={multitrackFixture()} frames={createFrameStore(0)} solo={new Set()} onSeek={vi.fn()} report={{ requested: 3, saved: 0, review: 0, empty: 0, stopped: false, failures: [{ trackId: "track-1", message: "Speech cue is outside its prepared audio range" }] }} />);
   expect(screen.getByText(/0 of 3 tracks saved/)).toBeTruthy();
   expect(screen.getByRole("heading", { name: "No new transcript was saved" })).toBeTruthy();
   expect(container.querySelector(".cp-multitrack-error")).toBeNull();
@@ -103,7 +104,7 @@ it("shows an honest failed-run summary and keeps the details behind the info but
 
 it("keeps the chosen person when their mic is renamed", () => {
   const document = fixture(); document.transcripts.push({ ...multitrackTranscript("track-2"), cues: [{ ...multitrackTranscript().cues[0], text: "Sam's answer." }] });
-  const props = { frame: 0, solo: new Set<string>(), onSeek: vi.fn() };
+  const props = { frames: createFrameStore(0), solo: new Set<string>(), onSeek: vi.fn() };
   const view = render(<MultitrackTranscript {...props} document={document} />);
   fireEvent.click(screen.getByRole("tab", { name: "A2 Sam mic" }));
   const renamed = { ...document, labels: [...document.labels, { track_id: "track-2", owner_name: "Samantha", cast_member_id: null, color: null }] };
@@ -114,17 +115,48 @@ it("keeps the chosen person when their mic is renamed", () => {
 it("does not reformat fixed transcript clocks on playback ticks; highlighting and new data stay live", () => {
   const document = fixture(), clock = vi.spyOn(multitrack, "sequenceTimecode");
   const props = { document, solo: new Set<string>(), onSeek: vi.fn() };
-  const view = render(<MultitrackTranscript {...props} frame={0} />);
+  const frames = createFrameStore(0);
+  const view = render(<MultitrackTranscript {...props} frames={frames} />);
   const initial = clock.mock.calls.length;
   expect(initial).toBeGreaterThan(0);
   const cue = screen.getByRole("button", { name: /This is the first answer/ });
   expect(cue.classList.contains("is-current")).toBe(false);
-  view.rerender(<MultitrackTranscript {...props} frame={250} />);
+  act(() => frames.set(250));
   expect(cue.classList.contains("is-current")).toBe(true);
   expect(clock).toHaveBeenCalledTimes(initial);
-  view.rerender(<MultitrackTranscript {...props} frame={350} />);
+  act(() => frames.set(350));
   expect(cue.classList.contains("is-current")).toBe(false);
   expect(clock).toHaveBeenCalledTimes(initial);
-  view.rerender(<MultitrackTranscript {...props} document={{ ...document, manifest: { ...document.manifest, start_frame: 0 } }} frame={0} />);
+  view.rerender(<MultitrackTranscript {...props} document={{ ...document, manifest: { ...document.manifest, start_frame: 0 } }} frames={frames} />);
   expect(clock.mock.calls.length).toBeGreaterThan(initial);
+});
+
+it("⇧-click marks a line In to Out, ⌥-click solos its mic, and a click plays from it", () => {
+  const document = fixture(), seek = vi.fn(), markLine = vi.fn(), soloLine = vi.fn();
+  render(<MultitrackTranscript document={document} frames={createFrameStore(0)} solo={new Set()} onSeek={seek} onMarkLine={markLine} onSolo={soloLine} />);
+  const cue = screen.getByRole("button", { name: /This is the first answer/ });
+  fireEvent.click(cue, { shiftKey: true });
+  fireEvent.click(cue, { altKey: true });
+  expect(seek).not.toHaveBeenCalled();
+  const [from, to] = markLine.mock.calls[0];
+  expect(to).toBeGreaterThan(from);
+  expect(soloLine).toHaveBeenCalledWith("track-1");
+  fireEvent.click(cue);
+  expect(seek).toHaveBeenCalledWith(from, "track-1");
+});
+
+it("follows playback past the lines shown: the list grows to the line being played and marks it", () => {
+  const document = multitrackFixture();
+  document.transcripts = [{ ...multitrackTranscript(), duration_frames: 24000,
+    cues: Array.from({ length: 260 }, (_, index) => ({ id: `line-${index}`, start_sample: index * 16000, end_sample: index * 16000 + 12000, text: `Line number ${index}.`, boundary_review: false })) }];
+  const frames = createFrameStore(0);
+  render(<MultitrackTranscript document={document} frames={frames} solo={new Set()} onSeek={vi.fn()} />);
+  expect(screen.queryByText("Line number 240.")).toBeNull();
+  act(() => frames.set(Math.round(240.3 * 24000 / 1001)));
+  expect(screen.getByRole("button", { name: /Line number 240\./ }).classList.contains("is-current")).toBe(true);
+  // Follow is a switch, on by default.
+  const follow = screen.getByRole("button", { name: "Follow" });
+  expect(follow.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(follow);
+  expect(follow.getAttribute("aria-pressed")).toBe("false");
 });

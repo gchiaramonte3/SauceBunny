@@ -11,7 +11,8 @@ const props = (overrides: Partial<Props> = {}): Props => ({
   onAddEdit: vi.fn(), onMarkIn: vi.fn(), onMarkClip: vi.fn(), onFindDead: vi.fn(), onMarkOut: vi.fn(), onLift: vi.fn(), onExtract: vi.fn(), onMarker: vi.fn(),
   onSnap: vi.fn(), onFollow: vi.fn(), onLoop: vi.fn(), onPrevious: vi.fn(), onNext: vi.fn(), allText: false, onAllText: vi.fn(),
   view: { waveforms: false, speakerColours: true, height: "medium" }, onView: vi.fn(), measuring: false,
-  audio: { crossfade: 2 }, onAudio: vi.fn(), zoom: 1, onZoom: vi.fn(), ...overrides,
+  audio: { crossfade: 2 }, onAudio: vi.fn(), zoom: 1, onZoom: vi.fn(),
+  tool: "select", onTool: vi.fn(), trimming: false, onTrim: vi.fn(), ripple: true, onRipple: vi.fn(), ...overrides,
 });
 
 it("will not look for dead space until every mic is measured, and says how to measure them", () => {
@@ -46,6 +47,19 @@ it("Audio ▸ Strip Silence… opens Media Composer's settings, and rests while 
   render(<EditTimelineTools {...props({ onStripSilence, sourceSide: true })} />);
   fireEvent.click(screen.getByRole("button", { name: "Audio" }));
   expect((screen.getByRole("menuitem", { name: "Strip Silence…" }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it("Audio ▸ Stack Conversations runs at once, and rests while the timeline shows Source", () => {
+  const onStackConversations = vi.fn();
+  const view = render(<EditTimelineTools {...props({ onStackConversations })} />);
+  fireEvent.click(screen.getByRole("button", { name: "Audio" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Stack Conversations" }));
+  expect(onStackConversations).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("menuitem", { name: "Stack Conversations" })).toBeNull();      // the menu closed
+  view.unmount();
+  render(<EditTimelineTools {...props({ onStackConversations, sourceSide: true })} />);
+  fireEvent.click(screen.getByRole("button", { name: "Audio" }));
+  expect((screen.getByRole("menuitem", { name: "Stack Conversations" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 it("holds tools only: no Play, no timecode readout and no status line", () => {

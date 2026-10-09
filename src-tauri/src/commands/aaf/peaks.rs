@@ -118,7 +118,7 @@ pub fn read_base(path: &Path) -> Result<(Vec<[i16; 2]>, u32, u64), AppError> {
 /// `may_build` is false for zoomed detail and cache-only requests: they read the
 /// finished overview and never start a build of their own, native or linked.
 pub async fn waveform(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64, may_build: bool, job: &str) -> Result<AafWaveform, AppError> {
-    store::track(document, track)?; store::source_ready(document)?;
+    store::track(document, track)?; store::audio_source_ready(document)?;
     if super::linked_audio::needed(document) { return super::linked_audio::waveform(app, document, track, start, duration, may_build, job).await; }
     let path = store::cache(app)?.join(format!("{}.peaks-v1.bin", store::cache_key(document, track, "pyramid")));
     // A cache-only request for an overview nobody built needs no PCM index.

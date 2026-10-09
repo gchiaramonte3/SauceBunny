@@ -1,4 +1,4 @@
-import { isGap, playsOn, segmentLength, segmentStarts, type Timeline, type TimelineMute } from "./edit-model";
+import { playersOf, segmentLength, segmentStarts, type Layering, type Timeline, type TimelineMute } from "./edit-model";
 
 /**
  * Strip Silence, to Media Composer's spec: on the selected tracks, between In
@@ -37,19 +37,22 @@ const EPSILON = 1e-6;
 const SLIVER = 0.04;
 
 /**
- * Every source stretch the cut plays on each selected lane, inside program
- * time `from` to `to`, merged per source and lane so a source range used twice
- * is measured once.
+ * Every source stretch the cut plays on the selected RECORD TRACKS, inside
+ * program time `from` to `to`: whoever is on each track there, from whatever
+ * they play (an overwrite's material included), merged per source and person
+ * so a source range used twice is measured once. It used to take everyone who
+ * was ever on a selected track and strip them everywhere, so stripping A1
+ * reached the same person's lines on A3, and it never measured an overwrite.
  */
-export function stripTargets(edit: Timeline, from: number, to: number, lanes: string[], sourceLanes: Record<string, string[]>): StripTarget[] {
-  const starts = segmentStarts(edit), found = new Map<string, StripTarget[]>();
+export function stripTargets(edit: Timeline, from: number, to: number, layers: readonly number[], layering: Layering): StripTarget[] {
+  const starts = segmentStarts(edit), found = new Map<string, StripTarget[]>(), chosen = new Set(layers);
   edit.segments.forEach((segment, index) => {
     const start = Math.max(from, starts[index]), end = Math.min(to, starts[index] + segmentLength(segment));
-    if (isGap(segment) || end - start <= EPSILON) return;
-    for (const lane of lanes) {
-      if (!playsOn(segment, lane) || !(sourceLanes[segment.source] ?? []).includes(lane)) continue;
-      const key = `${segment.source}\n${lane}`, list = found.get(key) ?? [];
-      list.push({ source: segment.source, lane, from: segment.srcIn + start - starts[index], to: segment.srcIn + end - starts[index] });
+    if (end - start <= EPSILON) return;
+    for (const { lane, layer, play } of playersOf(segment, layering)) {
+      if (!chosen.has(layer)) continue;
+      const key = `${play.source}\n${lane}`, list = found.get(key) ?? [];
+      list.push({ source: play.source, lane, from: play.srcIn + start - starts[index], to: play.srcIn + end - starts[index] });
       found.set(key, list);
     }
   });

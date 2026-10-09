@@ -238,6 +238,31 @@ worth doing:
 - [ ] Repeat with the window **minimised** rather than backgrounded. The local
       half needed both because `focus` alone missed the minimised case.
 
+## 7d. String Outs and AAF Audio play after a long idle
+
+The report (2026-10-08): after a long idle, Play in String Outs moved the
+playhead and made no sound, with no error. This Mac's default output was
+**Jump Desktop Audio**, a remote-desktop session's virtual device, which goes
+and comes back with the session; the Web Audio output stayed "running" on the
+device that had gone. Both players now make their output again before playing
+after a minute of silence, after a device change, and when their clock stops
+(`src/lib/audio-output.ts`).
+
+- [ ] In String Outs, play a few seconds, pause, leave the app for **20+
+      minutes** (long enough for the remote session to idle), come back and
+      press Play. It should be audible at once, at the same volume.
+- [ ] The same in AAF Audio, with a track's level changed first: the level
+      should still apply after the idle.
+- [ ] Pipeline log, channel **audio**: expect `String Outs: made the audio
+      output again (N min without sound).` (or `AAF Audio: …`) just before
+      it plays.
+- [ ] While playing, switch the Mac's output device (or disconnect and
+      reconnect the remote session). Playback should carry on audibly within
+      a couple of seconds, with `the Mac's audio devices changed` or `its
+      clock stopped while playing` in the log.
+- [ ] Play, pause and play again within a minute: no line in the log (the
+      output is kept while it is in use).
+
 ## 7a. Deleting a model now takes two clicks
 
 These were the most expensive single clicks in the app: a Whisper or LLM
@@ -1399,9 +1424,9 @@ media, WKWebView's audio, and Avid.
    the group clip and still switches angles (right-click V1 ▸ the group's
    angles, or the multicam keys), each A track plays one person's own mic,
    markers import from the `- Avid markers.txt` beside it, gaps are filler.
-   On HEAT 2 the export notes that one angle (the slow-motion camera, a
-   Motion Control) was left out of the group: V1 still switches between the
-   others. Repeat with **Keep all groups** and **Clip that plays**. This is
+   Every angle of the group is there, cameras Avid conforms to the group's
+   rate (47.952 and 59.94 behind Motion Control) included: HEAT 1's V1
+   switches between all 75. Repeat with **Keep all groups** and **Clip that plays**. This is
    the Phase 0 question: record which ones Avid accepts.
 6. **One per person** on a transcribed sequence: one edit per person,
    each bite with a marker naming them; export one and check it in Avid.
@@ -1448,8 +1473,8 @@ media, WKWebView's audio, and Avid.
     into Media Composer on the NEXIS seat: every track relinks with no
     offline media, A22 plays ALAYSHA, Match Frame on A22 opens her master
     clip (260/261/262-61-ALAYSHA-0731_01), V1 is the group and switches
-    between the cameras (all but the slow-motion one, which the export note
-    names), the record timecode starts at 01:00:00:00, and Markers ▸ Import
+    between every camera, the 59.94 one included (it was never slow motion:
+    Avid conforms it to the group's rate), the record timecode starts at 01:00:00:00, and Markers ▸ Import
     of the `- Avid markers.txt` puts her markers on A22. Then **Clip that
     plays** (V1 is one camera, no switching) and **Keep all groups** (every
     A track is a group too). Record all three; they settle Phase 0.
@@ -1482,6 +1507,14 @@ media, WKWebView's audio, and Avid.
     picture groups and import into Media Composer: the tracks are in the
     same top-down order, and a one-person bite is filler on the other
     tracks.
+17b. **A second string out of the same group.** Export two string outs of
+    HEAT 1 with Keep all groups. The message after each ends "If Media
+    Composer reports a group clip conflict on import, choose No To All."
+    (Clip that plays has no such line.) Import both into one bin. The
+    second import asks about a group clip conflict: click No To All. Both
+    sequences import, and a group in each still switches angles and plays.
+    If Media Composer crashes, note what was selected in the open bins
+    beforehand: the 2026-10-08 crash was in the bin's selected-items label.
 17. **Ask by person.** "Find every line where @ISABELLA or @NATHANIEL says
     they're tired, exhausted or that something is hard, and build a string
     out" on Qwen3.8 27B. The status names whose transcripts it reads and how
@@ -1539,3 +1572,140 @@ media, WKWebView's audio, and Avid.
     go silent on A1 only (A2 still plays there), nothing moves, ⌘Z brings
     them back in one step, and an exported AAF shows filler there in Media
     Composer. With Keep transcribed words on, no word is silenced.
+
+### October 6: String Outs record as Avid layers, Neo's trim and selection tools
+
+Start from New string out with a sequence as Source (the record starts empty,
+A1 to A4).
+
+1. **Record tracks are layers.** Mark a few seconds of Cara's lav in Source
+   (only her source track on), press V: one clip lands on A1 named CARA.
+   Patch Stephanie's source track to A1 (the → A1 menu on her source
+   header), mark and press B over part of Cara's clip: A1 shows Cara, then
+   Stephanie, then Cara, and A2 is untouched. Export AAF: in Media Composer
+   A1 plays Cara, Stephanie, Cara.
+2. **The playhead and scale stay put.** Switch Source and Record: the lanes,
+   ruler and playhead start at the same x in both and never sit over the
+   headers. Cut in another clip: nothing rescales; Fit (⇧Z) is the only
+   thing that does.
+3. **Selection.** Click a clip: a white outline. ⇧-click adds another.
+   Drag in empty track space: a grey box selects what it touches; draw it
+   around one edit per track and rollers appear instead. Delete leaves
+   filler; ⇧Delete closes the time on every track (and asks first when that
+   would take another track's clip). `,` and `.` nudge a frame, ⇧ ten; ↑ ↓
+   move the clip a track. Drag a clip: the move previews, snaps to edits and
+   the playhead, and lands on release as one undo.
+4. **Trim.** U seats a roll at the nearest edit on the selected tracks;
+   clicking an edit does too, just left or right of it seats the A or B
+   side. `,` `.` trim a frame, M and / ten, ⌥← ⌥→ as well. A roll moves the
+   edit on that track only; one side ripples every track (⇧R or the Ripple
+   button switches to overwrite). A trim past the source's media stops there
+   and says so. Dragging a roller previews the trim live.
+6. **It reads as an Avid timeline.** No orange marks on the ruler or down
+   through the tracks; a cut is only the line between two clips on its own
+   track; no V1 row. Export with the default (Keep all groups) a string out
+   with Cara on A1 and Stephanie from another moment on A2 over the same
+   time: in Media Composer V1 shows Cara's picture and V2 Stephanie's, both
+   still switchable groups.
+5. **Tools.** C is the blade: click a clip and it is cut there, on that
+   track (and on tracks you chose by hand). N rolls, Y slips (drag the clip:
+   its picture and sound move inside it), R slides (the clip moves, its
+   neighbours give and take). ⇧A is back to Selection. ⌘B cuts the selected
+   clips under the playhead, else the selected tracks.
+
+### October 6, evening: the plan's first pass (String Outs and AAF Audio)
+
+Needs Media Composer and a transcribed AAF Audio sequence; start String Outs
+from an empty string out, never the user's own.
+
+1. **The AAF has no hidden cuts.** Cut Cara onto A1 for ten seconds, then
+   overwrite Stephanie onto A2 over the middle of it. Export: in Media
+   Composer A1 is ONE clip across A2's two edits (no match-frame edits on
+   A1). Blade A1 in the middle (C) and export again: that edit is there.
+2. **Playback is level and seamless.** Play across A2's edit while A1 runs
+   on: no bump on A1. Cut in a fifth and a tenth person: the level of the
+   first does not drop.
+3. **Nothing goes missing.** Cut Kara's other line onto A2 over a stretch
+   where she plays on A1: it is refused, naming A1. Lift Harry on A1,
+   overwrite Jane onto A1 there, then ⇧⌫ Harry's struck words: refused,
+   naming Jane.
+4. **Pointer.** Over a clip the pointer is a hand, on its last 14 px a trim
+   cursor, between two clips a roll cursor. Drag a clip: a frame count
+   follows the pointer; hold it at the right edge of the timeline and the
+   view scrolls. ⌥-drag leaves a copy. Esc mid-drag puts everything back.
+5. **Copy, paste, Match Frame, J K L.** Select two clips, ⌘C, park later,
+   ⌘V: both land on their own tracks. ⌘C in the transcript text still copies
+   words. ⇧F on a clip opens its source on that frame with an In there.
+   L L L runs 1x, 2x, 4x; J slows and reverses; K stops.
+6. **AAF Audio.** Play a 3-hour sequence: the window stays responsive and
+   the transcript keeps the playing line in view. Zoom to 8x and play: the
+   view turns the page. Pinch on the lanes zooms around the pointer; a
+   sideways swipe pans; a click on the ruler parks there. ⇧-click a line
+   marks it, ⌥-click solos its mic.
+7. **A re-export keeps its words.** Export the same group sequence from
+   Media Composer again with one scene trimmed and import it: the new
+   document opens with transcripts on every mic whose media was heard
+   before, the trimmed lines at their new place, and a gap where the trim
+   brought in new material. Owner names come with them.
+
+### October 7: Ask about a range (needs an OpenAI or Claude key)
+
+1. **Model menus.** Settings ▸ AI APIs with a key saved: both menus list
+   the provider's models, chat models first and newest first. Refresh lists
+   them again. "Type a model id…" takes one by hand. Test still answers OK.
+2. **A range question.** In String Outs on a group sequence, ask "every time
+   CHASE and KENDALL talk to each other about X between 21:10:00:00 and
+   21:40:00:00". The Pipeline shows `find_conversations` and `scan` (not
+   pages of `read_transcript`). The answer cites lines that select in the
+   text, and comes back in seconds rather than a minute.
+3. **Stop.** Ask a whole-transcript topic and press Stop while it scans:
+   it stops at once, and the provider's usage page shows the requests ended.
+4. **AAF Audio.** With ChatGPT chosen, mark In and Out, pick a person's tab,
+   turn on Search with AI and describe a topic: "N matching passages ·
+   (scan model)", lines from that person inside the marks only. With Local
+   chosen, it runs on the Mac as before.
+5. **MCP.** In Claude Desktop with Sauce Bunny connected, `read_transcript`
+   answers in rows ("L… 21:10:09:07-… CHASE (A3): …").
+6. **Every camera in a group.** Open the PLANK CHALLENGE HEAT 1 AAF (or any
+   group with more than 16 angles) in AAF Audio, already imported once. The
+   relink that runs on open re-reads the picture: V1's block reads
+   `M007C004_260731CD` with a badge of 75, not "Clip 16", and hovering it
+   names twelve angles "and 63 more". The labels and transcripts you had are
+   still there.
+7. **Ask: copy, edit, run again.** Select words in an Ask answer and press
+   ⌘C: the words paste, not clips. Hover a question: Copy, Edit and Run
+   again. Edit puts it back in the box. A failed answer offers Try again,
+   which replaces the failure rather than repeating it.
+8. **Ask on a whole transcript with gpt-4o.** Ask a question that reads a
+   person's whole day (the twins one). It answers instead of "maximum
+   context length"; the Pipeline shows the step sent twice.
+9. **Ultrafast.** Settings ▸ AI APIs ▸ ChatGPT with gpt-4o and Ultrafast on:
+   the switch says gpt-4o does not offer it, and Test connection works.
+   Choose gpt-6-astra: Test still works, faster.
+10. **The redesigns.** String Outs with no tab open: a centred list filed
+    under Today, Yesterday, Previous 7 days and the month; each row leads
+    with its cut drawn to scale (one bar per bite, an empty one dashed), then
+    the name, bites and sequence, how long it plays, and when it was edited.
+    Up and Down walk every row across the groups; the search finds by
+    sequence name and Escape clears it. Review, empty: "Nothing on screen
+    yet", Open file… and Paste a link, then Screen, Window, Region and NDI
+    under "Or share live"; it fits without scrolling down to the smallest
+    window, and Paste a link opens a field that Escape or Back leaves.
+    Settings ▸ AI APIs: Local, Claude and ChatGPT each show only their own
+    settings.
+11. **Ask with gpt-6.1-sol.** Settings ▸ AI APIs ▸ ChatGPT, model
+    gpt-6.1-sol, Ultrafast off. Ask a question in String Outs: it answers
+    instead of "Function tools with reasoning_effort are not supported".
+12. **Every angle reaches Avid.** Export "Twins Rivalry Before The Fall"
+    (HEAT 1) with **Keep all groups** and import it: on V1, the angle menu
+    lists all 75 cameras, the 47.952 and 59.94 ones included, the angle
+    that plays is the one String Outs showed, and switching to a 47.952
+    camera lands on the same moment as the camera it replaces.
+13. **Conversations stack.** Open "Twins Rivalry Before The Fall" and choose
+    Audio ▸ Stack Conversations: the status line says 22 conversations, and
+    the record now shows DONNY and GILIO clips stacked over each
+    back-and-forth, with no filler inside one. Play an exchange: Gilio's
+    reactions during Donny's lines come from Gilio's own mic, nobody's word is
+    cut at a clip edge, and the markers still sit on each line. ⌘Z puts the
+    old layout back. Then ask Ask for a string out of a two-person exchange
+    and build it: the same shape, without the menu.

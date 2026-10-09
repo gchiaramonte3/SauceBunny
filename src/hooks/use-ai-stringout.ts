@@ -31,7 +31,7 @@ export function useAiStringout(modelId?: string | null) {
       const document = await invoke<AafDocument>("aaf_open", { documentId });
       const bites = laneBites(document);
       if (!bites.length) throw new Error("Nobody in this sequence has a transcript yet. Transcribe it in AAF Audio first.");
-      const names = Object.fromEntries(editFromSequence(document, "", false).tracks.map((track) => [track.id, track.name]));
+      const names = Object.fromEntries(editFromSequence(document, "").tracks.map((track) => [track.id, track.name]));
       if (!live()) return;
       setStatus({ busy: true, message: "Connecting to the model…" });
       const model = await connectModel(loadStringOutModel(), modelId, ctrl.signal);

@@ -21,6 +21,19 @@ use tokio::sync::Notify;
 /// Keychain service; the account is the provider ("anthropic" / "openai").
 const KEYCHAIN_SERVICE: &str = "com.saucebunny.desktop.ai";
 
+/// Run a Keychain call on the blocking pool, never on the main thread.
+///
+/// A Keychain read can wait on a person: macOS asks before a binary it does
+/// not recognise reads an item another build created (a re-signed release, a
+/// local build), and a locked login keychain asks for its password. As a
+/// plain `fn` command this ran on the main thread, so the whole window froze
+/// until the dialog was answered - measured at 86 s on String Outs' open,
+/// which checks for a saved key. On the blocking pool the dialog still asks,
+/// but the app keeps drawing and every other call keeps answering.
+pub(crate) async fn keychain<T: Send + 'static>(work: impl FnOnce() -> Result<T, AppError> + Send + 'static) -> Result<T, AppError> {
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|e| AppError::internal(e.to_string()))?
+}
+
 pub(crate) fn entry(provider: &str) -> Result<keyring::Entry, AppError> {
     if provider != "anthropic" && provider != "openai" {
         return Err(AppError::invalid(format!("Unknown AI provider: {provider}")));
@@ -31,14 +44,16 @@ pub(crate) fn entry(provider: &str) -> Result<keyring::Entry, AppError> {
 
 /// Store (or replace) a provider's API key in the Keychain.
 #[tauri::command]
-pub fn set_api_key(provider: String, key: String) -> Result<(), AppError> {
-    let key = key.trim();
-    if key.is_empty() {
-        return Err(AppError::invalid("The API key is empty."));
-    }
-    entry(&provider)?
-        .set_password(key)
-        .map_err(|e| AppError::internal(format!("Couldn't save the key to the Keychain: {e}")))
+pub async fn set_api_key(provider: String, key: String) -> Result<(), AppError> {
+    keychain(move || {
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(AppError::invalid("The API key is empty."));
+        }
+        entry(&provider)?
+            .set_password(key)
+            .map_err(|e| AppError::internal(format!("Couldn't save the key to the Keychain: {e}")))
+    }).await
 }
 
 // ── TURN relay credential (co-review) ───────────────────────────────
@@ -56,47 +71,49 @@ fn turn_entry() -> Result<keyring::Entry, AppError> {
 
 /// Store the TURN password; an empty/whitespace value clears it (idempotent).
 #[tauri::command]
-pub fn set_turn_password(password: String) -> Result<(), AppError> {
-    let p = password.trim();
-    if p.is_empty() {
-        return match turn_entry()?.delete_password() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(AppError::internal(format!("Couldn't clear the TURN password: {e}"))),
-        };
-    }
-    turn_entry()?
-        .set_password(p)
-        .map_err(|e| AppError::internal(format!("Couldn't save the TURN password to the Keychain: {e}")))
+pub async fn set_turn_password(password: String) -> Result<(), AppError> {
+    keychain(move || {
+        let p = password.trim();
+        if p.is_empty() {
+            return match turn_entry()?.delete_password() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(e) => Err(AppError::internal(format!("Couldn't clear the TURN password: {e}"))),
+            };
+        }
+        turn_entry()?
+            .set_password(p)
+            .map_err(|e| AppError::internal(format!("Couldn't save the TURN password to the Keychain: {e}")))
+    }).await
 }
 
 /// Read the TURN password back for the session's RTC config. Empty = none set.
 #[tauri::command]
-pub fn get_turn_password() -> Result<String, AppError> {
-    match turn_entry()?.get_password() {
+pub async fn get_turn_password() -> Result<String, AppError> {
+    keychain(|| match turn_entry()?.get_password() {
         Ok(p) => Ok(p),
         Err(keyring::Error::NoEntry) => Ok(String::new()),
         Err(e) => Err(AppError::internal(format!("Couldn't read the TURN password: {e}"))),
-    }
+    }).await
 }
 
 /// Forget a provider's key. Absent is success (idempotent).
 #[tauri::command]
-pub fn delete_api_key(provider: String) -> Result<(), AppError> {
-    match entry(&provider)?.delete_password() {
+pub async fn delete_api_key(provider: String) -> Result<(), AppError> {
+    keychain(move || match entry(&provider)?.delete_password() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(AppError::internal(format!("Couldn't remove the key: {e}"))),
-    }
+    }).await
 }
 
 /// Whether a key is stored for a provider (drives the Settings "key set" state).
 /// Never returns the key itself.
 #[tauri::command]
-pub fn has_api_key(provider: String) -> Result<bool, AppError> {
-    match entry(&provider)?.get_password() {
+pub async fn has_api_key(provider: String) -> Result<bool, AppError> {
+    keychain(move || match entry(&provider)?.get_password() {
         Ok(_) => Ok(true),
         Err(keyring::Error::NoEntry) => Ok(false),
         Err(e) => Err(AppError::internal(format!("Keychain read failed: {e}"))),
-    }
+    }).await
 }
 
 #[derive(Deserialize)]
@@ -277,7 +294,7 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
                 let input: Vec<serde_json::Value> = args.messages.iter()
                     .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
                     .collect();
-                let body = super::openai_responses::body(&args.model, &args.system, &input, max_tokens, tier, false);
+                let body = super::openai_responses::body(&args.model, &args.system, &input, max_tokens, Some(tier), false);
                 let req = client
                     .post(super::openai_responses::URL)
                     .header("authorization", format!("Bearer {key}"))
@@ -285,11 +302,7 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
                     .json(&body);
                 let (status, text) = post_and_read(req, cancel).await?;
                 if !status.is_success() {
-                    return Err(AppError::invalid(format!(
-                        "OpenAI API error {}: {}",
-                        status.as_u16(),
-                        provider_error(&text)
-                    )));
+                    return Err(super::openai_responses::refused(&args.model, status.as_u16(), &provider_error(&text)));
                 }
                 let v: serde_json::Value = serde_json::from_str(&text)?;
                 if super::openai_responses::out_of_room(&v) {

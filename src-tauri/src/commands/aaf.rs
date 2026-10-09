@@ -1,6 +1,7 @@
 //! Local, read-only AAF import and microphone-track transcription.
 //! Existing Clip/Review playback and global transcription commands are untouched.
 mod audio;
+mod carry;
 /// Settings counts and clears AAF Audio's playback windows by this name.
 pub(crate) use audio::is_playback_file;
 mod diagnostics;
@@ -14,6 +15,7 @@ mod linked_paths;
 mod linked_probe;
 mod linked_audio;
 mod local_read;
+mod media_probe;
 mod mxf_header;
 pub mod model;
 pub mod ownership;
@@ -111,10 +113,16 @@ pub async fn aaf_resolve_media(app: AppHandle, document_id: String, source_id: O
     }).await
 }
 
+/// With `transcripts` false, the document without its transcripts or the
+/// editor's bleed calls, parsed once while its file is unchanged: String Outs
+/// reads only the manifest, and the whole of HEAT 1's was 95 MB to parse and
+/// send to the page on every open (about 550 ms).
 #[tauri::command]
-pub async fn aaf_open(app: AppHandle, document_id: String) -> Result<AafDocument, AppError> {
+pub async fn aaf_open(app: AppHandle, document_id: String, transcripts: Option<bool>) -> Result<AafDocument, AppError> {
     diagnostics::operation(&app, &diagnostics::new_id(), "open", &format!("Open saved document {document_id}"), async {
-        store::load(&store::root(&app)?, &document_id)
+        let root = store::root(&app)?;
+        if transcripts == Some(false) { return Ok((*store::playback_document(&root, &document_id)?).clone()); }
+        store::load(&root, &document_id)
     }).await
 }
 
@@ -169,6 +177,13 @@ pub async fn aaf_read_recording_dates(app: AppHandle, document_id: String, job_i
     }).await
 }
 
+/// `sauce-bunny --probe-media`: check linked media for the app, from a child
+/// process, so a volume that stops answering holds the child and not the app
+/// (aaf/media_probe.rs).
+pub fn serve_media_probe() -> i32 {
+    media_probe::serve(std::io::stdin().lock(), std::io::stdout().lock())
+}
+
 #[tauri::command]
 pub async fn aaf_prepare_audio(app: AppHandle, document_id: String, track_id: String,
     start_frame: i64, duration_frames: i64, job_id: String) -> Result<AafAudioAsset, AppError>
@@ -185,7 +200,11 @@ pub async fn aaf_waveform(app: AppHandle, document_id: String, track_id: String,
     start_frame: Option<i64>, duration_frames: Option<i64>) -> Result<AafWaveform, AppError> {
     diagnostics::operation(&app, &job_id, "waveform", &format!("Waveform · document {document_id} · track {track_id}"), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
-    let document = store::load(&store::root(&app)?, &document_id)?;
+    // The document as playback reads it: parsed once while its file is
+    // unchanged, without its transcripts. A zoomed String Outs timeline asks
+    // for each visible clip's detail, and a full load parses megabytes of
+    // transcript a waveform never reads.
+    let document = store::playback_document(&store::root(&app)?, &document_id)?;
     match (start_frame, duration_frames) {
         (None, None) => peaks::waveform(&app, &document, &track_id, 0, document.manifest.duration_frames, true, &job_id).await,
         (Some(start), Some(duration)) => {
@@ -222,7 +241,8 @@ pub async fn aaf_transcribe_track(app: AppHandle, document_id: String, track_id:
 pub async fn aaf_speech(app: AppHandle, document_id: String, track_id: String, build: bool, job_id: String) -> Result<crate::speech::AafSpeech, AppError> {
     diagnostics::operation(&app, &job_id, "speech", &format!("Speech analysis · document {document_id} · track {track_id} · build {build}"), async {
     let _job = process::JobGuard::begin(&app, &job_id)?;
-    let document = store::load(&store::root(&app)?, &document_id)?;
+    // Parsed once for every mic: String Outs asks once per mic.
+    let document = store::read_document(&store::root(&app)?, &document_id)?;
     let cues: Vec<crate::speech::CueInput> = document.transcripts.iter().filter(|transcript| transcript.track_id == track_id)
         .flat_map(|transcript| transcript.cues.iter())
         .map(|cue| crate::speech::CueInput { id: &cue.id, start_sample: cue.start_sample, end_sample: cue.end_sample, text: &cue.text, words: cue.words.as_deref() })

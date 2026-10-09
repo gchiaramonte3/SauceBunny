@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EditDocument } from "../bindings/EditDocument";
-import { askLines, askMentions, askRecords, mentionQuery, parseAskAnswer, scopeLines, askFindPrompt, askParts, parseAskFind, askBuildTitle, asksToBuild } from "./edit-ask";
+import type { AskMessage } from "./edit-ask";
+import { askAgain, askLines, askMentions, askRecords, mentionQuery, parseAskAnswer, scopeLines, askFindPrompt, askParts, parseAskFind, askBuildTitle, asksToBuild } from "./edit-ask";
 import type { TimelineWord } from "./edit-model";
 import { layoutEditBites } from "./edit-stringout";
 
@@ -117,5 +118,28 @@ describe("a build the model forgot to propose", () => {
     // A person found from the start of their name counts, as it does when reading.
     expect(askBuildTitle("everything @isa says tired", mentions)).toBe("ISABELLA, from Ask");
     expect(askBuildTitle("everything tired", mentions)).toBe("From Ask");
+  });
+});
+
+describe("asking again", () => {
+  const you = (id: string, text: string): AskMessage => ({ id, role: "you", text, lines: [], action: null });
+  const ask = (id: string, failed = false): AskMessage => ({ id, role: "ask", text: failed ? "ChatGPT error 400" : "An answer.", lines: [], action: null, failed });
+
+  it("replaces a last attempt that failed, from the question or from the failure", () => {
+    const list = [you("q1", "Who won?"), ask("a1"), you("q2", "Find the rivalry"), ask("a2", true)];
+    for (const id of ["q2", "a2"]) expect(askAgain(list, id)).toEqual({ question: "Find the rivalry", base: list.slice(0, 2) });
+  });
+
+  it("asks an earlier question again as a new turn, keeping what came after", () => {
+    const list = [you("q1", "Who won?"), ask("a1"), you("q2", "And then?"), ask("a2")];
+    expect(askAgain(list, "q1")).toEqual({ question: "Who won?", base: list });
+  });
+
+  it("replaces a last question that was never answered, and keeps an answer that worked", () => {
+    const stopped = [you("q1", "Who won?"), ask("a1"), you("q2", "Stopped one")];
+    expect(askAgain(stopped, "q2")).toEqual({ question: "Stopped one", base: stopped.slice(0, 2) });
+    const answered = [you("q1", "x"), ask("a1")];
+    expect(askAgain(answered, "a1")).toEqual({ question: "x", base: answered });
+    expect(askAgain([], "nope")).toBeNull();
   });
 });

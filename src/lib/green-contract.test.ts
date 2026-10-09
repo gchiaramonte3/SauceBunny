@@ -91,7 +91,7 @@ const ALLOWED: Record<string, string[]> = {
   // User-approved exception (2026-09-07): Post is green when actionable.
   // This does not change neutral primary buttons or white keyboard focus.
   "review.css": ["cp-review-export-msg", "cp-status-chip", "cp-review-tc", "cp-review-enhance", "cp-review-post"],
-  "settings.css": ["cp-spike-row", "cp-aiapi-set", "cp-settings-ready", "cp-aiapi-msg"],
+  "settings.css": ["cp-spike-row", "cp-aiapi-status.ok", "cp-settings-ready", "cp-aiapi-msg"],
   "shell.css": ["cp-drop-card"],
   "transport.css": ["cp-track-queued"],
   // Outcomes in the logs header and log lines, and the queue's DONE state,
@@ -139,7 +139,7 @@ function sheets(): Array<[name: string, lines: string[]]> {
  * included.
  *
  * Reading only the line with the `{` on it is not enough, and this test caught
- * itself doing it: `.cp-aiapi-set,` and `.cp-settings-ready {` are one rule
+ * itself doing it: `.cp-aiapi-status.ok,` and `.cp-settings-ready {` are one rule
  * written across two lines, and taking the second line alone made the first
  * selector invisible. The allowlist then reported a live entry as dead. A
  * green declaration is governed by every selector that leads to it.

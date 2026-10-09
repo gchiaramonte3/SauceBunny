@@ -107,9 +107,11 @@ describe("no call site reopens the window", () => {
        scratch file nobody would play.
        The rule: between `const x = newJobId()` and the first `invoke(` after
        it, the name must reach somewhere a stop path can read - a ref
-       assignment, a setState, or a dispatch. Deliberately structural rather
-       than a list of approved sites, so the eighteenth call site is covered
-       the day it is written. */
+       assignment, a ref'd set of ids in flight (`ref.current.add(x)`, for
+       requests that run several at once, as String Outs' waveform detail
+       does), a setState, or a dispatch. Deliberately structural rather than
+       a list of approved sites, so the eighteenth call site is covered the
+       day it is written. */
     const offenders: string[] = [];
     let minted = 0;
     for (const [rel, text] of sources()) {
@@ -124,7 +126,7 @@ describe("no call site reopens the window", () => {
         const stop = after.search(/\binvoke\s*(<[^>]*>)?\s*\(/);
         const window = stop === -1 ? after : after.slice(0, stop);
         const held = new RegExp(
-          `(\\.current\\s*=\\s*${name}\\b|set[A-Z]\\w*\\(\\s*${name}\\b|dispatch\\([^)]*\\b${name}\\b)`,
+          `(\\.current\\s*=\\s*${name}\\b|\\.current\\.add\\(\\s*${name}\\b|set[A-Z]\\w*\\(\\s*${name}\\b|dispatch\\([^)]*\\b${name}\\b)`,
         ).test(window);
         if (!held) offenders.push(`${rel}: ${name} is minted and never held`);
       }

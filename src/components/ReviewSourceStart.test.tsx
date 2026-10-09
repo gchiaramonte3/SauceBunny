@@ -11,10 +11,10 @@ it("offers six explicit source choices without Resume or effects on mount", () =
   expect(screen.getAllByRole("button")).toHaveLength(6);
   expect(screen.queryByText(/Resume/)).toBeNull();
   for (const callback of Object.values(props)) expect(callback).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: /^Local file/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Open file…" }));
   expect(props.onImportFile).toHaveBeenCalledOnce();
   for (const label of ["Screen", "Window", "Region", "NDI"]) {
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label} `) }));
+    fireEvent.click(screen.getByRole("button", { name: label }));
     expect(props.onChooseLiveSource).toHaveBeenLastCalledWith(label.toLowerCase());
   }
   expect(props.onChooseLiveSource).toHaveBeenCalledTimes(4);
@@ -23,7 +23,7 @@ it("offers six explicit source choices without Resume or effects on mount", () =
 it("focuses a URL form and loads only after explicit submission", () => {
   const props = callbacks();
   render(<ReviewSourceStart inSession {...props} />);
-  fireEvent.click(screen.getByRole("button", { name: /^Link / }));
+  fireEvent.click(screen.getByRole("button", { name: "Paste a link" }));
   const url = screen.getByRole("textbox", { name: "Video URL" });
   expect(document.activeElement).toBe(url);
   fireEvent.change(url, { target: { value: "https://example.com/video" } });
@@ -32,6 +32,7 @@ it("focuses a URL form and loads only after explicit submission", () => {
   expect(props.onLoadUrl).toHaveBeenCalledWith("https://example.com/video");
   fireEvent.click(screen.getByRole("button", { name: "Back" }));
   expect(screen.getAllByRole("button")).toHaveLength(6);
+  expect(screen.getByRole("heading").textContent).toBe("Choose what the room sees");
   expect(props.onChooseLiveSource).not.toHaveBeenCalled();
   expect(props.onImportFile).not.toHaveBeenCalled();
 });

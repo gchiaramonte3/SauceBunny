@@ -19,9 +19,25 @@ export type EditKeyActions = {
   shuttle: (key: "j" | "k" | "l", on: EditKeySide) => void;
   step: (frames: number) => void; start: () => void; end: () => void;
   lift: () => void; extract: () => void; marker: () => void; markClip: () => void;
-  snap: () => void; previous: () => void; next: () => void; insert: () => void; overwrite: () => void;
+  previous: () => void; next: () => void; insert: () => void; overwrite: () => void;
   /** ⇧T: Avid's Toggle Source/Record in Timeline. */
   mode: () => void;
+  /** ⌘C, ⌘X and ⌘V on the record's clips; each says false when it has nothing to act on, and the key does what it does in text instead. */
+  copyClips: (cut: boolean) => boolean; pasteClips: () => boolean;
+  /** ⇧F: Match Frame, the record clip under the playhead loaded into the source at the same frame (Premiere's F; F alone clears the Out here, as in Avid). */
+  matchFrame: () => void;
+  /**
+   * The record tracks' trim and segment tools, after Neo's: U enters or leaves
+   * Trim, ⇧R switches one-sided trims between ripple and overwrite. Each that
+   * returns a boolean answers whether it acted, so the key can mean its usual
+   * thing when there is nothing selected (M is still a marker, `,` and `.`
+   * still nudge a clip when no roller is seated).
+   */
+  enterTrim: () => void; toggleRipple: () => void; selectAll: () => void;
+  /** Neo's tool keys: ⇧A Selection, C Blade, N Roll, Y Slip, R Slide. */
+  tool: (tool: "select" | "blade" | "roll" | "slip" | "slide") => void;
+  trimBy: (frames: number) => boolean; nudgeClips: (frames: number) => boolean; clipTrack: (delta: -1 | 1) => boolean;
+  deleteClips: (extract: boolean) => boolean; slip: (frames: number) => boolean; slide: (frames: number) => boolean;
 };
 
 /** Whether focus is drawn on an element; a browser without :focus-visible counts every focus as shown. */
@@ -63,6 +79,13 @@ export function useEditKeys(root: RefObject<HTMLElement | null>, active: boolean
       if (event.key === " " && (!pressable || (pressable.matches("button") && !showsFocus(pressable)))) return act(() => run.toggle(on));
       if (event.metaKey && !event.ctrlKey && key === "z") return act(event.shiftKey ? run.redo : run.undo);
       if (event.metaKey && !event.ctrlKey && !event.altKey && key === "y") return act(run.history);
+      // Copy, cut and paste clips, outside text: the transcript and fields keep ⌘C, ⌘X and ⌘V for words,
+      // and so does any text selected elsewhere (an Ask answer), which ⌘C copied clips over.
+      if (on === "timeline" && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !target.closest(".cp-te-doc, input, textarea, [contenteditable=true]")
+        && !(key !== "v" && window.getSelection()?.toString())) {
+        if ((key === "c" || key === "x") && run.copyClips(key === "x")) return event.preventDefault();
+        if (key === "v" && run.pasteClips()) return event.preventDefault();
+      }
       if (on === "timeline" && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
         const chord = ({ b: run.cutHere, l: run.loop, "=": run.zoomIn, "-": run.zoomOut } as Record<string, () => void>)[key];
         if (chord) return act(chord);
@@ -70,6 +93,25 @@ export function useEditKeys(root: RefObject<HTMLElement | null>, active: boolean
       // ⌥X was this editor's Clear Marks before G; kept so a habit still works.
       if (event.altKey && !event.metaKey && event.code === "KeyX") return act(() => run.clear("both", on));
       if (event.key === "Escape" && run.escape()) return event.preventDefault();
+      // The record tracks' clips and rollers, from anywhere but the transcript's own text (which has its own Delete and arrows).
+      if (on === "timeline" && !target.closest(".cp-te-doc")) {
+        const by = event.shiftKey ? 10 : 1, plain = !event.metaKey && !event.ctrlKey && !event.altKey;
+        if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && key === "a") return act(run.selectAll);
+        // ⌥← ⌥→ trim; ⌥⌘← ⌥⌘→ slip the selected clip. ⇧ is ten frames.
+        if (event.altKey && !event.ctrlKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+          const sign = event.key === "ArrowLeft" ? -1 : 1;
+          if (event.metaKey ? run.slip(sign * by) : run.trimBy(sign * by)) return event.preventDefault();
+        }
+        // , and . trim a frame (Avid's trim keys), or nudge the selected clips; ⌥ slides the selected clip.
+        if (!event.metaKey && !event.ctrlKey && (event.code === "Comma" || event.code === "Period")) {
+          const sign = event.code === "Comma" ? -1 : 1;
+          if (event.altKey ? run.slide(sign * by) : run.trimBy(sign * by) || run.nudgeClips(sign * by)) return event.preventDefault();
+        }
+        // M and / trim ten frames while rollers are seated, as Avid's trim keys; otherwise M is a marker.
+        if (plain && (event.code === "KeyM" || event.code === "Slash") && run.trimBy(event.code === "KeyM" ? -10 : 10)) return event.preventDefault();
+        if (plain && (event.key === "Delete" || event.key === "Backspace") && run.deleteClips(event.shiftKey)) return event.preventDefault();
+        if (plain && !event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown") && run.clipTrack(event.key === "ArrowUp" ? -1 : 1)) return event.preventDefault();
+      }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (key === "v" && !event.shiftKey) return act(run.insert);
       if (key === "b" && !event.shiftKey) return act(run.overwrite);
@@ -81,8 +123,9 @@ export function useEditKeys(root: RefObject<HTMLElement | null>, active: boolean
       if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !target.closest(".cp-te-doc, [role=slider], [role=tablist], [role=separator], [role=radiogroup]")) {
         return act(() => run.step((event.key === "ArrowLeft" ? -1 : 1) * (event.shiftKey ? 10 : 1)));
       }
-      if (event.shiftKey) { if (key === "z") act(run.zoomFit); if (key === "t") act(run.mode); return; }
-      const letter = ({ z: run.lift, x: run.extract, m: run.marker, t: run.markClip, n: run.snap, a: run.previous, s: run.next } as Record<string, () => void>)[key];
+      if (event.shiftKey) { if (key === "z") act(run.zoomFit); if (key === "t") act(run.mode); if (key === "f") act(run.matchFrame); if (key === "r") act(run.toggleRipple); if (key === "a") act(() => run.tool("select")); return; }
+      const letter = ({ z: run.lift, x: run.extract, m: run.marker, t: run.markClip, a: run.previous, s: run.next, u: run.enterTrim,
+        c: () => run.tool("blade"), n: () => run.tool("roll"), y: () => run.tool("slip"), r: () => run.tool("slide") } as Record<string, () => void>)[key];
       if (letter) act(letter);
     };
     window.addEventListener("keydown", listener, true);

@@ -126,7 +126,8 @@ export type QueuedClip = {
 export type SourceKind = "youtube" | "file";
 
 export type ClientLog = {
-  id: number;
+  /** A React key, stable for the line's life: the Clip view counts, the Pipeline uses its row id. */
+  id: number | string;
   ts: string;          // HH:MM:SS
   tag: LogTag;
   source: string;      // e.g. "yt-dlp", "ffmpeg", "probe", "ok", "warn"

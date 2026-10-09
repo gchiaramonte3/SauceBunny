@@ -145,6 +145,9 @@
   border-top: 1px solid var(--line-1);
 }
 .cp-te-src-actions { display: flex; gap: 6px; }
+/* Whose tracks an edit brings: the source track selectors, said in words where the text is. */
+.cp-te-src-brings { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; margin: 0; min-width: 0; font-size: var(--text-sm); color: var(--fg-3); }
+.cp-te-src-brings-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Edit (record) ───────────────────────────────────────────────────── */
 /* What the editor last did, a quiet line under the words. No rule: the source
@@ -272,7 +275,7 @@
    clip, grey when another track is soloed, deep violet on the soloed one.
    By default each lane wears its speaker's hue instead (View ▸ Speaker
    colours), the same colour the text gives that person. */
-.cp-te-timeline { --te-lane-h: 36px; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cp-te-timeline { --te-lane-h: 36px; --te-head-w: 280px; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .cp-te-timeline.is-small { --te-lane-h: 24px; }
 .cp-te-timeline.is-large { --te-lane-h: 58px; }
 .cp-te-tl-tools { flex: none; display: flex; align-items: center; gap: 4px; min-height: 36px; padding: 0 8px; }
@@ -300,9 +303,14 @@
   min-height: 0;
   overflow-y: auto;
   display: grid;
-  /* Headers size to the longest name, up to 280px. At a fixed 156px, S, M and
-     T left names about 12px, so every person read as one letter. */
-  grid-template-columns: fit-content(280px) minmax(0, 1fr);
+  /* One fixed header width, the same in Source and Record, as Avid's and AAF
+     Audio's: the lanes, the ruler and the playhead start at one x whatever is
+     in the headers. Sized to the longest name (fit-content) moved all of them
+     whenever the view switched or someone was patched, and a patch menu wider
+     than the column put the playhead over the headers. At 156px, S, M and T
+     left names about 12px, so the width holds the record header's five
+     switches with room for a name; a longer one truncates. */
+  grid-template-columns: var(--te-head-w) minmax(0, 1fr);
   /* The ruler row, tall enough for the Source/Record switch's 24px targets in the corner beside it. */
   grid-template-rows: 28px;
   grid-auto-rows: auto;
@@ -352,31 +360,6 @@
 button.cp-te-tl-marker { bottom: 0; width: 24px; height: 24px; margin-left: -12px; padding: 0; border: none; background: none; clip-path: none; cursor: pointer; z-index: 2; }
 button.cp-te-tl-marker::before { content: ""; position: absolute; bottom: 2px; left: 8px; width: 8px; height: 10px; background: var(--novella-violet); clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%); }
 button.cp-te-tl-marker.is-selected::before { background: var(--fg-0); }
-.cp-te-tl-seam-mark {
-  position: absolute;
-  top: 0;
-  z-index: 1;
-  width: 24px;
-  height: 22px;
-  margin-left: -12px;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-}
-.cp-te-tl-seam-mark::after {
-  content: "";
-  position: absolute;
-  left: 7px;
-  top: 7px;
-  width: 10px;
-  height: 9px;
-  background: var(--fg-4);
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
-}
-.cp-te-tl-seam-mark.is-clipped::after { background: var(--warning); }
-.cp-te-tl-seam-mark:hover::after { background: var(--fg-1); }
-.cp-te-tl-seam-mark.is-selected::after { background: var(--fg-0); }
 .cp-te-tl-row { display: contents; }
 .cp-te-tl-head {
   grid-column: 1;
@@ -384,6 +367,8 @@ button.cp-te-tl-marker.is-selected::before { background: var(--fg-0); }
   align-items: center;
   gap: 6px;
   min-width: 0;
+  /* Nothing in a header reaches into the lanes, whatever it holds. */
+  overflow: hidden;
   min-height: var(--te-lane-h);
   padding: 0 6px 0 10px;
   background: var(--bg-1);
@@ -406,7 +391,9 @@ button.cp-te-tl-marker.is-selected::before { background: var(--fg-0); }
   cursor: pointer;
 }
 .cp-te-tl-track:hover { color: var(--fg-2); border-color: var(--line-2); }
-.cp-te-tl-track[aria-pressed="true"] { background: var(--bg-4); color: var(--fg-1); border-color: var(--line-3); }
+/* A selected track's selector is lit, as Avid's are: a light key with dark type, readable at a glance down 30 tracks. */
+.cp-te-tl-track[aria-pressed="true"] { background: var(--fg-2); color: var(--bg-0); border-color: var(--fg-2); font-weight: var(--weight-semibold); }
+.cp-te-tl-track[aria-pressed="true"]:hover { background: var(--fg-1); border-color: var(--fg-1); color: var(--bg-0); }
 .cp-te-tl-head .cp-te-swatch { width: 6px; height: 6px; }
 /* The Source view's groups, as AAF Audio lays them out: a disclosure on the
    track, and its alternates indented under it behind a ↳. */
@@ -415,14 +402,49 @@ button.cp-te-tl-marker.is-selected::before { background: var(--fg-0); }
 .cp-te-tl-row.is-alternative .cp-te-tl-head { padding-left: 24px; }
 .cp-te-tl-note { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: var(--text-xs); color: var(--fg-4); pointer-events: none; }
 .cp-te-tl-name { flex: 1; min-width: 0; font-size: var(--text-base); color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The patch panel: who plays on a record track, chosen in its header. Record
-   tracks are A1, A2… and a person is patched to one; choosing someone else
-   puts them on this track and the rest move down. */
-.cp-te-tl-patch.cp-select { flex: 1; min-width: 0; max-width: 200px; color: var(--fg-2); }
-/* The empty track under the last one in use, where the next person is patched. */
-.cp-te-tl-patch-row .cp-te-tl-head { opacity: 0.8; }
-.cp-te-tl-patch-row .cp-te-tl-lane { min-height: 28px; cursor: default; }
 .cp-te-tl-switches { flex: none; display: flex; gap: 3px; }
+/* The record tools (Neo's): a selected clip is outlined in white, as Neo draws it. */
+.cp-te-tl-clip.is-picked { box-shadow: inset 0 0 0 1px var(--fg-0); z-index: 1; }
+/* Trim rollers, Neo's: 3px bars in the selection violet with a dark halo. A roll sits
+   both sides of the cut with a clear channel; one side sits inside its own clip; an
+   overwrite (red, in Avid) carries a square cap, a ripple (yellow) none. */
+.cp-te-tl-roller { position: absolute; top: 2px; bottom: 2px; width: 0; z-index: 2; pointer-events: none; }
+.cp-te-tl-roller::before, .cp-te-tl-roller::after { content: ""; position: absolute; top: 0; bottom: 0; width: 3px; background: var(--novella-violet); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-0) 55%, transparent); }
+.cp-te-tl-roller.is-both::before { left: -5px; }
+.cp-te-tl-roller.is-both::after { left: 2px; }
+.cp-te-tl-roller.is-a::before { left: -5px; }
+.cp-te-tl-roller.is-a::after, .cp-te-tl-roller.is-b::before { display: none; }
+.cp-te-tl-roller.is-b::after { left: 2px; }
+.cp-te-tl-roller.is-overwrite::before, .cp-te-tl-roller.is-overwrite::after { border-top: 4px solid var(--fg-0); }
+/* The lasso: Neo's grey box, over the tracks while it is drawn. */
+.cp-te-tl-lasso { position: fixed; z-index: var(--z-popover); pointer-events: none; border: 1px solid color-mix(in srgb, var(--fg-1) 55%, transparent); background: color-mix(in srgb, var(--fg-1) 12%, transparent); }
+/* The pointer says which tool is in hand. */
+.cp-te-lower[data-tool="blade"] .cp-te-tl-lane { cursor: crosshair; }
+.cp-te-lower[data-tool="roll"] .cp-te-tl-lane { cursor: col-resize; }
+.cp-te-lower[data-tool="slip"] .cp-te-tl-lane, .cp-te-lower[data-tool="slide"] .cp-te-tl-lane { cursor: ew-resize; }
+.cp-te-lower[data-tool="select"] .cp-te-tl-lane { cursor: default; }
+/* Under the Selection tool the pointer says what a press takes: a clip to move, its end to trim, the line between two to roll. */
+.cp-te-lower[data-tool="select"] .cp-te-tl-lane[data-zone="clip"] { cursor: grab; }
+.cp-te-lower .cp-te-tl-lane[data-zone="moving"] { cursor: grabbing; }
+.cp-te-lower[data-tool="select"] .cp-te-tl-lane[data-zone="trim"] { cursor: ew-resize; }
+.cp-te-lower[data-tool="select"] .cp-te-tl-lane[data-zone="roll"] { cursor: col-resize; }
+/* The count beside the pointer while a drag is held: frames moved, and where a trim stopped. */
+.cp-te-tl-readout {
+  position: fixed;
+  z-index: var(--z-popover);
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  background: var(--bg-3);
+  box-shadow: var(--shadow-card);
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* A source track's patch: the record track it lands on (→ A1). */
+.cp-te-tl-patchto.cp-select { flex: none; width: 64px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
 /* S, M and T: the AAF Audio switches, at the 24px pointer minimum. */
 .cp-te-tl-toggle {
   width: 24px;
@@ -443,49 +465,55 @@ button.cp-te-tl-marker.is-selected::before { background: var(--fg-0); }
 .cp-te-tl-row.is-solo .cp-te-tl-toggle[aria-pressed="true"]:first-child { background: var(--novella-violet-deep); border-color: transparent; }
 .cp-te-tl-lane { grid-column: 2; position: relative; min-height: var(--te-lane-h); overflow: hidden; border-bottom: 1px solid var(--line-1); cursor: pointer; }
 .cp-te-tl-row.has-text .cp-te-tl-head, .cp-te-tl-row.has-text .cp-te-tl-lane { min-height: calc(var(--te-lane-h) + 18px); }
+/* A clip as Avid draws one: a solid block filling its track, its name at
+   the top left, and a cut a straight dark line at each edge, on its own track
+   only. Two clips cut back to back read as two because of that line and
+   nothing else: no marks on the ruler, nothing drawn across other tracks. */
 .cp-te-tl-clip {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
+  top: 1px;
+  bottom: 1px;
   overflow: hidden;
-  border-radius: var(--r-2xs);
-  border-left: 1px solid var(--line-2);
-  background: color-mix(in srgb, var(--novella-violet) 12%, var(--bg-2));
+  box-shadow: inset 1px 0 0 var(--bg-0), inset -1px 0 0 var(--bg-0);
+  background: color-mix(in srgb, var(--novella-violet) 30%, var(--bg-3));
   color: color-mix(in srgb, var(--novella-violet) 55%, var(--fg-1));
 }
 .cp-te-tl-row.has-text .cp-te-tl-clip { top: 20px; }
 .cp-te-tl-row.is-solo .cp-te-tl-clip { background: color-mix(in srgb, var(--novella-violet-deep) 55%, var(--bg-2)); }
 .cp-te-timeline.is-speaker .cp-te-tl-clip {
-  background: color-mix(in srgb, var(--te-speaker) 12%, var(--bg-2));
-  border-left-color: color-mix(in srgb, var(--te-speaker) 40%, transparent);
+  background: color-mix(in srgb, var(--te-speaker) 30%, var(--bg-3));
   color: var(--te-speaker);
 }
+/* The clip's name, top left over its waveform, as Avid's clip text. */
+.cp-te-tl-clip-name { position: absolute; top: 3px; left: 5px; max-width: calc(100% - 10px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); line-height: var(--leading-none); color: var(--fg-1); pointer-events: none; z-index: 1; }
 .cp-te-timeline.is-speaker .cp-te-tl-row.is-solo .cp-te-tl-clip { background: color-mix(in srgb, var(--te-speaker) 20%, var(--bg-2)); }
 .cp-te-tl-row.is-unsoloed .cp-te-tl-clip, .cp-te-timeline.is-speaker .cp-te-tl-row.is-unsoloed .cp-te-tl-clip { background: var(--bg-2); }
 .cp-te-tl-row.is-unsoloed .cp-te-wave { filter: grayscale(1); opacity: 0.45; }
 .cp-te-tl-row.is-unsoloed .cp-te-tl-words { opacity: 0.6; }
 .cp-te-tl-row.is-muted .cp-te-wave { opacity: 0.35; }
-.cp-te-wave { display: block; width: 100%; height: 100%; }
+/* Placed by EditWave over just the part of its clip that is on screen (left and width are set there). */
+.cp-te-wave { position: absolute; top: 0; height: 100%; display: block; }
 /* Words over the waveform, where they are said: AAF Audio's text overlay. */
 .cp-te-tl-words { position: absolute; inset: 2px 0 auto; height: 16px; pointer-events: none; color: var(--fg-2); font-size: var(--text-sm); }
 .cp-te-tl-words > span { position: absolute; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 3px; box-sizing: border-box; height: 16px; padding-block: 2px; line-height: var(--leading-none); background: var(--bg-3); border-radius: var(--r-2xs); pointer-events: auto; }
 .cp-te-tl-words > span.is-summary { background: transparent; color: var(--fg-3); padding-inline: 6px; border-left: 1px solid var(--line-2); border-radius: 0; }
-.cp-te-tl-clipped { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--warning); }
 /* Absolutely positioned, so it takes no part in auto-placement (a placed
    item spanning every row pushed the lanes into implicit rows below it), and
    its grid lines still make it exactly as wide as the lanes. */
-.cp-te-tl-overlay { position: absolute; inset: 0; grid-column: 2; grid-row: 1 / span var(--te-rows, 2); z-index: 4; overflow: hidden; pointer-events: none; }
+/* contain: the playhead moves inside this layer on every frame, and nothing
+   in here may lay out the grid again (playing a 50-mic record once ran at 11
+   fps for it). Layout and paint only, NOT size: WebKit places a size-contained
+   absolute grid item against the whole grid rather than its grid area, which
+   put the playhead over the track headers, 18 px in at a source playhead
+   112 s along. The layer's size comes from its grid area (inset: 0). */
+.cp-te-tl-overlay { position: absolute; inset: 0; grid-column: 2; grid-row: 1 / span var(--te-rows, 2); z-index: 4; overflow: hidden; pointer-events: none; contain: layout paint; }
 /* An empty string out says so over its lanes, near the top: with 99 lanes the
    middle of the grid is thousands of pixels down. */
 .cp-te-tl-empty { position: absolute; inset: 28px 0 0; grid-column: 2; grid-row: 1 / span var(--te-rows, 2); z-index: 5; display: flex; justify-content: center; align-items: flex-start; padding: 16px; pointer-events: none; }
 .cp-te-tl-empty-card { max-width: 440px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); color: var(--fg-3); font-size: var(--text-md); line-height: var(--leading-snug); text-align: center; pointer-events: auto; }
 .cp-te-tl-empty-card p { margin: 0; }
-.cp-te-tl-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 10px; }
-.cp-te-tl-empty-actions:empty { display: none; }
 /* In to out on the selected tracks only, as Avid highlights it. */
 .cp-te-tl-marked-lane { position: absolute; top: 0; bottom: 0; z-index: 1; pointer-events: none; background: var(--marker-region); box-shadow: inset 1px 0 0 var(--marker), inset -1px 0 0 var(--marker); }
-/* A gap: empty time on every track. */
-.cp-te-tl-gap { position: absolute; top: 22px; bottom: 0; background: repeating-linear-gradient(135deg, var(--line-1) 0 1px, transparent 1px 6px); box-shadow: inset 1px 0 0 var(--line-2), inset -1px 0 0 var(--line-2); }
 /* Dead space under review: removing is filled, kept is outlined only. */
 .cp-te-tl-deadlayer { position: absolute; inset: 0; grid-column: 2; grid-row: 1 / span var(--te-rows, 2); z-index: 5; overflow: hidden; pointer-events: none; }
 .cp-te-tl-dead { position: absolute; top: 22px; bottom: 0; min-width: 3px; padding: 0; border: 1px dashed var(--warning); border-radius: var(--r-2xs); background: color-mix(in srgb, var(--warning) 22%, transparent); pointer-events: auto; cursor: pointer; }
@@ -500,10 +528,6 @@ button.cp-te-tl-marker.is-selected::before { background: var(--fg-0); }
   background: color-mix(in srgb, var(--sel-fill) 30%, transparent);
   box-shadow: inset 1px 0 0 var(--sel-fill), inset -1px 0 0 var(--sel-fill);
 }
-.cp-te-tl-seam { position: absolute; top: 22px; bottom: 0; width: 1px; background: var(--fg-4); }
-.cp-te-tl-seam.is-through { background: repeating-linear-gradient(to bottom, var(--fg-4) 0 3px, transparent 3px 6px); }
-.cp-te-tl-seam.is-selected { width: 2px; margin-left: -0.5px; background: var(--fg-0); }
-.cp-te-tl-fade { position: absolute; top: 22px; bottom: 0; min-width: 3px; background: linear-gradient(to right, transparent, color-mix(in srgb, var(--fg-1) 18%, transparent), transparent); }
 .cp-te-tl-playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--fg-1); }
 .cp-te-tl-playhead::before {
   content: "";
@@ -515,7 +539,8 @@ button.cp-te-tl-marker.is-selected::before { background: var(--fg-0); }
   background: var(--fg-1);
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
-.cp-te-tl-pan { flex: none; margin: 4px 8px 6px 164px; accent-color: var(--fg-3); cursor: ew-resize; }
+/* Under the lanes only, from where they start: the headers are one fixed width (--te-head-w). */
+.cp-te-tl-pan { flex: none; margin: 4px 8px 6px var(--te-head-w); accent-color: var(--fg-3); cursor: ew-resize; }
 
 /* ── Tool rows: play, scrub, timecode, text settings ─────────────────── */
 .cp-te-tools {
@@ -528,11 +553,12 @@ button.cp-te-tl-marker.is-selected::before { background: var(--fg-0); }
   border-bottom: 1px solid var(--line-1);
 }
 .cp-te-tools > .cp-te-scrub { flex: 1; }
-.cp-te-tools-tc { flex: none; font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--fg-2); white-space: nowrap; }
+/* The timecode and the rail change on every frame while playing; containing them keeps that from re-laying the pane. */
+.cp-te-tools-tc { flex: none; font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--fg-2); white-space: nowrap; font-variant-numeric: tabular-nums; contain: layout paint; }
 .cp-te-tools-of { font-weight: var(--weight-normal); color: var(--fg-4); }
 .cp-te-source-host { display: flex; flex-direction: column; min-height: 0; }
 .cp-te-source-host > * { flex: 1; min-height: 0; }
-.cp-te-scrub { position: relative; display: flex; align-items: center; height: 24px; min-width: 60px; cursor: pointer; touch-action: none; }
+.cp-te-scrub { position: relative; display: flex; align-items: center; height: 24px; min-width: 60px; cursor: pointer; touch-action: none; contain: layout paint; }
 .cp-te .cp-te-scrub:focus-visible { outline: none; }
 .cp-te-scrub:focus-visible .cp-te-scrub-track { box-shadow: 0 0 0 1px var(--focus-ring); }
 .cp-te-scrub-track { position: relative; flex: 1; height: 4px; border-radius: var(--r-pill); background: var(--bg-4); }
@@ -577,7 +603,7 @@ button.cp-te-tl-marker.is-selected::before { background: var(--fg-0); }
 }
 .cp-te-ghost .cp-te-restore { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
 .cp-te-ghost:hover .cp-te-restore, .cp-te-ghost:focus-within .cp-te-restore { opacity: 1; }
-.cp-te-ghost-menu { position: fixed; z-index: var(--z-popover); display: flex; flex-direction: column; min-width: 180px; padding: 6px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); }
+.cp-te-ghost-menu, .cp-te-word-menu { position: fixed; z-index: var(--z-popover); display: flex; flex-direction: column; min-width: 180px; padding: 6px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-card); }
 .cp-te-ghost-text {
   color: var(--fg-4);
   text-decoration: line-through;
@@ -712,18 +738,89 @@ button.cp-te-tl-marker.is-selected::before { background: var(--fg-0); }
 /* The edits list: where the view opens when no edit is open. */
 .cp-te-picker { flex: 1; min-height: 0; overflow-y: auto; padding: 32px 40px; display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
 .cp-te-picker-new { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 12px; border: 1px solid var(--line-2); border-radius: var(--r-card); background: var(--bg-2); }
-.cp-te-picker-new .cp-te-set-label { display: flex; flex-direction: column; gap: 4px; }
-.cp-te-picker-new .cp-input, .cp-te-picker-new .cp-select { min-width: 220px; min-height: 30px; font-family: var(--font-ui); font-size: var(--text-md); }
+/* A select is as wide as its longest option, and Start from names sequences by
+   file, date and id: unbounded, it pushed the card past its own border. */
+.cp-te-picker-new .cp-te-set-label { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: 100%; }
+.cp-te-picker-new .cp-input, .cp-te-picker-new .cp-select { min-width: 220px; max-width: 100%; min-height: 30px; font-family: var(--font-ui); font-size: var(--text-md); }
 .cp-te-picker-check { display: flex; align-items: center; gap: 6px; min-height: 30px; color: var(--fg-2); font-size: var(--text-md); }
 .cp-te-picker-head { margin: 12px 0 0; font-size: var(--text-xl); font-weight: var(--weight-semibold); line-height: var(--leading-tight); color: var(--fg-2); }
-.cp-te-picker-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
-.cp-te-picker-item {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; width: 100%; min-height: 36px; padding: 6px 10px;
-  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--fg-2); font-family: var(--font-ui); font-size: var(--text-md); text-align: left; cursor: pointer;
+/* The saved string outs (EditList.tsx), filed under when each was last
+   edited. Full width, on the page header's 20px gutters, so the list's edges
+   are the header's edges. Rows are two lines each with no stripes or rules:
+   the strip down the left edge is the structure, and hover lifts a row the
+   way it does in a menu. Narrow, the length gives way, then the strip. */
+.cp-te-shelf {
+  --te-shelf-cols: 112px minmax(0, 1fr) 88px 96px;
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 18px;
+  padding: 18px 20px 32px;
+  container-type: inline-size;
 }
-.cp-te-picker-item:hover { background: var(--bg-3); color: var(--fg-0); }
-.cp-te-picker-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-.cp-te-picker-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--weight-semibold); }
+/* One centred column, as wide as a list can be read across: on a wide window
+   the length and date stay within a glance of the name instead of out at the
+   window's edge. Narrower than this, it is the full width. */
+.cp-te-shelf-bar, .cp-te-shelf-groups, .cp-te-shelf-none { width: 100%; max-width: 1080px; margin: 0 auto; box-sizing: border-box; }
+.cp-te-shelf-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 12px; }
+.cp-te-shelf-count { font-size: var(--text-base); color: var(--fg-4); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* A composed field: the wrapper brightens on focus and the input inside draws no ring of its own. */
+.cp-te-shelf-search {
+  display: flex; align-items: center; gap: 8px; width: min(340px, 100%); min-height: 32px; padding: 0 10px;
+  border: 1px solid var(--line-1); border-radius: var(--r-md); background: var(--bg-2); color: var(--fg-4);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.cp-te-shelf-search:hover { border-color: var(--line-2); }
+.cp-te-shelf-search:focus-within { border-color: var(--focus-ring); }
+.cp-te-shelf-search input { flex: 1; min-width: 0; min-height: 30px; padding: 0; border: none; background: none; outline: none; color: var(--fg-1); font-family: var(--font-ui); font-size: var(--text-md); }
+.cp-te-shelf-groups { display: flex; flex-direction: column; gap: 20px; }
+.cp-te-shelf-group { display: flex; flex-direction: column; gap: 2px; }
+.cp-te-shelf-day {
+  margin: 0 0 4px; padding: 0 12px;
+  font-family: var(--font-ui); font-size: var(--text-sm); font-weight: var(--weight-bold);
+  letter-spacing: var(--track-caps-loose); text-transform: uppercase; color: var(--fg-5);
+}
+.cp-te-shelf-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.cp-te-shelf-row {
+  display: grid; grid-template-columns: var(--te-shelf-cols); align-items: center; column-gap: 16px;
+  width: 100%; min-height: 56px; padding: 0 12px; border: none; border-radius: var(--r-md); background: none;
+  color: var(--fg-3); font-family: var(--font-ui); text-align: left; cursor: pointer;
+  transition: background-color var(--dur-instant) var(--ease-out);
+}
+.cp-te-shelf-row:hover { background: var(--bg-2); }
+.cp-te-shelf-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; background: var(--bg-2); }
+.cp-te-shelf-what { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cp-te-shelf-what > span, .cp-te-shelf-when { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-te-shelf-name { font-size: var(--text-lg); font-weight: var(--weight-semibold); line-height: var(--leading-snug); color: var(--fg-1); }
+.cp-te-shelf-meta { font-size: var(--text-base); line-height: var(--leading-snug); color: var(--fg-4); }
+.cp-te-shelf-length { text-align: right; font-size: var(--text-md); color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.cp-te-shelf-when { text-align: right; font-size: var(--text-base); color: var(--fg-4); }
+.cp-te-shelf-none { padding: 20px 12px; font-size: var(--text-md); color: var(--fg-4); }
+/* The cut as a thumbnail (EditStrip.tsx): a record track in miniature, drawn
+   the way the timeline draws one (.cp-te-tl-clip): solid clips in the clip
+   colour, each as wide as it plays, a cut a dark line between two. */
+.cp-te-shelf-cut {
+  display: flex; height: 28px; padding: 3px; box-sizing: border-box; overflow: hidden;
+  border: 1px solid var(--line-1); border-radius: var(--r-sm); background: var(--bg-0);
+}
+.cp-te-shelf-cut > span {
+  flex: var(--te-bite, 1) 1 0; min-width: 2px;
+  box-shadow: inset -1px 0 0 var(--bg-0);
+  background: color-mix(in srgb, var(--novella-violet) 30%, var(--bg-3));
+  transition: background-color var(--dur-instant) var(--ease-out);
+}
+.cp-te-shelf-cut > span:first-child { border-radius: var(--r-2xs) 0 0 var(--r-2xs); }
+.cp-te-shelf-cut > span:last-child { border-radius: 0 var(--r-2xs) var(--r-2xs) 0; box-shadow: none; }
+.cp-te-shelf-row:hover .cp-te-shelf-cut > span, .cp-te-shelf-row:focus-visible .cp-te-shelf-cut > span { background: color-mix(in srgb, var(--novella-violet) 48%, var(--bg-3)); }
+.cp-te-shelf-cut.is-empty { border-style: dashed; border-color: var(--line-2); background: none; }
+@container (max-width: 640px) {
+  .cp-te-shelf-groups { --te-shelf-cols: 80px minmax(0, 1fr) 76px; }
+  .cp-te-shelf-length { display: none; }
+}
+@container (max-width: 440px) {
+  .cp-te-shelf-groups { --te-shelf-cols: minmax(0, 1fr) 72px; }
+  .cp-te-shelf-cut { display: none; }
+  .cp-te-shelf-bar { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) { .cp-te-shelf-row, .cp-te-shelf-search, .cp-te-shelf-cut > span { transition: none; } }
 .cp-te-ask-stringout { display: flex; flex-direction: column; gap: 8px; }
 .cp-te-picker-ask { display: flex; align-items: flex-end; gap: 12px; }
 .cp-te-picker-ask .cp-te-set-label { flex: 1; display: flex; flex-direction: column; gap: 4px; }
@@ -735,16 +832,6 @@ button.cp-te-tl-marker.is-selected::before { background: var(--fg-0); }
 .cp-te-proposal-at { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--fg-4); font-size: var(--text-sm); }
 .cp-te-proposal-text { min-width: 0; }
 
-/* V1 through the edit: picture cut names, never video (as AAF Audio draws it). */
-.cp-te-tl-picture .cp-te-tl-lane { min-height: 22px; cursor: default; }
-.cp-te-tl-picture .cp-te-tl-head { min-height: 22px; }
-.cp-te-tl-track.is-static { cursor: default; }
-.cp-te-tl-pic {
-  position: absolute; top: 2px; bottom: 2px; overflow: hidden; padding: 0 4px; box-sizing: border-box;
-  border-left: 1px solid var(--line-3); background: var(--bg-3); color: var(--fg-3);
-  font-size: var(--text-xs); line-height: var(--leading-none); white-space: nowrap; text-overflow: ellipsis; display: flex; align-items: center;
-}
-.cp-te-tl-pic.is-muted { background: transparent; border: 1px dashed var(--line-2); }
 
 /* ── Inspector (ported from the catalog prototype) ─────────────────── */
 .cp-te-inspector { overflow-y: auto; padding-bottom: 16px; }
@@ -803,6 +890,23 @@ textarea.cp-te-insp-input { resize: vertical; }
 .cp-te-msg.is-you { align-items: flex-end; }
 .cp-te-msg-text { max-width: 92%; padding: 7px 10px; border-radius: var(--r-md); font-size: var(--text-md); line-height: var(--leading-snug); color: var(--fg-2); background: var(--bg-3); }
 .cp-te-msg.is-you .cp-te-msg-text { background: var(--bg-4); color: var(--fg-1); }
+/* The conversation is prose: select it and ⌘C it like any reply. body is
+   unselectable (base.css), so Ask's words could not be selected at all. */
+.cp-te-msg-text, .cp-te-msg-quote, .cp-te-msg-proposal { user-select: text; -webkit-user-select: text; cursor: text; }
+/* Copy, Edit and Run again under each turn: quiet until the turn is hovered
+   or one of them has focus, so a long conversation is not a wall of buttons. */
+.cp-te-msg-tools { display: flex; gap: 2px; margin-top: -2px; opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
+.cp-te-msg:hover .cp-te-msg-tools, .cp-te-msg-tools:focus-within, .cp-te-msg:last-child .cp-te-msg-tools, .cp-te-msg.is-failed .cp-te-msg-tools { opacity: 1; }
+.cp-te-msg-tool {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 0 6px;
+  border: none; border-radius: var(--r-sm); background: none; color: var(--fg-4);
+  font-family: var(--font-ui); font-size: var(--text-sm); cursor: pointer;
+  transition: color var(--dur-instant) var(--ease-out), background-color var(--dur-instant) var(--ease-out);
+}
+.cp-te-msg-tool:hover:not(:disabled) { color: var(--fg-1); background: var(--bg-3); }
+.cp-te-msg-tool:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.cp-te-msg-tool:disabled { opacity: 0.4; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .cp-te-msg-tools, .cp-te-msg-tool { transition: none; } }
 .cp-te-chip { display: inline-block; padding: 0 5px; border-radius: var(--r-xs); background: var(--sel-soft); color: var(--fg-0); font-weight: var(--weight-semibold); }
 .cp-te-msg-lines { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .cp-te-msg-line {
@@ -837,6 +941,11 @@ textarea.cp-te-insp-input { resize: vertical; }
 .cp-te-msg-action { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line-2); border-radius: var(--r-md); }
 .cp-te-msg-proposal { margin: 0; font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--fg-1); }
 .cp-te-msg-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+/* A story cut's beats: what each does and how long it runs, over its lines. */
+.cp-te-msg-beats { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.cp-te-msg-beat { display: flex; flex-direction: column; gap: 2px; }
+.cp-te-msg-beat-head { margin: 0; font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.cp-te-msg-beat-purpose { margin: 0; font-size: var(--text-sm); color: var(--fg-3); }
 .cp-te-msg-done { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-base); color: var(--fg-3); }
 .cp-te-ask-input {
   flex: 1;

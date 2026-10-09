@@ -91,7 +91,7 @@ export function EditPage({ active, aiModelId, onOpenSettings, openRequest, pipel
         if (existing && (await editStore.list()).some((item) => item.id === existing)) { open(existing); return; }
         const sequence = await invoke<AafDocument>("aaf_open", { documentId });
         const id = newEditId();
-        await editStore.create(id, editFromSequence(sequence, documentName(sequence), false));
+        await editStore.create(id, editFromSequence(sequence, documentName(sequence)));
         saveJson(FOR_SEQUENCE_KEY, { ...made, [documentId]: id });
         setEdits(await editStore.list());
         open(id);
@@ -106,7 +106,8 @@ export function EditPage({ active, aiModelId, onOpenSettings, openRequest, pipel
   return <main className="cp-multitrack-page cp-te-page" aria-label="String Outs" hidden={!active}>
     <header className="cp-multitrack-page-head"><div><h1>String Outs</h1><p>Cut by the words. Send it back to Avid.</p></div>
       <div className="cp-multitrack-page-actions">
-        {hasEdits && <select className="cp-select" aria-label="Open saved string out" value={editId ?? ""}
+        {/* Not over the list itself, which already offers every one of them. */}
+        {hasEdits && (editId || creating) && <select className="cp-select" aria-label="Open saved string out" value={editId ?? ""}
           onChange={(event) => { if (event.target.value) open(event.target.value); }}>
           <option value="">Saved string outs…</option>
           {edits?.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}

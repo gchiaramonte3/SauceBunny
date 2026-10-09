@@ -1,4 +1,6 @@
 import { useCallback, useState } from "react";
+import { useFrame } from "../src/hooks/use-frame";
+import { createFrameStore } from "../src/lib/frame-store";
 import { MultitrackTimeline } from "../src/components/MultitrackTimeline";
 import { MultitrackTimecodeDialog } from "../src/components/MultitrackTimecodeDialog";
 import { sequenceTimecode, sequenceDurationTimecode } from "../src/lib/multitrack";
@@ -27,7 +29,8 @@ const waveforms = Object.fromEntries(names.map((_, track) => [String(track + 1),
 /** The real controlled timeline, with generated geometry and no audio or IPC. */
 export function MultitrackExamples() {
   const [document, setDocument] = useState(example);
-  const [frame, setFrame] = useState(420);
+  // The playhead lives in a frame store, as the page holds it, so a seek redraws only what draws the playhead.
+  const [frames] = useState(() => createFrameStore(420)), frame = useFrame(frames), setFrame = frames.set;
   const [timecodeOpen, setTimecodeOpen] = useState(false);
   const closeTimecode = useCallback(() => setTimecodeOpen(false), []);
   const [solo, setSolo] = useState(new Set(["1"]));
@@ -38,7 +41,7 @@ export function MultitrackExamples() {
     <div className="cp-multitrack-toolbar-options"><button className="cp-tc" aria-label="Go to multitrack timecode" onClick={(event) => { event.currentTarget.focus(); setTimecodeOpen(true); }}>{sequenceTimecode(document.manifest, frame)}</button>
       <div className="cp-tc cp-multitrack-readout" role="group" aria-label="Total runtime"><span>TRT</span>{sequenceDurationTimecode(document.manifest)}</div></div>
     {timecodeOpen && <MultitrackTimecodeDialog manifest={document.manifest} initialDigits="" onClose={closeTimecode} onSeek={setFrame} />}
-    <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={{}} selected={selected} solo={solo} frame={frame} levels={levels} onLevel={(id, value) => setLevels((prior) => ({ ...prior, [id]: value }))}
+    <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={{}} selected={selected} solo={solo} frames={frames} levels={levels} onLevel={(id, value) => setLevels((prior) => ({ ...prior, [id]: value }))}
       onSelect={(id) => setSelected((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; })}
       onRename={(trackId, owner) => setDocument((current) => ({ ...current, labels: [...current.labels.filter((label) => label.track_id !== trackId), { track_id: trackId, owner_name: owner, cast_member_id: null, color: null }] }))}
       onSolo={(id) => setSolo((prior) => { const next = new Set(prior); if (next.has(id)) next.delete(id); else next.add(id); return next; })}

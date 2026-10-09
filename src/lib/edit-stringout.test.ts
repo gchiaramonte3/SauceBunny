@@ -48,7 +48,7 @@ describe("rules-based string-outs", () => {
     const edit = stringoutFor(document, "Sam mic")!;
     expect(edit.tracks.map((track) => [track.name, track.featured])).toEqual([["Sam mic", true], ["Alex", false], ["Room", false]]);
     // Asked for the room and then Alex: the room on A1, Alex on A2, each bite on its own person's track.
-    const base = giveTracks(editFromSequence(document, "x", false), ["alex", "sam-mic"]);
+    const base = giveTracks(editFromSequence(document, "x"), ["alex", "sam-mic"]);
     const asked = layoutEditBites(base, [{ source: "s1", track: "room", from: 1, to: 3, text: "Room tone" }, { source: "s1", track: "alex", from: 10, to: 12, text: "Hi" }], "Room", { s1: 1000 });
     expect(asked.tracks.filter((track) => track.featured !== false).map((track) => track.id)).toEqual(["room", "alex"]);
     expect(asked.segments.flatMap((segment) => segment.kind === "source" ? [segment.tracks] : [])).toEqual([["room"], ["alex"]]);

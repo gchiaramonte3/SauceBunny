@@ -17,11 +17,21 @@ it("keeps picture groups by default (V1 switchable, each person's own mic), and 
   mocks.exportEdit.mockResolvedValue({ output: "/Users/me/Rosa.aaf", markers_output: "/Users/me/Rosa - Avid markers.txt", name: "Rosa", duration_frames: 480, segments: 3, markers: 3, copied_mobs: 9, warnings: [] });
   render(<EditExportButton editId="e1" title="Rosa" disabled={false} onDone={onDone} />);
   const mode = screen.getByRole("combobox", { name: "Group clips" }) as HTMLSelectElement;
-  expect(mode.value).toBe("V");
+  expect(mode.value).toBe("C");
   expect([...mode.options].map((option) => option.text)).toEqual(["Keep picture groups", "Keep all groups", "Clip that plays"]);
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Export AAF/ })); });
-  expect(mocks.exportEdit).toHaveBeenCalledWith("e1", "/Users/me/Rosa.aaf", "V", expect.any(String));
-  expect(onDone).toHaveBeenCalledWith("Exported Rosa: 3 segments, markers beside it.");
+  expect(mocks.exportEdit).toHaveBeenCalledWith("e1", "/Users/me/Rosa.aaf", "C", expect.any(String));
+  expect(onDone).toHaveBeenCalledWith("Exported Rosa: 3 segments, markers beside it. If Media Composer reports a group clip conflict on import, choose No To All.");
+});
+
+it("says nothing about group clip conflicts when no group was kept", async () => {
+  // Clip that plays carries no group mob, so Media Composer has no group to ask about.
+  const onDone = vi.fn();
+  mocks.exportEdit.mockResolvedValue({ output: "/Users/me/Rosa.aaf", markers_output: null, name: "Rosa", duration_frames: 480, segments: 3, markers: 0, copied_mobs: 9, warnings: [] });
+  render(<EditExportButton editId="e1" title="Rosa" disabled={false} onDone={onDone} />);
+  fireEvent.change(screen.getByRole("combobox", { name: "Group clips" }), { target: { value: "B" } });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Export AAF/ })); });
+  expect(onDone).toHaveBeenCalledWith("Exported Rosa: 3 segments.");
 });
 
 it("when Keep groups cannot trim an effect, says the other kind can write it", async () => {
@@ -49,7 +59,7 @@ it("keeps exporting when another string out is opened, and reports when this one
   expect(first).not.toHaveBeenCalled();
   const again = vi.fn();
   render(<EditExportButton editId="e2" title="Rosa" disabled={false} onDone={again} />);
-  expect(again).toHaveBeenCalledWith("Exported Rosa: 2 segments.");
+  expect(again).toHaveBeenCalledWith("Exported Rosa: 2 segments. If Media Composer reports a group clip conflict on import, choose No To All.");
   expect(screen.getByRole("button", { name: /Export AAF/ })).toBeTruthy();
 });
 

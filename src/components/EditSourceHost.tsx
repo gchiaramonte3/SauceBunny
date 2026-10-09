@@ -20,6 +20,7 @@ type Props = {
  */
 export function EditSourceHost({ side, lanes, colors, fps, used, reading, text, onText, onPlace }: Props) {
   const { source, playback } = side;
+  const bringing = lanes.filter((lane) => [...side.selected].some((mic) => side.laneOf.get(mic) === lane.id)).map((lane) => lane.name);
   if (!source) return <section className="cp-te-source cp-te-doc-empty" aria-label="Source"><p>Add an AAF Audio sequence to this string out to cut from it.</p></section>;
   return <div className="cp-te-source-host" data-source-id={source.id}>
     {side.sources.length > 1 && <select className="cp-select cp-te-source-pick" aria-label="Source sequence" value={source.id}
@@ -28,8 +29,9 @@ export function EditSourceHost({ side, lanes, colors, fps, used, reading, text, 
     </select>}
     <EditSourcePane source={source} speakers={lanes} colors={colors} fps={fps} placed={side.shown} used={used} corrections={{}}
       people={side.people} tab={side.tab} onTab={side.setTab} reading={reading} range={side.range} onRange={side.setRange} match={null}
-      canInsert={side.take() != null} marks={side.marks} frames={playback.frames} playing={playback.playing} onPlay={() => void playback.toggle()}
+      canInsert={side.marked} marks={side.marks} frames={playback.frames} playing={playback.playing} onPlay={() => void playback.toggle()}
       onScrub={(seconds) => void playback.seek(Math.round(seconds * fps))} onScrubStart={playback.pause} onScrubEnd={() => undefined}
+      brings={{ names: bringing, following: side.following, onFollow: side.followText, onChoose: () => side.setMode("source") }}
       text={text} onText={onText} onPlace={onPlace} />
   </div>;
 }

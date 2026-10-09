@@ -1,4 +1,5 @@
 import type { AafDocument } from "../bindings/AafDocument";
+import { useFrame } from "../hooks/use-frame";
 import type { useMultitrackAudition } from "../hooks/use-multitrack-audition";
 import { sequenceDurationTimecode, sequenceRate, sequenceTimecode } from "../lib/multitrack";
 import { IconFastForward, IconPause, IconPlay, IconRewind, IconSkipBack } from "./Icons";
@@ -14,6 +15,8 @@ type Props = {
 
 /** AAF Audio's transport, above the tracks: options, timecode with TRT and I/O, the buttons, and what you hear. */
 export function MultitrackTransport({ document, audio, markRange, waveforms, onWaveforms, onSeek, onTimecode }: Props) {
+  // The timecode reads the playhead as it moves; this bar is the only thing a frame of playback redraws here.
+  const frame = useFrame(audio.frames);
   return <div className="cp-multitrack-transport" aria-label="AAF Audio playback controls">
     <div className="cp-multitrack-toolbar-options">
       <button className="btn btn-ghost" aria-pressed={audio.scrubbing} title="Hear short audio excerpts while scrubbing" onClick={() => audio.setScrubbing(!audio.scrubbing)}>Audio scrub</button>
@@ -26,7 +29,7 @@ export function MultitrackTransport({ document, audio, markRange, waveforms, onW
         {markRange && markRange.end > markRange.start
           ? <div className="cp-tc cp-multitrack-readout is-marked" role="group" aria-label="Marked range duration" title="Marked range duration, from In to Out"><span>I/O</span>{sequenceDurationTimecode(document.manifest, markRange.end - markRange.start)}</div>
           : <span aria-hidden="true" />}
-        <button className="cp-tc cp-multitrack-tc" aria-label="Current timecode" aria-haspopup="dialog" title="Current timecode · Type 0-9, Enter to seek" disabled={!sequenceRate(document.manifest)} onClick={(event) => { event.currentTarget.focus(); onTimecode(); }}>{sequenceTimecode(document.manifest, audio.frame)}</button>
+        <button className="cp-tc cp-multitrack-tc" aria-label="Current timecode" aria-haspopup="dialog" title="Current timecode · Type 0-9, Enter to seek" disabled={!sequenceRate(document.manifest)} onClick={(event) => { event.currentTarget.focus(); onTimecode(); }}>{sequenceTimecode(document.manifest, frame)}</button>
         <div className="cp-tc cp-multitrack-readout" role="group" aria-label="Total runtime" title="Total runtime of the loaded sequence"><span>TRT</span>{sequenceDurationTimecode(document.manifest)}</div>
       </div>
       <div className="cp-multitrack-transport-buttons">

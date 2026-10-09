@@ -64,7 +64,7 @@ What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Ever
 ├── src-tauri/                 # Rust backend (Tauri shell + sidecar orchestration)
 │   ├── src/
 │   │   ├── lib.rs             # Tauri command registration + cache-sweep startup hook
-│   │   ├── main.rs            # tiny entrypoint shim → sauce_bunny_lib::run()
+│   │   ├── main.rs            # tiny entrypoint shim: --mcp, --eval, --probe-media, else sauce_bunny_lib::run()
 │   │   ├── commands/          # Tauri commands by domain — twelve modules:
 │   │   │                     #   download, media, transcript, library, tags, system,
 │   │   │                     #   session, peer_stream, rung, llm, cloud_ai, sniff
@@ -174,7 +174,7 @@ and fallback warnings accompany saved results; sanitized Whisper GPU/timing
 counters enter Pipeline without recognized text. Both main and regeneration
 pickers share this contract, and settings are frozen for the selected-track run.
 
-The native schema-4 AAF document (manifest schema 3, embedded PCM index schema 2)
+The native schema-4 AAF document (manifest schema 4, embedded PCM index schema 2)
 remains authoritative for labels, recording-date
 provenance/overrides and per-track results, including committed empty results.
 Native writes emit `saucebunny:multitrack-changed` only after atomic saving.
@@ -274,6 +274,20 @@ heartbeat, writes a row when either goes quiet (and again when it answers), and
 runs `/usr/bin/sample` once per main-thread hang. `pipeline_health` adds memory,
 running processes, mounted volumes (local or network, `MNT_NOWAIT` so a stalled
 NEXIS cannot hold the export) and the newest hang sample to Export diagnostics.
+
+**Linked media is checked from a child process** (`aaf/media_probe.rs`). Every
+playback window, waveform and transcription confirms the MXF it is about to
+read is the file its binding names (a stat, and two 64 KiB reads when the stat
+has moved). That ran on the app's own threads until a NEXIS workspace stopped
+answering mid-read on 2026-10-05: a thread waiting on a volume that never
+replies is in an uninterruptible kernel wait, Force Quit could not end the
+process, and macOS handed later launches to the dying copy. Now the app runs
+itself as `sauce-bunny --probe-media` (JSON lines over stdin and stdout, the
+same `store::source_fingerprint` a relink records), gives it 20 s, and abandons
+it past that with an error naming the volume. The memo the in-process check
+kept stays on the app's side, so an unmoved file is only stat'ed, and a file
+verified in the last 15 s is not asked about again. Relink and import still
+read NEXIS in process; they run only when the editor asks for them.
 Native `aaf-diagnostic` events record job boundaries, subprocess stages/timings,
 candidate paths/sizes, validation failures and media-resolution totals. The local
 journal retains 1,500 recent rows in memory and two rolling 1 MiB files under

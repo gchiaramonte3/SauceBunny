@@ -25,7 +25,7 @@ vi.mock("../lib/string-out-model", async (original) => ({
 
 import { EditSidePanel } from "./EditSidePanel";
 import { connectModel } from "../lib/string-out-model";
-import { setUltrafast } from "../lib/ai-provider";
+import { setCloudModel, setUltrafast } from "../lib/ai-provider";
 
 // Rosa's line is cue r1 of AAF track 1 in document "doc", Dev's is cue d1 of track 2.
 const word = (track: string, cue: string, index: number, text: string, start: number): TimelineWord =>
@@ -98,6 +98,8 @@ it("ChatGPT with Ultrafast on asks for the tier; the same question without it do
   const chatgpt = { kind: "cloud", provider: "openai", ctx: 32000, name: "ChatGPT" } as const;
   vi.mocked(connectModel).mockResolvedValueOnce(chatgpt).mockResolvedValueOnce(chatgpt);
   replies.push(JSON.stringify({ answer: "Fast.", lines: [], action: null }), JSON.stringify({ answer: "Standard.", lines: [], action: null }));
+  // OpenAI offers the tier for gpt-6-astra; with gpt-4o it refuses the request, so the tier is not sent at all.
+  setCloudModel("openai", "gpt-6-astra");
   setUltrafast(true);
   setup();
   ask("who is tired?");

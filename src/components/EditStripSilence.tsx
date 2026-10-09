@@ -53,8 +53,8 @@ export function EditStripSilence({ request, scope, hint, onDone, onClose, ...hoo
       <div className="cp-te-strip-actions">
         {strip.busy && <span className="cp-te-pane-note" role="status">Measuring…</span>}
         <button type="button" className="btn btn-ghost cp-te-btn" onClick={cancel}>{strip.busy ? "Stop" : "Cancel"}</button>
-        <button type="button" className="btn cp-te-btn" disabled={strip.busy || !!hint || !request.lanes.length} onClick={() => void run()}
-          title={hint ?? (request.lanes.length ? "Silence the quiet stretches on these tracks; nothing moves" : "Select a track first")}>Strip</button>
+        <button type="button" className="btn cp-te-btn" disabled={strip.busy || !!hint || !request.layers.length} onClick={() => void run()}
+          title={hint ?? (request.layers.length ? "Silence the quiet stretches on these tracks; nothing moves" : "Select a track first")}>Strip</button>
       </div>
     </div>
   </div>, document.body);

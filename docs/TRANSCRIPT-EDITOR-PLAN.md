@@ -118,7 +118,12 @@ The one thing no amount of fixture testing can answer.
   camera. Nothing is keyframed, so retiming keyframes would have fixed
   nothing. Keep groups now leaves an angle it cannot cut out of that bite's
   group with a warning (AAF §7.20 permits a Selector with fewer alternates;
-  the angle that plays is unchanged). The default is now **Keep picture
+  the angle that plays is unchanged). **Corrected 2026-10-07:** that camera
+  was never slow motion. A SpeedRatio of 2/5 over a 59.94 clip in a 23.976
+  group is Avid's frame-rate conform at real speed, and HEAT 1's V1 has 45
+  such angles of 75 (44 at 47.952, one at 59.94), so "fewer alternates" cost
+  Avid 45 cameras. The writer now trims a conform as Media Composer does and
+  never leaves an angle out (docs/AAF-MULTITRACK.md, Groups). The default is now **Keep picture
   groups** ("V"): V1 as C, switchable in Avid, and every sound track as B,
   each person's own mic. That is the model the 2026-09-29 research arrived
   at (below): writing twenty lavs as C puts a twenty-way group on every
@@ -177,7 +182,13 @@ What was built (2026-09-30), and where it differs from the list above:
   the loaded sequence, laid out by AAF Audio's own `visibleLanes`, so group
   alternates sit under a disclosure behind a ↳ exactly as in AAF Audio. The
   sequence's real clips, V1, waveforms and T words, in source timecode.
-- **Source track selectors** (step 3): main tracks on, alternates off, as in
+- **Source track selectors** (step 3). *Superseded 2026-10-06:* until the
+  editor turns any on or off they follow the text (the mics of whoever said
+  the selected words, or the person whose tab is read), and once used an edit
+  brings exactly the tracks that are on, as Avid's do; record tracks that are
+  off receive nothing. "Main tracks on" brought a whole room into every cut:
+  one word of one person's under all fifty people, because every lav heard
+  her. The original note follows. Main tracks on, alternates off, as in
   AAF Audio. The new clip plays the mics that are on plus whoever said the
   selected words (a line chosen in someone's tab always brings them), and
   names those lanes itself, so a mic that is off is filler in that clip only

@@ -21,6 +21,8 @@ use crate::edit_doc::EditDocument;
 use crate::AppError;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::cell::RefCell;
 use std::path::Path;
 
 pub const LOG_SCHEMA_VERSION: i64 = 1;
@@ -41,6 +43,45 @@ pub struct EditSummary {
     pub head: i64,
     #[ts(type = "number")]
     pub states: i64,
+    /// What the String Outs list shows of it, read from its head: the
+    /// sequences it is cut from, how long it plays, and its bites (clips
+    /// that play a source, gaps not counted). Empty when the head cannot
+    /// be read, which the list survives.
+    pub sources: Vec<String>,
+    #[ts(type = "number")]
+    pub duration_frames: i64,
+    pub bites: u32,
+    /// Each bite's length in frames, in record order, for the list's strip
+    /// that draws the cut to scale. The first `STRIP_BITES` only: the strip
+    /// is a thumbnail, and a cut of thousands of bites must not ride along.
+    #[ts(type = "Array<number>")]
+    pub bite_frames: Vec<i64>,
+    pub edit_rate: Option<crate::edit_doc::EditRate>,
+}
+
+/// How many bites the list's strip is told about.
+const STRIP_BITES: usize = 64;
+
+/// What the list shows of one head document, read from its JSON without
+/// building the whole document.
+struct Details { sources: Vec<String>, frames: i64, bites: u32, bite_frames: Vec<i64>, edit_rate: Option<crate::edit_doc::EditRate> }
+
+fn details(document: &Value) -> Details {
+    let sources = document["sources"].as_array().into_iter().flatten().filter_map(|source| source["name"].as_str().map(str::to_string)).collect();
+    let (mut frames, mut bites, mut bite_frames) = (0i64, 0u32, Vec::new());
+    for segment in document["segments"].as_array().into_iter().flatten() {
+        match segment["kind"].as_str() {
+            Some("source") => {
+                let length = (segment["out_frame"].as_i64().unwrap_or(0) - segment["in_frame"].as_i64().unwrap_or(0)).max(0);
+                frames += length;
+                bites += 1;
+                if bite_frames.len() < STRIP_BITES { bite_frames.push(length); }
+            }
+            Some("gap") => frames += segment["frames"].as_i64().unwrap_or(0).max(0),
+            _ => {}
+        }
+    }
+    Details { sources, frames, bites, bite_frames, edit_rate: serde_json::from_value(document["edit_rate"].clone()).ok() }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -86,6 +127,56 @@ pub struct EditHistory {
 
 pub struct EditLog {
     db: Connection,
+    /// The last document this log read or wrote, by state. A commit diffs
+    /// against the head, and building the head meant replaying up to 99
+    /// patches from its checkpoint, twice per commit (once to diff, once to
+    /// answer). Only the app's own writable log keeps it: a reader in another
+    /// process (the MCP server) cannot know the writer has moved on.
+    last: RefCell<Option<(i64, Value)>>,
+    remembers: bool,
+}
+
+/// A step's patch, matched by segment id rather than by position.
+/// `json_patch::diff` compares arrays element by element, so one clip inserted
+/// near the start of a long string out stored a replacement for every segment
+/// after it, and every later commit replayed them all. The segments' common
+/// head and tail (by id) are kept; what lies between is removed and added, and
+/// a kept segment whose content changed gets its own small diff.
+fn step_patch(base: &Value, next: &Value) -> Result<String, AppError> {
+    let (Some(old), Some(new)) = (base.get("segments").and_then(Value::as_array), next.get("segments").and_then(Value::as_array)) else {
+        return Ok(serde_json::to_string(&json_patch::diff(base, next))?);
+    };
+    let without_segments = |document: &Value| {
+        let mut document = document.clone();
+        if let Some(map) = document.as_object_mut() { map.remove("segments"); }
+        document
+    };
+    let ops_of = |patch: json_patch::Patch| -> Result<Vec<Value>, AppError> {
+        Ok(serde_json::to_value(patch)?.as_array().cloned().unwrap_or_default())
+    };
+    let mut ops = ops_of(json_patch::diff(&without_segments(base), &without_segments(next)))?;
+    let id = |segment: &Value| segment.get("id").and_then(Value::as_str).map(str::to_owned);
+    let same = |a: &Value, b: &Value| id(a).is_some() && id(a) == id(b);
+    let mut head = 0;
+    while head < old.len() && head < new.len() && same(&old[head], &new[head]) { head += 1; }
+    let mut tail = 0;
+    while tail < old.len() - head && tail < new.len() - head && same(&old[old.len() - 1 - tail], &new[new.len() - 1 - tail]) { tail += 1; }
+    // A kept segment's own changes, under its index at the time they apply.
+    let within = |index: usize, a: &Value, b: &Value, ops: &mut Vec<Value>| -> Result<(), AppError> {
+        if a == b { return Ok(()); }
+        for mut op in ops_of(json_patch::diff(a, b))? {
+            for key in ["path", "from"] {
+                if let Some(path) = op.get(key).and_then(Value::as_str) { op[key] = Value::String(format!("/segments/{index}{path}")); }
+            }
+            ops.push(op);
+        }
+        Ok(())
+    };
+    for index in 0..head { within(index, &old[index], &new[index], &mut ops)?; }
+    for index in (head..old.len() - tail).rev() { ops.push(json!({ "op": "remove", "path": format!("/segments/{index}") })); }
+    for (index, segment) in new.iter().enumerate().take(new.len() - tail).skip(head) { ops.push(json!({ "op": "add", "path": format!("/segments/{index}"), "value": segment })); }
+    for step in 0..tail { within(new.len() - tail + step, &old[old.len() - tail + step], &new[new.len() - tail + step], &mut ops)?; }
+    Ok(serde_json::to_string(&ops)?)
 }
 
 struct Row {
@@ -128,7 +219,7 @@ impl EditLog {
         if found.and_then(|version| version.parse::<i64>().ok()).is_some_and(|version| version > LOG_SCHEMA_VERSION) {
             return Err(AppError::Invalid("The edit history was written by a newer version of Sauce Bunny. Update the app to read it.".into()));
         }
-        Ok(Self { db })
+        Ok(Self { db, last: RefCell::new(None), remembers: false })
     }
 
     #[cfg(test)]
@@ -174,7 +265,7 @@ impl EditLog {
         if integrity != "ok" {
             return Err(AppError::Io(format!("The edit history failed its integrity check: {integrity}")));
         }
-        Ok(Self { db })
+        Ok(Self { db, last: RefCell::new(None), remembers: true })
     }
 
     pub fn list(&self) -> Result<Vec<EditSummary>, AppError> {
@@ -187,10 +278,19 @@ impl EditLog {
             .map_err(store_error)?;
         let rows = statement
             .query_map([], |row| {
-                Ok(EditSummary { id: row.get(0)?, title: row.get(1)?, created_at: row.get(2)?, updated_at: row.get(3)?, head: row.get(4)?, states: row.get(5)? })
+                Ok(EditSummary { id: row.get(0)?, title: row.get(1)?, created_at: row.get(2)?, updated_at: row.get(3)?, head: row.get(4)?, states: row.get(5)?,
+                    sources: Vec::new(), duration_frames: 0, bites: 0, bite_frames: Vec::new(), edit_rate: None })
             })
             .map_err(store_error)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(store_error)
+        let mut summaries = rows.collect::<Result<Vec<_>, _>>().map_err(store_error)?;
+        drop(statement);
+        for summary in &mut summaries {
+            if let Ok(document) = self.value_at(summary.head) {
+                let found = details(&document);
+                (summary.sources, summary.duration_frames, summary.bites, summary.bite_frames, summary.edit_rate) = (found.sources, found.frames, found.bites, found.bite_frames, found.edit_rate);
+            }
+        }
+        Ok(summaries)
     }
 
     pub fn create(&mut self, id: &str, document: &EditDocument, now: i64) -> Result<EditHead, AppError> {
@@ -228,6 +328,17 @@ impl EditLog {
 
     /// The document at any state: the nearest checkpoint, then patches forward.
     pub fn document_at(&self, state: i64) -> Result<EditDocument, AppError> {
+        Ok(serde_json::from_value(self.value_at(state)?)?)
+    }
+
+    fn remember(&self, state: i64, document: &Value) {
+        if self.remembers { *self.last.borrow_mut() = Some((state, document.clone())); }
+    }
+
+    fn value_at(&self, state: i64) -> Result<Value, AppError> {
+        if let Some((known, document)) = self.last.borrow().as_ref() {
+            if *known == state { return Ok(document.clone()); }
+        }
         let mut chain = Vec::new();
         let mut at = Some(state);
         let base = loop {
@@ -249,12 +360,13 @@ impl EditLog {
             chain.push(patch);
             at = parent;
         };
-        let mut value: serde_json::Value = serde_json::from_str(&base)?;
+        let mut value: Value = serde_json::from_str(&base)?;
         for patch in chain.iter().rev() {
             let patch: json_patch::Patch = serde_json::from_str(patch)?;
             json_patch::patch(&mut value, &patch).map_err(|error| AppError::Internal(format!("An edit step could not be replayed: {error}")))?;
         }
-        Ok(serde_json::from_value(value)?)
+        self.remember(state, &value);
+        Ok(value)
     }
 
     fn redo_target(&self, id: &str, state: i64) -> Result<Option<i64>, AppError> {
@@ -300,20 +412,21 @@ impl EditLog {
         let next = serde_json::to_value(document)?;
         let coalesce = group.is_some() && grp.as_deref() == group && now - at < COALESCE_MS && !has_children && pinned.is_none() && parent.is_some();
         if coalesce {
-            let base = serde_json::to_value(self.document_at(parent.unwrap_or(head))?)?;
-            let patch = serde_json::to_string(&json_patch::diff(&base, &next))?;
+            let base = self.value_at(parent.unwrap_or(head))?;
+            let patch = step_patch(&base, &next)?;
             let tx = self.db.transaction().map_err(store_error)?;
             tx.execute("UPDATE states SET patch = ?1, at = ?2 WHERE id = ?3", params![patch, now, head]).map_err(store_error)?;
             tx.execute("UPDATE checkpoints SET document = ?1 WHERE state_id = ?2", params![serde_json::to_string(document)?, head]).map_err(store_error)?;
             tx.execute("UPDATE edits SET updated_at = ?1, title = ?2 WHERE id = ?3", params![now, document.title, id]).map_err(store_error)?;
             tx.commit().map_err(store_error)?;
+            self.remember(head, &next);
             return self.head(id);
         }
-        let base = serde_json::to_value(self.document_at(head)?)?;
+        let base = self.value_at(head)?;
         if base == next {
             return self.head(id);
         }
-        let patch = serde_json::to_string(&json_patch::diff(&base, &next))?;
+        let patch = step_patch(&base, &next)?;
         let depth = depth + 1;
         let tx = self.db.transaction().map_err(store_error)?;
         tx.execute(
@@ -328,6 +441,7 @@ impl EditLog {
         tx.execute("INSERT OR REPLACE INTO redo(edit_id, parent, child) VALUES(?1, ?2, ?3)", params![id, head, state]).map_err(store_error)?;
         tx.execute("UPDATE edits SET head = ?1, updated_at = ?2, title = ?3 WHERE id = ?4", params![state, now, document.title, id]).map_err(store_error)?;
         tx.commit().map_err(store_error)?;
+        self.remember(state, &next);
         self.head(id)
     }
 
@@ -413,7 +527,7 @@ mod tests {
             sources: vec![EditSource { id: "s".into(), name: "S".into(), document_id: "d".into() }],
             tracks: vec![EditTrack { id: "t".into(), name: "T".into(), kind: EditTrackKind::Sound, source_tracks: Default::default(), featured: None }],
             segments: frames.iter().enumerate()
-                .map(|(index, frame)| EditSegment::Source { id: format!("seg{index}"), source: "s".into(), in_frame: index as i64 * 1000, out_frame: index as i64 * 1000 + frame, tracks: None })
+                .map(|(index, frame)| EditSegment::Source { id: format!("seg{index}"), source: "s".into(), in_frame: index as i64 * 1000, out_frame: index as i64 * 1000 + frame, tracks: None, overrides: None, layers: None, cuts: None })
                 .collect(),
             mutes: vec![],
             markers: vec![],
@@ -492,6 +606,32 @@ mod tests {
     }
 
     #[test]
+    fn a_clip_inserted_near_the_start_stores_a_small_patch_that_replays_exactly() {
+        let mut log = log();
+        let base = doc(&vec![10; 1000]);
+        ok(log.create("e", &base, 0));
+        // A new clip at the second place, and the first one trimmed: everything after keeps its id.
+        let mut next = base.clone();
+        next.segments.insert(1, EditSegment::Source { id: "new".into(), source: "s".into(), in_frame: 5, out_frame: 9, tracks: None, overrides: None, layers: None, cuts: None });
+        if let EditSegment::Source { out_frame, .. } = &mut next.segments[0] { *out_frame = 4; }
+        let head = ok(log.commit("e", "Insert", None, &next, 1_000));
+        let patch: String = log.db.query_row("SELECT patch FROM states WHERE id = ?1", params![head.state], |row| row.get(0)).unwrap_or_default();
+        // Two operations: the trim and the insert. Matched by position it was a replacement for all thousand.
+        assert_eq!(serde_json::from_str::<Vec<Value>>(&patch).unwrap_or_default().len(), 2, "{patch}");
+        // Replayed from the stored patch, not the remembered head.
+        log.last.replace(None);
+        assert_eq!(ok(log.document_at(head.state)), next);
+        // And removing a run in the middle, with a kept segment changed after it, replays too.
+        let mut later = next.clone();
+        later.segments.drain(400..600);
+        if let EditSegment::Source { tracks, .. } = &mut later.segments[400] { *tracks = Some(vec!["t".into()]); }
+        let head = ok(log.commit("e", "Extract", None, &later, 2_000));
+        log.last.replace(None);
+        assert_eq!(ok(log.document_at(head.state)), later);
+        assert_eq!(ok(log.undo("e", 3_000)).document, next);
+    }
+
+    #[test]
     fn thousands_of_steps_replay_exactly_through_checkpoints() {
         let mut log = log();
         ok(log.create("e", &doc(&[1]), 0));
@@ -535,5 +675,22 @@ mod tests {
         ok(log.commit("e", "noop", None, &doc(&[10]), 1_000));
         assert_eq!(ok(log.history("e")).states.len(), 1);
         assert_eq!(ok(log.list()).len(), 1);
+    }
+
+    #[test]
+    fn the_list_says_what_each_is_cut_from_how_long_it_plays_and_its_bites_at_its_head() {
+        let mut log = log();
+        ok(log.create("e", &doc(&[48, 24]), 0));
+        let mut longer = doc(&[48, 24, 96]);
+        longer.segments.push(EditSegment::Gap { id: "g".into(), frames: 12 });
+        ok(log.commit("e", "add", None, &longer, 1_000));
+        let listed = ok(log.list());
+        let summary = &listed[0];
+        assert_eq!((summary.sources.clone(), summary.duration_frames, summary.bites), (vec!["S".to_string()], 48 + 24 + 96 + 12, 3));
+        assert_eq!(summary.bite_frames, vec![48, 24, 96], "the strip draws one bar per bite, to scale, in record order");
+        assert_eq!(summary.edit_rate.as_ref().map(|rate| (rate.numerator, rate.denominator)), Some((24, 1)));
+        // Undone, the list reads the head it went back to.
+        ok(log.undo("e", 2_000));
+        assert_eq!(ok(log.list())[0].bites, 2);
     }
 }

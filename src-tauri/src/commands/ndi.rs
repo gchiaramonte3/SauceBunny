@@ -336,6 +336,9 @@ fn programs() -> &'static Mutex<Programs> { static VALUE: OnceLock<Mutex<Program
 pub(super) struct WorkerPermit;
 static NATIVE_WORKERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 impl WorkerPermit {
+    // Rust 1.99 renamed fetch_update to try_update and deprecated the old name;
+    // the crate's MSRV (1.91) has only the old one, and CI's clippy runs on stable.
+    #[allow(deprecated)]
     pub(super) fn acquire() -> Result<Self, AppError> {
         NATIVE_WORKERS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n|(n<2).then_some(n+1))
             .map(|_|Self).map_err(|_|AppError::invalid("An NDI receiver is still closing. Retry the preview in a moment. The shared feed is unchanged."))

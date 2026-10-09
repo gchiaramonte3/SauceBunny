@@ -52,7 +52,9 @@ export function EditAsk({ ask, mentions, colors, appLocalModelId, where, onJump,
       <button type="button" className="btn btn-ghost cp-te-btn" disabled={!ask.messages.length} onClick={ask.clear} title="Clear this conversation">Clear</button>
     </div>
     <div ref={log} className="cp-te-ask-log" role="log" aria-live="polite" aria-label="Conversation">
-      {ask.messages.map((message) => <EditAskMessage key={message.id} message={message} colors={colors} where={where} busy={ask.busy} onJump={onJump} onApply={onApply} onOpen={onOpen} />)}
+      {ask.messages.map((message) => <EditAskMessage key={message.id} message={message} colors={colors} where={where} busy={ask.busy} onJump={onJump} onApply={onApply} onOpen={onOpen}
+        onRun={message.role === "you" || message.failed ? () => ask.rerun(message.id) : undefined}
+        onEdit={message.role === "you" ? () => { setDraft(message.text); caretAfter.current = message.text.length; input.current?.focus(); } : undefined} />)}
       {(ask.busy || ask.status) && <p className="cp-te-ask-status" role="status">{ask.status}</p>}
     </div>
     <form className="cp-te-ask-form" style={{ "--te-ask-h": `${height}px` } as React.CSSProperties} onSubmit={(event) => { event.preventDefault(); send(); }}>

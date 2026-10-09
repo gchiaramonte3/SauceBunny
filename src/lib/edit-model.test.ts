@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  addEdit, clipAround, extractProgram, findDeadSpace, insertGap, isGap, liftOnTracks, liftProgram, removeDeadSpace, GAP, deleteWords as deleteKeys, ghostLines, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration, programToSource,
-  healSeam, overwrite, removeRange, restoreRange, seamList, snapToGap, spliceIn, unmuteWords, type Timeline, type TimelineWord,
+  addEdit, clipAround, extractProgram, findDeadSpace, insertGap, isGap, liftLayers, liftProgram, removeDeadSpace, GAP, deleteWords as deleteKeys, ghostLines, moveParagraph, muteWords, paragraphs, placeWords, placementKey, programDuration, programToSource,
+  addCut, healSeam, laneClips, layerClips, overwrite, removeRange, removeWithoutCuttingOvertalk, restoreRange, seamList, snapToGap, spliceIn, unliftOnTrack, unmuteWords, type Layering, type Timeline, type TimelineWord,
 } from "./edit-model";
 
 /** A small generated scene: six lines across five tracks, and a second source. */
@@ -178,6 +178,34 @@ describe("transcript editor model", () => {
     expect(ghostLines(whole, teWords)).toEqual([]);
   });
 
+  it("Remove Lines cuts a line nobody in the clip talks over, even where someone outside the clip spoke in the source", () => {
+    const words: TimelineWord[] = [
+      { id: "k1", source: "s", track: "kara", text: "so", start: 1, end: 1.5 },
+      { id: "k2", source: "s", track: "kara", text: "anyway", start: 2, end: 2.5 },
+      // Dev talks over "anyway" in the source, but this clip is Kara's alone.
+      { id: "d1", source: "s", track: "dev", text: "yeah", start: 2.1, end: 2.4 },
+    ];
+    const bite: Timeline = { segments: [{ id: "a", source: "s", srcIn: 0, srcOut: 4, tracks: ["kara"] }], mutes: [] };
+    const cut = removeWithoutCuttingOvertalk(words, bite, new Set(["k2"]));
+    expect(cut.mutes).toEqual([]);
+    expect(programDuration(cut)).toBeLessThan(4);
+    // With Dev in the clip too, his word is in the way: "anyway" is silenced, not cut.
+    const both: Timeline = { segments: [{ id: "a", source: "s", srcIn: 0, srcOut: 4 }], mutes: [] };
+    const kept = removeWithoutCuttingOvertalk(words, both, new Set(["k2"]));
+    expect(kept.mutes).toEqual([{ source: "s", track: "kara", srcIn: 2, srcOut: 2.5 }]);
+    expect(programDuration(kept)).toBe(4);
+  });
+
+  it("a restored middle line plays the people its clip played, on their tracks, and not every mic", () => {
+    const edit: Timeline = { segments: [
+      { id: "a", source: "s", srcIn: 0, srcOut: 4, tracks: ["kara"], layers: { kara: 2 } },
+      { id: "b", source: "s", srcIn: 6, srcOut: 9, tracks: ["kara"], layers: { kara: 2 } },
+    ], mutes: [] };
+    // A line from 4 to 5 s that does not join either side (it stops short of 6).
+    const back = restoreRange(edit, 1, "s", 4.5, 5);
+    expect(back.segments[1]).toMatchObject({ source: "s", srcIn: 4.5, srcOut: 5, tracks: ["kara"], layers: { kara: 2 } });
+  });
+
   it("what lies before the first kept piece or after the last is not removed: it was never in the string out", () => {
     const [, second] = paragraphs(placeWords(teWords, teWholeScene()));
     const cut: Timeline = { segments: [{ id: "t", source: "mg3", srcIn: second.words[0].word.start - 0.1, srcOut: second.words[second.words.length - 1].word.end + 0.1 }], mutes: [] };
@@ -259,12 +287,18 @@ describe("transcript editor model", () => {
     expect(placeWords(words, restored).map((item) => item.word.id)).toContain("a2");
   });
 
-  it("lift on some tracks silences only those mics and moves nothing", () => {
+  it("lift on some record tracks silences only those tracks, there, and moves nothing", () => {
     const edit: Timeline = { segments: [{ id: "x", source: "s", srcIn: 3, srcOut: 5 }, { id: "y", source: "s", srcIn: 0, srcOut: 2 }], mutes: [] };
-    const lifted = liftOnTracks(edit, 1, 3, () => ["a"]);
-    expect(lifted.mutes).toEqual([{ source: "s", track: "a", srcIn: 4, srcOut: 5 }, { source: "s", track: "a", srcIn: 0, srcOut: 1 }]);
+    const layering: Layering = { carries: () => ["a", "b"], home: (lane) => ({ a: 1, b: 2 } as Record<string, number>)[lane] };
+    const lifted = liftLayers(edit, 1, 3, [1], layering);
+    expect(lifted.mutes).toEqual([]);
+    expect(lifted.segments.map((s) => [s.srcIn, s.srcOut, s.overrides])).toEqual([
+      [3, 4, undefined], [4, 5, { a: { source: null } }], [0, 1, { a: { source: null } }], [1, 2, undefined]]);
     expect(programDuration(lifted)).toBe(4);
-    expect(liftOnTracks(edit, 2, 2, () => ["a"])).toBe(edit);
+    expect(liftLayers(edit, 2, 2, [1], layering)).toBe(edit);
+    // An empty track, or one whose person has no mic in the source, has nothing to lift.
+    expect(liftLayers(edit, 1, 3, [3], layering)).toBe(edit);
+    expect(liftLayers(edit, 1, 3, [1], { ...layering, carries: () => ["b"] })).toBe(edit);
   });
 
   it("gaps merge, can be inserted, and Mark Clip marks the segment under the playhead", () => {
@@ -321,5 +355,141 @@ describe("a clip that names its tracks", () => {
     // Two clips that play different people are not one clip.
     const mixed = { segments: [{ id: "a", source: "s", srcIn: 0, srcOut: 3, tracks: ["rosa"] }, { id: "b", source: "s", srcIn: 4, srcOut: 6, tracks: ["dev"] }], mutes: [] };
     expect(healSeam(mixed, 1)).toBe(mixed);
+  });
+});
+
+/**
+ * Avid's track selectors: an Overwrite or a Lift with only some tracks on
+ * changes those tracks and nothing else, while anything that closes or opens
+ * time does it on every track at once, so nothing slips out of sync.
+ */
+describe("per-track edits", () => {
+  const k = (id: string, track: string, start: number, end: number, source = "s"): TimelineWord => ({ id, source, track, text: id, start, end });
+  // Kara (a) and Bo (b) on one source; a second take of Kara on another.
+  const all = [k("ka1", "a", 1, 1.4), k("kb1", "b", 2, 2.4), k("ka2", "a", 4.2, 4.6), k("kb2", "b", 4.5, 4.9), k("ka3", "a", 7, 7.4), k("kb3", "b", 8, 8.4),
+    k("ta1", "a", 20.2, 20.6, "t"), k("ta2", "a", 21, 21.4, "t")];
+  const base = (): Timeline => ({ segments: [{ id: "s", source: "s", srcIn: 0, srcOut: 10 }], mutes: [] });
+  const carries = () => ["a", "b"];
+  // Kara on A1 and Bo on A2, where a segment does not say otherwise.
+  const layering: Layering = { carries, home: (lane) => ({ a: 1, b: 2 } as Record<string, number>)[lane] };
+  const A = { lane: "a", layer: 1 }, B = { lane: "b", layer: 2 };
+  const at = (edit: Timeline) => Object.fromEntries(placeWords(all, edit).map((item) => [item.voice ? `${item.word.id}@${item.voice}` : item.word.id, [+item.programStart.toFixed(3), item.muted]]));
+  const shape = (edit: Timeline) => edit.segments.map((s) => [s.source, s.srcIn, s.srcOut, s.tracks ?? null, s.overrides ?? null]);
+
+  it("an Overwrite on one track replaces that track alone, and everyone else keeps playing", () => {
+    const edit = overwrite(base(), "t", 20, 22, 4, [A], layering);
+    expect(programDuration(edit)).toBe(10);
+    const placed = at(edit);
+    // Kara's own line under the overwrite is gone; Bo's, under the same span, still plays where it was.
+    expect(placed.ka2).toBeUndefined();
+    expect(placed.kb2).toEqual([4.5, false]);
+    expect(placed["ta1@a"]).toEqual([4.2, false]);
+    expect(placed["ta2@a"]).toEqual([5, false]);
+    expect([placed.ka1, placed.ka3, placed.kb3]).toEqual([[1, false], [7, false], [8, false]]);
+    expect(shape(edit)).toEqual([["s", 0, 4, null, null], ["s", 4, 6, null, { a: { source: "t", srcIn: 20 } }], ["s", 6, 10, null, null]]);
+  });
+
+  it("an Overwrite on every track a source carries is simply a clip", () => {
+    const edit = overwrite(base(), "t", 20, 22, 4, [A, B], layering);
+    expect(shape(edit)).toEqual([["s", 0, 4, null, null], ["t", 20, 22, ["a", "b"], null], ["s", 6, 10, null, null]]);
+    // Putting a track's own material back over it is no override at all.
+    expect(overwrite(base(), "s", 4, 6, 4, [A], layering).segments.every((s) => !s.overrides)).toBe(true);
+  });
+
+  it("an Overwrite past the end runs on, with filler on the other tracks", () => {
+    const edit = overwrite(base(), "t", 20, 22, 9, [A], layering);
+    expect(programDuration(edit)).toBe(11);
+    expect(shape(edit)).toEqual([["s", 0, 9, null, null], ["s", 9, 10, null, { a: { source: "t", srcIn: 20 } }], ["t", 21, 22, ["a"], null]]);
+    // Onto a hole, the clip goes in on that track alone.
+    const holed = overwrite(liftProgram(base(), 4, 6), "t", 20, 22, 4, [A], layering);
+    expect(shape(holed)).toEqual([["s", 0, 4, null, null], ["t", 20, 22, ["a"], null], ["s", 6, 10, null, null]]);
+  });
+
+  it("a Lift on one track is a place in the edit: the same material elsewhere still plays", () => {
+    const twice = spliceIn(base(), "s", 4, 5, 10);
+    const lifted = liftLayers(twice, 4, 5, [1], layering);
+    expect(programDuration(lifted)).toBe(11);
+    const copies = placeWords(all, lifted).filter((item) => item.word.id === "ka2");
+    expect(copies.map((item) => [item.programStart, item.muted])).toEqual([[4.2, true], [10.2, false]]);
+    // The lifted words stay in the text, struck through, and Bo is untouched.
+    expect(placeWords(all, lifted).filter((item) => item.word.id === "kb2").every((item) => !item.muted)).toBe(true);
+  });
+
+  it("a lifted word restores where it was lifted, and a whole restore joins the clip again", () => {
+    const lifted = liftLayers(base(), 4, 5, [1], layering);
+    expect(at(unliftOnTrack(lifted, 4.2, 4.6, "a")).ka2).toEqual([4.2, false]);
+    expect(shape(unliftOnTrack(lifted, 4, 5, "a"))).toEqual(shape(base()));
+    expect(unliftOnTrack(lifted, 4, 5, "b")).toBe(lifted);
+  });
+
+  it("deleting a word an override plays closes the time there on every track", () => {
+    const edit = overwrite(base(), "t", 20, 22, 4, [A], layering);
+    const key = placeWords(all, edit).find((item) => item.word.id === "ta1")!;
+    const result = deleteKeys(all, edit, new Set([placementKey(key)]));
+    expect(result.removed.map((word) => word.id)).toEqual(["ta1"]);
+    expect(programDuration(result.edit)).toBeCloseTo(10 - result.seconds, 6);
+    expect(result.seconds).toBeGreaterThan(0.3);
+    const after = at(result.edit);
+    expect(after["ta1@a"]).toBeUndefined();
+    expect(after["ta2@a"]).toBeDefined();
+    expect(after.ka3[0]).toBeCloseTo(7 - result.seconds, 6);
+  });
+
+  it("an edit point inside an override's span keeps every track on its material, and joins again", () => {
+    const edit = overwrite(base(), "t", 20, 22, 4, [A], layering);
+    const split = addEdit(edit, 5);
+    expect(split.segments).toHaveLength(4);
+    expect(at(split)).toEqual(at(edit));
+    expect(shape(healSeam(split, 2))).toEqual(shape(edit));
+  });
+
+  it("where one track changes material the edit point is a jump, not a through edit", () => {
+    const edit = overwrite(base(), "t", 20, 22, 4, [A], layering);
+    expect(seamList(edit, all).map((seam) => [seam.at, seam.kind])).toEqual([[4, "jump"], [6, "jump"]]);
+    expect(healSeam(edit, 1)).toBe(edit);
+  });
+
+  it("each track reads as its own clips: a cut on another track alone is not a cut here", () => {
+    const edit = overwrite(base(), "t", 20, 22, 4, [A], layering);
+    expect(laneClips(edit, "b").map((clip) => [clip.from, clip.to, clip.source, clip.srcIn, clip.srcOut])).toEqual([[0, 10, "s", 0, 10]]);
+    expect(laneClips(edit, "a").map((clip) => [clip.from, clip.to, clip.source, clip.srcIn, clip.srcOut])).toEqual([[0, 4, "s", 0, 4], [4, 6, "t", 20, 22], [6, 10, "s", 6, 10]]);
+    expect(laneClips(liftLayers(base(), 4, 6, [1], layering), "a").map((clip) => [clip.from, clip.to])).toEqual([[0, 4], [6, 10]]);
+  });
+
+  it("a line is not cut by an edit made on someone else's track: its words keep their place and their paragraph", () => {
+    // Kara says "okay" at 2.0-2.5 and "remind" at 2.8-3.4; Bo is overwritten from 1 to 3 s.
+    const lines = [k("okay", "a", 2, 2.5), k("remind", "a", 2.8, 3.4)];
+    const edit = overwrite(base(), "t", 20, 22, 1, [B], layering);
+    expect(edit.segments).toHaveLength(3);
+    const placed = placeWords(lines, edit);
+    // "remind" straddles the edit point at 3 s and is not clipped to it.
+    expect(placed.map((item) => [item.word.id, item.programStart])).toEqual([["okay", 2], ["remind", 2.8]]);
+    expect(paragraphs(placed).map((paragraph) => [paragraph.words.length, paragraph.cutBefore])).toEqual([[2, false]]);
+    // Where Kara's own material does cut, her line still reads as cut.
+    const cutHer = overwrite(base(), "t", 20, 22, 1, [A], layering);
+    expect(placeWords(lines, cutHer).find((item) => item.word.id === "remind")!.programStart).toBe(3);
+  });
+
+  it("Add Edit cuts the chosen tracks alone, and the cut stays a cut on them though the material runs on", () => {
+    const cut = addCut(base(), 3, [1], layering)!;
+    expect(layerClips(cut, 1, layering).map((clip) => [clip.from, clip.to, clip.srcIn])).toEqual([[0, 3, 0], [3, 10, 3]]);
+    // Bo, on A2, plays straight through: no edit on his track.
+    expect(layerClips(cut, 2, layering).map((clip) => [clip.from, clip.to])).toEqual([[0, 10]]);
+    // Nothing more to cut there on A1, and nothing to cut where no clip crosses.
+    expect(addCut(cut, 3, [1], layering)).toBeNull();
+    expect(addCut(base(), 3, [3], layering)).toBeNull();
+    // Words and time are untouched; a split elsewhere keeps the edit where it is; healing it on purpose takes it away.
+    expect(at(cut)).toEqual(at(base()));
+    expect(layerClips(addCut(cut, 6, [2], layering)!, 1, layering).map((clip) => [clip.from, clip.to])).toEqual([[0, 3], [3, 10]]);
+    expect(healSeam(cut, 1)).toBe(cut);
+    expect(layerClips(healSeam(cut, 1, true), 1, layering).map((clip) => [clip.from, clip.to])).toEqual([[0, 10]]);
+  });
+
+  it("dead space is quiet on every track, overwritten ones included", () => {
+    const quietSource = [k("ka1", "a", 1, 1.4), k("ka3", "a", 8, 8.4), k("ta1", "a", 20.2, 20.6, "t"), k("ta2", "a", 21, 21.4, "t")];
+    const edit = overwrite(base(), "t", 20, 22, 4, [A], layering);
+    const spaces = findDeadSpace(edit, quietSource, () => 0);
+    expect(spaces.length).toBeGreaterThan(0);
+    for (const space of spaces) expect(space.to <= 4.2 - 0.1 || space.from >= 5.4 + 0.1).toBe(true);
   });
 });

@@ -76,9 +76,9 @@ pub async fn render(app: &AppHandle, document: &AafDocument, id: &str, start: i6
     super::audio::validate_range(document, start, duration)?;
     let _permit = super::audio::preparation(app, job).await?;
     let track = store::track(document, id)?;
-    linked::check_window_sources(document, track, start, duration)?;
+    linked::check_window_sources(app, job, document, track, start, duration).await?;
     let total = render_window(app, document, id, start, duration, job, output).await?;
-    linked::check_window_sources(document, track, start, duration)?; store::source_ready(document)?;
+    linked::check_window_sources(app, job, document, track, start, duration).await?;
     Ok(total)
 }
 
@@ -134,6 +134,9 @@ async fn render_window(app: &AppHandle, document: &AafDocument, id: &str, start:
         } else {
             // Mixed embedded/linked documents still extract embedded essence by
             // the established exact graph reader, never by a guessed locator.
+            // This clip IS read out of the AAF, so it needs the AAF present and
+            // unchanged (store::audio_source_ready skips that for linked media).
+            store::source_ready(document)?;
             let wav = work.0.join(format!("{index}.wav"));
             let args = vec!["extract".into(), "--graph".into(), "--sequence".into(), graph.sequence_id.clone(),
                 "--input".into(), document.source_path.clone(), "--expected-fingerprint".into(), document.manifest.source_fingerprint.clone(),
@@ -158,7 +161,7 @@ async fn render_window(app: &AppHandle, document: &AafDocument, id: &str, start:
 }
 
 pub async fn waveform(app: &AppHandle, document: &AafDocument, id: &str, start: i64, duration: i64, may_build: bool, job: &str) -> Result<AafWaveform, AppError> {
-    let track = store::track(document, id)?; linked::check_sources(document, track)?;
+    let track = store::track(document, id)?; linked::check_sources(app, job, document, track).await?;
     let path = store::cache(app)?.join(format!("{}.peaks-v2.bin", store::cache_key(document, id, "linked-pyramid")));
     let rate = &document.manifest.edit_rate;
     let total = sample(document.manifest.duration_frames, rate);
@@ -227,7 +230,7 @@ pub async fn waveform(app: &AppHandle, document: &AafDocument, id: &str, start: 
     let values = peaks.values;
     let partial = work.0.join("peaks.bin");
     super::peaks::write_pyramid(values, total, HZ, &partial, || process::check_cancelled(app,job))?;
-    linked::check_sources(document, track)?; store::source_ready(document)?; process::check_cancelled(app,job)?;
+    linked::check_sources(app, job, document, track).await?; process::check_cancelled(app,job)?;
     std::fs::rename(partial, &path)?;
     Ok(AafWaveform { track_id:id.into(), peaks: super::peaks::query(&path,sample(start,rate),sample(start+duration,rate),total,HZ)? })
 }

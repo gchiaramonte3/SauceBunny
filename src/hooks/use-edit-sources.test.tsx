@@ -179,3 +179,17 @@ it("marks Sam's copy of Rosa's word as hers only while the editor hides bleed", 
   await act(() => setBleedHidden(false));
   expect(sams()?.heardOn).toBeUndefined();
 });
+
+it("one track's W builds that track's waveform alone; the next W builds the next", async () => {
+  const { result, rerender } = renderHook(({ lanes }) => useEditSources(document, false, lanes), { initialProps: { lanes: new Set<string>() as ReadonlySet<string> } });
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(calls("aaf_speech", true)).toHaveLength(0);
+  rerender({ lanes: new Set(["sam"]) });
+  await waitFor(() => expect(result.current.peaks.get("s1:sam")).toEqual([[-0.5, 0.5]]));
+  // Rosa's W is off: her mic was never read for a waveform.
+  expect(calls("aaf_speech", true).map(([, args]) => args.trackId)).toEqual(["track-2"]);
+  expect(result.current.peaks.has("s1:rosa")).toBe(false);
+  rerender({ lanes: new Set(["sam", "rosa"]) });
+  await waitFor(() => expect(result.current.peaks.get("s1:rosa")).toEqual([[-0.5, 0.5]]));
+  expect(calls("aaf_speech", true).map(([, args]) => args.trackId)).toEqual(["track-2", "track-1"]);
+});

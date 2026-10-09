@@ -19,11 +19,6 @@ fn log(ctx: &Context) -> Result<Option<EditLog>, AppError> {
     EditLog::open_read_only(&ctx.roots.timelines).map(Some)
 }
 
-/// The people on record tracks, top-down: everyone but a group angle nobody
-/// has given a track (`featured: false`), as edit-new.ts and the AAF export number them.
-fn patched(document: &EditDocument) -> Vec<&EditTrack> {
-    document.tracks.iter().filter(|track| track.kind == EditTrackKind::Sound && track.featured != Some(false)).collect()
-}
 
 fn rate(document: &EditDocument) -> u32 { timecode::rate_of(document.edit_rate.numerator, document.edit_rate.denominator) }
 
@@ -35,6 +30,11 @@ fn seconds(document: &EditDocument, frames: i64) -> f64 {
 #[derive(Serialize)]
 pub struct Summary { string_out: String, title: String, running_time: String, seconds: f64, sources: Vec<String>, tracks: Vec<String>, updated_ms: i64, steps: i64 }
 
+/// Every string out's title by its address, for naming them in rows.
+pub fn titles(ctx: &Context) -> std::collections::HashMap<String, String> {
+    list(ctx).map(|all| all.into_iter().map(|item| (item.string_out, item.title)).collect()).unwrap_or_default()
+}
+
 pub fn list(ctx: &Context) -> Result<Vec<Summary>, AppError> {
     let Some(log) = log(ctx)? else { return Ok(Vec::new()) };
     log.list()?.into_iter().map(|summary| {
@@ -43,10 +43,28 @@ pub fn list(ctx: &Context) -> Result<Vec<Summary>, AppError> {
         Ok(Summary {
             string_out: Address::StringOut(summary.id.clone()).to_string(), title: summary.title, running_time: timecode::format(frames, rate(&document), false),
             seconds: seconds(&document, frames), sources: document.sources.iter().map(|source| source.name.clone()).collect(),
-            tracks: patched(&document).iter().enumerate().map(|(index, track)| format!("A{} {}", index + 1, track.name)).collect(),
+            tracks: record_tracks(&document),
             updated_ms: summary.updated_at, steps: summary.states,
         })
     }).collect()
+}
+
+/// Each record track (A1…) with everyone on it somewhere, in order of
+/// appearance: tracks are layers, so one can hold several people.
+fn layered(document: &EditDocument, plays: &[Vec<crate::edit_doc::EditPlay>]) -> Vec<(String, String)> {
+    let count = plays.iter().flatten().map(|play| play.layer).max().unwrap_or(0);
+    (1..=count).map(|layer| {
+        let mut names: Vec<String> = Vec::new();
+        for play in plays.iter().flatten().filter(|play| play.layer == layer) {
+            let name = document.tracks.iter().find(|track| track.id == play.lane).map(|track| track.name.clone()).unwrap_or_else(|| play.lane.to_string());
+            if !names.contains(&name) { names.push(name); }
+        }
+        (format!("A{layer}"), names.join(", "))
+    }).collect()
+}
+
+fn record_tracks(document: &EditDocument) -> Vec<String> {
+    layered(document, &document.plays()).into_iter().map(|(track, people)| format!("{track} {people}")).collect()
 }
 
 /// A string out a model named, by address, id or title, as its edit id.
@@ -72,6 +90,10 @@ struct Clip {
     #[serde(skip_serializing_if = "Option::is_none")] source_in: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")] source_out: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")] people: Vec<String>,
+    /// Tracks that play something else across this clip: an Overwrite or a
+    /// Lift made with only that track selected, e.g. "Kara: MG 3 Kitchen
+    /// 01:00:04:00 to 01:00:06:00" or "Kara: lifted".
+    #[serde(skip_serializing_if = "Vec::is_empty")] instead: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")] text: Vec<String>,
 }
 
@@ -101,31 +123,49 @@ pub fn detail(ctx: &Context, wanted: &str) -> Result<Detail, AppError> {
     let aaf = |source: &str| loaded.iter().find(|(id, _)| id == source).and_then(|(_, doc)| doc.clone());
     let drop = loaded.iter().find_map(|(_, doc)| doc.as_ref().filter(|doc| doc.manifest.timecode_fps == fps).map(|doc| doc.manifest.drop_frame)).unwrap_or(false);
     let record = |frames: i64| timecode::format(document.start_timecode_frames + frames, fps, drop);
-    let on_track = patched(document);
+    let on_track = document.patched();
     let name_of = |lane: &str| document.tracks.iter().find(|track| track.id == lane).map(|track| track.name.clone()).unwrap_or_else(|| lane.to_string());
+    let lane_of = |id: &str| on_track.iter().copied().find(|track| track.id == id);
+    let source_name = |id: &str| document.sources.iter().find(|item| item.id == id).map(|item| item.name.clone()).unwrap_or_else(|| id.to_string());
+    // Who is on which record track in each clip: tracks are layers, as in Avid.
+    let plays = document.plays();
     let mut at = 0;
     let mut clips = Vec::new();
-    for segment in &document.segments {
+    for (index, segment) in document.segments.iter().enumerate() {
         let length = segment.frames();
         match segment {
             EditSegment::Gap { id: gap, .. } => clips.push(Clip { kind: "gap", clip: Address::Clip { string_out: edit.clone(), clip: gap.clone() }.to_string(),
-                record_in: record(at), record_out: record(at + length), seconds: seconds(document, length), sequence: None, source_in: None, source_out: None, people: Vec::new(), text: Vec::new() }),
-            EditSegment::Source { id: clip, source, in_frame, out_frame, tracks } => {
-                let playing: Vec<&EditTrack> = on_track.iter().copied().filter(|track| track.source_tracks.contains_key(source) && tracks.as_ref().is_none_or(|only| only.contains(&track.id))).collect();
+                record_in: record(at), record_out: record(at + length), seconds: seconds(document, length), sequence: None, source_in: None, source_out: None, people: Vec::new(), instead: Vec::new(), text: Vec::new() }),
+            EditSegment::Source { id: clip, source, in_frame, out_frame, overrides, .. } => {
                 let sequence = aaf(source);
+                // Each person's words from the range they play here, in record order.
                 let mut text: Vec<(i64, String)> = Vec::new();
-                if let Some(doc) = &sequence {
-                    for lane in &playing {
-                        let Some(mic) = lane.source_tracks.get(source) else { continue };
-                        let Some(transcript) = doc.transcripts.iter().find(|item| &item.track_id == mic) else { continue };
-                        for cue in &transcript.cues {
-                            let from = sequences::frame_of(cue.start_sample, transcript.sample_rate, &doc.manifest.edit_rate);
-                            let to = sequences::frame_of(cue.end_sample, transcript.sample_rate, &doc.manifest.edit_rate);
-                            let middle = (from + to) / 2;
-                            let silenced = document.mutes.iter().any(|mute| &mute.source == source && mute.track == lane.id && mute.in_frame <= middle && middle < mute.out_frame);
-                            if *in_frame <= middle && middle < *out_frame && !silenced { text.push((from, format!("{}: {}", lane.name, cue.text.trim()))); }
-                        }
+                let mut words = |lane: &EditTrack, from_source: &str, first: i64| {
+                    let Some(doc) = aaf(from_source) else { return };
+                    let Some(mic) = lane.source_tracks.get(from_source) else { return };
+                    let Some(transcript) = doc.transcripts.iter().find(|item| &item.track_id == mic) else { return };
+                    for cue in &transcript.cues {
+                        let from = sequences::frame_of(cue.start_sample, transcript.sample_rate, &doc.manifest.edit_rate);
+                        let to = sequences::frame_of(cue.end_sample, transcript.sample_rate, &doc.manifest.edit_rate);
+                        let middle = (from + to) / 2;
+                        let silenced = document.mutes.iter().any(|mute| mute.source == from_source && mute.track == lane.id && mute.in_frame <= middle && middle < mute.out_frame);
+                        if first <= middle && middle < first + length && !silenced { text.push((from - first, format!("{}: {}", lane.name, cue.text.trim()))); }
                     }
+                };
+                let mut people = Vec::new();
+                let mut instead = Vec::new();
+                for play in &plays[index] {
+                    let Some(lane) = lane_of(play.lane) else { continue };
+                    people.push(format!("A{} {}", play.layer, lane.name));
+                    words(lane, play.source, play.in_frame);
+                    // Playing something other than the clip here: an Overwrite on that track alone.
+                    if play.source != source || play.in_frame != *in_frame {
+                        let range = aaf(play.source).map(|doc| format!(" {} to {}", sequences::tc(&doc, play.in_frame), sequences::tc(&doc, play.in_frame + length))).unwrap_or_default();
+                        instead.push(format!("A{} {}: {}{range}", play.layer, lane.name, source_name(play.source)));
+                    }
+                }
+                for (lane, over) in overrides.iter().flatten() {
+                    if over.source.is_none() { instead.push(format!("{}: lifted", name_of(lane))); }
                 }
                 text.sort_by_key(|(frame, _)| *frame);
                 let more = text.len().saturating_sub(CLIP_TEXT_LINES);
@@ -133,21 +173,26 @@ pub fn detail(ctx: &Context, wanted: &str) -> Result<Detail, AppError> {
                 if more > 0 { lines.push(format!("… {more} more lines")); }
                 clips.push(Clip {
                     kind: "clip", clip: Address::Clip { string_out: edit.clone(), clip: clip.clone() }.to_string(), record_in: record(at), record_out: record(at + length), seconds: seconds(document, length),
-                    sequence: Some(document.sources.iter().find(|item| &item.id == source).map(|item| item.name.clone()).unwrap_or_else(|| source.clone())),
+                    sequence: Some(source_name(source)),
                     source_in: sequence.as_ref().map(|doc| sequences::tc(doc, *in_frame)), source_out: sequence.as_ref().map(|doc| sequences::tc(doc, *out_frame)),
-                    people: playing.iter().map(|lane| lane.name.clone()).collect(), text: lines,
+                    people, instead, text: lines,
                 });
             }
         }
         at += length;
     }
-    let track_of = |lane: &str| on_track.iter().position(|track| track.id == lane).map(|index| format!("A{}", index + 1));
+    let tracks = layered(document, &plays).into_iter().map(|(track, person)| Track { track, person }).collect();
+    let starts: Vec<i64> = document.segments.iter().scan(0, |at, segment| { let start = *at; *at += segment.frames(); Some(start) }).collect();
+    let track_of = |lane: &str, frame: i64| starts.iter().rposition(|start| *start <= frame)
+        .and_then(|at| plays.get(at)?.iter().find(|play| play.lane == lane).map(|play| play.layer))
+        .or_else(|| on_track.iter().position(|track| track.id == lane).map(|index| index as u32 + 1))
+        .map(|layer| format!("A{layer}"));
     Ok(Detail {
         string_out: Address::StringOut(edit.clone()).to_string(), title: document.title.clone(), start: record(0), running_time: timecode::format(at, fps, false), seconds: seconds(document, at),
-        tracks: on_track.iter().enumerate().map(|(index, track)| Track { track: format!("A{}", index + 1), person: track.name.clone() }).collect(),
+        tracks,
         not_on_a_track: document.tracks.iter().filter(|track| track.kind == EditTrackKind::Sound && track.featured == Some(false)).map(|track| track.name.clone()).collect(),
         clips, markers: document.markers.iter().map(|marker| Marker { tc: record(marker.frame), name: marker.name.clone(), comment: marker.comment.clone(), color: marker.color.clone(),
-            track: marker.track.as_deref().and_then(|lane| track_of(lane).map(|track| format!("{track} {}", name_of(lane)))) }).collect(),
+            track: marker.track.as_deref().and_then(|lane| track_of(lane, marker.frame).map(|track| format!("{track} {}", name_of(lane)))) }).collect(),
         last_change: head.label.clone(), can_redo: head.redo.clone(),
     })
 }
@@ -181,14 +226,12 @@ pub fn uses(ctx: &Context, sequence: &str) -> Result<Vec<Use>, AppError> {
     for summary in log.list()? {
         let document = log.head(&summary.id)?.document;
         let address = Address::StringOut(summary.id.clone()).to_string();
-        let lanes = patched(&document);
-        for source in document.sources.iter().filter(|source| source.document_id == sequence) {
-            for segment in &document.segments {
-                let EditSegment::Source { source: from_source, in_frame, out_frame, tracks, .. } = segment else { continue };
-                if from_source != &source.id { continue; }
-                for lane in lanes.iter().filter(|lane| tracks.as_ref().is_none_or(|only| only.contains(&lane.id))) {
-                    if let Some(mic) = lane.source_tracks.get(&source.id) { out.push(Use { track: mic.clone(), from: *in_frame, to: *out_frame, string_out: address.clone() }); }
-                }
+        // What each person plays wherever they are, their overrides included (edit_doc.rs `plays`).
+        for (segment, here) in document.segments.iter().zip(document.plays()) {
+            for play in here {
+                let Some(source) = document.sources.iter().find(|source| source.id == play.source && source.document_id == sequence) else { continue };
+                let Some(mic) = document.tracks.iter().find(|track| track.id == play.lane).and_then(|lane| lane.source_tracks.get(&source.id)) else { continue };
+                out.push(Use { track: mic.clone(), from: play.in_frame, to: play.in_frame + segment.frames(), string_out: address.clone() });
             }
         }
     }

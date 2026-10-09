@@ -188,6 +188,9 @@ impl log::Log for StderrLog {
 static STDERR_LOG: StderrLog = StderrLog;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// `--probe-media`: the linked-media check run as a child of the app (commands/aaf/media_probe.rs).
+pub fn probe_media() -> i32 { commands::aaf::serve_media_probe() }
+
 pub fn run() {
     // Best effort: a second call (tests, a plugin that got there first) is a
     // no-op rather than a panic.
@@ -312,6 +315,8 @@ pub fn run() {
             commands::aaf_export_edits,
             commands::mcp_setup,
             commands::assistant_chat,
+            commands::cloud_models,
+            commands::transcript_scan,
             commands::mcp_save_extension,
             commands::edit_list,
             commands::edit_create,

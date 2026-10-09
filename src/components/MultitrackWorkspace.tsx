@@ -102,13 +102,15 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
   const [scope, setScope] = useState<"all" | "marked">("all");
   const markRange = marks.in === null && marks.out === null ? null : { start: marks.in ?? 0, end: marks.out === null ? document.manifest.duration_frames : marks.out + 1 };
   const range = scope === "marked" && markRange && markRange.end > markRange.start ? markRange : { start: 0, end: document.manifest.duration_frames };
-  const mark = (side: "in" | "out") => { const frame = audio.frame; setScope("marked"); setMarks(prior => side === "in" ? { in: frame, out: prior.out !== null && prior.out < frame ? null : prior.out } : { in: prior.in !== null && prior.in > frame ? null : prior.in, out: frame }); };
+  const zoomKeys = useRef<((direction: -1 | 0 | 1) => void) | null>(null);
+  const mark = (side: "in" | "out") => { const frame = audio.frames.get(); setScope("marked"); setMarks(prior => side === "in" ? { in: frame, out: prior.out !== null && prior.out < frame ? null : prior.out } : { in: prior.in !== null && prior.in > frame ? null : prior.in, out: frame }); };
   const rate = sequenceFps(document.manifest);
   useEffect(() => { onMarks?.({ in: marks.in === null ? null : marks.in / rate, out: marks.out === null ? null : (marks.out + 1) / rate }); }, [marks, rate, onMarks]);
   const clearMarks = () => { setMarks({ in: null, out: null }); setScope("all"); }, clearEdge = (edge: "in" | "out") => marks[edge === "in" ? "out" : "in"] === null ? clearMarks() : setMarks((prior) => ({ ...prior, [edge]: null }));
   useMultitrackKeyboard(active && !settingsOpen, audio, sequenceRate(document.manifest) ? setTimecodeEntry : undefined, {
     markIn: () => mark("in"), markOut: () => mark("out"), clear: clearMarks, clearIn: () => clearEdge("in"), clearOut: () => clearEdge("out"),
-    gotoIn: () => { if (marks.in !== null) void audio.seek(marks.in, undefined, false); }, gotoOut: () => { if (marks.out !== null) void audio.seek(marks.out, undefined, false); } });
+    gotoIn: () => { if (marks.in !== null) void audio.seek(marks.in, undefined, false); }, gotoOut: () => { if (marks.out !== null) void audio.seek(marks.out, undefined, false); } },
+    { zoom: (direction) => zoomKeys.current?.(direction), duration: document.manifest.duration_frames });
   useEffect(() => { onJobState?.(transcription.loading || relinking); }, [onJobState, transcription.loading, relinking]);
   const duration = document.manifest.duration_frames;
   const seek = (frame: number, trackId?: string) => { void audio.seek(frame, trackId); };
@@ -140,7 +142,7 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
       <MultitrackMediaStatus document={document} resolving={resolvingMedia} disabled={transcription.loading || relinkers.settings} onBusy={onStripBusy} onDetails={onOpenMedia} />
       <MultitrackCast document={document} active={active} onRename={onRename} editTrack={castTrack} onCloseEdit={() => setCastTrack(null)} />
       <MultitrackTimeline document={document} waveforms={waveforms} waveformErrors={waveformErrors} waveformsOffline={waveformsOffline} onRetryWaveform={onRetryWaveform} onReviewTiming={askTranscript} onTranscriptInfo={() => askTranscript(null, true)} selected={selected} onSelect={toggleTrack} onRename={onRename} onOwnerMenu={setCastTrack} onView={onView} detail={{ ...view, peaks: detail }}
-        solo={audio.solo} muted={audio.mute} onSolo={audio.toggleSolo} onMute={audio.toggleMute} levels={audio.levels} onLevel={audio.setTrackLevel} onTrackMenu={(id, x, y) => setTrackMenu({ id, x, y })} frame={audio.frame} onSeek={seek} onScrub={audio.scrub}
+        solo={audio.solo} muted={audio.mute} onSolo={audio.toggleSolo} onMute={audio.toggleMute} levels={audio.levels} onLevel={audio.setTrackLevel} onTrackMenu={(id, x, y) => setTrackMenu({ id, x, y })} frames={audio.frames} zoomKeys={zoomKeys} onSeek={seek} onScrub={audio.scrub}
         onScrubEnd={(frame, resume) => { void audio.seek(frame, undefined, resume); }} playing={audio.playing} showWaveforms={showWaveforms} waveformsBuilding={waveformsBuilding} transport={transport}
         expanded={expanded} onExpand={expandGroup} initialView={saved ?? undefined} onViewState={saveTimelineView} marks={marks} onClearMarks={clearMarks} />
       {audio.error && <p className="cp-multitrack-error" role="alert">{audio.error}</p>}
@@ -163,7 +165,9 @@ export function MultitrackWorkspace({ document, active, waveforms, waveformError
     {regenerate && active && <MultitrackRegenerate owner={trackOwner(document, regenerate)} generated={document.transcripts.some(item => item.track_id === regenerate)} initial={{ engine: transcription.engine, modelId: transcription.modelId, parakeetModel: transcription.parakeetModel, ...transcription.options }} models={transcription.models} parakeet={transcription.parakeet} onOpenSettings={onOpenSettings} onClose={() => setRegenerate(null)} onStart={(choice) => { const id = regenerate; setRegenerate(null); transcription.setOptions({ fast: choice.fast === true, speechOnly: choice.speechOnly === true, castNames: choice.castNames === true }); void transcription.start([id], 0, duration, choice); }} />}
     <div className="cp-multitrack-transcript-pane">
       <div className={`cp-multitrack-resize cp-resize-handle vertical${pane.resizing ? " dragging" : ""}`} role="separator" aria-label="Resize track transcripts" aria-orientation="vertical" aria-valuemin={pane.min} aria-valuemax={pane.max} aria-valuenow={Math.min(pane.width, paneMax)} tabIndex={0} onMouseDown={pane.onMouseDown} onKeyDown={pane.onKeyDown} onDoubleClick={() => pane.setWidth(340)} title="Drag to resize · arrow keys to nudge · Home to reset" />
-      <MultitrackTranscript document={document} frame={audio.frame} solo={audio.solo} onSeek={seek} report={transcription.report} error={transcription.error} loading={transcription.loading} active={active} aiModelId={aiModelId} selectedTracks={selected} request={transcriptRequest} />
+      <MultitrackTranscript document={document} frames={audio.frames} solo={audio.solo} onSeek={seek}
+        onMarkLine={(from, to) => { setScope("marked"); setMarks({ in: from, out: to }); }} onSolo={audio.toggleSolo}
+        range={{ from: marks.in === null ? null : sequenceTimecode(document.manifest, marks.in), to: marks.out === null ? null : sequenceTimecode(document.manifest, marks.out + 1) }} report={transcription.report} error={transcription.error} loading={transcription.loading} active={active} aiModelId={aiModelId} selectedTracks={selected} request={transcriptRequest} />
     </div>
     {settingsOpen && active && <MultitrackSettings document={document} waveformErrors={waveformErrors} onBusy={onSettingsBusy} disabled={transcription.loading || resolvingMedia || relinkers.strip} onClose={() => onCloseSettings?.()} />}
     {timecodeEntry != null && active && !settingsOpen && <MultitrackTimecodeDialog key={document.id} manifest={document.manifest} initialDigits={timecodeEntry} onClose={closeTimecode} onSeek={(frame) => { void audio.seek(frame, undefined, false); }} />}

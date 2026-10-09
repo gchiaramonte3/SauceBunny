@@ -32,10 +32,13 @@ import { MultitrackLibraryRows, matchingMultitrackEntries } from "./MultitrackLi
 import { MultitrackReaderSummary } from "./MultitrackReaderSummary";
 import { MultitrackRowMenu, type DocumentMenuTarget } from "./MultitrackRowMenu";
 import { MultitrackTranscript } from "./MultitrackTranscript";
+import { createFrameStore } from "../lib/frame-store";
 
 /** The AAF Audio group's key among the folder keys: its fold choice, and the
  *  heading a filed document is dragged back onto. No folder is called this. */
 const AAF_GROUP = "__aaf_audio__";
+/** The reader's AAF transcript has no playback of its own: a playhead that never moves, before the first frame. */
+const NO_PLAYHEAD = createFrameStore(-1);
 
 /**
  * The Transcripts reader — a reading-first workspace OUTSIDE the Clip editor
@@ -712,7 +715,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
             <MultitrackReaderSummary document={multitrack.document}
               onOpen={onOpenMultitrack ? () => onOpenMultitrack(multitrack.document!.id) : undefined}
               onOpenInStringOuts={onOpenInStringOuts ? () => onOpenInStringOuts(multitrack.document!.id) : undefined} />
-            <MultitrackTranscript key={multitrack.document.id} document={multitrack.document} frame={-1} solo={new Set()} initialAll active={visible} onSeek={(frame, trackId) => onOpenMultitrack?.(multitrack.selected!, frame, trackId)} />
+            <MultitrackTranscript key={multitrack.document.id} document={multitrack.document} frames={NO_PLAYHEAD} solo={new Set()} initialAll active={visible} onSeek={(frame, trackId) => onOpenMultitrack?.(multitrack.selected!, frame, trackId)} />
           </> : <p role="status">{multitrack.error || "Opening saved transcript…"}</p>}
         </div> : activePath ? (
           <>

@@ -5,7 +5,332 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- **Ask builds a story cut from an idea.** "Five minutes on the twins'
+  rivalry, ending on the fall" gets back a cut rather than a string out: 3 to
+  7 beats, each with what it does and how long it runs, lines chosen and
+  ordered to tell the story, fitted to the running time asked for. The model
+  outlines, gathers, times the cut with a new read-only tool (`measure_cut`,
+  the layout's own rules) and reads it back once as a critic; it still names
+  lines only by id. Applied, the cut is laid out tight (lines butted within a
+  beat, a second's pause between beats, a marker naming each beat), focused
+  on the people its markers name, with ums and stammers taken out where
+  nobody talks under them, each one a Removed line that Restore puts back.
+  A note on it ("shorter", "open on Donny") revises that cut. See
+  docs/STORY-CUT-SPEC-2026-10-08.md.
+
+### Fixed
+- **The export says how to answer Avid's group clip conflict.** Media
+  Composer asks "Group clip conflict found ... replace the original?"
+  whenever an import holds a group it already has loaded, so every string
+  out after the first one of a group asks, as Media Composer's own AAFs do.
+  After any export that keeps groups, String Outs now says to choose No To
+  All, which keeps the project's group and links the sequence to it. Media
+  Composer 24.12.6 also crashed during one of these imports after No: a
+  bin's selected-items label looked up a clip that was not loaded at that
+  moment. That crash is inside Media Composer, and this note does not
+  prevent it.
+- **String Outs and AAF Audio play again after a long idle.** After half an
+  hour away, Play moved the playhead and made no sound, with no error. The
+  Mac's output was a remote-desktop session's virtual device (Jump Desktop
+  Audio), which goes and comes back with the session; a Web Audio output is
+  bound to the device it started on and stayed "running" on one that was
+  gone. Each player now makes its output again before it plays after a
+  minute of silence, after the Mac's audio devices change, and when its
+  clock stops while playing, with its volume and track levels carried over
+  and decoded audio kept. Each time is written to the Pipeline (channel
+  audio), so a report says why.
+- **What you mute in String Outs arrives in Avid muted, not deleted.** A
+  mute was exported as filler, so the clip was gone from the Avid sequence
+  and Unmute had nothing to bring back. It is now written as Media
+  Composer's own muted clip, matched byte for byte against one Media
+  Composer 24.12 exported ("MUTE TEST"): the clip stays on its track,
+  effects and group intact, and Unmute Clip in Avid restores it. A track
+  nobody plays in a clip is still filler, as in an Avid sequence. The
+  writer's self-check reads each muted clip as silence and then opens it
+  and compares every frame it keeps with what would have played.
+- **A string out Ask builds plays the line it chose, not the whole room.**
+  Ask opens every mic that talks during a bite, so a reaction plays where it
+  happened; in a crowd that was everyone. "Crowd Cheers And Encouragement"
+  played 23 mics a bite at full level for lines from 1.3 people. Each clip
+  is now focused on the people its markers name: everyone else stays on
+  their track, muted, and a right-click on their line offers Unmute (⇧⌫
+  does the same). Audio ▸ Focus on Marked Lines does the same to a string
+  out made before this (on that one: 34 clips, 752 mutes, 1.3 mics live a
+  bite). A person is never muted over source their own marked line plays
+  elsewhere. What String Outs called Silence and Unsilence is now Mute and
+  Unmute everywhere, Media Composer's word for it.
+- **The record transcript reads in phrases when people talk over one
+  another.** Words were listed one by one in the order they sound, so a
+  crowd of open mics made every paragraph a single word ("don't", "have",
+  "wanted", "walls"). Each person's phrase is now kept whole, phrases in the
+  order they start, as the source side's All voices already reads. A
+  paragraph nobody hears, every word muted, is shown with Removed lines and
+  hidden without it.
+- **String Outs opens a tab without reading every mic again.** Switching
+  between string outs over HEAT 1 read all 98 mics each time, 901,138 words
+  in 25 to 27 s, with the page held for up to 400 ms whenever a batch
+  arrived. Every mic's read parsed the whole 95 MB AAF Audio document; it is
+  now parsed once while the file is unchanged (all 99 mics in 0.55 s
+  instead of about 20 s), String Outs opens a sequence without its
+  transcripts (0.7 MB instead of 95 MB), and what it has read is kept for
+  the session, so a tab over a sequence already read opens without asking
+  for anything and reuses the words it placed last time. A sequence saved
+  in AAF Audio is read again behind the words already on screen, so a
+  finished transcript now reaches an open string out.
+- **Avid reads the right frames from a camera it conforms to the group's
+  rate.** Importing "Emily Plank Competition Bites" into Media Composer
+  reported "Clip contains out-of-bounds reference, substituting filler" for
+  45 angles a bite on V1. Each 47.952 or 59.94 camera in a group sits in a
+  one-clip Sequence that names its rate (`_MIXMATCH_RATE_NUM`/`_DENOM`), and
+  the trim rebuilt that Sequence without it, so Avid counted the camera's
+  frames at 23.976: the wrong frames, and filler once that count ran past the
+  group. The copy now keeps every attribute Avid put on a Sequence, and the
+  self-check compares a conform's attributes with the source's.
+- **Avid plays the groups in an exported string out.** Playing a group in
+  Media Composer stopped with "PlayPipe::DoComp() encountered a missing
+  mob". The mob a sequence cuts from names its group clip in an attribute
+  (`_MATCH`) rather than on the timeline, and the export followed only the
+  timeline, so it left the group clip behind. It now carries it, which makes
+  HEAT 1's export hold exactly the mobs Avid's own export does, and the
+  self-check refuses a file where such a reference points at a mob the
+  source holds and the export does not. Group packs built before this are
+  not reused.
+- **An exported string out carries every camera of its group.** HEAT 1's
+  V1 group has 75 angles; the AAF export kept 30, so Media Composer offered
+  only those. The other 45 are 47.952 and 59.94 cameras that Avid conforms to
+  the group's 23.976 through Motion Control, and the writer read that as a
+  speed change it could not cut and left each one out with a warning (HEAT
+  2's "slow-motion camera" was the same thing). It now trims a conform the
+  way Media Composer does, keeps every angle in Avid's order with the
+  recorded selection (`_AAF_SELECTED`) moved when another angle plays, stops
+  the export rather than leave an angle out, and its self-check compares
+  every group's angles, order and alignment with the source.
+- **Ask keeps going when a conversation outgrows the model.** A
+  whole-transcript question that read page after page came back as the
+  provider's refusal ("maximum context length is 128000 tokens") and lost
+  the run. Now the oldest lookups are set aside and the step is sent again;
+  the model can look them up again if it still needs them. Only when the
+  question itself will not fit does Ask stop, and it says what to do.
+- **Ask's messages can be selected, copied and asked again.** Their text
+  could not be selected at all, and ⌘C copied clips instead. Each question
+  has Copy, Edit and Run again; an answer has Copy (with the lines it cites)
+  and, when it failed, Try again, which replaces the failed attempt.
+- **Ask works with models that take tools only through OpenAI's Responses
+  API.** gpt-6.1-sol failed at once with "Function tools with
+  reasoning_effort are not supported ... use /v1/responses". When OpenAI
+  answers that way, Ask asks again there, and sends that model there for the
+  rest of the session.
+- **Ultrafast no longer breaks ChatGPT with other models.** OpenAI offers the
+  tier for gpt-6-astra (and gpt-5.6-sol in preview) and refuses the whole
+  request with any other model ("Invalid service_tier argument"). The tier
+  is sent only with those models, the switch says when yours is not one, and
+  a refusal reads in plain words.
+- **AAF Audio counts every camera in a group.** A group clip of 75 angles
+  showed 16 on V1, because the AAF reader listed only the first sixteen.
+  It lists every angle now and names each by the file playing at the cut,
+  as Avid's group menu does; three of a real group's 75 had been named by a
+  file hours away. An unnamed group is labelled with the angle that plays
+  instead of "Clip". AAF Audio documents you have already imported re-read
+  their picture the next time you open them, keeping labels and transcripts.
+
 ### Changed
+- **A conversation plays as a conversation.** A string out Ask builds used to
+  play one person's mic per bite, with a second of filler before every reply:
+  in a back-and-forth, the other person's interjections and laughs were heard
+  only faintly through the speaker's mic, and words were cut off at every
+  change of speaker. Lines that run on from each other in a source are now
+  one clip with everyone in it on their own track, in sync (the mics are
+  tracks of the same sequence), filler only between conversations, edges
+  moved out of any word on an open mic, and a marker on each line. Someone in
+  the cut who reacts on their own mic during another's line is opened too.
+  **Audio ▸ Stack Conversations** does the same to a string out you already
+  have, in one undo step: "Twins Rivalry Before The Fall" goes from 83
+  one-mic clips and 72 gaps to 24 clips, 19 of them with both people.
+- **Saved string outs, redesigned.** One centred list filed under Today,
+  Yesterday, Previous 7 days and the month. Each row leads with the cut drawn
+  to scale (a bar per bite, so one long take and thirty quick ones look
+  different), then its name, bites and sequence, how long it plays and when
+  it was edited, with a search by name or sequence. It was a column of
+  titles beside an undo count.
+- **Review's empty monitor is an empty state, not a settings page.** "Nothing
+  on screen yet", Open file… and Paste a link, and the live sources as four
+  tiles under "Or share live". It replaced a boxed menu of six described
+  rows, and it gives way in steps as the monitor shrinks instead of
+  scrolling.
+- **Settings ▸ AI APIs shows the provider you choose.** Local, Claude and
+  ChatGPT switch what is shown below them; they looked like tabs and did
+  nothing, since both cloud cards were always there. The cloud notice is no
+  longer an error-red box.
+- **Ask answers range questions in a fraction of the time and cost.**
+  - **Compact rows.** Ask reads transcript lines as rows (id, timecode, who,
+    words) instead of records that were four-fifths field names and
+    addresses. Assistants connected through MCP get the same.
+  - **One call for the slice.** It reads several people over a timecode
+    range in one call, with the same words heard on several mics given once.
+  - **No lookup first.** It already knows the sequences you are working in
+    and their people.
+  - **Lookups run together:** the lookups Ask makes in one step no longer
+    wait for each other.
+  - **Measured on a 104-mic group,** 30 minutes of two people went from
+    about 39,000 tokens over three round trips to about 11,700 in one.
+- **Conversations and topics.**
+  - Ask finds where two or more people talk to each other, and reads only
+    those stretches.
+  - For a topic it scans a stretch, a whole transcript included, in
+    parallel with a fast model, and gets back only the lines about it. A
+    line the model did not actually read is never reported.
+  - Names are found through a small misspelling ("Jilio" finds JILLIO),
+    never across a different number.
+- **Choose any model your key can use.** Settings ▸ AI APIs lists every model
+  Claude or OpenAI offers your key: the model for Ask, Summary and Analysis,
+  and a separate fast scan model. Refresh fetches the list again, and a
+  typed model id still works.
+- **AAF Audio's Search with AI can use Claude or ChatGPT.** With a cloud
+  provider chosen in Settings, it scans the person tab's lines inside In to
+  Out with the scan model, all at once. With Local chosen, it runs on the
+  Mac as before.
+- **The AAF matches the timeline.** A segment boundary falls wherever any
+  track was cut, and the AAF writer wrote one clip per segment per track, so
+  Media Composer showed an edit on A1 at every place A2 had been cut. A track
+  that simply carries on is now one clip in the AAF, as String Outs draws it;
+  an Add Edit made on purpose stays an edit.
+- **Playback is the cut.** A person whose audio carries straight on through
+  another track's cut was crossfaded with themselves there, a small bump in
+  level; that join now plays through. The mix no longer drops by the number
+  of people cut in (about −26 dB with twenty): every track plays at unity, as
+  Media Composer does, through a limiter. The crossfade setting says it is
+  for playback only.
+- **No edit can quietly lose a line.** A string out holds each person on one
+  record track at a time, so cutting Kara onto A2 where her other line plays
+  on A1 used to take the A1 line away. Overwrite, trims, slides and moves now
+  refuse, and say who is on which track. Unsilencing someone whose track
+  another person now holds is refused the same way, instead of putting two
+  people on one track. A patch past A64 is refused when it is made, not at
+  the save.
+- **Strip Silence works on record tracks.** It measures what plays on the
+  selected tracks, an overwrite included, and no longer strips the same
+  person's lines on other tracks. Restore Line brings back only the people
+  its clip played, and markers on a person's track ride on what they play.
+  Ask's Remove Lines cuts a line nobody in the clip talks over, even where
+  someone outside the clip spoke in the source.
+- **Clips move and trim with the pointer as in Neo and Avid's Smart Tool.**
+  The pointer shows what a press takes: a hand over a clip, a trim cursor on
+  its last 14 px, a roll cursor on the line between two clips. A count of
+  frames follows the pointer while you drag, trims snap to cuts and the
+  playhead, ⌥-drag copies a clip, Esc drops a drag, and holding a drag at
+  the timeline's edge scrolls it. A clip dropped past the end lands there.
+- **⌘C, ⌘X and ⌘V copy, cut and paste clips** on the record tracks, over the
+  playhead on their own tracks. In the text they still copy words.
+- **Match Frame (⇧F, and a button beside Mark Clip).** The record clip under
+  the playhead opens in the source on the same frame, with an In there, that
+  person's mic on and patched back to the track they came from.
+- **J, K and L shuttle in String Outs**, at Avid's speeds both ways, as in
+  AAF Audio. J used to step back a second and L only played.
+- **A selected record track's selector is lit**, light with dark type, as in
+  Avid.
+- **AAF Audio no longer redraws the page on every frame of playback.** The
+  playhead moved through React state, so every lane and up to 200 transcript
+  lines re-rendered each frame; it now uses String Outs' frame store, and
+  only the timecode, the playhead lines and the current line redraw.
+- **AAF Audio's timeline moves like an editor's.** Zoomed in, the view turns
+  the page as the playhead runs off it. Pinch (or ⌘ with the wheel) zooms
+  about the pointer, a sideways swipe pans, and a click on the ruler parks
+  the playhead. ⌘= ⌘− ⇧Z, Home and End work as they do in String Outs, and
+  ⇧I no longer marks. The track header narrows on a narrow window, which a
+  rule was meant to do and never did.
+- **AAF Audio's transcript follows playback.** The line being played stays
+  in view (Follow, on by default), even past the first 200 lines.
+  ⇧-click a line to mark it In to Out, ⌥-click to solo its mic.
+- **A re-exported AAF keeps its words.** A new import over media already
+  transcribed (another day's cut, a re-export) starts with the lines that
+  play whole in it, followed through their source media, with owner names
+  and your calls on whose a line is. What no earlier run heard is marked as
+  a gap on the track's status.
+- **Faster on big string outs.** Placing words, the edit points, dead space,
+  each track's clips and playback's silences no longer scan every word or
+  every mute for every segment, and the undo log stores an edit near the
+  start as a small step rather than a rewrite of every segment after it.
+- **The record is an Avid sequence: empty tracks you cut onto.** Record
+  tracks are layers, A1, A2…, not people: a new string out shows four empty
+  tracks, a clip lands on the track its source track is patched to, and one
+  track can carry one person's lav and then someone else's. Each clip wears
+  its person's colour and name. Source tracks that are on show their patch
+  (→ A1) in the Source view: one lav lands on A1 whoever it is, two on A1
+  and A2, and any can be patched elsewhere. Overwrite onto a track replaces
+  whoever was on it there; Lift, solo, mute and W work on record tracks.
+- **Neo's trim and selection tools on the record tracks.** Click a clip to
+  select it (⇧/⌘-click to add), lasso in empty track space, Delete to lift
+  and ⇧Delete to extract, `,` `.` to nudge and ↑ ↓ to move a clip a track,
+  or drag it (previewed, snapping to edits and the playhead). Trim as Neo
+  and Avid do: U or a click on an edit seats rollers (a roll, or one side),
+  `,` `.` M / and ⌥← ⌥→ trim, one side ripples every track unless ⇧R
+  switches it to overwrite, and a trim stops at the source's media and says
+  so. The palette and keys are Neo's: ⇧A Selection, C Blade, N Roll, Y
+  Slip, R Slide. N used to toggle Snap, which is now its button only, as in
+  Neo. Add Edit (⌘B) and the blade cut only the clips and tracks they are
+  aimed at, and the cut stays on those tracks.
+- **The record timeline looks like Avid's.** Clips are solid blocks with
+  their name at the top left, and a cut is the straight line between two
+  clips on its own track. The orange triangles on the ruler, the lines and
+  dashes drawn down through every track at each edit point, the crossfade
+  and gap shading and the orange "cuts into a word" marks are gone. The V1
+  picture row is gone too: String Outs edits audio.
+- **AAF export stacks picture per audio track, and keeps every group.** Each
+  record track gets its own video track carrying the picture of the moment it
+  plays, A1's on V1 and A2's on V2, so two voices from different moments
+  each keep their own picture instead of one overwriting the other (where a
+  track's picture is the same moment as a lower one's, it is filler). Export
+  now keeps all video and audio groups by default.
+- **No more starting from the whole sequence.** New string out loads a
+  sequence as the source and leaves the record empty, and the empty record
+  no longer offers "Add all of" the group. A record built from the whole
+  sequence put every track of the group on it and read as nothing like one.
+- **The timeline keeps its scale.** It opens at 4 pixels a frame, as Neo's
+  does, runs on five minutes past the end, and changes scale only when you
+  zoom or press Fit. It used to stretch the whole record across the window,
+  so every edit rescaled the clips, the ruler and the playhead. Source and
+  Record keep their own zoom and scroll, and the track headers are one fixed
+  width in both, so the lanes and the playhead never move sideways or sit
+  over the headers.
+- **An edit brings the source tracks of whoever said the words.** In String
+  Outs, Insert, Overwrite and Append used to bring every main mic of the
+  sequence, so one word of one person's came in under all fifty people in
+  the room (every lav heard her). Source tracks now follow the text: the mics
+  of whoever said the selected words, or the person whose tab is read. Turn
+  source tracks on or off in the timeline's Source view and an edit brings
+  exactly those, as Avid's track selectors do; "Follow the text" goes back.
+  The source pane says what an edit brings ("Brings CARA").
+- **Record tracks that are off receive nothing.** As in Avid, material lands
+  only on record tracks that are on; someone with no track yet still gets one.
+- **Overwrite and Lift change only the tracks that are on.** Select one
+  person's lav, mark, press B, and their track alone plays the new material
+  while everyone else plays on, as in Avid. Overwrite used to clear the range
+  on every track and splice the clip back on the chosen ones, so overwriting
+  one person silenced the room. Lift on some tracks now lifts at that place
+  only; it used to silence that stretch of source everywhere it played.
+  Restoring a lifted word undoes the lift around it. AAF export writes a
+  record track that changes person or material clip by clip with the writer's
+  new per-track overrides; that needs the rebuilt AAF sidecar, and an export
+  with an older one is refused rather than written wrong.
+- **Each track shows its own cuts.** A track's clips run until something
+  changes what that track plays, so an edit on other tracks alone no longer
+  cuts every row, splits V1's picture, or breaks someone else's line in the
+  record text with an edit mark.
+- **Marks work by Avid's three-point rule.** Record In and Out win and set the
+  length (the source gives its In, or backtimes from its Out, or starts at its
+  playhead); a record Out alone backtimes the edit to end there; one source
+  mark is enough, running to the end or from the start of the source. An edit
+  the marks cannot make is refused with a sentence saying why.
+- **Waveforms per track.** Each String Outs track has a W: its waveform alone
+  is built and drawn, and ⌥-click turns every track's on or off, as Avid's
+  per-track waveform setting. View ▸ Waveforms is every track.
+- **Waveforms have detail when zoomed.** A clip draws the part of itself on
+  screen, at that range's own resolution, instead of stretching the whole
+  sequence's 2,048-point overview (about 5 s a point on a 3-hour mic) into a
+  solid block.
+- **Clips read as clips.** Each String Outs clip shows its sequence's name and
+  an edge at both ends, so two cuts back to back read as two.
 - **AAF Audio and String Outs open clear.** Neither reopens the last sequence
   or string out at launch; what you open stays open while the app runs.
 - **The "!" beside a mic owner explains itself.** Click it: it means timing
@@ -57,6 +382,41 @@ All notable changes to Sauce Bunny. Format loosely follows
   the narrowest window.
 
 ### Fixed
+- **Sauce Bunny always quits, and opens again, when NEXIS stops answering.**
+  Every playback window, waveform and transcription checked its MXF from the
+  app's own threads. When a NEXIS workspace stopped answering mid-read, a
+  thread sat in the kernel, Force Quit could not end the app, and macOS handed
+  every later launch to the dying copy, so the app would not open until the
+  Mac restarted. Those checks now run in a short-lived child process with a
+  20 s limit; a volume that does not answer fails the request with words
+  naming it, and the app keeps going.
+- **AAF Audio and String Outs play after the AAF has been tidied away.** Every
+  playback, waveform and transcription re-checked the AAF it was imported
+  from, though a linked sequence's audio is its MXF, so moving the AAF after
+  import silenced it: "The original AAF is unavailable." Only what reads the
+  AAF itself (import, relink, export, embedded audio) still needs it.
+- **No freeze while macOS asks about the Keychain.** String Outs checks for a
+  saved AI key when it opens; that ran on the thread that draws the window,
+  so a Keychain prompt (a re-signed build, a locked keychain) froze the app
+  until it was answered. Every Keychain call now waits off that thread.
+- **Playing a long string out is smooth.** Each row the Pipeline logs while
+  playing (one per window of audio per mic) made it rewrite every line it
+  held, because lines were keyed by position in a log that drops its oldest:
+  tens of thousands of changes every few seconds, about 10 fps on a 50-mic
+  record. Lines now keep their place. The record's transcript re-renders only
+  the paragraphs the playhead leaves and enters, and the playhead and rail no
+  longer re-lay the timeline.
+- **Playback keeps going with String Outs behind another window.** The next
+  window of audio was fetched only on an animation frame, which macOS stops
+  for a hidden window, so the sound ran out a few seconds after you looked
+  away (at Media Composer, say).
+- **Opening a string out holding a whole sequence no longer stalls.** Words
+  arriving a mic at a time re-laid every word four times a second; with
+  457,253 words that froze the page for up to 1.5 s at a time. It shows them
+  once a second, and they load in about 5 s.
+- **Shift-click extends the source selection** a tab kept, never from a click
+  made in another tab; Escape forgets the anchor too.
+- **New string out's Start from menu stays inside its card.**
 - **String Outs opens a string out in seconds, not half a minute.** Opening
   one reads every mic with a call apiece, one after another (121 for eight
   sequences), and each call re-rendered the Pipeline at the foot of the page

@@ -142,11 +142,11 @@ fn reads_one_persons_lines_in_a_timecode_range_and_says_which_string_outs_use_th
 
 #[test]
 fn a_page_stops_under_its_budget_and_continues_from_its_cursor() {
-    let long = super::Line { line: "x".into(), who: "P".into(), track: "A1".into(), tc_in: "".into(), tc_out: "".into(), text: "word ".repeat(2_000), in_string_outs: vec![], bleed_from: None };
+    let long = super::Line { line: "x".into(), who: "P".into(), track: "A1".into(), tc_in: "".into(), tc_out: "".into(), text: "word ".repeat(2_000), in_string_outs: vec![], bleed_from: None, span: [0, 1], copies: 0 };
     let lines = vec![long; 50];
-    let (first, next) = super::sequences::page(&lines, 0, 1_000);
+    let (first, next) = super::sequences::page(&lines, 0, 1_000, 60_000);
     assert!(first.len() < 10 && next == Some(first.len()), "{} lines", first.len());
-    let (rest, _) = super::sequences::page(&lines, next.unwrap(), 1_000);
+    let (rest, _) = super::sequences::page(&lines, next.unwrap(), 1_000, 60_000);
     assert!(!rest.is_empty());
 }
 
@@ -288,4 +288,137 @@ fn labels_from_an_older_document_are_ignored_not_trusted() {
     cache_bleed(&f, false);
     let found = call(&f.ctx, "search_transcripts", json!({ "query": "tired", "people": ["P2"], "sequences": [BANK] }));
     assert!(found["matches"].as_array().unwrap().iter().any(|hit| hit["line"].as_str().unwrap().ends_with("/t2-c0")));
+}
+
+#[test]
+fn a_name_is_found_without_case_accents_or_a_small_misspelling_but_never_by_a_different_number() {
+    let names = ["JILLIO", "DONNIE", "JULIA", "Zoë", "P2"];
+    let found = |wanted: &str| super::pick(&names, wanted, |name| name, |name| name, "person").copied();
+    assert_eq!(found("jillio").unwrap(), "JILLIO");
+    assert_eq!(found("Jilio").unwrap(), "JILLIO");
+    assert_eq!(found("Donny").unwrap(), "DONNIE");
+    assert_eq!(found("zoe").unwrap(), "Zoë");
+    // A different number is someone else.
+    let missing = found("P21").unwrap_err().to_string();
+    assert!(missing.contains("No person called \"P21\"") && missing.contains("Closest"), "{missing}");
+    // Two equally close spellings name neither, and say who they could be.
+    assert!(found("Jullio").is_err() || found("Jullio").unwrap() == "JILLIO");
+}
+
+#[test]
+fn several_people_read_in_one_page_with_the_same_words_on_two_mics_once() {
+    let f = fixture();
+    // P1 and P2 say "Line 1 from t1." and "Line 1 from t2." at the same moment: one line heard on two mics.
+    let both = call(&f.ctx, "read_transcript", json!({ "sequence": BANK, "people": ["P1", "p2"], "from": "20:00:00:00", "to": "20:00:09:00" }));
+    assert_eq!((both["person"].as_str(), both["total"].as_u64()), (Some("P1, P2"), Some(5)));
+    assert!(both["lines"].as_array().unwrap().iter().all(|line| line["who"] == "P1" && line["copies"] == 1), "{both}");
+    // Asked to keep every copy, both mics' lines come back.
+    let kept = call(&f.ctx, "read_transcript", json!({ "sequence": BANK, "people": ["P1", "P2"], "from": "20:00:00:00", "to": "20:00:09:00", "keep_copies": true }));
+    assert_eq!(kept["total"], 10);
+    // A short "yeah" is never a copy: everyone says it.
+    assert_eq!(super::sequences::PAGE_LINES, 200);
+}
+
+#[test]
+fn a_model_reads_rows_with_short_ids_that_turn_back_into_addresses() {
+    let f = fixture();
+    let output = tools::answer(&f.ctx, "read_transcript", &json!({ "sequence": "AFF BANK 1", "people": ["P1"], "from": "20:00:00:00", "to": "20:00:05:00" })).unwrap();
+    let text = output.text();
+    let mut rows = text.lines();
+    assert_eq!(rows.next().unwrap(), format!("AFF BANK 1 (saucebunny://sequence/{BANK}) · P1 · lines 1-3 of 3"));
+    let first = rows.next().unwrap();
+    assert!(first.ends_with("P1 (A1): I am so tired, says t1 at 0. [in: P1 tired]"), "{first}");
+    let id = first.split(' ').next().unwrap();
+    assert_eq!(f.ctx.ids.address(id), Some(format!("saucebunny://sequence/{BANK}/line/t1/t1-c0")));
+    // Search answers in rows too, and a range and any-word narrow it.
+    let found = tools::answer(&f.ctx, "search_transcripts", &json!({ "query": "tired sleepy", "any": true, "people": ["P1"], "sequences": [BANK], "from": "20:00:00:00", "to": "20:00:09:00" })).unwrap().text();
+    assert!(found.starts_with("Search \"tired sleepy\" in AFF BANK 1: 1 of 1 matches"), "{found}");
+    assert!(found.contains(id), "{found}");
+    let none = tools::answer(&f.ctx, "search_transcripts", &json!({ "query": "tired sleepy", "people": ["P1"], "sequences": [BANK] })).unwrap().text();
+    assert!(none.contains(": 0 of 0 matches"), "{none}");
+    // The brief sequence is the names and timecodes, not the tracks.
+    let brief = call(&f.ctx, "get_sequence", json!({ "sequence": BANK, "brief": true }));
+    assert_eq!((brief["start"].as_str(), brief["people"].as_array().unwrap().len()), (Some("20:00:00:00"), 20));
+    assert!(brief.get("tracks").is_some_and(Value::is_number));
+}
+
+#[test]
+fn one_person_on_two_mics_reads_once_and_a_line_said_twice_at_different_times_stays_twice() {
+    let line = |track: &str, from: i64, text: &str| (from, track.to_string(), super::Line { line: format!("{track}-{from}"), who: "KENDALL".into(), track: track.into(),
+        tc_in: String::new(), tc_out: String::new(), text: text.into(), in_string_outs: vec![], bleed_from: None, span: [from, from + 48], copies: 0 });
+    let folded = super::sequences::fold_copies(vec![
+        line("t10", 0, "kinda think that would be a sick match"), line("t14", 0, "kinda think that would be a sick match"),
+        line("t10", 500, "kinda think that would be a sick match"),
+    ], &[]);
+    assert_eq!(folded.iter().map(|line| (line.track.as_str(), line.copies)).collect::<Vec<_>>(), [("t10", 1), ("t10", 0)]);
+}
+
+/// ROOM: Donnie and Jillio argue at 0-7 s, Donnie talks alone at 40 s, and
+/// they go at it again at 60-66 s with Eve cutting in.
+pub(crate) fn add_room(ctx: &Context) {
+    let said = |track: &str, lines: &[(f64, &str)]| json!({ "track_id": track, "start_frame": 0, "duration_frames": 24 * 600, "engine": "parakeet", "model_id": "m",
+        "status": "completed", "sample_rate": 16000, "timing_issues": [], "warnings": [],
+        "cues": lines.iter().enumerate().map(|(index, (at, text))| json!({ "id": format!("{track}-{index}"), "start_sample": (at * 16_000.0) as i64,
+            "end_sample": ((at + 1.5) * 16_000.0) as i64, "text": text, "boundary_review": false })).collect::<Vec<_>>() });
+    let room = document(ROOM, "ROOM", vec![track("k", 1), track("d", 2), track("e", 3)],
+        vec![json!({ "track_id": "k", "owner_name": "DONNIE" }), json!({ "track_id": "d", "owner_name": "JILLIO" }), json!({ "track_id": "e", "owner_name": "EVE" })],
+        vec![
+            said("k", &[(0.0, "my brother always won"), (4.0, "every single time we played"), (40.0, "talking to myself here now"), (60.0, "you were the favourite one"), (65.0, "and you still are to them")]),
+            said("d", &[(2.0, "that is not how it went"), (6.0, "you always cheated at cards"), (63.0, "only because I was younger")]),
+            said("e", &[(61.5, "can we film the next one")]),
+        ], None);
+    crate::commands::aaf::store::create(&ctx.roots.multitrack, &room).unwrap();
+}
+pub(crate) const ROOM: &str = "3333333333333333333333333333333333333333333333333333333333333333";
+
+#[test]
+fn conversations_are_where_the_people_take_turns_and_end_at_a_long_pause() {
+    let f = fixture();
+    add_room(&f.ctx);
+    let found = call(&f.ctx, "find_conversations", json!({ "sequence": "ROOM", "people": ["Donny", "Jillio"] }));
+    let stretches = found["stretches"].as_array().unwrap();
+    assert_eq!(stretches.len(), 2, "{found}");
+    assert_eq!((stretches[0]["turns"].as_u64(), stretches[0]["lines"].as_array().unwrap().len()), (Some(3), 4));
+    // Eve speaks inside the second one: she comes with it.
+    let second: Vec<&str> = stretches[1]["lines"].as_array().unwrap().iter().map(|line| line["who"].as_str().unwrap()).collect();
+    assert_eq!(second, ["DONNIE", "EVE", "JILLIO", "DONNIE"]);
+    // A shorter gap splits the second exchange (60 s to 63 s is past a 1 s pause), so only the first is left.
+    let tight = call(&f.ctx, "find_conversations", json!({ "sequence": "ROOM", "people": ["DONNIE", "JILLIO"], "gap": 1.0 }));
+    assert_eq!(tight["stretches"].as_array().unwrap().len(), 1);
+    // As rows: a line per stretch, then its lines, Eve marked.
+    let rows = tools::answer(&f.ctx, "find_conversations", &json!({ "sequence": "ROOM", "people": ["DONNIE", "JILLIO"] })).unwrap().text();
+    assert!(rows.starts_with("Conversations between DONNIE and JILLIO in ROOM") && rows.contains("[not asked for]") && rows.contains("3 turns"), "{rows}");
+    // One person is not a conversation.
+    assert!(tools::call(&f.ctx, "find_conversations", &json!({ "sequence": "ROOM", "people": ["DONNIE"] })).is_err());
+}
+
+#[test]
+fn a_cut_is_measured_beat_by_beat_with_what_is_wrong_with_it_named() {
+    // A story cut is fitted to a running time with this, so a model never adds up timecodes itself.
+    let f = fixture();
+    cache_bleed(&f, true);
+    let id = |track: &str, cue: &str| f.ctx.ids.id(&format!("saucebunny://sequence/{BANK}/line/{track}/{cue}"));
+    let measured = call(&f.ctx, "measure_cut", json!({ "target_seconds": 5, "beats": [
+        // Two lines two seconds apart play as one stretch; P2's copy of P1's line sits inside it.
+        { "title": "Setup", "lines": [id("t1", "t1-c0"), id("t1", "t1-c1"), id("t2", "t2-c0")] },
+        // Back in time by more than the join: two stretches, then a line already used.
+        { "title": "Turn", "lines": [id("t1", "t1-c4"), id("t1", "t1-c2"), id("t1", "t1-c0")] },
+        { "title": "Nothing", "lines": ["Lnothing"] },
+    ] }));
+    let beats = measured["beats"].as_array().unwrap();
+    assert_eq!(beats.iter().map(|beat| (beat["title"].as_str().unwrap(), beat["stretches"].as_u64().unwrap(), beat["lines"].as_u64().unwrap())).collect::<Vec<_>>(),
+        vec![("Setup", 1, 3), ("Turn", 3, 3), ("Nothing", 0, 0)]);
+    // 0 to 83 frames at 23.976 (3.46 s), with a quarter second before and half a second after.
+    assert_eq!(beats[0]["seconds"], 4.2);
+    let total = measured["seconds"].as_f64().unwrap();
+    let sum: f64 = beats.iter().map(|beat| beat["seconds"].as_f64().unwrap()).sum();
+    assert!((total - (sum + 1.0)).abs() < 0.11, "one pause between the two beats that play: {total} vs {sum}");
+    let warnings: Vec<&str> = measured["warnings"].as_array().unwrap().iter().map(|warning| warning.as_str().unwrap()).collect();
+    for expected in ["plays twice", "heard on another person's mic", "Lnothing names no line", "\"Nothing\" has no lines that play", "against a target of 0:05"] {
+        assert!(warnings.iter().any(|warning| warning.contains(expected)), "no warning saying {expected:?}: {warnings:?}");
+    }
+    // Within a tenth of the target, nothing is said about it.
+    let close = call(&f.ctx, "measure_cut", json!({ "target_seconds": 4.2, "beats": [{ "title": "Setup", "lines": [id("t1", "t1-c0"), id("t1", "t1-c1")] }] }));
+    assert!(close.get("warnings").is_none(), "{close}");
+    assert_eq!(close["runtime"], "0:04");
 }

@@ -81,7 +81,7 @@ pub async fn extract_16k(app: &AppHandle, document: &AafDocument, track: &str, s
 {
     validate_range(document, start, duration)?;
     store::track(document, track)?;
-    store::source_ready(document)?;
+    store::audio_source_ready(document)?;
     let raw = directory.join("raw.wav");
     let wav = directory.join("audio.wav");
     // Share audition's read-only index; do not boot Python or compute unused
@@ -106,7 +106,7 @@ pub async fn extract_16k(app: &AppHandle, document: &AafDocument, track: &str, s
         return Err(AppError::invalid("Prepared audio duration does not match the AAF timeline"));
     }
     process::check_cancelled(app, job)?;
-    store::source_ready(document)?;
+    store::audio_source_ready(document)?;
     Ok((wav, info))
 }
 
@@ -120,7 +120,7 @@ pub async fn prepare(app: &AppHandle, document: &AafDocument, track: &str, start
 {
     validate_range(document, start, duration)?;
     store::track(document, track)?;
-    store::source_ready(document)?;
+    store::audio_source_ready(document)?;
     if super::linked_audio::needed(document) { return prepare_linked(app, document, track, start, duration, job).await; }
     let reader = super::pcm::get(app, document, job).await?;
     let selected = reader.index.track(track)?;
@@ -157,7 +157,7 @@ pub async fn prepare(app: &AppHandle, document: &AafDocument, track: &str, start
 }
 
 async fn prepare_linked(app: &AppHandle, document: &AafDocument, track: &str, start: i64, duration: i64, job: &str) -> Result<AafAudioAsset, AppError> {
-    super::linked::check_window_sources(document, store::track(document, track)?, start, duration)?;
+    super::linked::check_window_sources(app, job, document, store::track(document, track)?, start, duration).await?;
     let expected = super::linked_audio::sample(start+duration, &document.manifest.edit_rate)-super::linked_audio::sample(start, &document.manifest.edit_rate);
     let key = store::cache_key(document, track, &format!("linked-pcm-v1-{start}-{duration}"));
     let cache = store::cache(app)?;

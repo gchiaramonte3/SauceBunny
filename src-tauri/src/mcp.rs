@@ -55,8 +55,11 @@ pub fn handle(ctx: &Context, message: &Value) -> Option<Value> {
             let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
             if !tools::TOOLS.iter().any(|tool| tool.name == name) { return Some(failure(&id, -32602, &format!("Unknown tool: {name}"))); }
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
-            match tools::call(ctx, name, &args) {
-                Ok(result) => reply(&id, json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(&result).unwrap_or_default() }], "structuredContent": result, "isError": false })),
+            // Lines come as rows with short ids, a fraction of the JSON records
+            // (docs/ASK-RANGE-SPEC-2026-10-06.md, decision 2); the rest as before.
+            match tools::answer(ctx, name, &args) {
+                Ok(tools::Output::Rows(text)) => reply(&id, json!({ "content": [{ "type": "text", "text": text }], "isError": false })),
+                Ok(tools::Output::Json(result)) => reply(&id, json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(&result).unwrap_or_default() }], "structuredContent": result, "isError": false })),
                 // A tool that fails tells the model why, so it can ask differently.
                 Err(error) => reply(&id, json!({ "content": [{ "type": "text", "text": error.to_string() }], "isError": true })),
             }
@@ -145,8 +148,11 @@ mod tests {
         assert!(tools.iter().all(|tool| tool["inputSchema"]["type"] == "object" && tool["annotations"]["readOnlyHint"] == true));
         let called = ask(&f.ctx, "tools/call", json!({ "name": "read_transcript", "arguments": { "sequence": "AFF BANK 1", "person": "P5", "limit": 2 } }));
         assert_eq!(called["result"]["isError"], false);
-        assert_eq!(called["result"]["structuredContent"]["lines"].as_array().unwrap().len(), 2);
-        assert!(called["result"]["content"][0]["text"].as_str().unwrap().contains("\"who\": \"P5\""));
+        // Lines come as rows: a head, then one row per line.
+        let rows = called["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(rows.starts_with("AFF BANK 1 (") && rows.lines().count() == 3 && rows.contains("P5 (A5): "), "{rows}");
+        // Other tools still answer as structured data.
+        assert_eq!(ask(&f.ctx, "tools/call", json!({ "name": "list_sequences", "arguments": {} }))["result"]["structuredContent"]["sequences"].as_array().unwrap().len(), 2);
         // A failing tool tells the model why, inside the result.
         let failed = ask(&f.ctx, "tools/call", json!({ "name": "get_sequence", "arguments": { "sequence": "nowhere" } }));
         assert_eq!(failed["result"]["isError"], true);

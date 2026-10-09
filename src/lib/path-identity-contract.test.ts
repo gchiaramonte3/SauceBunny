@@ -34,6 +34,7 @@ const ALLOWED: ReadonlyArray<readonly [file: string, why: string]> = [
   ["src/lib/edit-new.ts", "normalises a microphone-owner label to match people across sequences; not filesystem identity"],
   ["src/lib/edit-export.ts", "normalises an edit TITLE into a suggested file name for the save dialog; the dialog returns the path"],
   ["src/lib/edit-stringout.ts", "normalises a microphone-owner label to find every mic a person owns; not filesystem identity"],
+  ["src/lib/edit-exchanges.ts", "normalises transcript WORDS to tell one utterance heard on two mics from a listener's own word; not filesystem identity"],
   ["src/components/MultitrackLibraryRows.tsx", "normalises search query text for matching display titles, not file identity"],
   ["src/components/MultitrackDocumentDialog.tsx", "normalises a document TITLE the editor typed; a title is display text, not file identity"],
   ["src/lib/review.ts", "normalises a TITLE inside reviewFingerprint, and a composite fingerprint string on lookup — neither is a path"],

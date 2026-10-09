@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { EditDocument } from "../bindings/EditDocument";
 import { EditAudio, JOIN_FADE_SECONDS, planBlocks, programToSource, trackPieces } from "./edit-audio";
 
@@ -15,12 +15,18 @@ class FakeContext {
   onstatechange: (() => void) | null = null;
   currentTime = 0; state = "running"; destination = {};
   resume = vi.fn().mockResolvedValue(undefined); close = vi.fn().mockResolvedValue(undefined);
+  gains: FakeGain[] = [];
   constructor() { context = this; }
   createGain(): FakeGain {
     const curves: Curve[] = [];
-    return { gain: { value: 1, curves, setValueCurveAtTime: (curve, when, duration) => { curves.push({ curve, when, duration }); } }, connect: vi.fn(), disconnect: vi.fn() };
+    const gain: FakeGain = { gain: { value: 1, curves, setValueCurveAtTime: (curve, when, duration) => { curves.push({ curve, when, duration }); } }, connect: vi.fn(), disconnect: vi.fn() };
+    this.gains.push(gain); return gain;
   }
-  createBufferSource() {
+  createDynamicsCompressor() {
+    const param = () => ({ value: 0 });
+    return { threshold: param(), knee: param(), ratio: param(), attack: param(), release: param(), connect: vi.fn(), disconnect: vi.fn() };
+  }
+    createBufferSource() {
     const source: FakeSource = { buffer: null, gain: null, start: vi.fn(), stop: vi.fn(), disconnect: vi.fn(), onended: null,
       connect: (gain) => { source.gain = gain; } };
     sources.push(source); return source;
@@ -90,6 +96,168 @@ describe("edit list mapping", () => {
       { from: 24, to: 48, fadeIn: "mute", fadeOut: "join" },
     ]);
     expect(trackPieces(document, first, "T2")).toEqual([{ from: 0, to: 48, fadeIn: null, fadeOut: "join" }]);
+  });
+});
+
+describe("a long silence", () => {
+  it("plays on a new output after a minute without sound, at the levels it had", async () => {
+    // 2026-10-08: after a long idle String Outs played nothing. The Mac's output was a remote-desktop
+    // session's virtual device, which goes and comes back; the old output stayed "running" on nothing.
+    let now = 1_000_000; const clock = vi.spyOn(performance, "now").mockImplementation(() => now); onTestFinished(() => clock.mockRestore());
+    const notify = vi.fn(), player = new EditAudio(FPS, notify);
+    player.setDocument(edit(), ["T1", "T2"]); player.setLevel(0.5, false); player.setTrackLevel("T1", 2);
+    await player.seek(0, 1); player.pause();
+    const first = context;
+    now += 39 * 60_000; sources.length = 0;
+    await player.seek(0, 1);
+    expect(context).not.toBe(first);
+    expect(first.close).toHaveBeenCalled();
+    // The master rebuilt at the volume asked for, T1's level carried over, and both mics play on it.
+    expect(context.gains[0].gain.value).toBe(0.5);
+    expect(context.gains.some((gain) => gain.gain.value === 2)).toBe(true);
+    expect(voices("a1").length).toBeGreaterThan(0);
+    expect(voices("b1").length).toBeGreaterThan(0);
+    expect(notify.mock.lastCall![0]).toMatchObject({ rate: 1, error: null });
+    // Playing again straight away keeps the same output.
+    const second = context; player.pause(); await player.seek(0, 1);
+    expect(context).toBe(second);
+    player.close();
+  });
+
+  it("makes the output again and carries on when its clock stops while playing", async () => {
+    let now = 1_000_000; const clock = vi.spyOn(performance, "now").mockImplementation(() => now); onTestFinished(() => clock.mockRestore());
+    const notify = vi.fn(), player = new EditAudio(FPS, notify);
+    player.setDocument(edit(), ["T1"]);
+    await player.seek(10, 1);
+    const first = context;
+    tick();
+    // Two seconds on the page's clock, watched every second, none on the audio clock: it has stopped.
+    now += 1_000; tick();
+    expect(context).toBe(first);
+    now += 1_000; tick();
+    await vi.waitFor(() => expect(context).not.toBe(first));
+    await vi.waitFor(() => expect(notify.mock.lastCall![0]).toMatchObject({ rate: 1, error: null }));
+    player.close();
+  });
+});
+
+describe("shuttle", () => {
+  it("J and L step Avid's ladder both ways, a shuttle moves the playhead at its speed, and L at 1x is playback", async () => {
+    const notify = vi.fn(), player = new EditAudio(FPS, notify);
+    const last = () => notify.mock.lastCall![0] as { frame: number; rate: number };
+    player.setDocument(edit(), ["T1", "T2"]);
+    await player.seek(100, 0);
+    await player.shuttle(-1);
+    expect(last().rate).toBe(-1);
+    // A second of the clock at -1x: a second's worth of frames back.
+    context.currentTime += 1; tick();
+    expect(last().frame).toBe(100 - FPS);
+    await player.shuttle(-1);
+    expect(last().rate).toBe(-2);
+    await player.shuttle(1);
+    expect(last().rate).toBe(-1);
+    // From -1x, L flips to 1x forward: ordinary playback.
+    await player.shuttle(1);
+    expect(last().rate).toBe(1);
+    await player.shuttle(1);
+    expect(last().rate).toBe(2);
+    // Running into the start stops it there.
+    player.pause(); await player.seek(5, 0); await player.shuttle(-1);
+    context.currentTime += 1; tick();
+    expect(last()).toMatchObject({ frame: 0, rate: 0 });
+  });
+});
+
+describe("joins", () => {
+  // S1 [0,48) then S1 [48,96): one take, split because T2 was overwritten in the second half.
+  const split = (): EditDocument => {
+    const document = edit();
+    document.segments = [
+      { kind: "source", id: "a", source: "S1", in_frame: 0, out_frame: 48 },
+      { kind: "source", id: "b", source: "S1", in_frame: 48, out_frame: 96, overrides: { T2: { source: "S1", in_frame: 300 } } },
+    ];
+    return document;
+  };
+
+  it("fades a track only where its own material changes: one that carries on across another track's cut plays straight through", async () => {
+    const document = split(), [first, second] = planBlocks(document, 120);
+    expect([first.joinOut, second.joinIn]).toEqual([true, true]);
+    // Ann (T1) runs on from frame 48 to 48: no fade either side of the boundary.
+    expect(trackPieces(document, first, "T1")).toEqual([{ from: 0, to: 48, fadeIn: null, fadeOut: null }]);
+    expect(trackPieces(document, second, "T1")).toEqual([{ from: 48, to: 96, fadeIn: null, fadeOut: null }]);
+    // Bob (T2) jumps to frame 300 there: a cut, faded.
+    expect(trackPieces(document, first, "T2")).toEqual([{ from: 0, to: 48, fadeIn: null, fadeOut: "join" }]);
+    expect(trackPieces(document, second, "T2", second.program, second.overrides![0])).toEqual([{ from: 300, to: 348, fadeIn: "join", fadeOut: null }]);
+  });
+
+  it("plays every track at unity, as Media Composer does, however many people are heard", () => {
+    const player = new EditAudio(FPS, vi.fn());
+    const mixLevel = () => (player as unknown as { mix: FakeGain }).mix.gain.value;
+    player.setDocument(edit(), ["T1"]);
+    expect(mixLevel()).toBe(1);
+    player.setDocument(edit(), ["T1", "T2"]);
+    expect(mixLevel()).toBe(1);
+  });
+});
+
+describe("tracks edited alone", () => {
+  const overwritten = (overrides: Extract<EditDocument["segments"][number], { kind: "source" }>["overrides"], mutes: EditDocument["mutes"] = []) => {
+    const document = edit(mutes);
+    document.segments[0] = { kind: "source", id: "g1", source: "S1", in_frame: 0, out_frame: 48, overrides };
+    return document;
+  };
+
+  it("cuts a block wherever any of its ranges leaves a window, and an override's pieces take its own source's mutes", () => {
+    const document = overwritten({ T1: { source: "S2", in_frame: 230 } }, [{ source: "S2", track: "T1", in_frame: 245, out_frame: 250 }]);
+    const [first, second] = planBlocks(document, 120);
+    // S2 from 230 crosses its window at 240, ten frames in; S1 does not.
+    expect([first, second].map((block) => [block.program, block.end, block.at, block.window, block.overrides])).toEqual([
+      [0, 10, 0, 0, [{ source: "S2", at: 230, window: 120, lanes: ["T1"] }]],
+      [10, 48, 10, 0, [{ source: "S2", at: 240, window: 240, lanes: ["T1"] }]],
+    ]);
+    expect(trackPieces(document, second, "T1", second.program, second.overrides![0])).toEqual([
+      { from: 240, to: 245, fadeIn: null, fadeOut: "mute" }, { from: 250, to: 278, fadeIn: "mute", fadeOut: "join" }]);
+  });
+
+  it("an Overwrite on one track plays its new material there, and the other track keeps the clip", async () => {
+    const player = new EditAudio(FPS, vi.fn());
+    player.setDocument(overwritten({ T1: { source: "S2", in_frame: 250 } }), ["T1", "T2"]);
+    await player.seek(0, 1);
+    await vi.waitFor(() => expect(voices("b1")).toHaveLength(1));
+    const [ann] = voices("a2");
+    expect(startOf(ann)[0]).toBeCloseTo(.015, 6);
+    // Frame 250 of S2, ten frames into the window that starts at 240.
+    expect(startOf(ann)[1]).toBeCloseTo(10 / FPS, 6);
+    expect(startOf(voices("b1")[0])[0]).toBeCloseTo(.015, 6);
+    // Ann's own mic is not heard under her Overwrite.
+    expect(voices("a1")).toHaveLength(0);
+    player.close();
+  });
+
+  it("a track lifted alone is silent there and nowhere else", async () => {
+    const player = new EditAudio(FPS, vi.fn());
+    player.setDocument(overwritten({ T2: { source: null, in_frame: 0 } }), ["T1", "T2"]);
+    await player.seek(0, 1);
+    await vi.waitFor(() => expect(voices("a2")).toHaveLength(1));
+    expect(voices("a1")).toHaveLength(1);
+    expect(voices("b1")).toHaveLength(0);
+    player.close();
+  });
+});
+
+describe("solo and mute are record tracks", () => {
+  it("a quiet record track silences whoever is on it, where they are on it", async () => {
+    // The first clip swaps them: Ann on A2 and Bob on A1. Muting A1 silences Bob there, not Ann.
+    const document = edit();
+    document.segments[0] = { kind: "source", id: "g1", source: "S1", in_frame: 0, out_frame: 48, layers: { T1: 2, T2: 1 } };
+    const player = new EditAudio(FPS, vi.fn());
+    player.setDocument(document, ["T1", "T2"], {}, [1]);
+    await player.seek(0, 1);
+    await vi.waitFor(() => expect(voices("a1")).toHaveLength(1));
+    expect(voices("b1")).toHaveLength(0);
+    // In the third clip, which names no tracks, Ann is on her own A1: quiet there.
+    expect(voices("a2")).toHaveLength(0);
+    player.close();
   });
 });
 
@@ -236,6 +404,29 @@ describe("edit list playback", () => {
     const replanned = sources.slice(before);
     expect(replanned.map((voice) => voice.buffer?.track)).toEqual(["a1", "a2"]);
     expect(startOf(replanned[0])[1]).toBeCloseTo(.5, 6);
+    player.close();
+  });
+  it("keeps fetching the next window when no animation frame ever fires, as in a hidden window", async () => {
+    // Timers only: by default fake timers also fire requestAnimationFrame, which a hidden window never does.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const player = new EditAudio(FPS, vi.fn());
+    player.setDocument(edit(), ["T1", "T2"]);
+    await player.seek(0, 1);
+    // The first fill runs to a window ahead (program 132, the end of S2) and stops there.
+    await vi.waitFor(() => expect(voices("a2")).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(10);
+    // Ann's return in S1 (program 132) is not scheduled yet.
+    expect(voices("a1")).toHaveLength(1);
+    // Two seconds on (48 frames), less than a window is scheduled ahead. Nothing calls tick().
+    context.currentTime = 2;
+    await vi.advanceTimersByTimeAsync(600);
+    await vi.waitFor(() => expect(voices("a1")).toHaveLength(3));
+    // Pause stops the timer as well as the frame loop.
+    player.pause();
+    const scheduled = sources.length;
+    context.currentTime = 20;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(sources).toHaveLength(scheduled);
     player.close();
   });
   it("scrubbing sounds short grains from each audible mic, once decoded", async () => {

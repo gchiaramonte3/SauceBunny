@@ -58,7 +58,7 @@ async function boot(page: Page) {
         case "aaf_speech": return Promise.resolve(speech(args.trackId as string, tracks.findIndex((track) => track.id === args.trackId)));
         case "aaf_waveform": return Promise.reject(new Error("not built"));
         case "aaf_prepare_audio": return Promise.resolve({ path: `/e2e-mock/solo-${args.durationFrames}.wav`, start_frame: args.startFrame, duration_frames: args.durationFrames, sample_rate: 16000, sample_count: Math.ceil(Number(args.durationFrames) * 1001 / 24000 * 16000), peaks: [] });
-        case "edit_list": return Promise.resolve([...edits.keys()].map((id) => ({ id, title: "Big scene", created_at: 1, updated_at: 1, head: 1, states: 1 })));
+        case "edit_list": return Promise.resolve([...edits.keys()].map((id) => ({ id, title: "Big scene", created_at: 1, updated_at: 1, head: 1, states: 1, sources: [], duration_frames: 0, bites: 0, bite_frames: [], edit_rate: null })));
         case "edit_create": {
           // A test can ask for the new string out as a few short pieces with long cuts between them.
           const document = args.document as { segments: { in_frame: number; out_frame: number; id: string }[] };

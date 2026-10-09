@@ -1,5 +1,4 @@
 import type { AafDocument } from "../bindings/AafDocument";
-import type { AafPictureClip } from "../bindings/AafPictureClip";
 import type { EditTrack } from "../bindings/EditTrack";
 import type { PlacedWord } from "./edit-model";
 import { micOrder, micTrack, type MultitrackPerson } from "./multitrack-person";
@@ -87,17 +86,3 @@ export function firstSpeaker(people: MultitrackPerson[], placed: PlacedWord[]): 
   return people.find((person) => speaking.has(person.id))?.id ?? ALL_VOICES;
 }
 
-/**
- * Each source's V1 as picture blocks in source seconds: V1 when it has clips,
- * else the first picture track that does. The same rule export uses to pick
- * `picture_slot`, so the timeline shows the picture the AAF will carry.
- * Metadata only: names and cut points, never frames.
- */
-export function pictureBlocks(sources: { id: string }[], documents: Map<string, AafDocument>, fps: number): (source: string) => { from: number; to: number; clip: AafPictureClip }[] {
-  const bySource = new Map(sources.map((source) => {
-    const tracks = documents.get(source.id)?.manifest.graph?.picture_tracks ?? [];
-    const v1 = tracks.find((track) => track.physical_track_number === 1 && track.clips.length) ?? tracks.find((track) => track.clips.length);
-    return [source.id, (v1?.clips ?? []).map((clip) => ({ from: clip.start_frame / fps, to: (clip.start_frame + clip.duration_frames) / fps, clip }))];
-  }));
-  return (source: string) => bySource.get(source) ?? [];
-}

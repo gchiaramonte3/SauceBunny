@@ -10,10 +10,14 @@ export type EditRowsView = {
   start: number; span: number; width: number; x: (t: number) => string; w: (d: number) => string;
   scrub: Pick<React.HTMLAttributes<HTMLElement>, "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel">;
   waveforms: boolean; text: Set<string>; onText: (id: string) => void;
+  /** Scroll the view to start at these seconds (a drag held at the edge does, as Neo's timeline does). */
+  pan: (seconds: number) => void;
 };
 
 type Props = {
   side: EditSourceSide; aaf: AafDocument; colors: Record<string, string>; fps: number; view: EditRowsView;
+  /** How many tracks the record has, for the patch's choices (one more makes a new track). */
+  recordTracks: number;
   peaksOf: (source: string, lane: string) => [number, number][] | undefined; duration: number;
 };
 
@@ -26,7 +30,7 @@ export const sourceRows = (aaf: AafDocument, expanded: Set<string>) => visibleLa
  * visibleLanes), drawn in String Outs' lanes. Names belong here, on the source
  * side; the record side is tracks.
  */
-export function EditSourceTimeline({ side, aaf, colors, fps, view, peaksOf, duration }: Props) {
+export function EditSourceTimeline({ side, aaf, colors, fps, view, peaksOf, duration, recordTracks }: Props) {
   const source = side.source!;
   const seconds = (frames: number) => frames / fps;
   const graph = aaf.manifest.graph?.lanes ?? [];
@@ -38,6 +42,7 @@ export function EditSourceTimeline({ side, aaf, colors, fps, view, peaksOf, dura
       alternates={graph.filter((item) => item.parent_track_id === track.id).length} open={side.expanded.has(track.id)} onOpen={(all) => side.toggleExpanded(track.id, all)}
       group={meta?.parent_track_id ? meta.group_name || "Group audio" : null} status={laneStatus(aaf, track.id)} unread={!lane}
       selected={side.selected.has(track.id)} onSelect={(only) => side.toggleSelector(track.id, only)}
+      patch={lane && side.selected.has(track.id) && side.patch[lane] != null ? { layer: side.patch[lane], tracks: recordTracks, onPatch: (layer) => side.setPatch(lane, layer) } : undefined}
       soloed={!!lane && soloed.has(lane)} quiet={soloed.size > 0 && !(lane && soloed.has(lane))} onSolo={() => lane && side.toggleSolo(lane)}
       shown={view.text.has(track.id)} onText={() => view.onText(track.id)}
       clips={track.clips} seconds={seconds} start={view.start} span={view.span} x={view.x} w={view.w}

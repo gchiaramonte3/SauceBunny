@@ -35,6 +35,24 @@ export function exportEdits(editIds: string[], outputDir: string, approach: Edit
 }
 
 /**
+ * What to answer when Media Composer asks about a group clip on import,
+ * said after every export that keeps groups. A kept group travels in the AAF
+ * under its own MobID, as it does in Avid's own exports, and Media Composer
+ * asks "Group clip conflict found ... replace the original?" for every
+ * composition whose MobID is already loaded, without comparing the two
+ * (libameLibrary OMFImportResolver::ResolveConflictLogical; only a batch
+ * import skips it). So every import of a string out after the first asks.
+ * No keeps the group already in the project, and the sequence links to it
+ * by MobID, which is the point. It is not a crash guard: on 2026-10-08
+ * Media Composer 24.12.6 crashed during such an import after No, in the
+ * bin's selected-items label, which looked a selected clip up by MobID,
+ * found nothing, and read through the null.
+ */
+export function groupConflictNote(approach: EditExportApproach): string {
+  return approach === "B" ? "" : " If Media Composer reports a group clip conflict on import, choose No To All.";
+}
+
+/**
  * A file name Media Composer and Finder both accept, from the edit's title.
  * `export_stem` in src-tauri/src/edit_export.rs names batch exports the same
  * way; a change here belongs there too.

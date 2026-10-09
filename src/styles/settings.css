@@ -1209,8 +1209,11 @@
 .cp-update-note { color: var(--fg-3); font-size: var(--text-md); }
 
 /* ============================================================
-   AI APIs pane (AiApiSettings.tsx) — provider choice + cloud keys
+   AI APIs pane (AiApiSettings.tsx, CloudProviderCard.tsx): the provider
+   choice, then ONLY that provider's settings. Both cards used to show
+   whatever was chosen, so the choice read as tabs that did nothing.
    ============================================================ */
+/* Caps label over a control, used by Other apps (AssistantAccess). */
 .cp-aiapi-label {
   display: block;
   margin: 14px 0 6px;
@@ -1221,46 +1224,27 @@
   text-transform: uppercase;
   color: var(--fg-4);
 }
-.cp-aiapi-providers { display: flex; gap: 6px; flex-wrap: wrap; }
-.cp-aiapi-choice {
-  padding: 7px 16px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  background: var(--bg-3);
-  color: var(--fg-2);
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  font-weight: var(--weight-semibold);
-  cursor: pointer;
-}
-.cp-aiapi-choice:hover { color: var(--fg-1); background: var(--bg-4); }
-.cp-aiapi-choice.active { color: var(--fg-1); border-color: var(--fg-1); background: var(--bg-4); }
-.cp-aiapi-warn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 12px 0 0;
-  padding: 9px 12px;
-  border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--danger) 24%, transparent);
-  color: var(--fg-2);
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  line-height: var(--leading-snug);
-}
+/* The provider row carries no hairline: the card under it is the separation. */
+.cp-aiapi-provider { border-bottom: none; padding-top: 0; }
+.cp-aiapi-provider .cp-segmented { width: 100%; max-width: 360px; }
+.cp-aiapi-provider .cp-segmented button { padding: 6px 8px; font-size: var(--text-md); }
 .cp-aiapi-card {
-  margin-top: 16px;
-  padding: 14px 16px;
+  margin-top: 4px;
+  padding: 0 16px;
   border: 1px solid var(--line-1);
   border-radius: var(--r-card);
   background: var(--bg-1);
 }
-.cp-aiapi-cardhead { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-.cp-aiapi-name { font-family: var(--font-ui); font-size: var(--text-lg); font-weight: var(--weight-bold); color: var(--fg-1); }
+.cp-aiapi-card + .cp-aiapi-card { margin-top: 12px; }
+.cp-aiapi-cardhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 0 0; }
+.cp-aiapi-name { font-family: var(--font-ui); font-size: var(--text-xl); font-weight: var(--weight-bold); color: var(--fg-1); }
+.cp-aiapi-status {
+  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+  font-family: var(--font-ui); font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--fg-4);
+}
 /* "It is ready" — a positive OUTCOME, which is one of the two things green
    still means here. See the accent note in base.css. */
-.cp-aiapi-set,
+.cp-aiapi-status.ok,
 .cp-settings-ready {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--color-accent-green);
@@ -1271,6 +1255,35 @@
    green had scattered; leaving one copy of it in a JSX attribute would have
    guaranteed the next audit missed it too. */
 .cp-settings-ready { font-size: var(--text-sm); }
+/* Where the words go. A fact the editor agreed to by choosing the provider,
+   so it is said plainly in the card, in the neutral: it was a red box, which
+   reads as an error nobody had made. */
+.cp-aiapi-note {
+  display: flex; align-items: flex-start; gap: 6px;
+  margin: 4px 0 2px;
+  font-family: var(--font-ui); font-size: var(--text-base); line-height: var(--leading-snug); color: var(--fg-3);
+}
+.cp-aiapi-note svg { flex-shrink: 0; margin-top: 1px; color: var(--fg-4); }
+.cp-aiapi-card .cp-pane-row { grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); }
+.cp-aiapi-card .cp-pane-row:last-of-type { border-bottom: none; }
+.cp-aiapi-card .cp-pane-row .k label { cursor: default; }
+/* Inputs and menus fill the value column rather than sitting at its end. */
+.cp-aiapi-field { justify-content: stretch; }
+.cp-aiapi-field > .cp-aiapi-input, .cp-aiapi-field > .cp-aiapi-select { flex: 1; min-width: 0; }
+.cp-aiapi-select { width: 100%; min-width: 0; }
+.cp-aiapi-foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap;
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--line-1);
+}
+.cp-aiapi-count { margin-right: auto; font-family: var(--font-ui); font-size: var(--text-base); color: var(--fg-4); }
+.cp-aiapi-section {
+  margin: 28px 0 8px;
+  font-family: var(--font-ui); font-size: var(--text-sm); font-weight: var(--weight-bold);
+  letter-spacing: var(--track-caps-loose); text-transform: uppercase; color: var(--fg-4);
+}
+.cp-aiapi-section + .cp-aiapi-card { margin-top: 0; padding-bottom: 14px; }
+.cp-aiapi-section + .cp-aiapi-card .cp-aiapi-cardhead { padding-bottom: 6px; }
 .cp-aiapi-row { display: flex; gap: 6px; align-items: center; }
 .cp-aiapi-input {
   flex: 1;
@@ -1294,6 +1307,7 @@
   color: var(--fg-4);
 }
 .cp-aiapi-link {
+  padding: 0;
   border: 0;
   background: none;
   color: var(--fg-3);
@@ -1302,28 +1316,9 @@
   text-decoration: underline;
 }
 .cp-aiapi-link:hover { color: var(--fg-1); }
-/* The ChatGPT card's Ultrafast switch: the switch, then what it costs. */
-.cp-aiapi-speed {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-top: 12px;
-}
-.cp-aiapi-speed .cp-toggle-switch { margin-top: 1px; }
-.cp-aiapi-speed-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  line-height: var(--leading-snug);
-  color: var(--fg-3);
-}
-.cp-aiapi-speed-name { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--fg-1); }
 .cp-aiapi-msg {
   display: flex; align-items: center; gap: 6px;
-  margin: 8px 0 0;
+  margin: 0 0 14px;
   font-family: var(--font-ui);
   font-size: var(--text-base);
 }

@@ -314,8 +314,8 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
     engine: AafEngine, model_id: &str, language: &str, fast: bool, speech_only: bool, names: bool, job: &str) -> Result<AafTrackTranscript, AppError>
 {
     let lane = store::track(document, track)?;
-    store::source_ready(document)?;
-    super::linked::check_sources(document, store::track(document, track)?)?;
+    store::audio_source_ready(document)?;
+    super::linked::check_sources(app, job, document, store::track(document, track)?).await?;
     let end = start.checked_add(duration).ok_or_else(|| AppError::invalid("AAF transcription range overflow"))?;
     if start < 0 || duration <= 0 || end > document.manifest.duration_frames {
         return Err(AppError::invalid("Choose a transcription range within the sequence"));
@@ -368,8 +368,8 @@ pub async fn transcribe(app: &AppHandle, document: &AafDocument, track: &str, st
         process::progress(app, job, Some(track), "transcribing", batch[batch.len()-1].end, duration);
     }
     cues.sort_by_key(|cue| (cue.start_sample, cue.end_sample));
-    store::source_ready(document)?;
-    super::linked::check_sources(document, lane)?;
+    store::audio_source_ready(document)?;
+    super::linked::check_sources(app, job, document, lane).await?;
     let transcript = AafTrackTranscript { track_id: track.into(), start_frame: start, duration_frames: duration, engine: config.engine,
         model_id: config.model_id, status: if !timing_issues.is_empty() { AafTranscriptStatus::Review } else if cues.is_empty() { AafTranscriptStatus::Empty } else { AafTranscriptStatus::Completed },
         sample_rate: ASR_RATE as u32, cues, timing_issues,

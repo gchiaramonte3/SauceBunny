@@ -9,7 +9,7 @@ afterEach(() => { cleanup(); localStorage.clear(); });
 
 const open = { document: { sources: [], tracks: [] }, timeline: { segments: [], mutes: [] }, markers: [] } as unknown as OpenEdit;
 const base = { open, documents: new Map(), words: [], commit: vi.fn(async () => true), nameOf: (id: string) => id, scope: "A1 Rosa · the whole string out",
-  request: { from: 0, to: 10, lanes: ["rosa"], sourceLanes: { s: ["rosa"] } } };
+  request: { from: 0, to: 10, layers: [1], layering: { carries: () => ["rosa"], home: () => 1 } } };
 
 it("says why it cannot run until the mics are measured, and Escape closes it", () => {
   const onClose = vi.fn();

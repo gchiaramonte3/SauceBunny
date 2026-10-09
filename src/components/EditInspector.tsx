@@ -41,11 +41,11 @@ export function EditInspector({ ws, words, lanes, colors, tc, sourceName }: Prop
           <p className="cp-te-insp-lead">{plural(selected.length, "word", "words")} · {names(who)}</p>
           <p className="cp-te-insp-meta">{tc(selected[0].programStart)} to {tc(selected[selected.length - 1].programEnd)} · {(dry?.seconds ?? 0).toFixed(2)} s</p>
           <blockquote className="cp-te-insp-quote">{selected.slice(0, 14).map((item) => item.word.text).join(" ")}{selected.length > 14 ? " …" : ""}</blockquote>
-          {under.length > 0 && <p className="cp-te-insp-warn" role="note">{names(under)} talks under this: a delete silences only {names(who)} and asks before cutting for everyone.</p>}
+          {under.length > 0 && <p className="cp-te-insp-warn" role="note">{names(under)} talks under this: a delete mutes only {names(who)} and asks before cutting for everyone.</p>}
           <div className="cp-te-insp-actions">
             <button type="button" className="btn btn-ghost cp-te-btn" onClick={() => ws.remove(false)} title="Cut from every track and close up (⌫)">Delete<kbd className="cp-te-kbd">⌫</kbd></button>
-            <button type="button" className="btn btn-ghost cp-te-btn" onClick={() => ws.remove(true)} title={allSilenced ? "Unsilence on their track (⇧⌫)" : "Silence on their track only; nothing moves (⇧⌫)"}>
-              {allSilenced ? "Unsilence" : `Silence ${names(who)}`}<kbd className="cp-te-kbd">⇧⌫</kbd></button>
+            <button type="button" className="btn btn-ghost cp-te-btn" onClick={() => ws.remove(true)} title={allSilenced ? "Unmute on their track (⇧⌫)" : "Mute on their track only; nothing moves (⇧⌫)"}>
+              {allSilenced ? "Unmute" : `Mute ${names(who)}`}<kbd className="cp-te-kbd">⇧⌫</kbd></button>
           </div>
         </>}
     </section>
@@ -70,7 +70,7 @@ export function EditInspector({ ws, words, lanes, colors, tc, sourceName }: Prop
         <div><dt>Removed lines</dt><dd>{ws.ghosts.length}</dd></div>
         <div><dt>Clips per track</dt><dd>{ws.edit.segments.length}</dd></div>
         <div><dt>Edit points</dt><dd>{ws.seams.length}</dd></div>
-        <div><dt>Silenced</dt><dd>{plural(ws.placed.filter((item) => item.muted).length, "word", "words")}</dd></div>
+        <div><dt>Muted</dt><dd>{plural(ws.placed.filter((item) => item.muted).length, "word", "words")}</dd></div>
         <div><dt>Markers</dt><dd>{ws.markers.length}</dd></div>
       </dl>
     </section>

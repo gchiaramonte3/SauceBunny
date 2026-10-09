@@ -1,64 +1,74 @@
-import type { Seam, Timeline, TimelineLane } from "../lib/edit-model";
-import { clipPieces, playsOn, segmentLength } from "../lib/edit-model";
+import type { LayerClip } from "../lib/edit-model";
+import { clipPieces } from "../lib/edit-model";
+import type { Roller } from "../lib/edit-trim";
 import type { multitrackTextLayout } from "../lib/multitrack-text-layout";
 import { EditWave } from "./EditWave";
 
 type Cue = ReturnType<typeof multitrackTextLayout>[number];
-type Scrub = Pick<React.HTMLAttributes<HTMLElement>, "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel">;
+type Pointer = Pick<React.HTMLAttributes<HTMLElement>, "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onPointerLeave">;
 type Props = {
-  speaker: TimelineLane; color: string; soloed: boolean; quiet: boolean; muted: boolean; shown: boolean; cues: Cue[]; selected: boolean;
-  onTrack: (speaker: string, only: boolean) => void; onSolo: (speaker: string) => void; onMute: (speaker: string) => void; onText: (speaker: string) => void;
-  onUntrack?: (speaker: string) => void;
-  edit: Timeline; starts: number[]; start: number; span: number; x: (t: number) => string; w: (d: number) => string;
-  sourceSpeakers: Record<string, string[]>; sourceName: (id: string) => string; waveforms: boolean;
-  peaksOf: (source: string, speaker: string) => [number, number][] | undefined; durationOf: (source: string) => number;
-  mutes: Record<string, [number, number][]>; marked: number[] | null; seams: Seam[]; scrub: Scrub;
-  /** The patch panel: everyone who can be put on this track, and doing it. */
-  patch?: { people: TimelineLane[]; onPatch: (lane: string, position: number) => void };
+  /** The record track: 1 for A1. */
+  layer: number; clips: LayerClip[];
+  soloed: boolean; quiet: boolean; muted: boolean; shown: boolean; cues: Cue[]; selected: boolean;
+  onTrack: (layer: number, only: boolean) => void; onSolo: (layer: number) => void; onMute: (layer: number) => void; onText: (layer: number) => void;
+  start: number; span: number; x: (t: number) => string; w: (d: number) => string;
+  nameOf: (lane: string) => string; colorOf: (lane: string) => string; sourceName: (id: string) => string; waveforms: boolean;
+  /** This track's waveform switch; ⌥-click turns every track's on or off, as in Avid. */
+  onWave?: (layer: number, all: boolean) => void;
+  peaksOf: (source: string, lane: string) => [number, number][] | undefined; durationOf: (source: string) => number;
+  detail?: (pair: string, from: number, to: number) => Promise<[number, number][] | null>;
+  mutes: Record<string, [number, number][]>; marked: number[] | null;
+  /** The selected clips on this track, by where they start, and its trim rollers. */
+  picked?: number[]; rollers?: Roller[];
+  /** One-sided rollers ripple (yellow in Avid) or overwrite (red); drawn by shape, as Neo does. */
+  ripple?: boolean;
+  /** What the pointer does on the track (use-record-gestures). */
+  pointer: Pointer;
 };
 
 /**
- * One record track: the Avid track selector (A1…), who is patched to it
- * (the patch panel: choose someone else and they take this track, the rest
- * moving down), S/M/T, × to take them off, and the track's clips. A clip is
- * a segment of the edit that plays this person, where they have a mic in its
- * source; elsewhere the track is filler.
+ * One record track, as Avid draws one: a layer (A1…) and not a person. Its
+ * header is the track selector and S, M, T and W; its lane holds whatever was
+ * cut onto it, each clip in the colour and with the name of the person it
+ * plays, and filler everywhere else. A clip runs for as long as one person
+ * plays on continuously from one source range, so an edit on other tracks
+ * alone is no cut here. A range silenced on the track is not drawn, as the
+ * AAF writes it: the clip is cut there.
  */
 export function EditTimelineRow(props: Props) {
-  const { speaker, edit, starts, start, span, x, w, marked } = props;
-  return <div className={`cp-te-tl-row${props.soloed ? " is-solo" : ""}${props.quiet ? " is-unsoloed" : ""}${props.muted ? " is-muted" : ""}${props.shown ? " has-text" : ""}`}
-    style={{ "--te-speaker": props.color } as React.CSSProperties}>
+  const { layer, start, span, x, w, marked } = props;
+  const label = `A${layer}`;
+  const shown = props.clips.filter((clip) => clip.to >= start && clip.from <= start + span);
+  return <div className={`cp-te-tl-row${props.soloed ? " is-solo" : ""}${props.quiet ? " is-unsoloed" : ""}${props.muted ? " is-muted" : ""}${props.shown ? " has-text" : ""}`}>
     <div className="cp-te-tl-head">
-      <button type="button" className="cp-te-tl-track" aria-pressed={props.selected} aria-label={`Track A${speaker.track}`}
-        title={`Track A${speaker.track} (⌥-click: only this)`} onClick={(event) => props.onTrack(speaker.id, event.altKey)}>A{speaker.track}</button><span className="cp-te-swatch" aria-hidden="true" />
-      {props.patch ? <select className="cp-select xs cp-te-tl-patch" aria-label={`Who plays on A${speaker.track}`} title={`Who plays on A${speaker.track}`} value={speaker.id}
-        onChange={(event) => props.patch?.onPatch(event.target.value, speaker.track - 1)}>
-        {props.patch.people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
-        : <span className="cp-te-tl-name" title={speaker.name}>{speaker.name}</span>}
+      <button type="button" className="cp-te-tl-track" aria-pressed={props.selected} aria-label={`Track ${label}`}
+        title={`Track ${label} (⌥-click: only this)`} onClick={(event) => props.onTrack(layer, event.altKey)}>{label}</button>
       <span className="cp-te-tl-switches">
-        <button type="button" className="cp-te-tl-toggle" aria-pressed={props.soloed} aria-label={`Solo ${speaker.name}`} title={`Solo ${speaker.name}`} onClick={() => props.onSolo(speaker.id)}>S</button>
-        <button type="button" className="cp-te-tl-toggle" aria-pressed={props.muted} aria-label={`Mute ${speaker.name}`} title={`Mute ${speaker.name}`} onClick={() => props.onMute(speaker.id)}>M</button>
-        <button type="button" className="cp-te-tl-toggle" aria-pressed={props.shown} aria-label={`Text on ${speaker.name}`} title={`Text on ${speaker.name}`} onClick={() => props.onText(speaker.id)}>T</button>
-        {/* Patched when their words were cut in; this takes them off again, and the tracks below move up. */}
-        {props.onUntrack && <button type="button" className="cp-te-tl-toggle" aria-label={`Take ${speaker.name} off a track`}
-          title={`Take ${speaker.name} off a track`} onClick={() => props.onUntrack?.(speaker.id)}>×</button>}
+        <button type="button" className="cp-te-tl-toggle" aria-pressed={props.soloed} aria-label={`Solo ${label}`} title={`Solo ${label}`} onClick={() => props.onSolo(layer)}>S</button>
+        <button type="button" className="cp-te-tl-toggle" aria-pressed={props.muted} aria-label={`Mute ${label}`} title={`Mute ${label}`} onClick={() => props.onMute(layer)}>M</button>
+        <button type="button" className="cp-te-tl-toggle" aria-pressed={props.shown} aria-label={`Text on ${label}`} title={`Text on ${label}`} onClick={() => props.onText(layer)}>T</button>
+        {props.onWave && <button type="button" className="cp-te-tl-toggle" aria-pressed={props.waveforms} aria-label={`Waveform on ${label}`}
+          title={`Waveform on ${label} (⌥-click: every track)`} onClick={(event) => props.onWave?.(layer, event.altKey)}>W</button>}
       </span>
     </div>
-    <div className="cp-te-tl-lane" {...props.scrub}>
-      {edit.segments.map((segment, index) => starts[index] + segmentLength(segment) < start || starts[index] > start + span
-        || !props.sourceSpeakers[segment.source]?.includes(speaker.id) || !playsOn(segment, speaker.id) ? null
-        // A range silenced on this track is not drawn at all: the clip is cut
-        // there, as the AAF writes it, rather than shown with a quiet waveform.
-        : clipPieces(segment, props.mutes[`${segment.source}:${speaker.id}`] ?? []).map((piece) => {
-          const at = starts[index] + piece.srcIn - segment.srcIn;
-          return <div key={`${segment.id}:${piece.srcIn}`} className="cp-te-tl-clip" style={{ left: x(at), width: w(piece.srcOut - piece.srcIn) }}
-            title={`${speaker.name} · ${props.sourceName(segment.source)}`}>
-            {props.waveforms && <EditWave peaks={props.peaksOf(segment.source, speaker.id)} duration={props.durationOf(segment.source)} srcIn={piece.srcIn} srcOut={piece.srcOut} />}
-          </div>;
-        }))}
+    <div className="cp-te-tl-lane" data-record-layer={layer} {...props.pointer}>
+      {shown.map((clip) => clipPieces(clip, props.mutes[`${clip.source}:${clip.lane}`] ?? []).map((piece) => {
+        const at = clip.from + piece.srcIn - clip.srcIn, length = piece.srcOut - piece.srcIn;
+        // The part of the clip on screen, in source seconds: only that is drawn.
+        const from = piece.srcIn + Math.max(0, start - at), to = piece.srcIn + Math.min(length, start + span - at);
+        const who = props.nameOf(clip.lane), picked = props.picked?.some((from) => Math.abs(from - clip.from) < 1e-6);
+        return <div key={`${clip.first}:${piece.srcIn}`} className={`cp-te-tl-clip${picked ? " is-picked" : ""}`} style={{ left: x(at), width: w(length), "--te-speaker": props.colorOf(clip.lane) } as React.CSSProperties}
+          title={`${who} · ${props.sourceName(clip.source)}`}>
+          <span className="cp-te-tl-clip-name">{who}</span>
+          {props.waveforms && <EditWave peaks={props.peaksOf(clip.source, clip.lane)} duration={props.durationOf(clip.source)} srcIn={piece.srcIn} srcOut={piece.srcOut}
+            from={from} to={to} detail={props.detail} detailKey={`${clip.source}:${clip.lane}`} />}
+        </div>;
+      }))}
       {marked && props.selected && <span className="cp-te-tl-marked-lane" style={{ left: x(marked[0]), width: w(marked[1] - marked[0]) }} />}
+      {/* Trim rollers, as Neo draws them: bars either side of the cut for a roll, one inside the clip for one side; a square for an overwrite. */}
+      {props.rollers?.map((roller) => <span key={roller.at} className={`cp-te-tl-roller is-${roller.side}${roller.side !== "both" && !props.ripple ? " is-overwrite" : ""}`}
+        style={{ left: x(roller.at) }} aria-hidden="true" />)}
       {props.shown && <div className="cp-te-tl-words">{props.cues.map((cue) => <span key={cue.id} className={cue.summary ? "is-summary" : undefined} title={cue.title} style={cue.style}>{cue.text}</span>)}</div>}
-      {props.seams.filter((cut) => cut.clipped.has(speaker.id)).map((cut) => <span key={cut.index} className="cp-te-tl-clipped" style={{ left: x(cut.at) }} title={`Cuts into a word of ${speaker.name}'s`} />)}
     </div>
   </div>;
 }

@@ -24,7 +24,12 @@ export class MultitrackAudioCache {
   private running = 0;
   private queue: Array<() => void> = [];
   readonly windowFrames: number;
-  constructor(private documentId: string, fps: number, private duration: number, private context: AudioContext) { this.windowFrames = Math.ceil(5 * fps); }
+  /** `context` may be a getter: a player makes its output again after it goes stale (audio-output.ts), and decoding follows it. */
+  private readonly contextOf: () => AudioContext;
+  constructor(private documentId: string, fps: number, private duration: number, context: AudioContext | (() => AudioContext)) {
+    this.windowFrames = Math.ceil(5 * fps);
+    this.contextOf = typeof context === "function" ? context : () => context;
+  }
   start(frame: number) { return Math.floor(frame / this.windowFrames) * this.windowFrames; }
   private setPendingJob(jobId: string, abort: AbortController, key: string) { this.jobs.set(jobId, abort); this.started.add(key); }
   /** Stop waiting: callers of `get` are told so, queued reads are dropped, and reads in flight finish. */
@@ -74,7 +79,7 @@ export class MultitrackAudioCache {
       if (evicted()) throw new Error("Audio preparation cancelled");
       const response = await fetch(assetUrl(asset.path), { signal: abort.signal });
       if (!response.ok) throw new Error(`Prepared audio could not be read (${response.status})`);
-      const buffer = await this.context.decodeAudioData(await response.arrayBuffer());
+      const buffer = await this.contextOf().decodeAudioData(await response.arrayBuffer());
       if (evicted()) throw new Error("Audio preparation cancelled");
       return buffer;
     } finally { this.jobs.delete(jobId); this.started.delete(key); const next = this.queue.shift(); if (next) next(); else --this.running; }

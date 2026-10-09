@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Timeline } from "./edit-model";
+import type { Layering, Timeline } from "./edit-model";
 import { silentStretches, stripMutes, stripSilenceDefaults, stripTargets, type LevelWindow } from "./edit-strip-silence";
 
 const loud: [number, number] = [-0.5, 0.5];   // about -6 dBFS
@@ -44,16 +44,23 @@ describe("Strip Silence (Avid's settings)", () => {
     expect(silentStretches([windowOf(pattern)], [word], exact)).toHaveLength(1);
   });
 
-  it("measures each selected lane only where its clip plays and its source has a mic, inside the range", () => {
+  it("measures what plays on each selected record track, inside the range, and nobody's lines on other tracks", () => {
+    // Rosa sits on A1 and Dev on A2 unless a clip says otherwise.
+    const layering: Layering = { carries: () => ["rosa", "dev"], home: (lane) => ({ rosa: 1, dev: 2 } as Record<string, number>)[lane] };
     const edit: Timeline = { segments: [
       { id: "a", source: "s", srcIn: 10, srcOut: 20 },
       { id: "g", source: "gap", srcIn: 0, srcOut: 2 },
       { id: "b", source: "s", srcIn: 15, srcOut: 25, tracks: ["dev"] },
     ], mutes: [] };
-    const targets = stripTargets(edit, 5, 20, ["rosa", "dev"], { s: ["rosa", "dev"] });
+    const both = stripTargets(edit, 5, 20, [1, 2], layering);
     // Rosa plays only in the first clip (5 s of it in range); Dev plays both, and the
     // second clip's 15-23 s overlaps the first's 15-20 s, so it is measured once.
-    expect(targets).toEqual([{ source: "s", lane: "rosa", from: 15, to: 20 }, { source: "s", lane: "dev", from: 15, to: 23 }]);
+    expect(both).toEqual([{ source: "s", lane: "rosa", from: 15, to: 20 }, { source: "s", lane: "dev", from: 15, to: 23 }]);
+    // A1 alone: Rosa's lines, never Dev's on A2.
+    expect(stripTargets(edit, 5, 20, [1], layering)).toEqual([{ source: "s", lane: "rosa", from: 15, to: 20 }]);
+    // Rosa's other moment overwritten onto A1 in the first clip is what A1 plays there, so that is what is measured.
+    edit.segments[0] = { ...edit.segments[0], overrides: { rosa: { source: "s", srcIn: 40 } } };
+    expect(stripTargets(edit, 5, 20, [1], layering)).toEqual([{ source: "s", lane: "rosa", from: 45, to: 50 }]);
   });
 
   it("adds the stretches as mutes on their lanes, merged with what was already silenced", () => {

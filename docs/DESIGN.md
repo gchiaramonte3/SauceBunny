@@ -4,6 +4,32 @@ The current application rulebook. Source contracts enforce many of these
 rules, but cannot prove rendered geometry, dynamic names or complete keyboard
 behavior. Use the catalog and browser checks alongside those contracts.
 
+### Owner-requested redesigns · 2026-10-07
+
+The owner asked for three surfaces to be redesigned. This adopts them and
+nothing wider; it is not a licence for an application-wide restyle.
+
+- **Saved string outs** (`EditList`) are a shelf, not a table: one column
+  centred at 1080px, rows filed under Today, Yesterday, Previous 7 days and
+  the month, as Finder's and Notes' recents are. Each row leads with its cut
+  drawn to scale (`EditStrip`: a bar per bite in the timeline's clip violet,
+  long cuts folded into at most 28 runs, an empty one dashed), then a
+  two-line name and meta (bites first, so the count survives a long Avid
+  name), the length, and the time or date. Container queries drop the length,
+  then the strip, as the pane narrows.
+- **Review's empty monitor** (`ReviewSourceStart`) is an empty state, not a
+  menu: a glyph, "Nothing on screen yet", the two ways in (Open file… as the
+  primary button, Paste a link beside it), and the four live sources as tiles
+  under an "Or share live" rule. It answers to the monitor's own box with
+  container queries, never the viewport, and gives way in order (the glyph,
+  the line, tiles to chips, the title, then the live tiles) before anything
+  scrolls.
+- **Settings ▸ AI APIs** uses the Settings segmented control for the
+  provider, and shows only the chosen provider's settings, as Settings rows
+  in a card. A cloud provider's data notice is neutral text in the card, not
+  a danger-coloured box: choosing the provider is the consent, and nothing
+  went wrong.
+
 ### Multitrack saved-transcript indicators · 2026-09-22
 
 Each track reserves a small status-icon slot beside its editable mic-owner name.

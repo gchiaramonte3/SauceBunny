@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { streamChat } from "../lib/ai-chat";
 import { MultitrackTranscript } from "./MultitrackTranscript";
 import { multitrackFixture, multitrackTranscript } from "../test/multitrack-fixture";
+import { createFrameStore } from "../lib/frame-store";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
@@ -27,7 +28,7 @@ function setup() {
   first.cues.push({ ...first.cues[0], id: "cue-2", start_sample: 320000, end_sample: 360000, text: "The production budget is approved." });
   first.timing_issues = [{ id: "untimed", text: "The storm knocked out the power.", reported_timing: "invalid", reason: "Unknown timing", chunk_start_frame: 0 }];
   document.transcripts = [first, { ...multitrackTranscript("track-2"), cues: [{ ...first.cues[0], text: "Sam's unrelated words." }] }];
-  const props = { document, frame: 0, solo: new Set<string>(), onSeek: vi.fn(), aiModelId: "chosen" };
+  const props = { document, frames: createFrameStore(0), solo: new Set<string>(), onSeek: vi.fn(), aiModelId: "chosen" };
   return { props, ...render(<MultitrackTranscript {...props} />) };
 }
 function submit(query = "bad weather") {
@@ -58,13 +59,32 @@ it("searches by meaning with the chosen model, preserves exact seek and leaves u
   fireEvent.click(screen.getByRole("button", { name: "Search with AI" }));
   expect(screen.getByText("No matching transcript text.")).toBeTruthy();
 });
-it("scopes All voices to all original passages and uses the existing cloud setting neither for upload nor inference", async () => {
-  localStorage.setItem("saucebunny.ai.provider", "openai"); setup();
+it("scopes All voices to all original passages on the local model", async () => {
+  setup();
   fireEvent.click(screen.getByRole("tab", { name: "All voices" })); submit();
   await screen.findByText("1 matching passage · Local AI");
   expect(vi.mocked(streamChat).mock.calls[0][1][0].content).toContain("Sam's unrelated words");
-  expect(vi.mocked(invoke).mock.calls.some(([name]) => name === "cloud_chat")).toBe(false);
-  localStorage.removeItem("saucebunny.ai.provider");
+  expect(vi.mocked(invoke).mock.calls.some(([name]) => name === "transcript_scan" || name === "cloud_chat")).toBe(false);
+});
+it("with a cloud provider chosen in Settings, scans the person's lines inside In to Out there and lights what it finds", async () => {
+  // The owner, October 6: AAF Audio's search may use the cloud when a cloud provider is chosen.
+  localStorage.setItem("saucebunny.ai.provider", "openai"); localStorage.setItem("saucebunny.ai.scanModel.openai", "fast-model");
+  try {
+    const view = setup();
+    vi.mocked(invoke).mockImplementation(async (command) => command === "transcript_scan"
+      ? { hits: [{ line: `saucebunny://sequence/${view.props.document.id}/line/track-1/cue-2`, why: "money" }], rows: 2, chunks: 1, failed: 0 } : null);
+    view.rerender(<MultitrackTranscript {...view.props} range={{ from: "01:00:00:00", to: "01:00:30:00" }} />);
+    submit("money worries");
+    await screen.findByText("1 matching passage · fast-model");
+    const sent = (vi.mocked(invoke).mock.calls.find(([name]) => name === "transcript_scan")![1] as { args: Record<string, unknown> }).args;
+    expect(sent).toMatchObject({ provider: "openai", model: "fast-model", sequence: view.props.document.id, question: "money worries", from: "01:00:00:00", to: "01:00:30:00" });
+    expect((sent.people as string[]).length).toBe(1);
+    expect(streamChat).not.toHaveBeenCalled();
+    expect(screen.getByText("The production budget is approved.")).toBeTruthy();
+    expect(screen.queryByText("We had to postpone the picnic because it was pouring.")).toBeNull();
+  } finally {
+    localStorage.removeItem("saucebunny.ai.provider"); localStorage.removeItem("saucebunny.ai.scanModel.openai");
+  }
 });
 it.each(["edit", "toggle", "tab", "hide", "replace", "unmount", "stop"])("rejects a late AI response after %s", async (change) => {
   let finish!: (reply: string) => void;

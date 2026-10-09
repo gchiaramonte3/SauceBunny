@@ -56,7 +56,33 @@ design notes in `docs/AAF-MULTITRACK.md`, "Writer"). The request, at most
   sequence. `source_slots` maps a source id to a slot id of that source's
   sequence (the reader's track `id`); a track with no slot for a segment's
   source is Filler there.
-- `mutes` are relative to their segment and silence one track only.
+- `overrides` (request `schema_version` 2, which a request carrying any must
+  say): `{ "segment_index", "track_index", "source", "slot", "in_frame",
+  "choices"? }`. Across that whole source segment the sound track plays
+  `slot` of `source` from `in_frame` instead of its own slot of the
+  segment's source: a record track as a layer, as in Avid, where A1 can
+  carry one mic for one clip and another mic, or the same one from
+  elsewhere, for the next. The track's mutes for the segment still apply,
+  and the self-check compares it against the override. A writer that
+  predates overrides refuses version 2 rather than writing the segment's own
+  audio there.
+- A track that simply carries on across a segment boundary (the same slot of
+  the same source, from the frame its last piece stopped at, with the same
+  angles) is written as ONE clip there. A boundary falls wherever any track
+  was cut, and a piece per segment put an edit on every other track at each
+  of those places, which String Outs never drew. `cuts` (optional, any
+  schema version): `{ "segment_index", "track_index" }` keeps an edit on that
+  track at the start of that segment anyway, for String Outs' Add Edit. A
+  writer that predates it ignores it and writes a piece per segment.
+- `mutes` are relative to their segment and silence one track only. A mute
+  with `"keep": true` is one the editor made: each clip in it goes to Media
+  Composer as its own muted clip, which Unmute Clip brings back, written the
+  way Media Composer 24.12 writes one (a `Selector` marked
+  `_DISABLE_CLIP_FLAG` 1 and `_AAF_SELECTED` 0, selecting `Filler`, with the
+  clip untouched as its one alternate). Without `keep` it is filler: a track
+  nobody plays in that clip. The self-check reads a kept mute as silence and
+  then opens it, so what it keeps is compared frame by frame with what would
+  have played.
   `markers` are frames of the new sequence on a track index; `color` is one
   of Red, Green, Blue, Cyan, Magenta, Yellow, White, Black.
 - `approach` `"C"` copies group Selectors (every alternate, the chosen angle
@@ -81,7 +107,11 @@ design notes in `docs/AAF-MULTITRACK.md`, "Writer"). The request, at most
 
 A kept group clip (approach C) is a CompositionMob that can refer to every
 clip in the show, and the Edit Protocol wants every mob it reaches in the
-file, whole, with its original MobID. HEAT 2's V1 is one such group (176
+file, whole, with its original MobID. "Reaches" includes one reference off
+the timeline: the sync mob a sequence cuts from names its group clip with a
+`_MATCH` mob attribute (an `Avid MC Mob Reference`), and Media Composer
+follows it to play the group, so the closure follows it too. Without the
+group clip Avid stops with "PlayPipe::DoComp() encountered a missing mob". HEAT 2's V1 is one such group (176
 slots), so every C or "keep picture groups" export carries 3,474 of the
 file's 3,476 mobs however short the cut. The size is fixed; the time is not.
 

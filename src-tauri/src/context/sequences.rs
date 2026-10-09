@@ -10,6 +10,8 @@ use serde::Serialize;
 /// readable for a model rather than being cut off by its client.
 pub const PAGE_LINES: usize = 200;
 const PAGE_CHARS: usize = 60_000;
+/// A slice named by range or people: up to about 16,000 tokens of rows in one page.
+const NARROW_PAGE_CHARS: usize = 64_000;
 const MAX_PAGE_LINES: usize = 1_000;
 
 #[derive(Serialize)]
@@ -133,6 +135,21 @@ pub fn people(document: &AafDocument) -> Vec<Person> {
     out
 }
 
+/// A sequence in a few hundred tokens: its name, timecodes and the names of
+/// its people. `get_sequence` in full runs to 70,000 characters on a 104-mic
+/// group, most of it tracks and picture groups a question rarely needs.
+#[derive(Serialize)]
+pub struct SequenceBrief { pub sequence: String, pub name: String, pub fps: f64, pub start: String, pub end: String, pub tracks: usize, pub people: Vec<String> }
+
+pub fn brief(ctx: &Context, wanted: &str) -> Result<SequenceBrief, AppError> {
+    let document = ctx.document(&resolve(ctx, wanted)?)?;
+    let manifest = &document.manifest;
+    let rate = f64::from(manifest.edit_rate.numerator) / f64::from(manifest.edit_rate.denominator.max(1));
+    Ok(SequenceBrief { sequence: Address::Sequence(document.id.clone()).to_string(), name: manifest.name.clone(), fps: (rate * 1000.0).round() / 1000.0,
+        start: tc(&document, 0), end: tc(&document, manifest.duration_frames), tracks: manifest.tracks.len(),
+        people: people(&document).into_iter().filter(|person| person.lines > 0).map(|person| person.name).collect() })
+}
+
 pub fn detail(ctx: &Context, wanted: &str) -> Result<SequenceDetail, AppError> {
     let document = ctx.document(&resolve(ctx, wanted)?)?;
     let manifest = &document.manifest;
@@ -202,7 +219,8 @@ pub(crate) fn all_lines(ctx: &Context, document: &AafDocument) -> Result<Vec<(i6
                 .map(|(_, sources)| sources.iter().max_by_key(|(_, count)| **count).map(|(source, _)| *source)
                     .and_then(|source| document.manifest.tracks.iter().find(|item| item.id == source)).map(|source| owner(document, source)).unwrap_or_else(|| "another mic".into()));
             out.push(((from, order), track.id.clone(), Line { line: Address::Line { sequence: document.id.clone(), track: track.id.clone(), cue: cue.id.clone() }.to_string(),
-                who: who.clone(), track: label.clone(), tc_in: tc(document, from), tc_out: tc(document, to), text: cue.text.trim().to_string(), in_string_outs, bleed_from }));
+                who: who.clone(), track: label.clone(), tc_in: tc(document, from), tc_out: tc(document, to), text: cue.text.trim().to_string(), in_string_outs, bleed_from,
+                span: [from, to], copies: 0 }));
         }
     }
     out.sort_by_key(|(key, _, _)| *key);
@@ -219,48 +237,139 @@ fn person_tracks(document: &AafDocument, wanted: &str) -> Result<(String, Vec<St
 
 #[derive(Serialize)]
 pub struct Page {
-    sequence: String, name: String,
-    #[serde(skip_serializing_if = "Option::is_none")] person: Option<String>,
-    lines: Vec<Line>, total: usize,
-    #[serde(skip_serializing_if = "Option::is_none")] next_cursor: Option<usize>,
+    pub sequence: String, pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")] pub person: Option<String>,
+    pub lines: Vec<Line>, pub total: usize,
+    #[serde(skip_serializing_if = "Option::is_none")] pub next_cursor: Option<usize>,
+    /// Where this page starts in the whole slice, for "lines 201-400 of 900".
+    #[serde(skip)] pub cursor: usize,
 }
 
-pub struct Read<'a> { pub person: Option<&'a str>, pub from: Option<&'a str>, pub to: Option<&'a str>, pub cursor: usize, pub limit: usize }
+/// What `read_transcript` was asked for. `people` narrows to their mics (one
+/// or several); `include_bleed` keeps lines a mic only picked up from someone
+/// else's; `keep_copies` keeps every mic's copy of the same words rather than
+/// folding them into one (`fold_copies`).
+pub struct Read<'a> {
+    pub people: Vec<&'a str>, pub from: Option<&'a str>, pub to: Option<&'a str>, pub cursor: usize, pub limit: Option<usize>,
+    pub include_bleed: bool, pub keep_copies: bool,
+}
+
+/// A timecode a model gave, as frames from the sequence's start.
+pub(crate) fn bound(document: &AafDocument, text: Option<&str>) -> Result<Option<i64>, AppError> {
+    let manifest = &document.manifest;
+    text.map(|value| timecode::parse(value, manifest.timecode_fps, manifest.drop_frame).map(|frames| frames - manifest.start_frame)
+        .ok_or_else(|| AppError::invalid(format!("\"{value}\" is not timecode for {} (HH:MM:SS:FF, from {}).", manifest.name, tc(document, 0))))).transpose()
+}
+
+/// The lines of a sequence a read or a scan works on: in the range, on the
+/// people's mics, without bleed unless asked, and with copies folded.
+pub(crate) fn slice(ctx: &Context, document: &AafDocument, query: &Read) -> Result<(Vec<String>, Vec<Line>), AppError> {
+    let (names, tracks) = resolve_people(document, &query.people)?;
+    let chosen: Vec<(i64, String, Line)> = in_range(ctx, document, query.from, query.to, query.include_bleed)?.into_iter()
+        .filter(|(_, track, _)| tracks.as_ref().is_none_or(|ids| ids.contains(track))).collect();
+    let lines = if query.keep_copies { chosen.into_iter().map(|(_, _, line)| line).collect() } else { fold_copies(chosen, &names) };
+    Ok((names, lines))
+}
+
+/// The people a model named, as their names and their mics (None when it named nobody).
+pub(crate) fn resolve_people(document: &AafDocument, people: &[&str]) -> Result<(Vec<String>, Option<Vec<String>>), AppError> {
+    let mut names = Vec::new();
+    let mut tracks: Option<Vec<String>> = None;
+    for wanted in people {
+        let (name, ids) = person_tracks(document, wanted)?;
+        if !names.contains(&name) { names.push(name); }
+        tracks.get_or_insert_with(Vec::new).extend(ids);
+    }
+    Ok((names, tracks))
+}
+
+/// Every line in a timecode range, in time order, with its frame and its mic, without bleed unless asked.
+pub(crate) fn in_range(ctx: &Context, document: &AafDocument, from: Option<&str>, to: Option<&str>, include_bleed: bool) -> Result<Vec<(i64, String, Line)>, AppError> {
+    let (from, to) = (bound(document, from)?, bound(document, to)?);
+    Ok(all_lines(ctx, document)?.into_iter()
+        .filter(|(frame, _, line)| from.is_none_or(|start| *frame >= start) && to.is_none_or(|end| *frame < end) && (include_bleed || line.bleed_from.is_none()))
+        .collect())
+}
 
 pub fn read(ctx: &Context, wanted: &str, query: Read) -> Result<Page, AppError> {
     let document = ctx.document(&resolve(ctx, wanted)?)?;
-    let manifest = &document.manifest;
-    let bound = |text: Option<&str>| -> Result<Option<i64>, AppError> {
-        text.map(|value| timecode::parse(value, manifest.timecode_fps, manifest.drop_frame).map(|frames| frames - manifest.start_frame)
-            .ok_or_else(|| AppError::invalid(format!("\"{value}\" is not timecode for {} (HH:MM:SS:FF, from {}).", manifest.name, tc(&document, 0))))).transpose()
-    };
-    let (from, to) = (bound(query.from)?, bound(query.to)?);
-    let (person, tracks) = match query.person { Some(wanted) => { let (name, tracks) = person_tracks(&document, wanted)?; (Some(name), Some(tracks)) } None => (None, None) };
-    let chosen: Vec<Line> = all_lines(ctx, &document)?.into_iter()
-        .filter(|(frame, track, _)| from.is_none_or(|start| *frame >= start) && to.is_none_or(|end| *frame < end) && tracks.as_ref().is_none_or(|ids| ids.contains(track)))
-        .map(|(_, _, line)| line).collect();
-    let (lines, next_cursor) = page(&chosen, query.cursor, query.limit);
-    Ok(Page { sequence: Address::Sequence(document.id.clone()).to_string(), name: manifest.name.clone(), person, total: chosen.len(), lines, next_cursor })
+    let (names, chosen) = slice(ctx, &document, &query)?;
+    // A slice asked for by range or people comes in one page where it can; a whole sequence in pages.
+    let narrow = query.from.is_some() || query.to.is_some() || !query.people.is_empty();
+    let budget = if narrow { NARROW_PAGE_CHARS } else { PAGE_CHARS };
+    let (lines, next_cursor) = page(&chosen, query.cursor, query.limit.unwrap_or(if narrow { MAX_PAGE_LINES } else { PAGE_LINES }), budget);
+    Ok(Page { sequence: Address::Sequence(document.id.clone()).to_string(), name: document.manifest.name.clone(),
+        person: (!names.is_empty()).then(|| names.join(", ")), total: chosen.len(), lines, next_cursor, cursor: query.cursor })
 }
 
-/// One page of lines from `cursor`, stopping at the line limit or the character budget.
-pub(crate) fn page(lines: &[Line], cursor: usize, limit: usize) -> (Vec<Line>, Option<usize>) {
+/// One page of lines from `cursor`, stopping at the line limit or the character budget (counted as rows).
+pub(crate) fn page(lines: &[Line], cursor: usize, limit: usize, budget: usize) -> (Vec<Line>, Option<usize>) {
     let limit = limit.clamp(1, MAX_PAGE_LINES);
     let (mut out, mut chars) = (Vec::new(), 0);
     for line in lines.iter().skip(cursor) {
-        chars += line.text.len() + 160;
-        if out.len() >= limit || (chars > PAGE_CHARS && !out.is_empty()) { break; }
+        chars += super::rows::row_chars(line);
+        if out.len() >= limit || (chars > budget && !out.is_empty()) { break; }
         out.push(line.clone());
     }
     let next = cursor + out.len();
     (out, (next < lines.len()).then_some(next))
 }
 
-#[derive(Serialize)]
-pub struct Found { sequence: String, #[serde(flatten)] line: Line }
+/// Words of a line, for comparing two mics' copies of it.
+fn word_set(text: &str) -> std::collections::HashSet<String> { words(text).into_iter().collect() }
+
+/**
+ * Every lav hears its neighbours, and where the bleed resolver has not run
+ * the same words arrive from several mics: on a 104-mic sequence a quarter
+ * of the lines (docs/ASK-RANGE-SPEC-2026-10-06.md), and one person wearing
+ * two mics gives every line twice. A line that overlaps one on another mic
+ * in time and shares at least COPY_SHARE of its words is a copy; one is kept, with how many it stands for. The one kept is on the mic
+ * of someone the caller named, else the one with the most words (the mic it
+ * was said into usually hears it whole).
+ */
+pub(crate) fn fold_copies(lines: Vec<(i64, String, Line)>, named: &[String]) -> Vec<Line> {
+    let sets: Vec<std::collections::HashSet<String>> = lines.iter().map(|(_, _, line)| word_set(&line.text)).collect();
+    let mut keeper: Vec<usize> = (0..lines.len()).collect();
+    let rank = |index: usize| (named.contains(&lines[index].2.who), sets[index].len(), std::cmp::Reverse(index));
+    for i in 0..lines.len() {
+        if sets[i].len() < COPY_MIN_WORDS { continue; }
+        let [from, to] = lines[i].2.span;
+        // Lines are in time order: only near neighbours can overlap.
+        for j in (i + 1)..lines.len() {
+            let [other_from, other_to] = lines[j].2.span;
+            if other_from >= to + COPY_REACH_FRAMES { break; }
+            // The same person on two mics (a second lav, a group alternate) is a copy too.
+            if lines[j].1 == lines[i].1 || other_to <= from || sets[j].len() < COPY_MIN_WORDS { continue; }
+            let shared = sets[i].intersection(&sets[j]).count();
+            if (shared as f64) < COPY_SHARE * sets[i].len().min(sets[j].len()) as f64 { continue; }
+            // Join the two groups under whichever line ranks higher.
+            let (a, b) = (root(&mut keeper, i), root(&mut keeper, j));
+            if a != b { if rank(a) >= rank(b) { keeper[b] = a; } else { keeper[a] = b; } }
+        }
+    }
+    let mut counts = vec![0usize; lines.len()];
+    let roots: Vec<usize> = (0..lines.len()).map(|index| root(&mut keeper, index)).collect();
+    for (index, root) in roots.iter().enumerate() { if *root != index { counts[*root] += 1; } }
+    lines.into_iter().enumerate().filter(|(index, _)| roots[*index] == *index).map(|(index, (_, _, mut line))| { line.copies = counts[index]; line }).collect()
+}
+
+fn root(keeper: &mut [usize], mut at: usize) -> usize {
+    while keeper[at] != at { keeper[at] = keeper[keeper[at]]; at = keeper[at]; }
+    at
+}
+
+/// How much of the shorter line's words two lines must share to be one line heard twice.
+const COPY_SHARE: f64 = 0.6;
+/// Lines shorter than this are not compared: "yeah" and "okay" are said by everyone.
+const COPY_MIN_WORDS: usize = 3;
+/// How far past a line's end a copy may start (about two seconds): mics drift a little.
+const COPY_REACH_FRAMES: i64 = 48;
 
 #[derive(Serialize)]
-pub struct Search { query: String, matches: Vec<Found>, total: usize }
+pub struct Found { pub sequence: String, #[serde(flatten)] pub line: Line }
+
+#[derive(Serialize)]
+pub struct Search { pub query: String, pub matches: Vec<Found>, pub total: usize }
 
 fn words(text: &str) -> Vec<String> {
     text.to_lowercase().split(|c: char| !(c.is_alphanumeric() || c == '\'')).map(|word| word.trim_matches('\'').to_string()).filter(|word| !word.is_empty()).collect()
@@ -269,7 +378,11 @@ fn words(text: &str) -> Vec<String> {
 /// Lines that hold every word of the query (a word also matches the start of
 /// a longer one, so "tire" finds "tired"), or the exact phrase when it is in
 /// quotes. Case-insensitive; local and instant.
-pub fn search(ctx: &Context, query: &str, people_filter: &[String], sequences: &[String], limit: usize, include_bleed: bool) -> Result<Search, AppError> {
+/// Where a search looks, besides its words: a timecode range (in one sequence's timecode) and whether any word will do.
+#[derive(Default)]
+pub struct Within<'a> { pub from: Option<&'a str>, pub to: Option<&'a str>, pub any: bool }
+
+pub fn search(ctx: &Context, query: &str, people_filter: &[String], sequences: &[String], limit: usize, include_bleed: bool, within: Within) -> Result<Search, AppError> {
     let phrase = query.trim().strip_prefix('"').and_then(|rest| rest.strip_suffix('"')).map(str::to_lowercase);
     let wanted = words(query);
     if wanted.is_empty() { return Err(AppError::invalid("Search needs at least one word.")); }
@@ -282,7 +395,9 @@ pub fn search(ctx: &Context, query: &str, people_filter: &[String], sequences: &
             let everyone = people(&document);
             Some(people_filter.iter().filter_map(|wanted| pick(&everyone, wanted, |person| person.key.as_str(), |person| person.name.as_str(), "person").ok().map(|person| person.name.clone())).collect())
         };
+        let (from, to) = (bound(&document, within.from)?, bound(&document, within.to)?);
         for (frame, _, line) in all_lines(ctx, &document)? {
+            if from.is_some_and(|start| frame < start) || to.is_some_and(|end| frame >= end) { continue; }
             if allowed.as_ref().is_some_and(|names| !names.contains(&line.who)) { continue; }
             // A bleed copy repeats its owner's line: one hit, from the mic it was said into.
             if line.bleed_from.is_some() && !include_bleed { continue; }
@@ -291,7 +406,8 @@ pub fn search(ctx: &Context, query: &str, people_filter: &[String], sequences: &
                 None => {
                     let have = words(&line.text);
                     let hits: Vec<usize> = wanted.iter().map(|word| if have.contains(word) { 2 } else if have.iter().any(|item| item.starts_with(word.as_str())) { 1 } else { 0 }).collect();
-                    if hits.contains(&0) { 0 } else { hits.iter().sum() }
+                    // Every word, or (with `any`) as many as it has, best first.
+                    if hits.contains(&0) && !within.any { 0 } else { hits.iter().sum() }
                 }
             };
             if score > 0 { scored.push((score, document.manifest.name.clone(), frame, line)); }

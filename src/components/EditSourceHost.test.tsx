@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { EditDocument } from "../bindings/EditDocument";
 import { useEditSourceSide, type EditSourceMarks, type EditSourceTake } from "../hooks/use-edit-source-side";
@@ -60,9 +60,57 @@ it("Insert takes exactly the words selected in the tab being read, and their spa
   const [take, atEnd] = onTake.mock.calls[0];
   expect(atEnd).toBe(false);
   expect(take.words).toEqual([words[0], words[2], words[3]]);
-  expect([take.from, take.to]).toEqual([1, 2.1]);
-  // Every mic is on by default, so the clip brings both people, in track order.
-  expect(take.lanes).toEqual(["rosa", "dev"]);
+  expect([take.in, take.out]).toEqual([1, 2.1]);
+  // Source tracks follow the text: Rosa's words bring Rosa's mic, not every mic in the room.
+  expect(take.lanes).toEqual(["rosa"]);
+});
+
+it("a selection in All voices brings whoever said its words, in track order", () => {
+  const onTake = vi.fn();
+  render(<Host onTake={onTake} />);
+  fireEvent.click(within(screen.getByRole("tablist", { name: "Transcripts by person" })).getByRole("tab", { name: "All voices" }));
+  const shown = [...document.querySelectorAll<HTMLElement>("[data-src-index]")];
+  // All voices reads I, was, tired (Rosa's cue), then Yeah (Dev's).
+  fireEvent.pointerDown(shown[2], { button: 0 });
+  fireEvent.pointerDown(shown[3], { button: 0, shiftKey: true });
+  fireEvent.click(screen.getByRole("button", { name: /^Insert/ }));
+  expect(onTake.mock.calls[0][0].lanes).toEqual(["rosa", "dev"]);
+});
+
+it("source track selectors, once used, make an edit bring exactly those tracks, until it follows the text again", () => {
+  const { result } = renderHook(() => useEditSourceSide({ document: edit, sources: [{ id: "s1", short: "Kitchen", duration: 10, startFrames: 86400 }], documents: new Map(),
+    words, colors: { rosa: "#f00", dev: "#0f0" }, fps: 24, active: true, request: null }));
+  // Rosa's tab, her three words selected.
+  act(() => result.current.setRange([0, 2]));
+  expect(result.current.following).toBe(true);
+  expect(result.current.take()?.lanes).toEqual(["rosa"]);
+  // Only Dev's mic on, as with Avid's track selectors: Rosa's words, Dev's track.
+  act(() => result.current.toggleSelector("t2", true));
+  expect(result.current.following).toBe(false);
+  expect(result.current.take()?.lanes).toEqual(["dev"]);
+  // Both on.
+  act(() => result.current.toggleSelector("t1", false));
+  expect(result.current.take()?.lanes).toEqual(["rosa", "dev"]);
+  act(() => result.current.followText());
+  expect(result.current.take()?.lanes).toEqual(["rosa"]);
+});
+
+it("Shift-click extends the selection this tab kept, never from a click made in another tab", () => {
+  render(<Host />);
+  const tabs = screen.getByRole("tablist", { name: "Transcripts by person" });
+  const shown = () => [...document.querySelectorAll<HTMLElement>("[data-src-index]")];
+  const selected = () => [...document.querySelectorAll(".cp-te-src-word.is-selected")].map((element) => element.textContent);
+  // Rosa's last word, then a click in Dev's tab (index 0 there).
+  fireEvent.pointerDown(shown()[2], { button: 0 });
+  expect(selected()).toEqual(["tired"]);
+  fireEvent.click(within(tabs).getByRole("tab", { name: "DEV" }));
+  fireEvent.pointerDown(shown()[0], { button: 0 });
+  // Back to Rosa: her selection was kept. Shift-click "was" extends THAT
+  // selection to [was, tired]; extending from Dev's index 0 would select [I, was].
+  fireEvent.click(within(tabs).getByRole("tab", { name: "ROSA" }));
+  expect(selected()).toEqual(["tired"]);
+  fireEvent.pointerDown(shown()[1], { button: 0, shiftKey: true });
+  expect(selected()).toEqual(["was", "tired"]);
 });
 
 it("says the words are still being read instead of claiming there are none", () => {
@@ -86,4 +134,13 @@ it("AAF Audio's In and Out arrive marked: on the source's rail, and on the words
   expect(marked).toEqual(["I", "was"]);
   // Marks set by I and O make the source ready to cut in.
   expect((screen.getByRole("button", { name: /^Insert/ }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("says whose tracks an edit brings, and that it follows the text", () => {
+  render(<Host />);
+  // Rosa's tab with nothing selected: her mic.
+  expect(screen.getByText("Brings ROSA, following the text")).toBeTruthy();
+  fireEvent.click(within(screen.getByRole("tablist", { name: "Transcripts by person" })).getByRole("tab", { name: "All voices" }));
+  expect(screen.getByText("Brings ROSA and DEV, following the text")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Choose tracks" })).toBeTruthy();
 });

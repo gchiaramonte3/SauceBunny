@@ -308,6 +308,32 @@ class GraphTests(unittest.TestCase):
         self.assertEqual((clip['group_name'],clip['angles']),(None,[]))
         self.assertEqual(len(data['tracks']),1)
 
+    def test_picture_group_lists_every_angle_named_by_the_file_playing_at_the_cut(self):
+        # Avid's shape for a big multicam group: each angle a camera's run of
+        # files in an unnamed group mob, the cut a SourceClip into it. A real
+        # group of 75 showed 16, and three were named by a file hours away.
+        def master(file, rate, name):
+            mob = file.create.MasterMob(name); file.content.mobs.append(mob)
+            slot = mob.create_timeline_slot(rate); slot.segment = file.create.Filler(media_kind='picture', length=400)
+            return lambda length: mob.create_source_clip(slot.slot_id, 0, length, 'picture')
+        def group(file, clip_b, clip_a):
+            rate, gap = '24000/1001', lambda length: file.create.Filler(media_kind='picture', length=length)
+            mob = file.create.CompositionMob(); mob.name = ''; file.content.mobs.append(mob)
+            selector = file.create.Selector(media_kind='picture', length=clip_b.length)
+            for n in range(20):
+                early, late = master(file, rate, f'CAM {n} early'), master(file, rate, f'CAM {n} late')
+                # The cut reads each angle at 35: playing, between files, past an earlier file, past the end, empty.
+                layout = {1: [gap(38), late(40)], 2: [early(10), gap(15), late(40)], 3: [early(10), gap(90)], 4: [gap(100)]}.get(n, [gap(30), early(10), late(40)])
+                slot = mob.create_timeline_slot(rate); slot.segment = file.create.Sequence(media_kind='picture'); slot.segment.components.extend(layout)
+                angle = mob.create_source_clip(slot.slot_id, 35, clip_b.length, 'picture')
+                if n == 0: selector['Selected'].value = angle
+                else: selector['Alternates'].append(angle)
+            return selector
+        path=self.root/'picture-big-group.aaf'; grouped_fixture(path,alternatives=0); add_picture_track(path,wrap=group)
+        clip=self.read(path)['graph']['picture_tracks'][0]['clips'][1]
+        self.assertTrue(clip['group'])
+        self.assertEqual(clip['angles'],['CAM 0 early','CAM 1 late','CAM 2 late','CAM 3 early','Unnamed angle',*[f'CAM {n} early' for n in range(5,20)]])
+
     def test_picture_clip_count_is_bounded_without_failing_audio(self):
         import picture
         path=self.root/'picture-bound.aaf'; grouped_fixture(path,alternatives=0); add_picture_track(path)

@@ -5,7 +5,7 @@ import { multitrackFixture, multitrackGroupFixture, multitrackTranscript } from 
 import { MultitrackWorkspace } from "./MultitrackWorkspace";
 const mocks = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), seek: vi.fn().mockResolvedValue(undefined), pause: vi.fn(), toggle: vi.fn(), shuttle: vi.fn(), solo: new Set<string>() }));
 vi.mock("../hooks/use-multitrack-transcription", () => ({ useMultitrackTranscription: () => ({ engine: "parakeet", models: [], ready: true, loading: false, status: "", error: null, resolution: null, ...mocks }) }));
-vi.mock("../hooks/use-multitrack-audition", () => ({ useMultitrackAudition: () => ({ ...mocks, frame: 0, rate: 0, solo: mocks.solo, mute: new Set(), scrubbing: true, volume: .8, muted: false }) }));
+vi.mock("../hooks/use-multitrack-audition", () => ({ useMultitrackAudition: () => ({ ...mocks, frames: { get: () => 0, set: () => {}, subscribe: () => () => {} }, rate: 0, solo: mocks.solo, mute: new Set(), scrubbing: true, volume: .8, muted: false }) }));
 vi.mock("../hooks/use-multitrack-detail", () => ({ useMultitrackDetail: () => ({}) }));
 vi.mock("./MultitrackCast", () => ({ MultitrackCast: () => <div>Save Mic Owners as Cast</div> }));
 vi.mock("./MultitrackTranscript", () => ({ MultitrackTranscript: () => null }));

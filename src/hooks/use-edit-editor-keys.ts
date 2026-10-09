@@ -3,21 +3,23 @@ import type { FrameStore } from "../lib/frame-store";
 import { useEditKeys, type EditKeySide } from "./use-edit-keys";
 import type { EditSourceSide } from "./use-edit-source-side";
 import type { useEditWorkspace } from "./use-edit-workspace";
+import type { RecordTool } from "./use-record-gestures";
 
-type Playback = { frames: FrameStore; playing: boolean; toggle: () => Promise<void>; pause: () => void; seek: (frame: number, play?: boolean) => Promise<void> };
+type Playback = { frames: FrameStore; playing: boolean; toggle: () => Promise<void>; pause: () => void; seek: (frame: number, play?: boolean) => Promise<void>; shuttle: (direction: 1 | -1) => Promise<void> };
 type Options = {
   root: RefObject<HTMLElement | null>; active: boolean; fps: number;
   ws: ReturnType<typeof useEditWorkspace>; side: EditSourceSide; playback: Playback;
   undo: () => void; redo: () => void; onHistory: () => void;
-  loop: boolean; onLoop: () => void; onZoom: (change: (zoom: number) => number) => void; onSnap: () => void;
+  loop: boolean; onLoop: () => void; onZoom: (direction: -1 | 0 | 1) => void;
+  /** Take up a record tool (Neo's keys: ⇧A, C, N, Y, R). */
+  onTool: (tool: RecordTool) => void;
   /** What the source has marked, spliced in (V), appended, or laid over the record (B). */
   place: (how: "insert" | "append" | "overwrite") => void;
   /** Toggle Source/Record in Timeline (⇧T), through the same path as the corner switch. */
   onMode: (mode: "source" | "record") => void;
+  /** Match Frame (⇧F): the record clip under the playhead, loaded into the source. */
+  onMatchFrame: () => void;
 };
-
-/** How far J steps back: the engine plays forward only, so J is a step back that repeats while it is held. */
-const J_STEP_SECONDS = 1;
 
 /**
  * Which monitor each key acts on, as Avid's keys follow the active monitor:
@@ -26,7 +28,7 @@ const J_STEP_SECONDS = 1;
  * markers, edit-to-edit) rest while the timeline shows Source, exactly as
  * their buttons do. Loop loops the side shown.
  */
-export function useEditEditorKeys({ root, active, fps, ws, side, playback, undo, redo, onHistory, loop, onLoop, onZoom, onSnap, place, onMode }: Options) {
+export function useEditEditorKeys({ root, active, fps, ws, side, playback, undo, redo, onHistory, loop, onLoop, onZoom, place, onMode, onTool, onMatchFrame }: Options) {
   const sourceShown = side.mode === "source";
   const onSource = (on: EditKeySide) => on === "pane" || sourceShown;
   const monitor = (on: EditKeySide) => onSource(on) ? side.playback : playback;
@@ -50,9 +52,13 @@ export function useEditEditorKeys({ root, active, fps, ws, side, playback, undo,
     toggle: (on) => void monitor(on).toggle(), undo, redo, history: onHistory,
     start: () => void looped.seek(0), end: () => void looped.seek(Math.round(length * fps)),
     step: (frames) => void looped.seek(Math.max(0, looped.frames.get() + frames), false),
-    cutHere: record(ws.cutHere), loop: onLoop, zoomIn: () => onZoom((zoom) => Math.min(32, zoom * 2)), zoomOut: () => onZoom((zoom) => Math.max(1, zoom / 2)), zoomFit: () => onZoom(() => 1),
+    cutHere: record(ws.cutHere), loop: onLoop, zoomIn: () => onZoom(1), zoomOut: () => onZoom(-1), zoomFit: () => onZoom(0),
     mode: () => onMode(side.mode === "source" ? "record" : "source"),
     escape: () => {
+      // Leave Trim, then let go of the selected clips, as Avid's Esc steps back.
+      if (ws.rollers.length) { ws.setRollers([]); ws.setMessage("Left Trim."); return true; }
+      if (ws.picks.length) { ws.setPicks([]); return true; }
+      if (ws.clipGuard) { ws.setClipGuard(null); return true; }
       if (ws.dead) { ws.setDead(null); return true; }
       if (ws.prompt) { ws.setPrompt(null); return true; }
       if (ws.extractGuard) { ws.setExtractGuard(null); return true; }
@@ -64,16 +70,23 @@ export function useEditEditorKeys({ root, active, fps, ws, side, playback, undo,
       ws.setMarks((marks) => which === "both" ? { in: null, out: null } : { ...marks, [which]: null });
     },
     go: (edge, on) => { const to = marksOf(on)[edge]; if (to != null) void monitor(on).seek(Math.round(to * fps), false); },
+    // J and L step the shuttle ladder (Avid's speeds, both ways); K stops.
     shuttle: (key, on) => {
       const engine = monitor(on);
-      if (key === "l") { if (!engine.playing) void engine.toggle(); return; }
-      engine.pause();
-      if (key === "j") void engine.seek(Math.max(0, engine.frames.get() - Math.round(J_STEP_SECONDS * fps)), false);
+      if (key === "k") { engine.pause(); return; }
+      void engine.shuttle(key === "l" ? 1 : -1);
     },
     lift: record(() => ws.takeMarked(false)), extract: record(() => ws.takeMarked(true)), marker: record(ws.addMarker), markClip: record(ws.markClip),
     // The edit points either side of the playhead, found when the key is pressed.
     previous: record(() => { const at = playback.frames.get() / fps, seam = [...ws.seams].reverse().find((item) => item.at < at - 1e-3); if (seam) ws.chooseSeam(seam.index); }),
     next: record(() => { const at = playback.frames.get() / fps, seam = ws.seams.find((item) => item.at > at + 1e-3); if (seam) ws.chooseSeam(seam.index); }),
-    snap: onSnap, insert: () => place("insert"), overwrite: () => place("overwrite"),
+    insert: () => place("insert"), overwrite: () => place("overwrite"),
+    matchFrame: record(onMatchFrame),
+    copyClips: (cut) => !sourceShown && ws.copySelected(cut), pasteClips: () => !sourceShown && ws.paste(),
+    // The record tracks' tools rest while the timeline shows Source, as the other record-only edits do.
+    enterTrim: record(ws.enterTrim), toggleRipple: record(ws.toggleRipple), selectAll: record(ws.selectAllClips), tool: (tool) => { if (!sourceShown) onTool(tool); },
+    trimBy: (frames) => !sourceShown && ws.trimBy(frames), nudgeClips: (frames) => !sourceShown && ws.shiftClips(frames, 0),
+    clipTrack: (delta) => !sourceShown && ws.shiftClips(0, delta), deleteClips: (extract) => !sourceShown && ws.deleteClips(extract),
+    slip: (frames) => !sourceShown && ws.slipBy(frames), slide: (frames) => !sourceShown && ws.slideBy(frames),
   });
 }

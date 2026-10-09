@@ -54,7 +54,7 @@ it("welcomes a first-time user, and lists their work once there is any", async (
   const first = render(<EditPage active onOpenSettings={() => undefined} />);
   expect(await screen.findByRole("heading", { name: "Pull the story out, bite by bite" })).toBeTruthy();
   first.unmount();
-  answers.edit_list = [{ id: "e1", title: "First pass", created_at: 1, updated_at: 2, head: 3, states: 3 }];
+  answers.edit_list = [{ id: "e1", title: "First pass", created_at: 1, updated_at: 2, head: 3, states: 3, sources: [], duration_frames: 0, bites: 0, bite_frames: [], edit_rate: null }];
   render(<EditPage active onOpenSettings={() => undefined} />);
   expect(await screen.findByRole("button", { name: /First pass/ })).toBeTruthy();
   expect(screen.queryByRole("heading", { name: "Pull the story out, bite by bite" })).toBeNull();
@@ -64,22 +64,22 @@ it("opens on the list at launch, whatever was open last time (the owner wants it
   // What older builds stored to reopen it: ignored now.
   localStorage.setItem("saucebunny.editor.lastEdit", "e1");
   localStorage.setItem("saucebunny.stringOuts.tabs", JSON.stringify(["e1"]));
-  answers.edit_list = [{ id: "e1", title: "First pass", created_at: 1, updated_at: 2, head: 3, states: 3 }];
+  answers.edit_list = [{ id: "e1", title: "First pass", created_at: 1, updated_at: 2, head: 3, states: 3, sources: [], duration_frames: 0, bites: 0, bite_frames: [], edit_rate: null }];
   render(<EditPage active onOpenSettings={() => undefined} />);
   expect(await screen.findByRole("button", { name: /First pass/ })).toBeTruthy();
   expect(screen.queryByRole("tab")).toBeNull();
 });
 
-it("Start from leaves out what Add sequence's list hid, newest first, and offers to show it again", async () => {
+it("Source leaves out what Add sequence's list hid, newest first, and offers to show it again", async () => {
   const summary = (id: string, name: string, modified_ms: number) => ({ id, name, track_count: 2, transcribed_tracks: 1, source_path: `/fixtures/${id}.aaf`, modified_ms });
   answers.aaf_list = [summary("a", "Older", 1_000), summary("b", "Newest", 3_000), summary("c", "Hidden", 2_000)];
   localStorage.setItem("saucebunny.stringOuts.hiddenSequences", JSON.stringify({ c: 2_000 }));
   render(<EditNewPanel onOpen={vi.fn()} onCancel={null} />);
-  const select = screen.getByLabelText("Start from") as HTMLSelectElement;
+  const select = screen.getByLabelText("Source") as HTMLSelectElement;
   const options = () => [...select.options].map((option) => option.textContent);
-  await waitFor(() => expect(options()).toEqual(["An empty timeline", "Newest", "Older", "Show 1 hidden sequence"]));
+  await waitFor(() => expect(options()).toEqual(["None yet", "Newest", "Older", "Show 1 hidden sequence"]));
   fireEvent.change(select, { target: { value: "show-hidden" } });
-  expect(options()).toEqual(["An empty timeline", "Newest", "Hidden", "Older"]);
+  expect(options()).toEqual(["None yet", "Newest", "Hidden", "Older"]);
   expect(select.value).toBe("");
   expect(localStorage.getItem("saucebunny.stringOuts.hiddenSequences")).toBe("{}");
 });

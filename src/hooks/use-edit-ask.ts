@@ -3,10 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import type { AssistantReply } from "../bindings/AssistantReply";
 import type { EditDocument } from "../bindings/EditDocument";
 import type { ChatMessage } from "../lib/ai-chat";
-import { loadCloudModel, serviceTier } from "../lib/ai-provider";
-import { citeAddress, parseToolsAnswer, toolsHistory, toolsQuestion, toolsSystem } from "../lib/edit-ask-tools";
+import { loadCloudModel, serviceTier, loadScanModel } from "../lib/ai-provider";
+import { asksForCut, citeAddress, parseToolsAnswer, resolveProposal, toolsHistory, toolsQuestion, toolsSystem } from "../lib/edit-ask-tools";
 import type { TimelineWord } from "../lib/edit-model";
-import { askBuildTitle, askFindPrompt, askMentioned, askParts, askPrompt, asksToBuild, askRecords, cite, parseAskAnswer, parseAskFind, scopeLines, type AskCitation, type AskLine, type AskMention, type AskMessage } from "../lib/edit-ask";
+import { askAgain, askBuildTitle, askFindPrompt, askMentioned, askParts, askPrompt, asksToBuild, askRecords, cite, parseAskAnswer, parseAskFind, scopeLines, type AskCitation, type AskLine, type AskMention, type AskMessage } from "../lib/edit-ask";
 import { formatError } from "../lib/error-format";
 import { buildSourcePrefix, transcriptBudget } from "../lib/prompt-prefix";
 import { chat, connectModel, contextOf, loadStringOutModel, saveStringOutModel, type AskModel, type StringOutModel } from "../lib/string-out-model";
@@ -57,7 +57,8 @@ export function useEditAsk({ editId, lines, mentions, nameOf, sourceName, appLoc
   useEffect(() => save(editId, messages), [editId, messages]);
   useEffect(() => () => { abortRef.current?.abort(); abortRef.current = null; }, []);
 
-  async function send(question: string) {
+  /** Ask `question` after `base`, the conversation so far (a retry passes it without the failed attempt). */
+  async function send(question: string, base: AskMessage[] = latest.current) {
     if (!question.trim() || abortRef.current) return;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -65,26 +66,33 @@ export function useEditAsk({ editId, lines, mentions, nameOf, sourceName, appLoc
     const requestId = crypto.randomUUID();
     ctrl.signal.addEventListener("abort", () => void invoke("cloud_chat_cancel", { requestId }).catch(() => undefined), { once: true });
     const live = () => !ctrl.signal.aborted && abortRef.current === ctrl;
-    const earlier = messages;
-    setMessages((list) => [...list, { id: newId(), role: "you", text: question.trim(), lines: [], action: null }]);
+    const earlier = base;
+    setMessages([...base, { id: newId(), role: "you", text: question.trim(), lines: [], action: null }]);
     setStatus({ busy: true, text: "Connecting to the model…" });
     try {
       const connected = await connectModel(model, appLocalModelId, ctrl.signal);
       if (!live()) return;
       if (usesTools(connected)) {
         try {
-          setStatus({ busy: true, text: `Looking through the transcripts with ${connected.name}…` });
+          const cut = asksForCut(question, earlier);
+          setStatus({ busy: true, text: cut ? `Building the cut with ${connected.name}: outlining, finding lines and timing it…` : `Looking through the transcripts with ${connected.name}…` });
           const reply = await invoke<AssistantReply>("assistant_chat", { args: {
             provider: connected.kind === "cloud" ? connected.provider : "local", model: connected.kind === "cloud" ? loadCloudModel(connected.provider) : connected.server.model_id,
             system: toolsSystem(document, editId), messages: [...toolsHistory(earlier, document), { role: "user", content: toolsQuestion(question, askMentioned(question, mentions), sourceName) }],
-            app_state: screen(), library: transcriptLibrary(), request_id: requestId, service_tier: connected.kind === "cloud" ? serviceTier(connected.provider) : null } });
+            app_state: screen(), library: transcriptLibrary(), request_id: requestId, service_tier: connected.kind === "cloud" ? serviceTier(connected.provider) : null,
+            // One key per string out's Ask, so the provider reuses the cached start of its requests round after round.
+            cache_key: `ask:${editId}`,
+            // The fast model `scan` reads chunks with; the local server runs one model, so it scans with that.
+            scan_model: connected.kind === "cloud" ? loadScanModel(connected.provider) : null,
+            // A story cut takes more rounds of lookups than a question.
+            cut } });
           if (!live()) return;
           const parsed = parseToolsAnswer(reply.text);
           const cited = (list: string[]) => list.map((address) => citeAddress(address, document, words)).filter((line): line is AskCitation => !!line);
           // Asked to build, the model cited lines but proposed nothing: offer the build from its lines.
           const proposed = parsed.action ?? (parsed.lines.length && asksToBuild(question) ? { kind: "build" as const, title: askBuildTitle(question, mentions), lines: parsed.lines } : null);
-          const action = proposed?.kind === "build" ? { kind: "build" as const, title: proposed.title, lines: cited(proposed.lines) } : proposed ? { kind: "remove" as const, lines: cited(proposed.lines) } : null;
-          setMessages((list) => [...list, { id: newId(), role: "ask", text: parsed.text, lines: cited(parsed.lines), action: action?.lines.length ? action : null }]);
+          const action = proposed ? resolveProposal(proposed, (address) => citeAddress(address, document, words)) : null;
+          setMessages((list) => [...list, { id: newId(), role: "ask", text: parsed.text, lines: cited(parsed.lines), action }]);
           return;
         } catch (cause) {
           // A local model that cannot call tools reads the transcript the old way; a cloud failure is the answer.
@@ -141,8 +149,18 @@ export function useEditAsk({ editId, lines, mentions, nameOf, sourceName, appLoc
     abortRef.current?.abort(); abortRef.current = null;
     setStatus({ busy: false, text: "Stopped." });
   }
+  /**
+   * Ask a question again: the one with this id, or the one a failed answer
+   * with this id was to. When that question is the last thing asked and its
+   * answer failed, the failed attempt is replaced rather than repeated, so
+   * the conversation (and what the model is shown of it) reads as one try.
+   */
+  function rerun(id: string) {
+    const plan = askAgain(latest.current, id);
+    if (plan) void send(plan.question, plan.base);
+  }
   return {
-    messages, model, busy: status.busy, status: status.text, send, stop,
+    messages, model, busy: status.busy, status: status.text, send: (question: string) => send(question), stop, rerun,
     clear: () => { stop(); setMessages([]); setStatus({ busy: false, text: "" }); },
     setModel: (next: StringOutModel) => { setModelState(next); saveStringOutModel(next); },
     // Saved at once, not by the effect: "Make new string out" opens the new

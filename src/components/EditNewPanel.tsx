@@ -24,9 +24,11 @@ const emptyEdit = (title: string): EditDocument => ({ schema_version: EDIT_SCHEM
   edit_rate: { numerator: 24000, denominator: 1001 }, start_timecode_frames: 86400, sources: [], tracks: [], segments: [], mutes: [], markers: [] });
 
 /**
- * Starting a string out: empty, from an AAF Audio sequence (whole, to cut
- * down, or as a source to build up from), one per person, or asked for in
- * words.
+ * Starting a string out: always an empty record, as a new sequence is in
+ * Avid, with an AAF Audio sequence loaded as its source or none yet; or one
+ * per person, or asked for in words. There is no starting from the whole
+ * sequence: a record is built from the source, and a record that already
+ * held every track of the group read as nothing like one.
  */
 export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
   const [saved, setSaved] = useState<AafDocumentSummary[]>([]);
@@ -36,8 +38,6 @@ export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
   const shelf = useMemo(() => sequenceShelf(saved, hidden), [saved, hidden]), hiddenNow = hiddenCount(saved, hidden);
   const [title, setTitle] = useState("");
   const [from, setFrom] = useState("");
-  // Empty by default, as a new sequence is in Avid: the cut is built from chunks of the source.
-  const [whole, setWhole] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -53,7 +53,7 @@ export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
   const create = async () => {
     setBusy(true); setError(null);
     try {
-      const document = from ? editFromSequence(await invoke<AafDocument>("aaf_open", { documentId: from }), title, whole) : emptyEdit(title);
+      const document = from ? editFromSequence(await invoke<AafDocument>("aaf_open", { documentId: from }), title) : emptyEdit(title);
       const id = newEditId();
       await editStore.create(id, document);
       onOpen(id);
@@ -79,13 +79,12 @@ export function EditNewPanel({ onOpen, onCancel, appLocalModelId }: Props) {
     <h2 className="cp-te-picker-head">New string out</h2>
     <form className="cp-te-picker-new" onSubmit={(event) => { event.preventDefault(); void create(); }}>
       <label className="cp-te-set-label">Title<input className="cp-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Rosa, first pass" /></label>
-      <label className="cp-te-set-label">Start from<select className="cp-select" value={from}
+      <label className="cp-te-set-label">Source<select className="cp-select" value={from}
         onChange={(event) => { if (event.target.value === SHOW_HIDDEN) setHidden(showHiddenSequences()); else setFrom(event.target.value); }}>
-        <option value="">An empty timeline</option>
+        <option value="">None yet</option>
         {shelf.map((item) => <option key={item.id} value={item.id}>{labels.get(item.id) ?? item.name}</option>)}
         {hiddenNow > 0 && <option value={SHOW_HIDDEN}>Show {plural(hiddenNow, "hidden sequence", "hidden sequences")}</option>}
       </select></label>
-      {from && <label className="cp-te-picker-check"><input type="checkbox" checked={whole} onChange={(event) => setWhole(event.target.checked)} />Start with the whole sequence</label>}
       <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "Creating…" : "Create"}</button>
       {from && <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void perPerson()}
         title="One string out per person: their bites in scene order, with handles, filler between and a marker on each">One per person</button>}

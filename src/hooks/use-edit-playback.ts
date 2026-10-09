@@ -8,6 +8,8 @@ export type EditPlaybackOptions = {
   document: EditDocument;
   /** Edit track ids that sound, after solo and mute. */
   audible: string[];
+  /** Record tracks (1 for A1) silenced by solo and mute: whoever is on one, where they are on it. */
+  quiet?: number[];
   /** False parks the engine and releases its AudioContext. */
   active: boolean;
   /** Each source's sequence length in frames, when known. Without it a source is read only as far as the edit reaches into it. */
@@ -16,9 +18,10 @@ export type EditPlaybackOptions = {
   joinFade?: number;
 };
 
-type Plan = { document: EditDocument; audibleKey: string; framesKey: string };
+type Plan = { document: EditDocument; audibleKey: string; framesKey: string; quietKey: string };
 const apply = (target: EditAudio, plan: Plan) =>
-  target.setDocument(plan.document, plan.audibleKey ? plan.audibleKey.split("|") : [], JSON.parse(plan.framesKey) as Record<string, number>);
+  target.setDocument(plan.document, plan.audibleKey ? plan.audibleKey.split("|") : [], JSON.parse(plan.framesKey) as Record<string, number>,
+    plan.quietKey ? plan.quietKey.split("|").map(Number) : []);
 
 type Status = Omit<EditAudioState, "frame">;
 
@@ -28,15 +31,15 @@ type Status = Omit<EditAudioState, "frame">;
  * and only a change of rate, waiting or error is React state, so playing does
  * not re-render whoever holds the playback.
  */
-export function useEditPlayback({ document, audible, active, sourceFrames, joinFade }: EditPlaybackOptions) {
+export function useEditPlayback({ document, audible, quiet, active, sourceFrames, joinFade }: EditPlaybackOptions) {
   const [state, setState] = useState<Status>({ rate: 0, busy: false, error: null });
   const [frames] = useState<FrameStore>(() => createFrameStore(0)), sent = useRef(state);
   const [volume, setVolume] = useState(0.8), [muted, setMuted] = useState(false);
   const [levels, setLevels] = useState<Record<string, number>>({});
-  const rate = fps(document.edit_rate), audibleKey = audible.join("|"), framesKey = JSON.stringify(sourceFrames ?? {});
+  const rate = fps(document.edit_rate), audibleKey = audible.join("|"), framesKey = JSON.stringify(sourceFrames ?? {}), quietKey = (quiet ?? []).join("|");
   const engine = useRef<EditAudio | null>(null), latest = useRef(state); latest.current = state;
-  const settings = useRef({ document, audibleKey, framesKey, rate, active, volume, muted, levels, joinFade });
-  settings.current = { document, audibleKey, framesKey, rate, active, volume, muted, levels, joinFade };
+  const settings = useRef({ document, audibleKey, framesKey, quietKey, rate, active, volume, muted, levels, joinFade });
+  settings.current = { document, audibleKey, framesKey, quietKey, rate, active, volume, muted, levels, joinFade };
   const getEngine = useCallback(() => {
     const current = settings.current;
     if (!engine.current && current.active) {
@@ -54,14 +57,15 @@ export function useEditPlayback({ document, audible, active, sourceFrames, joinF
   }, [frames]);
   // A new edit rate is a new clock; leaving the view releases the output.
   useEffect(() => () => { engine.current?.close(); engine.current = null; }, [rate, active]);
-  useEffect(() => { if (engine.current) apply(engine.current, settings.current); }, [document, audibleKey, framesKey]);
+  useEffect(() => { if (engine.current) apply(engine.current, settings.current); }, [document, audibleKey, framesKey, quietKey]);
   useEffect(() => { engine.current?.setLevel(volume, muted); }, [volume, muted]);
   useEffect(() => { engine.current?.setJoinFade(joinFade); }, [joinFade]);
   useEffect(() => { for (const [id, level] of Object.entries(levels)) engine.current?.setTrackLevel(id, level); }, [levels]);
   const seek = useCallback((frame: number, play = latest.current.rate !== 0) => getEngine()?.seek(frame, play ? 1 : 0) ?? Promise.resolve(), [getEngine]);
   const pause = useCallback(() => engine.current?.pause(), []);
   const toggle = useCallback(() => getEngine()?.toggle() ?? Promise.resolve(), [getEngine]);
+  const shuttle = useCallback((direction: 1 | -1) => getEngine()?.shuttle(direction) ?? Promise.resolve(), [getEngine]);
   const scrub = useCallback((frame: number) => getEngine()?.scrub(frame), [getEngine]);
   const setTrackLevel = useCallback((id: string, level: number) => setLevels((prior) => ({ ...prior, [id]: level })), []);
-  return { ...state, frames, playing: state.rate !== 0, seek, pause, toggle, scrub, volume, muted, setVolume, setMuted, levels, setTrackLevel };
+  return { ...state, frames, playing: state.rate !== 0, seek, pause, toggle, shuttle, scrub, volume, muted, setVolume, setMuted, levels, setTrackLevel };
 }

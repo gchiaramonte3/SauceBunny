@@ -131,6 +131,54 @@ describe("Parakeet models", () => {
   });
 });
 
+describe("AAF reader and app", () => {
+  // The Python reader writes the manifest and Rust validates it, with no
+  // compiler between them. A group angle bound higher in the reader than in
+  // the app fails the whole import ("Invalid AAF source graph"); a manifest
+  // version lower in the reader than in the app re-reads the AAF on every
+  // open, since each re-read saves a manifest that is still "older".
+  const picture = readFileSync(join(ROOT, "aaf-sidecar/picture.py"), "utf8");
+  const graph = readFileSync(join(ROOT, "aaf-sidecar/graph.py"), "utf8");
+  const model = readFileSync(join(ROOT, "src-tauri/src/commands/aaf/model.rs"), "utf8");
+  const pyAngles = /^MAX_ANGLES = (\d+)$/m.exec(picture)?.[1];
+  const rsAngles = /^pub const MAX_ANGLES: usize = (\d+);$/m.exec(model)?.[1];
+  const pyVersion = /result\.update\(schema_version=(\d+), graph=/.exec(graph)?.[1];
+  const rsVersion = /^pub const SCHEMA_VERSION: u32 = (\d+);$/m.exec(model)?.[1];
+
+  it("found both sides", () => {
+    expect([pyAngles, rsAngles, pyVersion, rsVersion].every(Boolean)).toBe(true);
+  });
+
+  it("bound group angles at the same number", () => {
+    expect(pyAngles).toBe(rsAngles);
+  });
+
+  it("stamp the graph manifest with the version the app expects", () => {
+    expect(pyVersion).toBe(rsVersion);
+  });
+});
+
+describe("story cut rules", () => {
+  // A model fits a story cut to a running time with measure_cut (Rust), and
+  // the app lays the cut out with edit-story (TypeScript). Different handles
+  // or a different join would lay out a cut longer or shorter than the one
+  // the model measured, with nothing to say so.
+  const ts = readFileSync(join(ROOT, "src/lib/edit-story.ts"), "utf8");
+  const rs = readFileSync(join(ROOT, "src-tauri/src/context/cuts.rs"), "utf8");
+  const names = ["CUT_HEAD_SECONDS", "CUT_TAIL_SECONDS", "CUT_JOIN_SECONDS", "CUT_BEAT_PAUSE_SECONDS"];
+  const read = (source: string, pattern: (name: string) => RegExp) => names.map((name) => Number(pattern(name).exec(source)?.[1]));
+  const tsValues = read(ts, (name) => new RegExp(`^export const ${name} = ([\\d.]+);$`, "m"));
+  const rsValues = read(rs, (name) => new RegExp(`^pub const ${name}: f64 = ([\\d.]+);$`, "m"));
+
+  it("found every rule on both sides", () => {
+    expect([...tsValues, ...rsValues].every((value) => Number.isFinite(value) && value > 0)).toBe(true);
+  });
+
+  it("times a cut with the rules it is laid out with", () => {
+    expect(tsValues).toEqual(rsValues);
+  });
+});
+
 function filesUnder(dir: string, ext: string, recurse: boolean): string[] {
   const out: string[] = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {

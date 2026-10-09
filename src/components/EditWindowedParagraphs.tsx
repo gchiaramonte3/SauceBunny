@@ -81,12 +81,23 @@ export function EditWindowedParagraphs({ root, sizes, keep = [], render }: Props
   }, []);
   const count = pages.length;
   const refs = useMemo(() => Array.from({ length: count }, (_, page) => (element: HTMLElement | null) => attach(page, element)), [count, attach]);
+  // Computed once per layout, not on every render: the record re-renders each
+  // time the playhead reaches a new word, and a whole 50-mic sequence is over
+  // a thousand pages.
+  const estimates = useMemo(() => pages.map(([start, end]) => sizes.slice(start, end).reduce((sum, size) => sum + size * PX_PER_WORD + PX_PER_PARAGRAPH, 0)), [pages, sizes]);
 
-  const pageOf = (paragraph: number) => pages.findIndex(([start, end]) => paragraph >= start && paragraph < end);
+  const pageOf = (paragraph: number) => {
+    let low = 0, high = pages.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >> 1, [start, end] = pages[middle];
+      if (paragraph < start) high = middle - 1; else if (paragraph >= end) low = middle + 1; else return middle;
+    }
+    return -1;
+  };
   const kept = new Set(keep.filter((paragraph): paragraph is number => paragraph != null && paragraph >= 0).map(pageOf));
   return <>{pages.map(([start, end], page) => {
     const drawn = seen.has(page) || kept.has(page);
-    const estimate = sizes.slice(start, end).reduce((sum, size) => sum + size * PX_PER_WORD + PX_PER_PARAGRAPH, 0);
+    const estimate = estimates[page];
     return <div key={page} ref={refs[page]} className="cp-te-textpage" data-edit-page={page} data-edit-drawn={drawn}
       style={drawn ? undefined : { height: heights.current.get(page) ?? estimate }}>
       {drawn && Array.from({ length: end - start }, (_, offset) => render(start + offset))}

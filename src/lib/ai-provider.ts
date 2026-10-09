@@ -8,6 +8,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatMessage } from "./ai-chat";
+import type { CloudModel } from "../bindings/CloudModel";
 
 export type CloudProvider = "anthropic" | "openai";
 export type AiProvider = "local" | CloudProvider;
@@ -43,6 +44,31 @@ export function setCloudModel(p: CloudProvider, model: string): void {
 }
 
 /**
+ * The SCAN model: a fast model Ask sends chunks of transcript to in parallel,
+ * to find the lines about a topic (docs/ASK-RANGE-SPEC-2026-10-06.md,
+ * section 6). Chosen per provider in Settings ▸ AI APIs; until it is, the
+ * provider's Ask model does the scanning too.
+ */
+const SCAN_MODEL_KEY = (p: CloudProvider) => `saucebunny.ai.scanModel.${p}`;
+
+export function loadScanModel(p: CloudProvider): string {
+  try { return localStorage.getItem(SCAN_MODEL_KEY(p))?.trim() || loadCloudModel(p); }
+  catch { return loadCloudModel(p); }
+}
+
+export function setScanModel(p: CloudProvider, model: string): void {
+  try {
+    if (model.trim()) localStorage.setItem(SCAN_MODEL_KEY(p), model.trim());
+    else localStorage.removeItem(SCAN_MODEL_KEY(p));
+  } catch { /* storage unavailable: the choice lasts this session */ }
+}
+
+/** Every model the saved key can call, from the provider's own list (Rust `cloud_models`): chat models first, newest first. */
+export function listCloudModels(p: CloudProvider): Promise<CloudModel[]> {
+  return invoke<CloudModel[]>("cloud_models", { provider: p });
+}
+
+/**
  * OpenAI's Ultrafast tier: the same model up to about six times faster
  * through the API, at about six times the price per token, offered for
  * gpt-6-astra. Off unless the user turns it on, and it only ever reaches
@@ -62,9 +88,22 @@ export function setUltrafast(on: boolean): void {
   } catch { /* storage unavailable: the choice lasts this session */ }
 }
 
-/** The service tier a request to this provider asks for: Ultrafast for OpenAI when chosen, else none. */
-export function serviceTier(p: CloudProvider): "ultrafast" | null {
-  return p === "openai" && loadUltrafast() ? "ultrafast" : null;
+/**
+ * The models OpenAI offers Ultrafast for, from its Ultrafast mode guide:
+ * gpt-6-astra, and gpt-5.6-sol in preview. A dated snapshot of either counts.
+ * With any other model OpenAI refuses the whole request ("Invalid
+ * service_tier argument"), so the switch applies only to these.
+ */
+const ULTRAFAST_MODELS = ["gpt-6-astra", "gpt-5.6-sol"];
+
+export function offersUltrafast(model: string): boolean {
+  const id = model.trim();
+  return ULTRAFAST_MODELS.some((name) => id === name || new RegExp(`^${name.replace(/\./g, "\\.")}-\\d{4}-\\d{2}-\\d{2}$`).test(id));
+}
+
+/** The service tier a request to this provider asks for: Ultrafast for OpenAI when chosen and its model offers it, else none. */
+export function serviceTier(p: CloudProvider, model: string = loadCloudModel(p)): "ultrafast" | null {
+  return p === "openai" && loadUltrafast() && offersUltrafast(model) ? "ultrafast" : null;
 }
 
 // ── Keychain (Rust) — the key is write/clear/check-only from the frontend ──

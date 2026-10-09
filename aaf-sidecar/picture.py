@@ -4,6 +4,7 @@ No essence is opened, no locator is followed and no frame is decoded: a
 picture clip is a record range plus the names and identities an editor needs
 to know where the picture cuts are and what they came from.
 """
+from bisect import bisect_right
 from fractions import Fraction
 import aaf2
 from reader import value, clean_name, append_warning, timecode_segment, round_sample, MAX_DEPTH, MAX_SEGMENTS
@@ -12,9 +13,12 @@ from reader import value, clean_name, append_warning, timecode_segment, round_sa
 # and a partial picture lane, never the audio import.
 MAX_PICTURE_CLIPS = 100000
 MAX_PICTURE_STEPS = 1000000
-# A multicam group names at most this many angles; a sixty-camera group still
-# reads, it just lists the first sixteen.
-MAX_ANGLES = 16
+# A multicam group lists at most this many angles. It was sixteen, and a
+# reality group of 75 cameras showed as 16 beside Avid's menu of 75: every
+# angle is listed now, and this only bounds a malformed file. The app's
+# validation (model.rs) holds the same number.
+MAX_ANGLES = 256
+UNNAMED_ANGLE = 'Unnamed angle'
 
 
 class Budget(Exception):
@@ -97,13 +101,59 @@ def component_at(sequence, position, steps):
     return None
 
 
-def angle_name(seg, steps):
-    """What one angle of a group is called: the first clip name down its
-    chain (a camera's master clip), without following it any further."""
+def clips_of(sequence, steps):
+    """A sequence's clips, leaving out filler, as (starts, [(start, clip)])."""
+    starts, clips, cursor = [], [], Fraction(0)
+    for index, child in enumerate(sequence.components):
+        steps.take()
+        if index >= MAX_SEGMENTS:
+            break
+        length = Fraction(child.length or 0)
+        if isinstance(child, aaf2.components.Transition):
+            cursor -= length
+            continue
+        if not isinstance(child, aaf2.components.Filler) and length > 0:
+            starts.append(cursor)
+            clips.append((cursor, child))
+        cursor += length
+    return starts, clips
+
+
+def playing(index, position):
+    """The clip playing at `position` and the offset into it; between two
+    clips the next one, past the last the last one. That is the clip Avid's
+    group menu names an angle by when its camera is between files."""
+    starts, clips = index
+    if not clips:
+        return None
+    at = bisect_right(starts, position) - 1
+    if at >= 0:
+        start, clip = clips[at]
+        if position < start + Fraction(clip.length or 0):
+            return clip, position - start
+    if at + 1 < len(clips):
+        return clips[at + 1][1], Fraction(0)
+    clip = clips[at][1]
+    return clip, max(Fraction(0), Fraction(clip.length or 0) - 1)
+
+
+def angle_name(seg, position, rate, steps, memo):
+    """What one angle of a group is called where the group is cut in: the
+    clip name playing there (a camera's master clip), as Avid's menu names it.
+
+    An angle is often a camera's whole day of files in one track, so its
+    first clip can be hours from the cut: naming the first one called three
+    of a real group's 75 angles by files Avid did not show. Each angle's
+    track is indexed once in `memo`, since every cut of the group reads the
+    same tracks.
+    """
     for _ in range(16):
         steps.take()
         if isinstance(seg, aaf2.components.Sequence):
-            seg = next((c for c in seg.components if not isinstance(c, aaf2.components.Filler)), None)
+            found = playing(clips_of(seg, steps), position)
+            if found is None:
+                return None
+            seg, position = found
         elif isinstance(seg, aaf2.components.OperationGroup):
             seg = next(iter(value(seg, 'InputSegments') or []), None)
         elif isinstance(seg, aaf2.components.Selector):
@@ -115,13 +165,27 @@ def angle_name(seg, steps):
             name = clean_name(mob.name, '')
             if isinstance(mob, aaf2.mobs.MasterMob) or name or slot is None:
                 return name or None
-            seg = slot.segment
+            target = slot_rate(slot)
+            if target is None:
+                return None
+            position, rate = Fraction(seg.start or 0) + position * target / rate, target
+            segment = slot.segment
+            if not isinstance(segment, aaf2.components.Sequence):
+                seg = segment
+                continue
+            key = (str(mob.mob_id), slot.slot_id)
+            if key not in memo:
+                memo[key] = clips_of(segment, steps)
+            found = playing(memo[key], position)
+            if found is None:
+                return None
+            seg, position = found
         else:
             return None
     return None
 
 
-def resolve(seg, rate, steps):
+def resolve(seg, rate, steps, memo=None):
     """Follow one record-side component down its source chain to the tape.
 
     Records the first MasterMob (the clip), the file SourceMob with its
@@ -129,8 +193,10 @@ def resolve(seg, rate, steps):
     with the source timecode at the clip's in point. For a group (a multicam
     clip) it also records the group's name and what each angle is called,
     the selected one first: names only, so the picture still travels as
-    metadata and nothing is opened.
+    metadata and nothing is opened. Every angle is listed, an unnamed one as
+    such, so the count is the group's.
     """
+    memo = {} if memo is None else memo
     clip = {'kind': 'clip', 'name': None, 'master_mob_id': None, 'file_mob_id': None, 'tape_name': None,
             'source_start_frame': None, 'source_timecode_fps': None, 'source_drop_frame': None,
             'group': False, 'group_name': None, 'angles': [], 'effect': None, 'descriptor': None}
@@ -150,7 +216,7 @@ def resolve(seg, rate, steps):
                 # The outermost group is the one an editor switches in Avid.
                 options = [value(seg, 'Selected'), *(value(seg, 'Alternates') or [])]
                 clip['group_name'] = composition
-                clip['angles'] = [name for name in (angle_name(o, steps) for o in options[:MAX_ANGLES] if o is not None) if name]
+                clip['angles'] = [angle_name(o, position, rate, steps, memo) or UNNAMED_ANGLE for o in options[:MAX_ANGLES] if o is not None]
             clip['group'] = True
             seg = value(seg, 'Selected')
             continue
@@ -233,7 +299,7 @@ def track_entry(slot):
             'name': clean_name(slot.name, 'Picture'), 'component': type(slot.segment).__name__, 'clips': []}
 
 
-def picture_track(slot, sequence_rate, warnings, steps):
+def picture_track(slot, sequence_rate, warnings, steps, memo=None):
     track = track_entry(slot)
     rate = slot_rate(slot)
     if rate is None:
@@ -249,7 +315,7 @@ def picture_track(slot, sequence_rate, warnings, steps):
         if len(track['clips']) >= MAX_PICTURE_CLIPS:
             append_warning(warnings, 'A picture track has more clips than are read. The rest of its cuts are not shown.')
             break
-        clip = resolve(component, rate, steps)
+        clip = resolve(component, rate, steps, memo)
         clip.update(start_frame=first, duration_frames=end - first)
         track['clips'].append(clip)
     return track
@@ -258,11 +324,11 @@ def picture_track(slot, sequence_rate, warnings, steps):
 def picture_tracks(slots, sequence_rate, warnings):
     """Every picture slot of the chosen sequence, with its clips as metadata.
     One step budget covers them all; running out costs clips, never audio."""
-    steps, tracks, exhausted = Steps(), [], False
+    steps, tracks, exhausted, memo = Steps(), [], False, {}
     for slot in slots:
         if not exhausted:
             try:
-                tracks.append(picture_track(slot, sequence_rate, warnings, steps))
+                tracks.append(picture_track(slot, sequence_rate, warnings, steps, memo))
                 continue
             except Budget:
                 exhausted = True

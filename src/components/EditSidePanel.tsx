@@ -10,6 +10,8 @@ import { fromDocument, toDocument, type OpenEdit } from "../lib/edit-document";
 import { removeWithoutCuttingOvertalk, type TimelineLane, type TimelineWord } from "../lib/edit-model";
 import { editStore, newEditId } from "../lib/edit-store";
 import { layoutEditBites } from "../lib/edit-stringout";
+import { cutSeconds, layoutStoryCut } from "../lib/edit-story";
+import { secondsToClock } from "../lib/timecode";
 import { formatError } from "../lib/error-format";
 import { EditAsk } from "./EditAsk";
 import { EditHistoryPanel } from "./EditHistoryPanel";
@@ -46,12 +48,22 @@ export function EditSidePanel(props: Props) {
     const action = message.action;
     if (!action) return;
     try {
-      let next: EditDocument;
-      if (action.kind === "build") {
-        next = layoutEditBites(document, action.lines, action.title, props.lengths);
+      let next: EditDocument, done = "";
+      if (action.kind === "build" || action.kind === "cut") {
+        if (action.kind === "build") next = layoutEditBites(document, action.lines, action.title, props.lengths, words);
+        else {
+          // A story cut: beats laid out tight, fillers taken out (edit-story.ts).
+          const laid = layoutStoryCut(document, { title: action.title, target: action.target, beats: action.beats }, props.lengths, words);
+          next = laid.document;
+          done = `Built "${action.title}", ${secondsToClock(cutSeconds(next), { round: true })}${laid.trimmed
+            ? `, with ${laid.trimmed} filler word${laid.trimmed === 1 ? "" : "s"} taken out (Removed lines shows them, and Restore puts any back)` : ""}.`;
+        }
         if (into === "here") {
           const opened = fromDocument(next);
-          if (await props.commit(`Ask: ${action.title}`, () => ({ document: next, timeline: opened.timeline, markers: opened.markers }))) ask.markApplied(message.id, "here");
+          if (await props.commit(`Ask: ${action.title}`, () => ({ document: next, timeline: opened.timeline, markers: opened.markers }))) {
+            ask.markApplied(message.id, "here");
+            if (done) ws.setMessage(done);
+          }
           return;
         }
       } else {
@@ -67,6 +79,7 @@ export function EditSidePanel(props: Props) {
       const id = newEditId();
       await editStore.create(id, next);
       ask.markApplied(message.id, "new", id);
+      if (done) ws.setMessage(done);
       // The new string out opens in a tab of its own; this one stays in its tab.
       props.onOpenEdit(id);
     } catch (cause) {

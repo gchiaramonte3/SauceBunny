@@ -6,7 +6,7 @@ import { EditTimelineRuler } from "./EditTimelineRuler";
 afterEach(cleanup);
 
 const props = { rulerRef: null, fps: 24, recordStart: 86_400, start: 0, span: 100, width: 1000, x: (t: number) => `${t}%`, w: (d: number) => `${d}%`,
-  markers: { list: [] }, seams: [], seam: null, describe: () => "", onSeam: () => undefined, scrub: {} };
+  markers: { list: [] }, scrub: {} };
 
 it("draws a lone In or Out as a stem with its wing, and both as the winged range", () => {
   const view = render(<EditTimelineRuler {...props} marks={{ in: 20, out: null }} />);

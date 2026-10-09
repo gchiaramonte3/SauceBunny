@@ -89,7 +89,7 @@ pub async fn resolve(app: &AppHandle, document_id: &str, build: bool, job: &str)
     // between then makes the stamp older than the answer (computed again next
     // time) rather than newer (an answer about the old words, trusted).
     let document_time = modified(&store::document_file(&root, document_id)?);
-    let document = store::load(&root, document_id)?;
+    let document = store::read_document(&root, document_id)?;
     let transcribed: HashSet<&str> = document.transcripts.iter().map(|transcript| transcript.track_id.as_str()).collect();
     let wanted: Vec<&AafTrack> = document.manifest.tracks.iter().filter(|track| transcribed.contains(track.id.as_str())).collect();
     let mut overviews = Vec::new();

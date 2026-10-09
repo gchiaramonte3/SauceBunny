@@ -1,5 +1,5 @@
 import { measure, pipelineInvoke } from "../lib/pipeline";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { AafOwnership } from "../bindings/AafOwnership";
 import type { AafSpeech } from "../bindings/AafSpeech";
@@ -13,6 +13,7 @@ import { loadSpeech } from "../lib/edit-speech";
 import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
 import { cueLabels, ownershipIndex, type OwnershipIndex } from "../lib/multitrack-ownership";
+import { mergedWords, micWords, onSequenceForgotten, sequenceWords, type SequenceWords } from "../lib/edit-words-cache";
 import { useBleedHidden } from "./use-bleed-hidden";
 const invoke = pipelineInvoke("String Outs");
 
@@ -32,12 +33,17 @@ export type EditSourceData = {
   measured: boolean;
   /** Waveforms are being built for lanes that have none. */
   measuring: boolean;
+  /**
+   * Finer peaks for a source range of `source:lane`, from the overview pyramid
+   * already on disk (a range request never builds one), or null.
+   */
+  detail: (pair: string, from: number, to: number) => Promise<[number, number][] | null>;
   errors: string[];
 };
 
 /** `ownership`: per source, the bleed resolver's labels (accuracy spec, phase 3), from Rust's cache. */
 type Loaded = { documents: Map<string, AafDocument>; speech: Map<string, AafSpeech>; peaks: Map<string, [number, number][]>; ownership: Map<string, OwnershipIndex>; errors: string[] };
-type Lane = { pair: string; source: string; documentId: string; trackId: string; label: string; frames: number };
+type Lane = { pair: string; source: string; lane: string; documentId: string; trackId: string; label: string; frames: number };
 
 /**
  * Every mapped lane of every loaded source, in the order they are shown; with
@@ -52,11 +58,18 @@ function lanesOf(document: EditDocument, documents: Map<string, AafDocument>, tr
     const heard = (lane: EditDocument["tracks"][number]) => onTrack(lane) || !alternativeLane(aaf, lane.source_tracks[source.id] ?? "");
     return document.tracks.filter((lane) => !tracked || heard(lane)).flatMap((lane) => {
       const trackId = lane.source_tracks[source.id];
-      return trackId ? [{ pair: `${source.id}:${lane.id}`, source: source.id, documentId: source.document_id, trackId,
+      return trackId ? [{ pair: `${source.id}:${lane.id}`, source: source.id, lane: lane.id, documentId: source.document_id, trackId,
         label: `${source.name} · ${lane.name}`, frames: aaf.manifest.duration_frames }] : [];
     });
   });
 }
+
+const NO_LANES: ReadonlySet<string> = new Set();
+/** Detail answers kept: a zoomed timeline asks again as it pans, and a lane's range is its key. */
+const DETAIL_KEPT = 256;
+
+/** How often the words pass shows what it has read so far. */
+const PUBLISH_EVERY_MS = 1000;
 
 /** What the words pass reads: the sources and each person's mics. */
 const keyOf = (document: EditDocument | null) => document ? JSON.stringify([document.sources, document.tracks.map((track) => track.source_tracks)]) : "";
@@ -84,9 +97,18 @@ async function cachedPeaks(lane: Lane, jobId: string): Promise<[number, number][
  * says, so nothing reads that silence as a fact.
  *
  * Loads when the edit's sources or lane mapping change, never on an edit step.
+ * What it reads is kept for the session (lib/edit-words-cache), so a tab
+ * reopened over a sequence already read asks the app for nothing, and a
+ * sequence saved meanwhile is read again behind the words already shown.
  * Every backend job holds its id from the start, and leaving cancels them.
  */
-export function useEditSources(document: EditDocument | null, waveforms = false): EditSourceData {
+export function useEditSources(document: EditDocument | null, waveforms = false, waveLanes: ReadonlySet<string> = NO_LANES): EditSourceData {
+  // Waveforms for every track (View ▸ Waveforms), or for the tracks whose W is
+  // on, as Avid's per-track waveform setting. Only those are built: building
+  // one reads every file its mic uses, minutes a track on NEXIS.
+  const waveKey = [...waveLanes].sort().join("\n");
+  const wants = waveforms || waveLanes.size > 0;
+  const wanted = useRef((lane: string) => waveforms || waveLanes.has(lane)); wanted.current = (lane: string) => waveforms || waveLanes.has(lane);
   const [loaded, setLoaded] = useState<Loaded>({ documents: new Map(), speech: new Map(), peaks: new Map(), ownership: new Map(), errors: [] });
   const [loading, setLoading] = useState(false);
   const hide = useBleedHidden();
@@ -105,6 +127,10 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
   const ownershipJob = useRef<string | null>(null);
   const measureSpeechJob = useRef<string | null>(null), measureWaveJob = useRef<string | null>(null);
   const key = keyOf(document);
+  // Bumped when a sequence this edit reads is saved: its words are read again.
+  const [saved, setSaved] = useState(0);
+  const sequences = document ? document.sources.map((source) => source.document_id).join("\n") : "";
+  useEffect(() => onSequenceForgotten((id) => { if (sequences.split("\n").includes(id)) setSaved((value) => value + 1); }), [sequences]);
   // Who is on a track changes without changing what is read: a person given
   // a track is measured next, and nobody's words are read again.
   const tracked = document ? document.tracks.filter(onTrack).map((track) => track.id).join("\n") : "";
@@ -113,18 +139,52 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
   // the pass has finished starts another.
   const passing = useRef(false);
   const [rescan, setRescan] = useState(0);
-  useEffect(() => { if (waveforms && !passing.current) setRescan((value) => value + 1); }, [tracked, waveforms]);
+  // Finer peaks for what a zoomed timeline shows. Each request holds its job id
+  // from the start (job-id contract), and leaving the edit cancels them.
+  const detailJobs = useRef(new Set<string>());
+  const details = useRef(new Map<string, Promise<[number, number][] | null>>());
+  useEffect(() => () => {
+    for (const id of detailJobs.current) void invoke("cancel_job", { jobId: id }).catch(() => undefined);
+    detailJobs.current.clear(); details.current.clear();
+  }, [key]);
+  const detail = useCallback((pair: string, from: number, to: number) => {
+    const now = documentRef.current, aaf = latest.current.documents.get(pair.split(":")[0]);
+    const lane = now && aaf ? lanesOf(now, latest.current.documents).find((item) => item.pair === pair) : undefined;
+    if (!lane || !aaf) return Promise.resolve(null);
+    const fps = aaf.manifest.edit_rate.numerator / aaf.manifest.edit_rate.denominator;
+    const startFrame = Math.max(0, Math.floor(from * fps)), endFrame = Math.min(lane.frames, Math.ceil(to * fps));
+    if (endFrame <= startFrame) return Promise.resolve(null);
+    const cacheKey = `${pair}|${startFrame}|${endFrame}`, kept = details.current.get(cacheKey);
+    if (kept) return kept;
+    const jobId = newJobId();
+    detailJobs.current.add(jobId);
+    const asked = invoke<AafWaveform>("aaf_waveform", { documentId: lane.documentId, trackId: lane.trackId, jobId, startFrame, durationFrames: endFrame - startFrame })
+      .then((wave) => wave.peaks as [number, number][]).catch(() => null).finally(() => detailJobs.current.delete(jobId));
+    details.current.set(cacheKey, asked);
+    while (details.current.size > DETAIL_KEPT) details.current.delete(details.current.keys().next().value ?? "");
+    return asked;
+  }, []);
+  useEffect(() => { if (wants && !passing.current) setRescan((value) => value + 1); }, [tracked, wants, waveKey]);
 
   useEffect(() => {
     if (!document) return;
     let live = true;
-    setLoading(true);
+    // Read again because a sequence was saved: what is shown stays until the
+    // new words land, rather than the pane emptying and filling again.
+    const again = publishedKey.current === key;
+    if (!again) setLoading(true);
     void (async () => {
-      const next: Loaded = { documents: new Map(), speech: new Map(), peaks: new Map(), ownership: new Map(), errors: [] };
+      const next: Loaded = { documents: new Map(), speech: new Map(), peaks: again ? latest.current.peaks : new Map(), ownership: new Map(), errors: [] };
+      const kept = new Map<string, SequenceWords>();
       for (const source of document.sources) {
+        const entry = sequenceWords(source.document_id);
+        kept.set(source.id, entry);
         try {
-          const aaf = await invoke<AafDocument>("aaf_open", { documentId: source.document_id });
+          // Without its transcripts: nothing here reads them, and HEAT 1's
+          // were 95 MB to send on every open.
+          const aaf = entry.document ?? await invoke<AafDocument>("aaf_open", { documentId: source.document_id, transcripts: false });
           if (!live) return;
+          entry.document = aaf;
           next.documents.set(source.id, aaf);
         } catch (cause) {
           next.errors.push(`${source.name}: ${formatError(cause)}`);
@@ -132,34 +192,51 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
         }
         // Bleed labels never measure a mic here (that reads media): what is
         // not measured yet is simply unlabelled, and every word stays.
-        const jobId = newJobId();
-        ownershipJob.current = jobId;
-        try {
-          const answer = await invoke<AafOwnership | null>("aaf_ownership", { documentId: source.document_id, build: false, jobId });
-          if (!live) return;
-          if (answer && Array.isArray(answer.words)) next.ownership.set(source.id, ownershipIndex(answer));
-        } catch { /* labels are a refinement; the words load without them */ }
-        finally { ownershipJob.current = null; }
+        if (entry.ownership === undefined) {
+          const jobId = newJobId();
+          ownershipJob.current = jobId;
+          try {
+            const answer = await invoke<AafOwnership | null>("aaf_ownership", { documentId: source.document_id, build: false, jobId });
+            if (!live) return;
+            entry.ownership = answer && Array.isArray(answer.words) ? ownershipIndex(answer) : null;
+          } catch { /* labels are a refinement; the words load without them */ }
+          finally { ownershipJob.current = null; }
+        }
+        if (entry.ownership) next.ownership.set(source.id, entry.ownership);
       }
-      // Words are shown as they arrive, a mic at a time (at most a few times a
-      // second, since every publish re-reads every word): on a 20-mic sequence
-      // the pane used to say "No transcripts" until the last mic was read.
+      // Words are shown as they arrive, a mic at a time (at most once a second,
+      // since every publish re-reads every word): on a 20-mic sequence the pane
+      // used to say "No transcripts" until the last mic was read. It was four
+      // times a second while each mic took a quarter of a second to read; now
+      // a mic reads in ~20 ms, and on a string out holding a whole 50-mic
+      // sequence each publish re-laid 457,253 words, freezing the page for up
+      // to 1.5 s at a time while the words loaded.
       const lanes = lanesOf(document, next.documents);
+      const got = new Map<string, AafSpeech>();
+      for (const lane of lanes) {
+        const known = kept.get(lane.source)?.speech.get(lane.trackId);
+        if (known) got.set(lane.pair, known);
+      }
+      const missing = lanes.filter((lane) => !got.has(lane.pair));
+      // In lane order, whichever were already kept, so words keep one order.
+      const ordered = () => new Map(lanes.flatMap((lane) => { const one = got.get(lane.pair); return one ? [[lane.pair, one] as const] : []; }));
       let shown = 0;
-      const publish = (done: number) => { shown = performance.now(); setLoaded({ ...next, speech: new Map(next.speech) }); setRead({ done, total: lanes.length }); };
-      publish(0);
-      for (const [index, lane] of lanes.entries()) {
+      const publish = (done: number) => { shown = performance.now(); setLoaded({ ...next, speech: ordered() }); setRead({ done, total: lanes.length }); };
+      if (missing.length && !again) publish(got.size);
+      for (const lane of missing) {
         const jobId = newJobId();
         wordsJob.current = jobId;
         try {
-          next.speech.set(lane.pair, await loadSpeech(lane.documentId, lane.trackId, false, jobId));
+          const speech = await loadSpeech(lane.documentId, lane.trackId, false, jobId);
+          got.set(lane.pair, speech);
+          kept.get(lane.source)?.speech.set(lane.trackId, speech);
         } catch (cause) {
           if (live) next.errors.push(`${lane.label}: ${formatError(cause)}`);
         } finally { wordsJob.current = null; }
         if (!live) return;
-        if (performance.now() - shown > 250) publish(index + 1);
+        if (!again && performance.now() - shown > PUBLISH_EVERY_MS) publish(got.size);
       }
-      if (live) { publishedKey.current = key; setLoaded(next); setRead(null); setLoading(false); setGeneration((value) => value + 1); }
+      if (live) { publishedKey.current = key; setLoaded({ ...next, speech: ordered() }); setRead(null); setLoading(false); setGeneration((value) => value + 1); }
     })();
     return () => {
       live = false;
@@ -170,14 +247,14 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
     };
     // The key captures what matters; `document` itself changes on every step.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, saved]);
 
   // With View ▸ Waveforms on: draw what is already built, then build the rest
   // lane by lane, replacing each lane's length-placed words with measured ones
   // as it lands rather than holding everything back for the slowest mic.
   useEffect(() => {
     const document = documentRef.current;
-    if (!waveforms || !document || generation === 0 || publishedKey.current !== key) return;
+    if (!wants || !document || generation === 0 || publishedKey.current !== key) return;
     let live = true;
     passing.current = true;
     setMeasuring(true);
@@ -186,7 +263,7 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
       for (;;) {
         const now = documentRef.current;
         if (!live || !now || keyOf(now) !== key) return;
-        const lane = lanesOf(now, latest.current.documents, true).find((item) => !tried.has(item.pair));
+        const lane = lanesOf(now, latest.current.documents, true).find((item) => !tried.has(item.pair) && wanted.current(item.lane));
         if (!lane) break;
         tried.add(lane.pair);
         const had = latest.current.speech.get(lane.pair);
@@ -198,8 +275,12 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
         if (!peaks || !had?.measured) {
           const speechId = newJobId();
           measureSpeechJob.current = speechId;
+          // Taken before the wait: one forgotten meanwhile (the sequence was
+          // saved) is not kept, so this answer cannot outlive the save.
+          const entry = sequenceWords(lane.documentId);
           try {
             speech = await loadSpeech(lane.documentId, lane.trackId, true, speechId);
+            entry.speech.set(lane.trackId, speech);
           } catch (cause) {
             if (live) setLoaded((prior) => ({ ...prior, errors: [...prior.errors, `${lane.label}: ${formatError(cause)}`] }));
           } finally { measureSpeechJob.current = null; }
@@ -229,10 +310,10 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
         held.current = null;
       }
     };
-  }, [waveforms, generation, key, rescan]);
+  }, [wants, generation, key, rescan]);
 
   return useMemo(() => {
-    const words: TimelineWord[] = [];
+    const parts: TimelineWord[][] = [];
     const audible = new Map<string, [number, number][]>();
     const heard = new Set(tracked.split("\n"));
     measure("String Outs", `Turning ${loaded.speech.size} mics' speech into words`, () => { for (const [pair, speech] of loaded.speech) {
@@ -245,9 +326,12 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
         const word = cueLabels(labels, speech.track_id, cue)?.get(index);
         return word?.label === "bleed" ? word.heard_on ?? undefined : undefined;
       });
-      words.push(...wordsFromSpeech(speech, source, lane, heardOn));
+      // The same objects as last time make the same array, so a tab
+      // reopened over these mics reuses the words and what was placed from them.
+      parts.push(micWords(speech, source, lane, labels, () => wordsFromSpeech(speech, source, lane, heardOn)));
       if (heard.has(lane)) audible.set(source, [...(audible.get(source) ?? []), ...audibleSpans(speech)]);
     } });
+    const words = mergedWords(parts);
     // Complete only when every mic on a track has its measured words: not
     // while they are still being read, and not when a sequence or a mic
     // failed to load, whose missing spans would read as silence.
@@ -256,7 +340,7 @@ export function useEditSources(document: EditDocument | null, waveforms = false)
       && lanesOf(document, loaded.documents, true).every((lane) => loaded.speech.get(lane.pair)?.measured === true);
     const durations: Record<string, number> = {};
     for (const [source, aaf] of loaded.documents) durations[source] = toSeconds(aaf.manifest.duration_frames, aaf.manifest.edit_rate);
-    return { documents: loaded.documents, words, audible, peaks: loaded.peaks, durations, loading, read: loading ? read ?? { done: 0, total: 0 } : null, measured, measuring, errors: loaded.errors };
+    return { documents: loaded.documents, words, audible, peaks: loaded.peaks, durations, loading, read: loading ? read ?? { done: 0, total: 0 } : null, measured, measuring, errors: loaded.errors, detail };
     // `key` and `tracked` say everything the document contributes here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, loading, read, measuring, key, tracked, hide]);

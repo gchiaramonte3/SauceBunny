@@ -2,9 +2,15 @@
 use crate::AppError;
 use serde::{Deserialize, Serialize};
 
-pub const SCHEMA_VERSION: u32 = 3;
+/// The manifest the AAF reader writes. A saved document with an older one is
+/// re-read on its next relink or import, keeping its labels and transcripts
+/// (`store::upgrade_graph`). 4: every group angle, named at the cut (it was
+/// the first sixteen, named by each camera's first file).
+pub const SCHEMA_VERSION: u32 = 4;
 pub const DOCUMENT_SCHEMA_VERSION: u32 = 4;
 pub const ASR_RATE: i64 = 16_000;
+/// The most angles a group clip lists, as the reader bounds them (picture.py `MAX_ANGLES`).
+pub const MAX_ANGLES: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
@@ -333,7 +339,7 @@ pub fn validate_manifest(manifest: &AafManifest) -> Result<(), AppError> {
                     || clip.source_start_frame.is_some_and(|frame| frame < 0)
                     || clip.source_timecode_fps.is_some_and(|fps| !(1..=120).contains(&fps))
                     || text.into_iter().flatten().any(|t| t.len() > 1024)
-                    || clip.angles.as_ref().is_some_and(|angles| angles.len() > 16 || angles.iter().any(|name| name.len() > 1024))
+                    || clip.angles.as_ref().is_some_and(|angles| angles.len() > MAX_ANGLES || angles.iter().any(|name| name.len() > 1024))
                     || clip.descriptor.as_ref().is_some_and(|d| d.kind.len() > 256
                         || [&d.sample_rate, &d.frame_layout, &d.compression].into_iter().flatten().any(|t| t.len() > 256))
                 { return Err(bad()); }

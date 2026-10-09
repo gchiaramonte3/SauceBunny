@@ -135,8 +135,50 @@ connected to another; they are all the storyline.
 
 A **speaker-only removal** is the one exception, and it never ripples. It is a
 **mute** on one track over a source range: silence on that track, time on
-the other tracks untouched. Lift with only some track selectors on is the
-same thing, over a marked range.
+the other tracks untouched.
+
+**Editing one track alone** (2026-10-06). Avid lets an editor overwrite or
+lift with only some track selectors on: select Kara's lav, mark, press B, and
+Kara's track plays the new material while everyone else plays on. A segment
+carries this as **overrides**: per lane, either another source range it plays
+for the segment's whole length, or nothing (a lift there). An edit that ends
+inside a segment splits it first, on every lane, so a ripple still moves
+every track together and nothing can slip out of sync; the lanes simply play
+different things between those cuts.
+
+```
+edit    |----a----|--b--|----c----|           b overrides Kara alone
+lanes   A1 Kara    ▇▇▇▇▇▇▇|░░░░░|▇▇▇▇▇▇▇      ░ = her other take
+        A2 Dev   ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇      no cut on his track at all
+```
+
+**Record tracks are layers** (2026-10-06, after Neo's design and Avid's). A1,
+A2… are not people: a segment's `layers` says which record track each person
+in it sits on, so A1 can carry Kara's lav for one clip and Stephanie's for
+the next. Lanes stay people, because words, silences, bleed and playback
+belong to a mic; the track is where it sits. A source track that is on is
+PATCHED to a record track (the → A1 on its header in the Source view): one
+patched by hand keeps its track, the rest go top-down from A1, so a single
+lav lands on A1 whoever it is. Overwrite onto a track lifts whoever was on it
+there, since a track holds one clip at a time. A segment without `layers` (a
+string out from before them) puts each person on the track they were patched
+to then. Solo, mute, W and the track selectors are record tracks.
+
+Each track draws its own clips (`layerClips`): a run of segments where one
+person carries on the same source range is one clip, so a cut made on other
+tracks alone is not a cut on this one. The record shows at least four tracks,
+empty until something is cut onto them, and the timeline keeps its scale (4
+pixels a frame, five minutes of runway, Fit only when asked), as Neo's does. A lift on one track is positional, unlike a mute: the
+same source range played elsewhere in the edit still plays there. The saved
+document stamps schema version 2 only when it holds an override, so a string
+out without one still opens in an older build, and one with them is refused
+there rather than opened without them.
+
+Insert and Overwrite take their marks by Avid's **three-point rule**
+(`src/lib/edit-three-point.ts`): record In and Out win and the source gives a
+start (its In, or backtimed from its Out, or its playhead); otherwise the
+source gives the length and the edit lands at the record In, ends at the
+record Out, or goes at the record playhead.
 
 Rules the model enforces, and the prototype's tests pin
 (`design-system/transcript-editor-model.test.ts`):

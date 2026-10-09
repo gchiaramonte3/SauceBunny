@@ -10,18 +10,21 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 // The workspace is the editor itself; here it only needs to say which edit it holds and let Ask open another.
 vi.mock("./EditWorkspace", () => ({ EditWorkspace: ({ editId, onOpenEdit, onTitle }: { editId: string; onOpenEdit: (id: string) => void; onTitle?: (title: string) => void }) =>
   <div data-testid="workspace">{editId}<button onClick={() => onOpenEdit("rosa")}>Make Rosa</button><button onClick={() => onTitle?.("Scene, renamed")}>Rename</button></div> }));
-vi.mock("./EditList", () => ({ EditList: () => <div>All string outs</div> }));
+vi.mock("./EditList", () => ({ EditList: ({ edits, onOpen }: { edits: { id: string; title: string }[]; onOpen: (id: string) => void }) =>
+  <div>All string outs{edits.map((edit) => <button key={edit.id} onClick={() => onOpen(edit.id)}>Open {edit.id}</button>)}</div> }));
 vi.mock("./EditNewPanel", () => ({ EditNewPanel: () => <div>New panel</div> }));
 
-const edits = [{ id: "scene", title: "Scene", created_at: 1, updated_at: 1, head: 1, states: 1 }, { id: "rosa", title: "Rosa", created_at: 2, updated_at: 2, head: 1, states: 1 }];
+const edits = [{ id: "scene", title: "Scene", created_at: 1, updated_at: 1, head: 1, states: 1, sources: [], duration_frames: 0, bites: 0, bite_frames: [], edit_rate: null }, { id: "rosa", title: "Rosa", created_at: 2, updated_at: 2, head: 1, states: 1, sources: [], duration_frames: 0, bites: 0, bite_frames: [], edit_rate: null }];
 afterEach(cleanup);
 beforeEach(() => { localStorage.clear(); mocks.list.mockResolvedValue(edits); });
 
 const tabs = () => screen.queryAllByRole("tab").map((tab) => [tab.textContent?.replace("×", ""), tab.getAttribute("aria-selected")]);
-/** Open a saved string out the way a person does at launch: from the page's Saved string outs menu. */
+/** Open a saved string out the way a person does: from the list when it is showing, from the menu once one is open. */
 const openSaved = async (id: string) => {
-  const menu = await screen.findByRole("combobox", { name: "Open saved string out" });
-  fireEvent.change(menu, { target: { value: id } });
+  await waitFor(() => expect(screen.queryByRole("combobox", { name: "Open saved string out" }) ?? screen.queryByRole("button", { name: `Open ${id}` })).toBeTruthy());
+  const menu = screen.queryByRole("combobox", { name: "Open saved string out" });
+  if (menu) fireEvent.change(menu, { target: { value: id } });
+  else fireEvent.click(screen.getByRole("button", { name: `Open ${id}` }));
 };
 
 it("starts clear at launch: the list, no tabs, even if older builds remembered some", async () => {
@@ -86,7 +89,7 @@ it("AAF Audio's Open in String Outs makes one string out per sequence, source lo
   mocks.invoke.mockImplementation((command: string) => command === "aaf_open" ? Promise.resolve(sequence) : Promise.resolve(undefined));
   let listed = [...edits];
   mocks.list.mockImplementation(async () => listed);
-  mocks.create.mockImplementation(async (id: string, document: { title: string }) => { listed = [...listed, { id, title: document.title, created_at: 3, updated_at: 3, head: 1, states: 1 }]; });
+  mocks.create.mockImplementation(async (id: string, document: { title: string }) => { listed = [...listed, { id, title: document.title, created_at: 3, updated_at: 3, head: 1, states: 1, sources: [], duration_frames: 0, bites: 0, bite_frames: [], edit_rate: null }]; });
   const view = render(<EditPage active onOpenSettings={vi.fn()} openRequest={{ documentId: sequence.id, tick: 1 }} />);
   await waitFor(() => expect(screen.getByTestId("workspace").textContent).toContain("made"));
   const [, document] = mocks.create.mock.calls[0];

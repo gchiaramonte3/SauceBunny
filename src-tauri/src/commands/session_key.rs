@@ -119,7 +119,13 @@ pub fn load_or_create_host_key() -> SecretKey {
 /// Whether a durable identity exists, so the UI can say whether a code it is
 /// about to hand someone will still work tomorrow.
 #[tauri::command]
-pub fn has_review_identity() -> Result<bool, AppError> {
+pub async fn has_review_identity() -> Result<bool, AppError> {
+    super::cloud_ai::keychain(review_identity_stored).await
+}
+
+/// `has_review_identity` without the trip to the blocking pool, for callers
+/// already off the main thread (the nightly Keychain test).
+fn review_identity_stored() -> Result<bool, AppError> {
     match entry()?.get_password() {
         Ok(v) => Ok(v.parse::<SecretKey>().is_ok()),
         Err(keyring::Error::NoEntry) => Ok(false),
@@ -136,11 +142,11 @@ pub fn has_review_identity() -> Result<bool, AppError> {
 /// record to revoke against. A session already running keeps the key it bound
 /// with; the next one mints a new identity.
 #[tauri::command]
-pub fn reset_review_identity() -> Result<(), AppError> {
-    match entry()?.delete_password() {
+pub async fn reset_review_identity() -> Result<(), AppError> {
+    super::cloud_ai::keychain(|| match entry()?.delete_password() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(AppError::internal(format!("Couldn't reset the review identity: {e}"))),
-    }
+    }).await
 }
 
 #[cfg(test)]
@@ -218,7 +224,7 @@ mod tests {
         let first = load_or_create_host_key().public();
         let second = load_or_create_host_key().public();
 
-        match has_review_identity() {
+        match review_identity_stored() {
             Ok(true) => assert_eq!(
                 first, second,
                 "the Keychain holds an identity but two loads disagreed",

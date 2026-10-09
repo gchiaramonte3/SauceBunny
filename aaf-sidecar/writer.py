@@ -52,6 +52,7 @@ import shutil
 import tempfile
 
 import aaf2
+from aaf2.auid import AUID
 from aaf2.components import (Filler, OperationGroup, ScopeReference, Selector, Sequence, SourceClip,
                              SourceReference, Transition)
 from aaf2.misc import TaggedValueHelper, VaryingValue
@@ -62,9 +63,19 @@ from reader import (MAX_DEPTH, ReaderError, clean_name, fail, fingerprint, media
                     rate_of, value)
 
 SCHEMA_VERSION = 1
+# Edit requests that carry per-track overrides (a record track as a layer).
+OVERRIDES_SCHEMA_VERSION = 2
 # Bump whenever what the writer puts in a file changes: a group pack names the
 # version that built it, so a pack from another version is never reused.
-WRITER_VERSION = 1
+WRITER_VERSION = 3
+# Media Composer's pointer from one mob to another off the timeline: the
+# PortableObject of a mob attribute, which Avid names `_MATCH`. A group's sync
+# CompositionMob, the one a sequence cuts from, names its group clip this way,
+# and Media Composer follows it to play the group. Nothing on the timeline
+# refers to the group clip, so a closure that followed SourceReferences alone
+# left it behind, and Avid stopped playback with "PlayPipe::DoComp()
+# encountered a missing mob" (HEAT 1, 2026-10-07).
+AVID_MOB_REFERENCE = AUID('6619f8e0-fe77-11d3-a084-006094eb75cb')
 MAX_REQUEST_BYTES = 64 * 1024 * 1024
 MAX_EDITS = 256
 MAX_TRACKS = 256
@@ -134,8 +145,9 @@ def validate(request):
     """Strict shape and bound checks. Nothing here opens a file for writing."""
     if not isinstance(request, dict):
         invalid('The edit request must be a JSON object.')
-    if request.get('schema_version') != SCHEMA_VERSION:
-        invalid(f'Unsupported edit request schema_version; expected {SCHEMA_VERSION}.')
+    version = request.get('schema_version')
+    if version not in (SCHEMA_VERSION, OVERRIDES_SCHEMA_VERSION):
+        invalid(f'Unsupported edit request schema_version; expected {SCHEMA_VERSION} or {OVERRIDES_SCHEMA_VERSION}.')
     spec = {'name': clean_name(text(request, 'name', 'request', True, 240), 'Sequence'),
             'edit_rate': parse_rate(request.get('edit_rate')),
             'start_tc': whole(request, 'start_timecode_frames'),
@@ -220,8 +232,6 @@ def validate(request):
             first, last = whole(segment, 'in_frame', 0, where), whole(segment, 'out_frame', 1, where)
             if last <= first:
                 invalid(f'{where}: out_frame must be after in_frame.')
-            if not any(key in t['slots'] for t in spec['tracks']):
-                invalid(f'{where}: source "{key}" is not mapped to any output track.')
             item = {'kind': 'source', 'source': key, 'in': first, 'out': last, 'length': last - first}
         item['start'] = cursor
         cursor += item['length']
@@ -242,7 +252,74 @@ def validate(request):
         first, last = whole(mute, 'from_frame', 0, where), whole(mute, 'to_frame', 1, where)
         if last <= first or last > spec['segments'][at]['length']:
             invalid(f'{where}: the muted range must lie inside its segment.')
-        spec['mutes'].setdefault((at, track), []).append((first, last))
+        # `keep`: the editor muted it, so it stays on the track as Media
+        # Composer's muted clip. Without it, filler: a track nobody plays.
+        keep = mute.get('keep', False)
+        if not isinstance(keep, bool):
+            invalid(f'{where}: keep must be true or false.')
+        spec['mutes'].setdefault((at, track), []).append((first, last, keep))
+
+    # A track that plays other material across one whole segment: a source
+    # slot of its own from its own frame, for the segment's length. This is a
+    # record track as a layer, as in Avid: A1 can carry one mic for one clip and
+    # another mic, or the same mic from elsewhere, for the next; and the video
+    # track stacked with it carries the picture of that same moment, so two
+    # voices from different times each keep their own picture.
+    # A request that uses it says version 2, so a writer that predates it
+    # refuses rather than writing the segment's own audio there.
+    overrides = request.get('overrides', [])
+    if not isinstance(overrides, list) or len(overrides) > MAX_SEGMENTS * MAX_SOUND_TRACKS:
+        invalid('overrides must be a list of segment and track pairs.')
+    if overrides and version != OVERRIDES_SCHEMA_VERSION:
+        invalid(f'overrides need schema_version {OVERRIDES_SCHEMA_VERSION}.')
+    spec['overrides'] = {}
+    for index, override in enumerate(overrides):
+        where = f'overrides[{index}]'
+        if not isinstance(override, dict):
+            invalid(f'{where} must be an object.')
+        at, track = whole(override, 'segment_index', 0, where), whole(override, 'track_index', 0, where)
+        if at >= len(spec['segments']) or track >= len(spec['tracks']) or (at, track) in spec['overrides']:
+            invalid(f'{where}: segment_index or track_index is out of range or listed twice.')
+        segment = spec['segments'][at]
+        if segment['kind'] != 'source':
+            invalid(f'{where}: only a source segment can play other material.')
+        key = override.get('source')
+        if key not in spec['sources']:
+            invalid(f'{where}: unknown source "{key}".')
+        slot = override.get('slot')
+        if type(slot) is not int or slot < 0:
+            invalid(f'{where}: slot must be a slot id.')
+        first = whole(override, 'in_frame', 0, where)
+        choices = override.get('choices', [])
+        if choices and spec['tracks'][track]['kind'] != 'sound':
+            invalid(f'{where}: group angles are chosen on a sound track only.')
+        if (not isinstance(choices, list) or len(choices) > MAX_CHOICES
+                or not all(isinstance(angle, str) and 0 < len(angle) <= 512 for angle in choices)):
+            invalid(f'{where}: choices must list group angles.')
+        spec['overrides'][(at, track)] = {'kind': 'source', 'source': key, 'slot': slot, 'in': first,
+                                          'out': first + segment['length'], 'length': segment['length'],
+                                          'start': segment['start'], 'choices': frozenset(choices)}
+    # Deliberate edits (String Outs' Add Edit) on a track where its material
+    # carries on: kept as edits. Everywhere else a track that simply carries on
+    # across a segment boundary is written as one clip (runs). Optional and
+    # ignored by older writers, which wrote a piece per segment anyway.
+    cuts = request.get('cuts', [])
+    if not isinstance(cuts, list) or len(cuts) > MAX_SEGMENTS * MAX_SOUND_TRACKS:
+        invalid('cuts must be a list of segment and track pairs.')
+    spec['cuts'] = set()
+    for index, cut in enumerate(cuts):
+        where = f'cuts[{index}]'
+        if not isinstance(cut, dict):
+            invalid(f'{where} must be an object.')
+        at, track = whole(cut, 'segment_index', 0, where), whole(cut, 'track_index', 0, where)
+        if at >= len(spec['segments']) or track >= len(spec['tracks']):
+            invalid(f'{where}: segment_index or track_index is out of range.')
+        spec['cuts'].add((at, track))
+    # Every source segment reaches some track, through a track's slot or an override.
+    for at, segment in enumerate(spec['segments']):
+        if segment['kind'] == 'source' and not any(segment['source'] in t['slots'] for t in spec['tracks']) \
+                and not any(where[0] == at for where in spec['overrides']):
+            invalid(f'segments[{at}]: source "{segment["source"]}" is not mapped to any output track.')
 
     markers = request.get('markers', [])
     if not isinstance(markers, list) or len(markers) > MAX_MARKERS:
@@ -304,6 +381,56 @@ def avid_marker_text(spec, tracks, fps, drop):
 
 
 # ---------------------------------------------------------------- copy + trim
+def conform(seg, rate):
+    """Avid's Motion Control used as a frame-rate conform, as `(ratio, clip,
+    phase)`, or None for any other time warp.
+
+    A 47.952 or 59.94 camera in a 23.976 group plays at real speed through a
+    Motion Control whose constant SpeedRatio is the group rate over the
+    camera's (1/2, 2/5), over one clip (bare, or alone in a Sequence) on a
+    slot that runs at the camera's rate. HEAT 1's V1 group has 45 such angles
+    of 75. Media Composer places the clip on the source frame under the
+    group's first frame, rounded down: input start = floor(G / ratio) for
+    group frame G. So `phase` (in source frames, under 1) is where group frame
+    0 of this component falls after that start, and a trim at group frame `o`
+    begins at floor(phase + o / ratio). Anything that does not fit that shape
+    exactly is not a conform this writer knows how to cut.
+    """
+    operation = value(seg, 'Operation')
+    inputs = list(value(seg, 'InputSegments') or [])
+    params = list(value(seg, 'Parameters') or [])
+    if not value(operation, 'IsTimeWarp') or len(inputs) != 1 or any(isinstance(p, VaryingValue) for p in params):
+        return None
+    ratio = next((Fraction(p.value) for p in params if p.name == 'SpeedRatio'), None)
+    inner = inputs[0]
+    clips = [inner] if isinstance(inner, SourceClip) else list(inner.components) if isinstance(inner, Sequence) else []
+    if not ratio or len(clips) != 1 or not isinstance(clips[0], SourceClip) or clips[0].slot is None:
+        return None
+    clip = clips[0]
+    if Fraction(rate_of(clip.slot)) != Fraction(rate) / ratio:
+        return None
+    phase = math.ceil(clip.start * ratio) / ratio - clip.start
+    if not 0 <= phase < 1 or inner.length < math.ceil(phase + seg.length / ratio):
+        return None
+    return ratio, clip, phase
+
+
+def selected_index(seg, alternates):
+    """Where the playing angle sits in the group's angle list. Media Composer
+    records it as `_AAF_SELECTED` and lists the alternates in angle order
+    without it, so the list is the alternates with Selected put back at that
+    index (all 44 groups of HEAT 1 read so). 0 when the attribute is absent."""
+    found = next((t.value for t in value(seg, 'ComponentAttributeList') or [] if t.name == '_AAF_SELECTED'), None)
+    return found if isinstance(found, int) and 0 <= found <= alternates else 0
+
+
+def angles_of(seg):
+    """A group's angles in Avid's order, and the index of the one that plays."""
+    alternates = list(value(seg, 'Alternates') or [])
+    at = selected_index(seg, len(alternates))
+    return alternates[:at] + [value(seg, 'Selected')] + alternates[at:], at
+
+
 class Cloner:
     """Copies one source sequence's components into the new file, trimmed.
 
@@ -340,6 +467,7 @@ class Cloner:
         if isinstance(seg, Selector):
             selected = value(seg, 'Selected')
             options = [selected, *(value(seg, 'Alternates') or [])]
+            angles, _ = angles_of(seg)
             chosen = next((option for option in options if option is not None and choice_id(option) in self.prefer),
                           None) if self.prefer and not is_muted(seg) else None
             if self.prefer and not self.inside and chosen is None:
@@ -359,7 +487,15 @@ class Cloner:
                     return self.clone(play, offset, length, depth + 1, True)
                 new = copy_without(seg, self.dst, ('Selected', 'Alternates'))   # keeps Avid's attributes
                 new['Selected'].value = self.clone(play, offset, length, depth + 1, True)
-                new['Alternates'].value = self.alternates([a for a in options if a is not play and a is not None], offset, length, depth)
+                # Every angle, in Avid's order: the group must be the one the
+                # editor switches in Media Composer, not a smaller one.
+                new['Alternates'].value = [self.angle(a, number, len(angles), offset, length, depth)
+                                           for number, a in enumerate(angles, 1) if a is not play and a is not None]
+                if play is not selected:
+                    at = next(i for i, a in enumerate(angles) if a is play)
+                    for tag in value(new, 'ComponentAttributeList') or []:
+                        if tag.name == '_AAF_SELECTED':
+                            tag.value = at
                 new.length = length
                 return new
             finally:
@@ -370,22 +506,18 @@ class Cloner:
             return self.operation(seg, offset, length, depth)
         fail(f'{type(seg).__name__} components cannot be copied into a new sequence. Render or remove it in Avid.')
 
-    def alternates(self, options, offset, length, depth):
-        """The angles a kept group can still switch to. One that cannot be cut
-        (a speed change on a camera, as HEAT 2's slow-motion angle has) is left
-        out of this bite's group with a warning, rather than failing the whole
-        export: the spec allows a group with fewer alternates, the angle that
-        plays is unchanged, and every other angle stays switchable."""
-        kept = []
-        for option in options:
-            before = set(self.references)
-            try:
-                kept.append(self.clone(option, offset, length, depth + 1, True))
-            except ReaderError as error:
-                self.references = before
-                why = str(error).split('. ')[0].rstrip('.')
-                self.warn(f'A group angle ({why}) was left out of its group; the angle that plays and every other angle are kept.')
-        return kept
+    def angle(self, option, number, total, offset, length, depth):
+        """One angle a kept group can switch to. This used to leave an angle it
+        could not cut out of the group with a warning. Every one it left out
+        was a camera conformed to the group's rate (HEAT 2's "slow-motion"
+        camera was a 59.94 conform at real speed, and HEAT 1's V1 lost 45 of
+        its 75 angles), and a group with angles missing is not the group in
+        Avid. So an angle that cannot be copied exactly stops the export."""
+        try:
+            return self.clone(option, offset, length, depth + 1, True)
+        except ReaderError as error:
+            raise ReaderError(error.code, f'Angle {number} of {total} in this group cannot be copied exactly, and a '
+                              f'group with an angle missing would not match the one in Avid. {error}') from None
 
     def offers(self, seg, depth):
         """Whether a group below `seg` offers one of the angles being sought."""
@@ -461,9 +593,16 @@ class Cloner:
                 transitions = True
                 continue
             parts.append(self.clone(child, left - start, right - left, depth + 1))
-        if len(parts) == 1 and not transitions:
+        # A Sequence carrying Avid's attributes stays a Sequence, and the copy
+        # keeps them: a conformed camera's one-clip Sequence says in
+        # `_MIXMATCH_RATE_NUM`/`_DENOM` which rate its frames are counted in.
+        # A bare one made Media Composer count them at the group's rate, so it
+        # cut the wrong frames and, past the group's length in those units,
+        # imported "out-of-bounds reference, substituting filler" (HEAT 1,
+        # 2026-10-07).
+        if len(parts) == 1 and not transitions and not value(seg, 'ComponentAttributeList'):
             return parts[0]
-        new = self.dst.create.Sequence(media_kind=seg.media_kind)
+        new = copy_without(seg, self.dst, ('Components',))
         new['Components'].value = parts
         new.length = length
         return new
@@ -474,7 +613,10 @@ class Cloner:
         inputs = list(value(seg, 'InputSegments') or [])
         params = list(value(seg, 'Parameters') or [])
         if value(operation, 'IsTimeWarp'):
-            fail(f'{name} changes speed. Render it in Avid before exporting the bite.')
+            warp = conform(seg, self.rate)
+            if warp is None:
+                fail(f'{name} changes speed. Render it in Avid before exporting the bite.')
+            return self.conformed(seg, warp, offset, length, depth)
         if any(i.length != seg.length for i in inputs):
             fail(f'{name} has inputs of another length. Render it in Avid before exporting the bite.')
         if any(isinstance(p, VaryingValue) for p in params):
@@ -487,6 +629,35 @@ class Cloner:
         # Rendering is a render of the untrimmed effect; it does not travel.
         new = copy_without(seg, self.dst, ('InputSegments', 'Rendering'))
         new['InputSegments'].value = [self.clone(i, offset, length, depth + 1) for i in inputs]
+        new.length = length
+        return new
+
+    def conformed(self, seg, warp, offset, length, depth):
+        """A camera conformed to the group's rate, trimmed the way Media
+        Composer trims one (read off its own export of HEAT 1): the clip starts
+        on the source frame under the first group frame, rounded down, and ends
+        on the one under the end, rounded up, so a 59.94 bite of 45 frames can
+        hold 113 source frames. The input stays a one-clip Sequence and the
+        effect keeps every parameter and attribute Avid gave it."""
+        ratio, _, phase = warp
+        if self.approach == 'B' or (self.prefer and not self.inside):
+            fail('A camera Avid conforms to the group frame rate plays here, and following it to its master clip '
+                 'would lose where its frames fall. Send this track with its groups kept.', 'unsupported_aaf')
+        inner = value(seg, 'InputSegments')[0]
+        first = math.floor(phase + offset / ratio)
+        last = math.ceil(phase + (offset + length) / ratio)
+        rate, self.rate = self.rate, Fraction(self.rate) / ratio
+        try:
+            trimmed = self.clone(inner, first, last - first, depth + 1)
+        finally:
+            self.rate = rate
+        if isinstance(inner, Sequence) and not isinstance(trimmed, Sequence):
+            wrapped = copy_without(inner, self.dst, ('Components',))
+            wrapped['Components'].value = [trimmed]
+            wrapped.length = trimmed.length
+            trimmed = wrapped
+        new = copy_without(seg, self.dst, ('InputSegments', 'Rendering'))
+        new['InputSegments'].value = [trimmed]
         new.length = length
         return new
 
@@ -559,10 +730,25 @@ def mob_closure(src, dst, mob_ids, closed=frozenset()):
         if mob.mob_id not in dst.content.mobs:
             dst.content.mobs.append(mob.copy(root=dst, classdef_cache=classes))
             copied.append(mob_id)
-        for item, _ in mob.walk_references(topdown=True):
-            if isinstance(item, SourceReference) and item.mob_id is not None and item.mob_id.int != 0:
-                pending.append(str(item.mob_id))
+        pending.extend(str(key) for key, _ in mob_references(mob))
     return copied
+
+
+def mob_references(mob):
+    """(MobID, slot) for every mob `mob` points at: each SourceReference with
+    the slot it names, and each of Avid's mob references with None, since it
+    names a whole mob. The null MobID, a chain's end, is left out. Avid writes
+    `_MATCH` on most master clips too; there it usually names a mob the export
+    does not hold, which is a chain ending outside the file, as below."""
+    for item, _ in mob.walk_references(topdown=True):
+        if isinstance(item, SourceReference):
+            key, slot = item.mob_id, item.slot_id
+        elif item.class_id == AVID_MOB_REFERENCE:
+            key, slot = item['Mob Reference MobID'].value, None
+        else:
+            continue
+        if key is not None and key.int != 0:
+            yield key, slot
 
 
 def check_references(file, mobs, sources):
@@ -572,17 +758,16 @@ def check_references(file, mobs, sources):
     Looks targets up rather than indexing every mob of every file."""
     slots = {}
     for mob in mobs:
-        for item, _ in mob.walk_references(topdown=True):
-            if not isinstance(item, SourceReference) or item.mob_id is None or item.mob_id.int == 0:
-                continue
-            key = item.mob_id
+        for key, slot in mob_references(mob):
             if not any(key in source.content.mobs for source in sources):
                 continue
             if key not in slots:
                 target = file.content.mobs.get(key)
-                slots[key] = None if target is None else {slot.slot_id for slot in target.slots}
-            if slots[key] is None or item.slot_id not in slots[key]:
-                fail(f'Self-check failed: {key} slot {item.slot_id} was not copied.', 'verify_failed')
+                slots[key] = None if target is None else {each.slot_id for each in target.slots}
+            if slots[key] is None:
+                fail(f'Self-check failed: {key} was not copied.', 'verify_failed')
+            if slot is not None and slot not in slots[key]:
+                fail(f'Self-check failed: {key} slot {slot} was not copied.', 'verify_failed')
 
 
 def add_markers(dst, comp, rate, slot, markers):
@@ -677,23 +862,24 @@ def compose(spec, sources, dst, warnings):
         slot['PhysicalTrackNumber'].value = track['number']
         out.append({'slot': slot, 'kind': kind, 'parts': [], 'label': ('V' if track['kind'] == 'picture' else 'A') + str(track['number'])})
 
-    for at, segment in enumerate(spec['segments']):
-        for index, (track, target) in enumerate(zip(spec['tracks'], out)):
-            sequence = target['parts']
-            slot_id = track['slots'].get(segment.get('source'))
-            if segment['kind'] == 'gap' or slot_id is None:
-                append_piece(sequence, dst.create.Filler(media_kind=target['kind'], length=segment['length']), dst, target['kind'])
+    for index, (track, target) in enumerate(zip(spec['tracks'], out)):
+        sequence = target['parts']
+        for run in runs(spec, track, index):
+            if run['gap']:
+                append_piece(sequence, dst.create.Filler(media_kind=target['kind'], length=run['length']), dst, target['kind'])
                 continue
-            source_slot = sources[segment['source']].slots[slot_id]
-            prefer = track['choices'].get(segment['source'], frozenset())
+            source_slot = sources[run['source']].slots[run['slot']]
             cursor = 0
-            for first, last in muted_ranges(spec['mutes'].get((at, index), []), segment['length']):
+            for first, last, keep in muted_ranges(run['mutes'], run['length']):
                 if first > cursor:
-                    piece(spec, cloners, segment, at, target, source_slot, cursor, first, dst, prefer, track['approach'])
-                append_piece(sequence, dst.create.Filler(media_kind=target['kind'], length=last - first), dst, target['kind'])
+                    piece(spec, cloners, run, run['at'], target, source_slot, cursor, first, dst, run['prefer'], track['approach'])
+                if keep:
+                    piece(spec, cloners, run, run['at'], target, source_slot, first, last, dst, run['prefer'], track['approach'], muted=True)
+                else:
+                    append_piece(sequence, dst.create.Filler(media_kind=target['kind'], length=last - first), dst, target['kind'])
                 cursor = last
-            if cursor < segment['length']:
-                piece(spec, cloners, segment, at, target, source_slot, cursor, segment['length'], dst, prefer, track['approach'])
+            if cursor < run['length']:
+                piece(spec, cloners, run, run['at'], target, source_slot, cursor, run['length'], dst, run['prefer'], track['approach'])
     for target in out:
         target['slot'].segment['Components'].value = target['parts']
         target['slot'].segment.length = spec['length']
@@ -785,17 +971,72 @@ def build_pack(source, group_ids, destination):
         temporary.unlink(missing_ok=True)
 
 
+def played_by(spec, track, at, index, segment):
+    """(what a track plays at segment `at`, the slot it plays, the group
+    angles it prefers): its override there, else the segment itself."""
+    override = spec['overrides'].get((at, index))
+    if override:
+        return override, override['slot'], override['choices']
+    return segment, track['slots'].get(segment.get('source')), track['choices'].get(segment.get('source'), frozenset())
+
+
+def runs(spec, track, index):
+    """What one output track plays, joined wherever it simply carries on: the
+    same slot of the same source, from the frame the last piece stopped at,
+    with the same group angles. A segment boundary falls wherever ANY track
+    was cut, so a piece per segment handed Media Composer an edit on A1 at
+    every place A2 was cut, which String Outs never draws (its layerClips
+    joins them the same way). A deliberate edit there (`cuts`) stays one.
+    Each run is a gap, or a source range with its mutes relative to its start."""
+    out = []
+    for at, plain in enumerate(spec['segments']):
+        segment, slot_id, prefer = played_by(spec, track, at, index, plain)
+        if segment['kind'] == 'gap' or slot_id is None:
+            out.append({'gap': True, 'at': at, 'length': segment['length']})
+            continue
+        mutes = spec['mutes'].get((at, index), [])
+        last = out[-1] if out else None
+        if (last and not last['gap'] and last['source'] == segment['source'] and last['slot'] == slot_id
+                and last['prefer'] == prefer and last['in'] + last['length'] == segment['in']
+                and (at, index) not in spec['cuts']):
+            last['mutes'].extend((last['length'] + first, last['length'] + end, keep) for first, end, keep in mutes)
+            last['length'] += segment['length']
+            continue
+        out.append({'gap': False, 'at': at, 'source': segment['source'], 'slot': slot_id, 'prefer': prefer,
+                    'in': segment['in'], 'length': segment['length'], 'mutes': list(mutes)})
+    return out
+
+
 def muted_ranges(ranges, length):
-    merged = []
-    for first, last in sorted(ranges):
-        if merged and first <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], last)
-        else:
-            merged.append([first, min(last, length)])
-    return merged
+    """(first, last, keep) for each muted stretch, in order and apart. Filler
+    wins where a kept mute and filler overlap: nobody plays there."""
+    def merged(spans):
+        out = []
+        for first, last in sorted(spans):
+            if out and first <= out[-1][1]:
+                out[-1][1] = max(out[-1][1], last)
+            else:
+                out.append([first, min(last, length)])
+        return out
+    gone = merged((first, last) for first, last, keep in ranges if not keep)
+    kept = []
+    for first, last in merged((first, last) for first, last, keep in ranges if keep):
+        for low, high in gone:
+            if high <= first or low >= last:
+                continue
+            if low > first:
+                kept.append([first, low])
+            first = max(first, high)
+            if first >= last:
+                break
+        if first < last:
+            kept.append([first, last])
+    return sorted([(first, last, False) for first, last in gone] + [(first, last, True) for first, last in kept])
 
 
-def piece(spec, cloners, segment, at, target, source_slot, first, last, dst, prefer=frozenset(), approach=None):
+def piece(spec, cloners, segment, at, target, source_slot, first, last, dst, prefer=frozenset(), approach=None, muted=False):
+    """Source frames [first, last) of a segment onto its track; `muted`, each
+    clip in them as Media Composer's muted clip (`mute_clip`)."""
     cloner = cloners[segment['source']]
     cloner.prefer, cloner.inside = prefer, False
     cloner.approach = approach or spec['approach']
@@ -806,7 +1047,33 @@ def piece(spec, cloners, segment, at, target, source_slot, first, last, dst, pre
                           f'{segment["in"] + first} to {segment["in"] + last}): {error}') from None
     finally:
         cloner.prefer, cloner.inside, cloner.approach = frozenset(), False, spec['approach']
-    append_piece(target['parts'], component, dst, target['kind'])
+    if not muted:
+        append_piece(target['parts'], component, dst, target['kind'])
+        return
+    parts = []
+    append_piece(parts, component, dst, target['kind'])
+    for part in parts:
+        if isinstance(part, Transition):
+            fail(f'Segment {at + 1} on {target["label"]}: a muted stretch holds a dissolve, which Media Composer '
+                 'cannot mute on its own. Unmute it, or cut the dissolve out first.')
+        append_piece(target['parts'], part if isinstance(part, Filler) else mute_clip(part, dst, target['kind']), dst, target['kind'])
+
+
+def mute_clip(component, dst, kind):
+    """Media Composer's muted clip, as its own export writes one (MUTE TEST,
+    Media Composer 24.12, 2026-10-07): a Selector marked _DISABLE_CLIP_FLAG 1
+    and _AAF_SELECTED 0, selecting Filler of the clip's length, with the clip
+    itself, effects and all, untouched as its one alternate. Each clip is
+    wrapped on its own, as Avid wraps two muted clips in a row. Unmute Clip
+    in Avid brings it back as it was."""
+    wrapper = dst.create.Selector(media_kind=kind)
+    wrapper['Selected'].value = dst.create.Filler(media_kind=kind, length=component.length)
+    wrapper['Alternates'].value = [component]
+    wrapper.length = component.length
+    tags = TaggedValueHelper(wrapper['ComponentAttributeList'])
+    tags['_DISABLE_CLIP_FLAG'] = 1
+    tags['_AAF_SELECTED'] = 0
+    return wrapper
 
 
 # ---------------------------------------------------------------- verify
@@ -815,10 +1082,20 @@ class VerifyTimeline:
     Only what plays is compared, so group alternates are not expanded."""
 
     @staticmethod
-    def open(file, sequence_id, budget):
+    def open(file, sequence_id, budget, opened=False):
+        """`opened`: each muted clip that sits directly on a track (where the
+        writer puts the ones it mutes) reads as the clip it keeps, so the
+        self-check can see what Unmute in Media Composer would bring back."""
         class Bounded(GraphTimeline):
             MAX_EXPANSIONS = budget
             MAX_COMPONENTS = budget
+
+            def expand(self, seg, rate, start, duration, trail, warnings_list, depth=0):
+                if opened and depth == 1 and isinstance(seg, Selector) and is_muted(seg):
+                    kept = list(value(seg, 'Alternates') or [])
+                    if len(kept) == 1:
+                        return super().expand(kept[0], rate, start, duration, trail, warnings_list, depth + 1)
+                return super().expand(seg, rate, start, duration, trail, warnings_list, depth)
         # The sequence by its MobID, as the reader's scan would find it but
         # without reading every mob in front of it: an export made on a group
         # pack holds its new sequence after thousands of the show's mobs.
@@ -863,7 +1140,15 @@ def picture_frames(seg, rate, first, last, depth=0):
         yield from picture_frames(value(seg, 'Selected'), rate, first, last, depth + 1)
     elif isinstance(seg, OperationGroup):
         inputs = list(value(seg, 'InputSegments') or [])
-        if len(inputs) == 1:
+        warp = conform(seg, rate)
+        if warp is not None:
+            # A camera conformed to the group's rate: the exact source
+            # position under each group frame, so a trim that moved it by
+            # even one source frame does not compare equal.
+            ratio, clip, phase = warp
+            for frame in range(first, last):
+                yield ('clip', str(clip.mob_id), clip.slot_id, clip.start + phase + frame / ratio)
+        elif len(inputs) == 1:
             yield from picture_frames(inputs[0], rate, first, last, depth + 1)
         else:
             for _ in range(first, last):
@@ -904,6 +1189,107 @@ def picture_frames(seg, rate, first, last, depth=0):
     else:
         for _ in range(first, last):
             yield ('unsupported', type(seg).__name__)
+
+
+def attributes(component):
+    """Avid's attributes on a component, which a trim must carry unchanged."""
+    return tuple(sorted((tag.name, repr(tag.value)) for tag in value(component, 'ComponentAttributeList') or []))
+
+
+def angle_key(option):
+    """What one angle of a group shows: the clip it plays, through a conform,
+    with the attributes that tell Media Composer how to read a conform (its
+    Motion Control's and its Sequence's), which a trim must not lose."""
+    if isinstance(option, OperationGroup):
+        inputs = list(value(option, 'InputSegments') or [])
+        if len(inputs) != 1:
+            return ('effect', str(value(option, 'Operation').name))
+        key = angle_key(inputs[0])
+        return ('conform', attributes(option), key) if value(value(option, 'Operation'), 'IsTimeWarp') else key
+    if isinstance(option, Sequence):
+        clips = [c for c in option.components if not isinstance(c, Filler)]
+        key = angle_key(clips[0]) if len(clips) == 1 else ('sequence',)
+        tags = attributes(option)
+        return ('sequence', tags, key) if tags else key
+    if isinstance(option, SourceClip):
+        return (str(option.mob_id), option.slot_id)
+    return ('silent',)
+
+
+def angle_frame(option, rate):
+    """The group frame an angle is cut at, by Media Composer's rule for a
+    conformed camera, or None when the angle does not say."""
+    if isinstance(option, OperationGroup):
+        warp = conform(option, rate)
+        if warp is not None:
+            return math.ceil(warp[1].start * warp[0])
+        inputs = list(value(option, 'InputSegments') or [])
+        return angle_frame(inputs[0], rate) if len(inputs) == 1 and inputs[0].length == option.length else None
+    if isinstance(option, Sequence):
+        children = list(option.components)
+        return angle_frame(children[0], rate) if len(children) == 1 else None
+    if isinstance(option, SourceClip) and option.mob_id is not None and option.mob_id.int != 0 and option.slot is not None \
+            and rate_of(option.slot) == Fraction(rate):
+        return option.start
+    return None
+
+
+def group_shapes(seg, rate, shapes, depth=0):
+    """Every group under `seg`, as what makes it the group Avid switches: its
+    angles in order (any order, when the file does not record one), and where
+    each is cut relative to the first. A trim moves every angle by the same
+    amount, so a copy has exactly the shape of the group it was cut from."""
+    if seg is None or depth > MAX_CLONE_DEPTH:
+        return
+    if isinstance(seg, Selector) and is_muted(seg):
+        # A muted clip is not a group: its groups are inside the clip it keeps.
+        for option in value(seg, 'Alternates') or []:
+            group_shapes(option, rate, shapes, depth + 1)
+        return
+    if isinstance(seg, Selector):
+        angles, _ = angles_of(seg)
+        frames = [angle_frame(a, rate) for a in angles]
+        origin = next((f for f in frames if f is not None), 0)
+        pairs = tuple(zip((angle_key(a) for a in angles), (None if f is None else f - origin for f in frames)))
+        ordered = any(t.name == '_AAF_SELECTED' for t in value(seg, 'ComponentAttributeList') or [])
+        shapes.append(pairs if ordered else ('any order', tuple(sorted(pairs, key=repr))))
+        for option in angles:
+            group_shapes(option, rate, shapes, depth + 1)
+    elif isinstance(seg, Sequence):
+        for child in seg.components:
+            group_shapes(child, rate, shapes, depth + 1)
+    elif isinstance(seg, OperationGroup):
+        warp = conform(seg, rate)
+        for child in value(seg, 'InputSegments') or []:
+            group_shapes(child, Fraction(rate) / warp[0] if warp else rate, shapes, depth + 1)
+
+
+def mob_groups(mob):
+    shapes = []
+    for slot in mob.slots:
+        if isinstance(slot, aaf2.mobslots.TimelineMobSlot):
+            group_shapes(slot.segment, rate_of(slot), shapes)
+    return shapes
+
+
+def check_groups(out_comp, sources, cache):
+    """Every group in the new sequence has the angles, in the order and at the
+    offsets, of a group in the source. The frame comparison only follows what
+    plays, and an angle left out of a group plays nothing, so this is the only
+    check that sees one go missing."""
+    known = set()
+    for source in sources.values():
+        read = ('groups', source.identity, str(source.sequence.mob_id))
+        if read not in cache:
+            cache[read] = set(mob_groups(source.sequence))
+        known |= cache[read]
+    shapes = mob_groups(out_comp)
+    for shape in shapes:
+        if shape not in known:
+            count = len(shape[1]) if shape and shape[0] == 'any order' else len(shape)
+            fail(f'Self-check failed: a group in the new sequence has {count} angles that do not match any group in '
+                 'the source, in number, order or alignment. Nothing was written.', 'verify_failed')
+    return len(shapes)
 
 
 def compare(expected, actual, label, frame0):
@@ -953,13 +1339,15 @@ def verify(spec, sources, destination, built, cache=None):
             fail('Self-check failed: the timecode track or length does not match the edit.', 'verify_failed')
         out_tracks = {t['id']: t for t in timeline.tracks}
         reads = {}
+        overridden = {override['source'] for override in spec['overrides'].values()}
         for key, source in sources.items():
-            if any(key in t['slots'] and t['kind'] == 'sound' for t in spec['tracks']):
+            if key in overridden or any(key in t['slots'] and t['kind'] == 'sound' for t in spec['tracks']):
                 read = (source.identity, str(source.sequence.mob_id), budget)
                 if read not in cache:
                     cache[read] = VerifyTimeline.open(source.file, read[1], budget)
                 reads[key] = cache[read]
         out_comp = out_file.content.mobs.get(aaf2.mobid.MobID(built['sequence_id']))
+        groups = check_groups(out_comp, sources, cache)
         frames, preferred = 0, {}
         for index, (track, info) in enumerate(zip(spec['tracks'], built['tracks'])):
             label = info['label']
@@ -971,18 +1359,58 @@ def verify(spec, sources, destination, built, cache=None):
             else:
                 actual = picture_frames(out_comp.slot_at(info['slot_id']).segment, rate, 0, spec['length'])
             frames += compare(expected_frames(spec, sources, reads, track, index, preferred), actual, label, 0)
+        # Silence is not enough for a stretch the editor muted: it must keep
+        # exactly what played there, or Unmute in Avid brings back something
+        # else. The muted clips are opened and compared where they were made.
+        if any(keep for ranges in spec['mutes'].values() for _, _, keep in ranges):
+            opened = VerifyTimeline.open(out_file, built['sequence_id'], budget, opened=True)
+            opened_tracks = {t['id']: t for t in opened.tracks}
+            for index, (track, info) in enumerate(zip(spec['tracks'], built['tracks'])):
+                spans = kept_spans(spec, index)
+                if not spans or track['kind'] != 'sound':
+                    continue
+                actual = reader_frames(opened, opened_tracks[str(info['slot_id'])], 0, spec['length'])
+                expected = expected_frames(spec, sources, reads, track, index, preferred, opened=True)
+                frames += compare(inside(expected, spans), inside(actual, spans), f'{info["label"]} (muted)', 0)
         markers = sorted((m['position'], m['comment'], m['attributes'].get('_ATN_CRM_USER'), m['attributes'].get('_ATN_CRM_COLOR'),
                           tuple(m['described_slots'])) for m in timeline.markers)
         wanted = sorted((m['frame'], m['comment'], m['name'], m['color'], (built['tracks'][m['track']]['slot_id'],))
                         for m in spec['markers'])
         if markers != wanted:
             fail('Self-check failed: the markers read back differently from the edit.', 'verify_failed')
-    return {'ok': True, 'frames_checked': frames, 'tracks_checked': len(spec['tracks']), 'markers_checked': len(wanted)}
+    return {'ok': True, 'frames_checked': frames, 'tracks_checked': len(spec['tracks']), 'markers_checked': len(wanted),
+            'groups_checked': groups}
 
 
-def expected_frames(spec, sources, reads, track, index, preferred):
-    for at, segment in enumerate(spec['segments']):
-        slot_id = track['slots'].get(segment.get('source'))
+def kept_spans(spec, index):
+    """Record frames [first, last) the editor muted on track `index`."""
+    spans, at = [], 0
+    for position, segment in enumerate(spec['segments']):
+        for first, last, keep in muted_ranges(spec['mutes'].get((position, index), []), segment['length']):
+            if keep:
+                spans.append((at + first, at + last))
+        at += segment['length']
+    return spans
+
+
+def inside(frames, spans):
+    """Only the frames inside `spans` (sorted), each kept with nothing else."""
+    spans = iter(spans)
+    span = next(spans, None)
+    for offset, key in enumerate(frames):
+        while span and offset >= span[1]:
+            span = next(spans, None)
+        if span is None:
+            return
+        if offset >= span[0]:
+            yield key
+
+
+def expected_frames(spec, sources, reads, track, index, preferred, opened=False):
+    """What each frame of track `index` plays. `opened`: a stretch the editor
+    muted reads as the material it keeps; filler is filler either way."""
+    for at, plain in enumerate(spec['segments']):
+        segment, slot_id, prefer = played_by(spec, track, at, index, plain)
         if segment['kind'] == 'gap' or slot_id is None:
             yield from (('gap',) for _ in range(segment['length']))
             continue
@@ -992,7 +1420,6 @@ def expected_frames(spec, sources, reads, track, index, preferred):
             source_track = next((t for t in timeline.tracks if t['id'] == str(slot_id)), None)
             if source_track is None:
                 fail(f'Self-check failed: the reader does not see slot {slot_id} of source "{segment["source"]}".', 'verify_failed')
-            prefer = track['choices'].get(segment['source'])
             if prefer:
                 # Read the way the track was asked for: those angles, and
                 # nothing outside the groups that offer them.
@@ -1005,7 +1432,7 @@ def expected_frames(spec, sources, reads, track, index, preferred):
             played = picture_frames(sources[segment['source']].slots[slot_id].segment, spec['edit_rate'],
                                     segment['in'], segment['out'])
         for offset, key in enumerate(played):
-            yield ('gap',) if any(first <= offset < last for first, last in muted) else key
+            yield ('gap',) if any(first <= offset < last and not (opened and keep) for first, last, keep in muted) else key
 
 
 # ---------------------------------------------------------------- entry points
@@ -1062,6 +1489,10 @@ class Session:
         for index, track in enumerate(spec['tracks']):
             for key, slot_id in track['slots'].items():
                 sources[key].slot(slot_id, track['kind'], spec['edit_rate'], f'tracks[{index}]')
+        for (at, track), override in spec['overrides'].items():
+            slot = sources[override['source']].slot(override['slot'], spec['tracks'][track]['kind'], spec['edit_rate'], f'segments[{at}] override')
+            if override['out'] > slot.segment.length:
+                invalid(f'segments[{at}]: an override runs past the end of slot {override["slot"]} in source "{override["source"]}".')
         for index, segment in enumerate(spec['segments']):
             if segment['kind'] != 'source':
                 continue

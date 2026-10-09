@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import type { FrameStore } from "../lib/frame-store";
 import type { AafDocument } from "../bindings/AafDocument";
 import { audioTrackLabel, clampFrame, sequenceTimecode, trackOwner, transcriptRows } from "../lib/multitrack";
 import { MultitrackWaveform } from "./MultitrackWaveform";
 import { MultitrackLevel } from "./MultitrackLevel";
 import { MultitrackPictureLane } from "./MultitrackPictureLane";
+import { MultitrackPlayhead } from "./MultitrackPlayhead";
 import { multitrackTextLayout } from "../lib/multitrack-text-layout";
 import { alternativeLane, laneMetadata, laneReady, laneStatus, visibleLanes } from "../lib/multitrack-graph";
 import { IconChevronRight, IconChevronDown } from "./Icons";
@@ -28,8 +30,11 @@ type Props = {
   onRetryWaveform?: (trackId: string) => void;
   /** The original AAF can't be read: lanes stay quiet, and the page says why once. */
   waveformsOffline?: boolean;
-  frame: number; onSeek: (frame: number, trackId?: string) => void; onScrub?: (frame: number) => void;
+  /** The playhead, read as it moves (lib/frame-store) so playback does not redraw every lane. */
+  frames: FrameStore; onSeek: (frame: number, trackId?: string) => void; onScrub?: (frame: number) => void;
   onScrubEnd?: (frame: number, resume: boolean) => void; playing?: boolean; showWaveforms?: boolean; transport?: ReactNode;
+  /** Set to this timeline's zoom for the page's keys (⌘= in, ⌘− out, ⇧Z fit; 0 fits). */
+  zoomKeys?: MutableRefObject<((direction: -1 | 0 | 1) => void) | null>;
   /** The tracks being built now; the rest are waiting their turn, not working. */
   waveformsBuilding?: string[];
   /** From a track's status glyph: show its passages to review, or Transcript info. */
@@ -44,7 +49,7 @@ function TrackLabel({ document, trackId, onRename, onOwnerMenu }: Pick<Props, "d
     onBlur={() => { if (!cancelled.current && draft.trim() !== owner) onRename(trackId, draft.trim()); cancelled.current = false; }}
     onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { cancelled.current = true; setDraft(owner); event.currentTarget.blur(); } }} />;
 }
-export function MultitrackTimeline({ document, waveforms, waveformErrors, selected, onSelect, onRename, solo, muted = new Set(), onSolo, onMute, levels = {}, onLevel, onTrackMenu, onOwnerMenu, frame, onSeek, onScrub, onScrubEnd, playing = false, showWaveforms = true, waveformsBuilding = [], transport, detail, onView, expanded = new Set(), onExpand, initialView, onViewState, marks = { in: null, out: null }, onClearMarks, onRetryWaveform, waveformsOffline = false, onReviewTiming, onTranscriptInfo }: Props) {
+export function MultitrackTimeline({ document, waveforms, waveformErrors, selected, onSelect, onRename, solo, muted = new Set(), onSolo, onMute, levels = {}, onLevel, onTrackMenu, onOwnerMenu, frames, onSeek, onScrub, onScrubEnd, playing = false, showWaveforms = true, waveformsBuilding = [], transport, detail, onView, expanded = new Set(), onExpand, initialView, onViewState, marks = { in: null, out: null }, onClearMarks, onRetryWaveform, waveformsOffline = false, onReviewTiming, onTranscriptInfo, zoomKeys }: Props) {
   const [zoom, setZoom] = useState(initialView?.zoom ?? 1), [start, setStart] = useState(0), [density, setDensity] = useState(initialView?.density ?? "small");
   const [textTracks, setTextTracks] = useState(() => new Set(initialView?.text ?? [])), [dragging, setDragging] = useState(false), [hover, setHover] = useState<number | null>(null);
   useEffect(() => { onViewState?.({ zoom, density, text: [...textTracks] }); }, [onViewState, zoom, density, textTracks]);
@@ -58,6 +63,15 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
   const duration = document.manifest.duration_frames, span = Math.max(1, Math.ceil(duration / zoom));
   const viewStart = Math.max(0, Math.min(start, duration - span)), viewEnd = Math.min(duration, viewStart + span);
   useEffect(() => { onView?.(viewStart, span, showWaveforms && !dragging && zoom > 1); }, [onView, viewStart, span, showWaveforms, dragging, zoom]);
+  // Zoomed in and playing, the view turns the page when the playhead runs off
+  // it, as Media Composer's timeline does; it renders again only on a page turn.
+  useEffect(() => {
+    if (!playing || zoom <= 1 || dragging) return;
+    return frames.subscribe(() => {
+      const frame = frames.get();
+      if (frame >= viewEnd || frame < viewStart) setStart(Math.max(0, Math.min(duration - span, frame - Math.floor(span / 20))));
+    });
+  }, [frames, playing, zoom, dragging, viewStart, viewEnd, span, duration]);
   const rows = useMemo(() => transcriptRows(document), [document]);
   // Native saving publishes these results one track at a time. Job progress is
   // not a saved result, and a failed regeneration must not hide the prior one.
@@ -79,11 +93,59 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
     return new Map([...grouped].map(([id, cues]) => [id, multitrackTextLayout(cues, viewStart, span, laneWidth)]));
   }, [rows, textTracks, viewStart, span, laneWidth]);
   const ruler = useMemo(() => Array.from({ length: 5 }, (_, index) => sequenceTimecode(document.manifest, viewStart + Math.floor(span * index / 4))), [document.manifest, viewStart, span]);
-  const playheadTimecode = sequenceTimecode(document.manifest, frame);
+  // Each lane is a seek slider whose value is the playhead. Written as the
+  // frame moves rather than rendered, so playback does not redraw the lanes.
+  const lanesRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const write = () => {
+      const frame = frames.get(), text = sequenceTimecode(document.manifest, frame);
+      for (const lane of lanesRef.current?.querySelectorAll<HTMLElement>(".cp-multitrack-lane-audio") ?? []) {
+        lane.setAttribute("aria-valuenow", String(frame)); lane.setAttribute("aria-valuetext", text);
+      }
+    };
+    write();
+    return frames.subscribe(write);
+  });
   // Out is the last marked frame, so the span ends at its far edge. The ruler
   // clips 8px out, so a mark scrolled off either side simply is not drawn.
   const rulerMarks = <RulerMarks from={marks.in} to={marks.out === null ? null : marks.out + 1} x={(edge) => `${(edge - viewStart) / span * 100}%`} w={(length) => `${length / span * 100}%`} onClear={onClearMarks} />;
-  const moveZoom = (next: number) => { setZoom(next); setStart(Math.max(0, Math.min(duration - duration / next, Math.floor(frame - duration / next / 2)))); };
+  const moveZoom = (next: number) => { setZoom(next); setStart(Math.max(0, Math.min(duration - duration / next, Math.floor(frames.get() - duration / next / 2)))); };
+  // Pinch (or ⌘ with the wheel) zooms about the pointer, a step per doubling;
+  // a sideways swipe pans. A native listener, since a passive one cannot stop
+  // the page itself zooming. The frame under the pointer stays under it.
+  const view = useRef({ zoom, viewStart, span, duration }); view.current = { zoom, viewStart, span, duration };
+  const wheelHeld = useRef(0);
+  useEffect(() => {
+    const lanes = lanesRef.current;
+    if (!lanes) return;
+    const wheel = (event: WheelEvent) => {
+      const audioLane = (event.target as HTMLElement | null)?.closest(".cp-multitrack-lane-audio, .cp-multitrack-ruler");
+      if (!audioLane) return;
+      const { zoom: was, viewStart: from, span: width, duration: length } = view.current, box = audioLane.getBoundingClientRect();
+      const at = from + ((event.clientX - box.left) / Math.max(1, box.width)) * width;
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        // One step per gesture beat, not one per wheel event: a trackpad pinch sends dozens.
+        if (performance.now() - wheelHeld.current < 120 || !event.deltaY) return;
+        wheelHeld.current = performance.now();
+        const next = Math.min(1024, Math.max(1, event.deltaY < 0 ? was * 2 : was / 2)), nextSpan = Math.max(1, Math.ceil(length / next));
+        setZoom(next); setStart(Math.max(0, Math.min(length - nextSpan, Math.round(at - ((at - from) / width) * nextSpan))));
+        return;
+      }
+      if (was > 1 && Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+        event.preventDefault();
+        setStart(Math.max(0, Math.min(length - width, Math.round(from + (event.deltaX / Math.max(1, box.width)) * width))));
+      }
+    };
+    lanes.addEventListener("wheel", wheel, { passive: false });
+    return () => lanes.removeEventListener("wheel", wheel);
+  }, []);
+  // The page's zoom keys: a doubling either way, as the buttons step, or Fit.
+  useEffect(() => {
+    if (!zoomKeys) return;
+    zoomKeys.current = (direction) => moveZoom(direction === 0 ? 1 : Math.min(1024, Math.max(1, direction > 0 ? zoom * 2 : zoom / 2)));
+    return () => { zoomKeys.current = null; };
+  });
   const pickFrame = (clientX: number, element: HTMLElement) => { const bounds = element.getBoundingClientRect(); return clampFrame(viewStart + (clientX - bounds.left) / Math.max(1, bounds.width) * span, duration); };
   const endGesture = (pointer: number, cancelled = false) => {
     const current = gesture.current; if (!current || current.pointer !== pointer) return;
@@ -97,9 +159,10 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
       <label className="cp-multitrack-density"><span>Track size</span><select className="cp-select" value={density} onChange={(event) => setDensity(event.target.value)}><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label>
       <MultitrackZoom zoom={zoom} onZoom={moveZoom} />
     </div>
-    <div className="cp-multitrack-lanes">
-      <div className="cp-multitrack-ruler-row"><div className="cp-multitrack-lane-heading">Track / mic owner</div><div ref={rulerRef} className="cp-multitrack-ruler">{ruler.map((timecode, index) => <span key={index} aria-hidden="true">{timecode}</span>)}{rulerMarks}</div></div>
-      <MultitrackPictureLane tracks={document.manifest.graph?.picture_tracks} viewStart={viewStart} viewEnd={viewEnd} span={span} frame={frame} />
+    <div ref={lanesRef} className="cp-multitrack-lanes">
+      <div className="cp-multitrack-ruler-row"><div className="cp-multitrack-lane-heading">Track / mic owner</div><div ref={rulerRef} className="cp-multitrack-ruler"
+        onPointerDown={(event) => { if (event.button !== 0 || (event.target as HTMLElement).closest("button")) return; onSeek(pickFrame(event.clientX, event.currentTarget)); }}>{ruler.map((timecode, index) => <span key={index} aria-hidden="true">{timecode}</span>)}{rulerMarks}</div></div>
+      <MultitrackPictureLane tracks={document.manifest.graph?.picture_tracks} viewStart={viewStart} viewEnd={viewEnd} span={span} frames={frames} />
       {visibleLanes(document, expanded).map((track) => {
         const child = alternativeLane(document, track.id), ready = laneReady(document, track.id);
         const children = document.manifest.graph?.lanes.filter(lane => lane.parent_track_id === track.id).length ?? 0;
@@ -122,17 +185,17 @@ export function MultitrackTimeline({ document, waveforms, waveformErrors, select
               {onLevel && <MultitrackLevel owner={trackOwner(document, track.id)} value={levels[track.id] ?? 1} onChange={(value) => onLevel(track.id, value)} />}
               {onTrackMenu && <button className="btn btn-ghost cp-multitrack-track-menu-trigger" aria-label={`Track actions for ${trackOwner(document, track.id)}`} aria-haspopup="menu" onClick={(event) => { event.currentTarget.focus(); const bounds = event.currentTarget.getBoundingClientRect(); onTrackMenu(track.id, bounds.left, bounds.bottom); }}>⋯</button>}</div>
           </div>
-          <div className="cp-multitrack-lane-audio" role="slider" tabIndex={0} aria-label={`Seek ${track.name}`} aria-valuemin={0} aria-valuemax={duration - 1} aria-valuenow={frame} aria-valuetext={playheadTimecode}
+          <div className="cp-multitrack-lane-audio" role="slider" tabIndex={0} aria-label={`Seek ${track.name}`} aria-valuemin={0} aria-valuemax={duration - 1}
             onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId); const target = pickFrame(event.clientX, event.currentTarget); gesture.current = { pointer: event.pointerId, resume: playing, frame: target }; setDragging(true); onScrub?.(target); }}
             onPointerMove={(event) => { const target = pickFrame(event.clientX, event.currentTarget); setHover(target); if (gesture.current?.pointer === event.pointerId) { gesture.current.frame = target; onScrub?.(target); } }}
             onPointerUp={(event) => { if (gesture.current) gesture.current.frame = pickFrame(event.clientX, event.currentTarget); endGesture(event.pointerId); }}
             onPointerCancel={(event) => endGesture(event.pointerId, true)} onLostPointerCapture={(event) => endGesture(event.pointerId, true)} onPointerLeave={() => setHover(null)}
-            onKeyDown={(event) => { const targets: Record<string, number> = { ArrowLeft: frame - (event.shiftKey ? 10 : 1), ArrowRight: frame + (event.shiftKey ? 10 : 1), Home: 0, End: duration - 1 }; if (event.key in targets) { event.preventDefault(); event.stopPropagation(); onSeek(clampFrame(targets[event.key], duration)); } }}>
+            onKeyDown={(event) => { const frame = frames.get(), targets: Record<string, number> = { ArrowLeft: frame - (event.shiftKey ? 10 : 1), ArrowRight: frame + (event.shiftKey ? 10 : 1), Home: 0, End: duration - 1 }; if (event.key in targets) { event.preventDefault(); event.stopPropagation(); onSeek(clampFrame(targets[event.key], duration)); } }}>
             {clipsByTrack.get(track.id)?.map((style, clipIndex) => <span className="cp-multitrack-clip" key={clipIndex} style={style} />)}
             {!ready ? <span className="cp-multitrack-waveform-note">{laneStatus(document, track.id)}</span> : showWaveforms && !waveformsOffline && (peaks ? <MultitrackWaveform peaks={peaks} from={detailed ? 0 : viewStart / duration} to={detailed ? 1 : viewEnd / duration} gain={levels[track.id] ?? 1} /> : <span className="cp-multitrack-waveform-note" title={waveformErrors[track.id] || undefined}>{waveformErrors[track.id] ? <>Waveform unavailable{onRetryWaveform && <button className="btn btn-ghost" aria-label={`Retry waveform for ${track.name}`} onClick={() => onRetryWaveform(track.id)}>Retry</button>}</> : waveformsBuilding.includes(track.id) ? "Preparing waveform…" : "Waveform queued"}</span>)}
             {textTracks.has(track.id) && <div className="cp-multitrack-text-overlay">{cues.length ? cues.map((cue) => <span className={cue.summary ? "cp-multitrack-text-summary" : undefined} key={cue.id} title={cue.title} style={cue.style}>{cue.text}</span>) : <span className="cp-multitrack-no-text">No transcript in this view</span>}</div>}
             {hover !== null && <span className="cp-multitrack-cursor" style={{ left: `${(hover - viewStart) / span * 100}%` }} />}
-            {frame >= viewStart && frame < viewEnd && <span className="cp-multitrack-playhead" style={{ left: `${(frame - viewStart) / span * 100}%` }} />}
+            <MultitrackPlayhead frames={frames} viewStart={viewStart} viewEnd={viewEnd} span={span} />
           </div>
         </div>;
       })}

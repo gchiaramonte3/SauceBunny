@@ -124,6 +124,7 @@ Read tools, every door (phase 1 builds them, phases 2 and 3 expose them):
 | `list_string_outs()` | "What string outs exist?" | Title, address, running time, sources, who is on A1… |
 | `get_string_out(string_out)` | "What's in Rosa's string out?" | Record tracks (A1 = HARRY…), clips in order (record TC in and out, source sequence and TC in and out, who plays, the words), markers, running time, last change |
 | `get_history(string_out)` | "What did I change?" | Undo steps with labels and times, undone branches |
+| `measure_cut(beats, target_seconds?)` | "How long would this cut run?" (added 2026-10-08, docs/STORY-CUT-SPEC-2026-10-08.md) | Seconds per beat and in all, timed with String Outs' own cut layout; warnings for a line used twice, an id that names nothing, a bleed copy, a missed target. Computes only: it builds and changes nothing |
 | `list_transcript_files(folder?)` · `read_transcript_file(path, from?, to?)` | The Transcripts library | Files; lines with speaker and time |
 | `get_app_state()` | "This line", "here", "the selection" | Open view, sequence and string out; playhead (record and source TC); selection as lines; marks; Source/Record; the source side's person tab and marks (live; phase 4) |
 

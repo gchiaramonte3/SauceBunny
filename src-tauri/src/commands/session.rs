@@ -129,6 +129,9 @@ const MAX_PENDING_REQUESTS: usize = 16;
 
 struct SubstreamPermit(Arc<AtomicUsize>);
 impl SubstreamPermit {
+    // Rust 1.99 renamed fetch_update to try_update and deprecated the old name;
+    // the crate's MSRV (1.91) has only the old one, and CI's clippy runs on stable.
+    #[allow(deprecated)]
     fn acquire(counter: Arc<AtomicUsize>, limit: usize) -> Option<Self> {
         counter.fetch_update(Ordering::SeqCst, Ordering::SeqCst,
             |active| (active < limit).then_some(active + 1)).ok()?;

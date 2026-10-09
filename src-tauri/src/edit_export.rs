@@ -112,23 +112,48 @@ pub fn build_request(document: &EditDocument, sources: &[ExportSource], approach
     let alternate = |source: &str, track_id: &str| sources.iter().find(|known| known.id == source).and_then(|known| known.alternates.get(track_id));
     let on_track = |track: &&EditTrack| track.featured != Some(false);
     let sound: Vec<_> = document.tracks.iter().filter(|track| track.kind == EditTrackKind::Sound).filter(on_track).collect();
-    if sound.len() > MAX_SOUND_TRACKS {
-        return Err(AppError::invalid(format!("This string out has {} audio tracks, and Media Composer takes {MAX_SOUND_TRACKS}. \
-            Take group angles off their tracks with the × on their headers, or split it into two string outs.", sound.len())));
+    // Record tracks are layers, as in Avid (edit_doc.rs `plays`): A1 can carry
+    // one person's mic in one clip and someone else's in the next.
+    let home = |id: &str| sound.iter().position(|track| track.id == id).map(|index| index as u32 + 1);
+    let plays: Vec<Vec<Play>> = document.plays().into_iter().map(|here| here.into_iter().filter_map(|play| Some(Play {
+        layer: play.layer, person: sound.iter().copied().find(|person| person.id == play.lane)?, source: play.source, in_frame: play.in_frame,
+    })).collect()).collect();
+    let count = plays.iter().flatten().map(|play| play.layer).max().unwrap_or(1).max(1);
+    if count as usize > MAX_SOUND_TRACKS {
+        return Err(AppError::invalid(format!("This string out uses {count} audio tracks, and Media Composer takes {MAX_SOUND_TRACKS}. \
+            Move clips onto fewer tracks, or split it into two string outs.")));
+    }
+    // A person's mic in a source, as the writer names it: their slot, or their
+    // group's track with their angle chosen.
+    let slot_of = |person: &EditTrack, source: &str| -> Result<Mic, AppError> {
+        let track_id = person.source_tracks.get(source).map(String::as_str).unwrap_or_default();
+        Ok(match alternate(source, track_id) {
+            Some(angle) => (angle.parent_slot, Some(angle.angles.clone())),
+            None => (slot(&person.name, track_id)?, None),
+        })
+    };
+    // Each track's own mic per source: whoever plays on it from that source
+    // most often, so a track that holds one person throughout needs nothing
+    // more, and the rest are the writer's overrides.
+    let mut defaults: Vec<std::collections::BTreeMap<String, Mic>> = Vec::new();
+    for layer in 1..=count {
+        let mut counts: std::collections::BTreeMap<(&str, &str), usize> = Default::default();
+        for play in plays.iter().flatten().filter(|play| play.layer == layer) { *counts.entry((play.source, play.person.id.as_str())).or_default() += 1; }
+        let mut chosen: std::collections::BTreeMap<String, Mic> = Default::default();
+        // Where nobody plays on it from a source, the person patched to it, as before layers.
+        let patched = sound.get(layer as usize - 1).copied();
+        for source in &document.sources {
+            let best = counts.iter().filter(|((from, _), _)| *from == source.id).max_by_key(|(_, times)| **times).map(|((_, id), _)| *id);
+            let person = best.and_then(|id| sound.iter().copied().find(|person| person.id == id))
+                .or_else(|| patched.filter(|person| person.source_tracks.contains_key(&source.id)));
+            if let Some(person) = person { chosen.insert(source.id.clone(), slot_of(person, &source.id)?); }
+        }
+        defaults.push(chosen);
     }
     let mut tracks = Vec::new();
-    for (index, track) in sound.iter().enumerate() {
-        let (mut slots, mut choices) = (serde_json::Map::new(), serde_json::Map::new());
-        for (source, track_id) in &track.source_tracks {
-            match alternate(source, track_id) {
-                // Their group's track, playing their angle.
-                Some(angle) => {
-                    slots.insert(source.clone(), json!(angle.parent_slot));
-                    choices.insert(source.clone(), json!(angle.angles));
-                }
-                None => { slots.insert(source.clone(), json!(slot(&track.name, track_id)?)); }
-            }
-        }
+    for (index, chosen) in defaults.iter().enumerate() {
+        let slots: serde_json::Map<String, Value> = chosen.iter().map(|(source, (slot, _))| (source.clone(), json!(slot))).collect();
+        let choices: serde_json::Map<String, Value> = chosen.iter().filter_map(|(source, (_, angles))| angles.as_ref().map(|angles| (source.clone(), json!(angles)))).collect();
         let mut out = json!({ "kind": "sound", "physical_track_number": index + 1, "source_slots": slots });
         if !choices.is_empty() { out["choices"] = Value::Object(choices); }
         tracks.push(out);
@@ -137,47 +162,116 @@ pub fn build_request(document: &EditDocument, sources: &[ExportSource], approach
     for source in &document.sources {
         if let Some(slot) = find(&source.id)?.picture_slot { picture.insert(source.id.clone(), json!(slot)); }
     }
-    if !picture.is_empty() {
-        let mut v1 = json!({ "kind": "picture", "physical_track_number": 1, "source_slots": picture });
-        if picture_approach != sound_approach { v1["approach"] = json!(picture_approach); }
-        tracks.push(v1);
-    }
-
-    let lane = |id: &str| sound.iter().position(|track| track.id == id);
-    // A marker on someone without a track lands on their group's track.
-    let home = |id: &str| lane(id).or_else(|| {
-        let person = document.tracks.iter().find(|track| track.id == id)?;
-        person.source_tracks.iter().find_map(|(source, track_id)| {
-            let parent = alternate(source, track_id)?.parent_slot.to_string();
-            sound.iter().position(|track| track.source_tracks.get(source) == Some(&parent))
-        })
-    });
+    let has_picture = |source: &str| picture.contains_key(source);
     let mut segments = Vec::new();
     let mut mutes = Vec::new();
+    let mut replaced = Vec::new();
     for (index, segment) in document.segments.iter().enumerate() {
         match segment {
             EditSegment::Gap { frames, .. } => segments.push(json!({ "kind": "gap", "frames": frames })),
-            EditSegment::Source { source, in_frame, out_frame, tracks: lanes, .. } => {
-                segments.push(json!({ "kind": "source", "source": source, "in_frame": in_frame, "out_frame": out_frame }));
-                // A clip cut with only some tracks is filler on the others, as
-                // an Avid track that was not selected for the edit.
-                if let Some(lanes) = lanes {
-                    for (track, lane) in sound.iter().enumerate() {
-                        if !lanes.contains(&lane.id) {
-                            mutes.push(json!({ "segment_index": index, "track_index": track, "from_frame": 0, "to_frame": out_frame - in_frame }));
-                        }
-                    }
+            EditSegment::Source { source, in_frame, out_frame, .. } => {
+                let length = out_frame - in_frame;
+                let here = &plays[index];
+                // Nothing to write anywhere: filler, which the writer can always place.
+                if here.is_empty() && !has_picture(source) && !defaults.iter().any(|chosen| chosen.contains_key(source)) {
+                    segments.push(json!({ "kind": "gap", "frames": length }));
+                    continue;
                 }
-                for mute in document.mutes.iter().filter(|mute| &mute.source == source) {
-                    let (from, to) = (mute.in_frame.max(*in_frame), mute.out_frame.min(*out_frame));
-                    let Some(track) = lane(&mute.track) else { continue };
-                    if to > from {
-                        mutes.push(json!({ "segment_index": index, "track_index": track, "from_frame": from - in_frame, "to_frame": to - in_frame }));
+                segments.push(json!({ "kind": "source", "source": source, "in_frame": in_frame, "out_frame": out_frame }));
+                for (track, chosen) in defaults.iter().enumerate() {
+                    let Some(play) = here.iter().find(|play| play.layer as usize == track + 1) else {
+                        // Nobody on this track here: filler, as an Avid track that was not part of the edit.
+                        if chosen.contains_key(source) {
+                            mutes.push(json!({ "segment_index": index, "track_index": track, "from_frame": 0, "to_frame": length }));
+                        }
+                        continue;
+                    };
+                    let mine = slot_of(play.person, play.source)?;
+                    if play.source != source || play.in_frame != *in_frame || chosen.get(source) != Some(&mine) {
+                        let mut over = json!({ "segment_index": index, "track_index": track, "source": play.source, "slot": mine.0, "in_frame": play.in_frame });
+                        if let Some(angles) = &mine.1 { over["choices"] = json!(angles); }
+                        replaced.push(over);
+                    }
+                    // What the editor muted in what they play, relative to the
+                    // segment. Kept: it goes to Avid as a muted clip, which
+                    // Unmute Clip brings back, not as filler.
+                    for mute in document.mutes.iter().filter(|mute| mute.source == play.source && mute.track == play.person.id) {
+                        let (from, to) = (mute.in_frame.max(play.in_frame), mute.out_frame.min(play.in_frame + length));
+                        if to > from {
+                            mutes.push(json!({ "segment_index": index, "track_index": track, "from_frame": from - play.in_frame, "to_frame": to - play.in_frame, "keep": true }));
+                        }
                     }
                 }
             }
         }
     }
+    // Picture, stacked with the audio: one video track per record track, V1
+    // carrying the picture of the moment A1 plays, V2 of A2's, and so on, so two
+    // voices from different moments each keep their own picture and neither
+    // overwrites the other. Where a track's picture is the same moment as a lower
+    // one's there, it is filler rather than a copy; video tracks that would be
+    // filler from end to end are left off.
+    let moments: Vec<Vec<Option<(&str, i64)>>> = plays.iter().map(|here| {
+        let mut seen: Vec<(&str, i64)> = Vec::new();
+        (1..=count).map(|layer| {
+            let play = here.iter().find(|play| play.layer == layer)?;
+            if !has_picture(play.source) || seen.contains(&(play.source, play.in_frame)) { return None; }
+            seen.push((play.source, play.in_frame));
+            Some((play.source, play.in_frame))
+        }).collect()
+    }).collect();
+    let videos = (1..=count as usize).filter(|layer| moments.iter().any(|row| row[layer - 1].is_some())).max().unwrap_or(0);
+    let first_video = tracks.len();
+    for layer in 1..=videos {
+        let mut video = json!({ "kind": "picture", "physical_track_number": layer, "source_slots": picture });
+        if picture_approach != sound_approach { video["approach"] = json!(picture_approach); }
+        tracks.push(video);
+    }
+    for (index, segment) in document.segments.iter().enumerate() {
+        let EditSegment::Source { source, in_frame, out_frame, .. } = segment else { continue };
+        if segments[index]["kind"] != "source" { continue; }
+        for layer in 1..=videos {
+            let track = first_video + layer - 1;
+            match moments[index][layer - 1] {
+                None => if has_picture(source) {
+                    mutes.push(json!({ "segment_index": index, "track_index": track, "from_frame": 0, "to_frame": out_frame - in_frame }));
+                },
+                Some((from, first)) => if from != source || first != *in_frame {
+                    replaced.push(json!({ "segment_index": index, "track_index": track, "source": from, "slot": picture[from], "in_frame": first }));
+                },
+            }
+        }
+    }
+    // The writer joins a track's pieces wherever its material simply carries
+    // on, as the timeline draws it; an Add Edit made on purpose there stays an
+    // edit, on the audio track and on the picture stacked with it.
+    let mut cuts = Vec::new();
+    for (index, segment) in document.segments.iter().enumerate() {
+        let EditSegment::Source { cuts: Some(lanes), .. } = segment else { continue };
+        if segments[index]["kind"] != "source" { continue; }
+        let mut layers: Vec<u32> = plays[index].iter().filter(|play| lanes.contains(&play.person.id)).map(|play| play.layer).collect();
+        layers.sort_unstable(); layers.dedup();
+        for layer in layers {
+            cuts.push(json!({ "segment_index": index, "track_index": layer - 1 }));
+            if (layer as usize) <= videos && moments[index][layer as usize - 1].is_some() {
+                cuts.push(json!({ "segment_index": index, "track_index": first_video + layer as usize - 1 }));
+            }
+        }
+    }
+    // A marker sits on the track its person is on at that frame, or the one
+    // they were patched to; someone without a track lands on their group's.
+    let starts: Vec<i64> = document.segments.iter().scan(0, |at, segment| { let start = *at; *at += segment.frames(); Some(start) }).collect();
+    let marker_track = |id: &str, frame: i64| {
+        let at = starts.iter().rposition(|start| *start <= frame);
+        let placed = at.and_then(|at| plays[at].iter().find(|play| play.person.id == id)).map(|play| play.layer);
+        placed.or_else(|| home(id)).map(|layer| (layer as usize - 1).min(count as usize - 1)).or_else(|| {
+            let person = document.tracks.iter().find(|track| track.id == id)?;
+            person.source_tracks.iter().find_map(|(source, track_id)| {
+                let parent = alternate(source, track_id)?.parent_slot;
+                defaults.iter().position(|chosen| chosen.get(source).is_some_and(|(slot, _)| *slot == parent))
+            })
+        })
+    };
     // A marker must sit on a frame of the edit; one exactly at its end (after
     // the last bite) moves onto the last frame rather than failing the export.
     let length: i64 = document.segments.iter().map(|segment| match segment {
@@ -185,18 +279,31 @@ pub fn build_request(document: &EditDocument, sources: &[ExportSource], approach
         EditSegment::Source { in_frame, out_frame, .. } => out_frame - in_frame,
     }).sum();
     let markers: Vec<Value> = document.markers.iter().map(|marker| json!({
-        "frame": marker.frame.min(length - 1).max(0), "track_index": marker.track.as_deref().and_then(home).unwrap_or(0),
+        "frame": marker.frame.min(length - 1).max(0), "track_index": marker.track.as_deref().and_then(|id| marker_track(id, marker.frame)).unwrap_or(0),
         "name": clip(&marker.name, MAX_NAME), "comment": clip(&marker.comment, MAX_COMMENT), "color": marker_color(&marker.color),
     })).collect();
 
-    Ok(json!({
-        "schema_version": 1, "name": clip(&document.title, MAX_NAME),
+    // Overrides need a writer that knows them (request version 2); an edit
+    // whose tracks each hold one person throughout is written as before.
+    let mut request = json!({
+        "schema_version": if replaced.is_empty() { 1 } else { 2 }, "name": clip(&document.title, MAX_NAME),
         "edit_rate": format!("{}/{}", document.edit_rate.numerator, document.edit_rate.denominator),
         "start_timecode_frames": document.start_timecode_frames, "approach": sound_approach,
         "sources": out_sources, "tracks": tracks, "segments": segments, "mutes": mutes, "markers": markers,
         "output_path": output_path,
-    }))
+    });
+    if !replaced.is_empty() { request["overrides"] = Value::Array(replaced); }
+    if !cuts.is_empty() { request["cuts"] = Value::Array(cuts); }
+    Ok(request)
 }
+
+/// A person's mic in a source as the writer names it: a slot, and the group
+/// angles to choose when the slot is their group's track.
+type Mic = (u32, Option<Vec<String>>);
+
+/// Someone sounding on a record track across one segment: who, on which
+/// track, and the source range they play there.
+struct Play<'a> { layer: u32, person: &'a EditTrack, source: &'a str, in_frame: i64 }
 
 /// The part of the writer's answer the app shows. Unknown fields are ignored,
 /// so the writer can report more without breaking the invoke.
@@ -298,9 +405,9 @@ mod tests {
             sources: vec![EditSource { id: "s1".into(), name: "Scene".into(), document_id: "d".into() }],
             tracks: vec![lane("rosa", "2"), lane("dev", "3")],
             segments: vec![
-                EditSegment::Source { id: "a".into(), source: "s1".into(), in_frame: 100, out_frame: 200, tracks: None },
+                EditSegment::Source { id: "a".into(), source: "s1".into(), in_frame: 100, out_frame: 200, tracks: None, overrides: None, layers: None, cuts: None },
                 EditSegment::Gap { id: "g".into(), frames: 24 },
-                EditSegment::Source { id: "b".into(), source: "s1".into(), in_frame: 150, out_frame: 300, tracks: None },
+                EditSegment::Source { id: "b".into(), source: "s1".into(), in_frame: 150, out_frame: 300, tracks: None, overrides: None, layers: None, cuts: None },
             ],
             mutes: vec![EditMute { source: "s1".into(), track: "dev".into(), in_frame: 180, out_frame: 220 }],
             markers: vec![EditMarker { id: "m".into(), frame: 10, track: Some("dev".into()), name: "Rosa".into(), comment: "laugh".into(), color: "yellow".into() }],
@@ -314,10 +421,11 @@ mod tests {
     #[test]
     fn mutes_become_segment_relative_on_every_segment_they_touch() {
         let request = build_request(&document(), &sources(), "C", "/out.aaf").unwrap();
-        // Source 180-220 on dev: frames 80-100 of the first segment and 30-70 of the third.
+        // Source 180-220 on dev: frames 80-100 of the first segment and 30-70 of the third,
+        // kept, so Avid gets them as muted clips rather than filler.
         assert_eq!(request["mutes"], json!([
-            { "segment_index": 0, "track_index": 1, "from_frame": 80, "to_frame": 100 },
-            { "segment_index": 2, "track_index": 1, "from_frame": 30, "to_frame": 70 },
+            { "segment_index": 0, "track_index": 1, "from_frame": 80, "to_frame": 100, "keep": true },
+            { "segment_index": 2, "track_index": 1, "from_frame": 30, "to_frame": 70, "keep": true },
         ]));
     }
 
@@ -333,11 +441,94 @@ mod tests {
     #[test]
     fn a_clip_cut_with_some_tracks_is_filler_on_the_rest() {
         let mut edit = document();
-        edit.segments[2] = EditSegment::Source { id: "b".into(), source: "s1".into(), in_frame: 150, out_frame: 300, tracks: Some(vec!["rosa".into()]) };
+        edit.segments[2] = EditSegment::Source { id: "b".into(), source: "s1".into(), in_frame: 150, out_frame: 300, tracks: Some(vec!["rosa".into()]), overrides: None, layers: None, cuts: None };
         edit.mutes.clear();
         let request = build_request(&edit, &sources(), "B", "/out.aaf").unwrap();
         // Rosa's bite: dev's track (index 1) is filler for the whole clip; the first clip plays both.
         assert_eq!(request["mutes"], json!([{ "segment_index": 2, "track_index": 1, "from_frame": 0, "to_frame": 150 }]));
+    }
+
+    #[test]
+    fn a_track_lifted_alone_is_filler_there_and_one_overwritten_alone_plays_its_override() {
+        use crate::edit_doc::EditOverride;
+        let mut edit = document();
+        edit.schema_version = 2;
+        edit.segments[2] = EditSegment::Source { id: "b".into(), source: "s1".into(), in_frame: 150, out_frame: 300, tracks: None,
+            overrides: Some(BTreeMap::from([("dev".to_string(), EditOverride { source: None, in_frame: 0 })])), layers: None, cuts: None };
+        let request = build_request(&edit, &sources(), "B", "/out.aaf").unwrap();
+        // Dev is lifted across the third clip: one whole-clip filler, not
+        // kept, and his muted range there is not written twice.
+        assert_eq!(request["mutes"], json!([
+            { "segment_index": 0, "track_index": 1, "from_frame": 80, "to_frame": 100, "keep": true },
+            { "segment_index": 2, "track_index": 1, "from_frame": 0, "to_frame": 150 },
+        ]));
+        edit.segments[2] = EditSegment::Source { id: "b".into(), source: "s1".into(), in_frame: 150, out_frame: 300, tracks: None,
+            overrides: Some(BTreeMap::from([("dev".to_string(), EditOverride { source: Some("s1".into()), in_frame: 900 })])), layers: None, cuts: None };
+        // Overwritten alone, his track plays the other range there: a writer
+        // override, which only a request saying version 2 may carry.
+        let request = build_request(&edit, &sources(), "B", "/out.aaf").unwrap();
+        assert_eq!(request["schema_version"], 2);
+        // His moment's picture rides on V2 (track 3: A1, A2, V1, V2), stacked over Rosa's on V1.
+        assert_eq!(request["overrides"], json!([{ "segment_index": 2, "track_index": 1, "source": "s1", "slot": 3, "in_frame": 900 },
+            { "segment_index": 2, "track_index": 3, "source": "s1", "slot": 1, "in_frame": 900 }]));
+    }
+
+    #[test]
+    fn a_record_track_is_a_layer_that_holds_one_persons_mic_and_then_anothers() {
+        // Rosa's bite and then Dev's, both cut onto A1.
+        let mut edit = document();
+        edit.schema_version = 2;
+        edit.segments = vec![
+            EditSegment::Source { id: "a".into(), source: "s1".into(), in_frame: 100, out_frame: 200, tracks: Some(vec!["rosa".into()]), overrides: None,
+                layers: Some(BTreeMap::from([("rosa".to_string(), 1)])), cuts: None },
+            EditSegment::Source { id: "b".into(), source: "s1".into(), in_frame: 400, out_frame: 450, tracks: Some(vec!["dev".into()]), overrides: None,
+                layers: Some(BTreeMap::from([("dev".to_string(), 1)])), cuts: None },
+        ];
+        edit.mutes.clear();
+        edit.markers[0].frame = 120;
+        let request = build_request(&edit, &sources(), "B", "/out.aaf").unwrap();
+        // One audio track (and V1), playing Rosa's mic and then Dev's.
+        assert_eq!(request["tracks"].as_array().unwrap().iter().filter(|track| track["kind"] == "sound").count(), 1);
+        assert_eq!(request["tracks"][0]["source_slots"], json!({ "s1": 2 }));
+        assert_eq!(request["schema_version"], 2);
+        assert_eq!(request["overrides"], json!([{ "segment_index": 1, "track_index": 0, "source": "s1", "slot": 3, "in_frame": 400 }]));
+        assert_eq!(request["mutes"], json!([]));
+        // Dev's marker sits on the track he is on there.
+        assert_eq!(request["markers"][0]["track_index"], 0);
+    }
+
+    #[test]
+    fn each_record_track_has_its_moments_picture_stacked_on_its_own_video_track() {
+        use crate::edit_doc::EditOverride;
+        let mut edit = document();
+        edit.schema_version = 2;
+        edit.mutes.clear();
+        edit.markers.clear();
+        // The first clip: Rosa and Dev at the same moment, one picture, on V1 alone.
+        let request = build_request(&edit, &sources(), "C", "/out.aaf").unwrap();
+        assert_eq!(request["tracks"].as_array().unwrap().iter().filter(|track| track["kind"] == "picture").count(), 1);
+        // Dev from another moment over the third clip: V2 carries his picture there, V1 keeps Rosa's, and V2 is filler elsewhere.
+        edit.segments[2] = EditSegment::Source { id: "b".into(), source: "s1".into(), in_frame: 150, out_frame: 300, tracks: None,
+            overrides: Some(BTreeMap::from([("dev".to_string(), EditOverride { source: Some("s1".into()), in_frame: 900 })])), layers: None, cuts: None };
+        let request = build_request(&edit, &sources(), "C", "/out.aaf").unwrap();
+        let kinds: Vec<_> = request["tracks"].as_array().unwrap().iter().map(|track| (track["kind"].clone(), track["physical_track_number"].clone())).collect();
+        assert_eq!(kinds, vec![(json!("sound"), json!(1)), (json!("sound"), json!(2)), (json!("picture"), json!(1)), (json!("picture"), json!(2))]);
+        assert_eq!(request["mutes"], json!([{ "segment_index": 0, "track_index": 3, "from_frame": 0, "to_frame": 100 }]));
+        assert!(request["overrides"].as_array().unwrap().contains(&json!({ "segment_index": 2, "track_index": 3, "source": "s1", "slot": 1, "in_frame": 900 })));
+    }
+
+    #[test]
+    fn an_add_edit_made_on_purpose_reaches_the_writer_on_its_track_and_the_picture_stacked_with_it() {
+        let mut edit = document();
+        edit.schema_version = 2;
+        edit.mutes.clear();
+        edit.markers.clear();
+        // No Add Edit anywhere: nothing for the writer to keep, and it joins whatever carries on.
+        assert!(build_request(&edit, &sources(), "C", "/out.aaf").unwrap().get("cuts").is_none());
+        // An Add Edit on Dev (A2) at the third clip: kept on A2. V1 shows the moment both play, so it has no V2 to cut.
+        if let EditSegment::Source { cuts, .. } = &mut edit.segments[2] { *cuts = Some(vec!["dev".into()]); }
+        let request = build_request(&edit, &sources(), "C", "/out.aaf").unwrap();
+        assert_eq!(request["cuts"], json!([{ "segment_index": 2, "track_index": 1 }]));
     }
 
     #[test]

@@ -180,15 +180,20 @@ result shapes are in [`aaf-sidecar/README.md`](../aaf-sidecar/README.md).
   plays to the master clip channel. A track can carry its own `approach`, and
   String Outs' default ("Keep picture groups") sends V1 as C and every sound
   track as B: the picture stays switchable in Avid, and each person's audio
-  is their own mic rather than a twenty-way group per bite. An alternate that
-  C cannot cut (HEAT 2's slow-motion camera, a speed change) is left out of
-  that bite's group with a warning instead of failing the export; the
-  selected angle must still copy. Only Media Composer can confirm the import
+  is their own mic rather than a twenty-way group per bite. Every angle is
+  carried, in Avid's order, and `_AAF_SELECTED` moves with the angle that
+  plays. A camera Avid conforms to the group's rate (a Motion Control with a
+  constant SpeedRatio over a 47.952 or 59.94 clip, which HEAT 2's
+  "slow-motion" camera turned out to be) is trimmed as Media Composer trims
+  one: head rounded down, tail rounded up, the one-clip Sequence kept. An
+  angle that still cannot be copied exactly stops the export: a group with an
+  angle missing is not the group in Avid. The self-check compares every
+  group's angles, order and alignment with the source. Only Media Composer can confirm the import
   (the Phase 0 Mac test plan in
   [AAF-ASSEMBLY-RESEARCH.md](AAF-ASSEMBLY-RESEARCH.md)).
 - **What is refused.** A cut that splits a transition (a bite holding a whole
   dissolve keeps it), speed changes and keyframed picture effects on what
-  plays (an alternate carrying one is left out of its group, above), and anything
+  plays or in any angle of a kept group (the export stops, above), and anything
   not a clip, filler, selector, sequence or effect. Automated Audio Pan or
   Gain is dropped with a raw-microphone warning, the reader's own policy;
   constant pan and gain travel with the clip. A fade survives only on an
@@ -219,6 +224,25 @@ result shapes are in [`aaf-sidecar/README.md`](../aaf-sidecar/README.md).
   added, while the frame, timecode, marker and essence checks are unchanged.
   The output is the same set of mobs as a full export. Details, and the
   multi-source rule, in the sidecar README.
+- **Importing a kept group where it is already loaded.** A kept group travels
+  in the AAF under its own MobID, as in Media Composer's own exports.
+  Media Composer asks "Group clip conflict found ... replace the
+  original?" for every composition in an import whose MobID is already
+  loaded, and compares nothing first (`OMFImportResolver::ResolveConflictLogical`
+  in libameLibrary; only a batch import skips the question). So the first
+  import of a group brings it in, and every later import of a string out
+  of that group asks. The group's sync composition has no name in the
+  AAF, so the first import also leaves it in the bin as a clip named after
+  the AAF plus the count of unnamed mobs ("….1073"). The answer is No To
+  All: the project keeps its group and the sequence links to it by MobID.
+  The app says so after every export that keeps groups. No is not a crash
+  guard: on 2026-10-08 Media Composer 24.12.6 crashed during such an
+  import after No, in `ABinModel::getObjRunningSecTime` (the bin's
+  selected-items label), which looked a selected clip up by MobID, found
+  nothing and read through the null. Giving the group mobs new MobIDs per
+  export would end the question and that crash path, at the price of a
+  copy of the multigroup per import and Match Frame landing on the copy;
+  kept as is by the owner's choice (2026-10-08).
 - **Batch.** `aaf_export_edits` sends every string out of a batch to one
   `write-edits` run, named from each title as the save dialog would name it
   (" 2", " 3" when taken, never overwriting), and returns one outcome per

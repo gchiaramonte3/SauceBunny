@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import type { AafDocument } from "../bindings/AafDocument";
 import type { AafWaveform } from "../bindings/AafWaveform";
 import type { OpenEdit } from "../lib/edit-document";
-import type { TimelineWord } from "../lib/edit-model";
+import type { Layering, TimelineWord } from "../lib/edit-model";
 import { silentStretches, stripMutes, stripTargets, type LevelWindow, type StripSilenceOptions, type StripTarget } from "../lib/edit-strip-silence";
 import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
@@ -16,8 +16,8 @@ type Options = {
   commit: (label: string, change: (open: OpenEdit) => EditChange, group?: string | null) => Promise<boolean>;
   nameOf: (lane: string) => string;
 };
-/** What to strip: program In to Out, on these lanes. */
-export type StripRequest = { from: number; to: number; lanes: string[]; sourceLanes: Record<string, string[]> };
+/** What to strip: program In to Out, on these record tracks (1 for A1), and who sits where. */
+export type StripRequest = { from: number; to: number; layers: number[]; layering: Layering };
 
 /** Seconds of a mic read per request: the reader returns 2048 points a read, so about 10 ms each. */
 const CHUNK_SECONDS = 20;
@@ -52,7 +52,7 @@ export function useEditStripSilence({ open, documents, words, commit, nameOf }: 
     setBusy(true);
     try {
       const found: StripTarget[] = [];
-      for (const target of stripTargets(open.timeline, request.from, request.to, request.lanes, request.sourceLanes)) {
+      for (const target of stripTargets(open.timeline, request.from, request.to, request.layers, request.layering)) {
         const own = words.filter((word) => word.source === target.source && word.track === target.lane);
         for (const [a, b] of silentStretches(await read(target, jobId), own, options)) {
           const from = Math.max(a, target.from), to = Math.min(b, target.to);

@@ -20,6 +20,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 
 import { MultitrackTranscript } from "./MultitrackTranscript";
 import { setBleedHidden } from "../lib/bleed-hidden";
+import { createFrameStore } from "../lib/frame-store";
 
 // Alex says "This is the first answer." on track 1; Sam's mic heard it too.
 function fixture() {
@@ -41,7 +42,7 @@ const openBleed = async (label: string) => fireEvent.click(await screen.findByRo
 afterEach(async () => { cleanup(); refuseSwitch = false; await setBleedHidden(false); });
 
 it("shows a line heard on the wrong mic in All voices, dimmed and labelled, until the editor hides bleed", async () => {
-  render(<MultitrackTranscript document={fixture()} frame={0} solo={new Set()} onSeek={vi.fn()} initialAll />);
+  render(<MultitrackTranscript document={fixture()} frames={createFrameStore(0)} solo={new Set()} onSeek={vi.fn()} initialAll />);
   await openBleed("Bleed · 1 dimmed");
   await screen.findByText("1 line heard on another mic dimmed.");
   const body = screen.getByRole("tabpanel");
@@ -57,7 +58,7 @@ it("shows a line heard on the wrong mic in All voices, dimmed and labelled, unti
 
 it("leaves the switch where it was, and says why, when it cannot be saved", async () => {
   refuseSwitch = true;
-  render(<MultitrackTranscript document={fixture()} frame={0} solo={new Set()} onSeek={vi.fn()} initialAll />);
+  render(<MultitrackTranscript document={fixture()} frames={createFrameStore(0)} solo={new Set()} onSeek={vi.fn()} initialAll />);
   await openBleed("Bleed · 1 dimmed");
   await screen.findByText("1 line heard on another mic dimmed.");
   fireEvent.click(screen.getByLabelText("Hide bleed"));
@@ -67,7 +68,7 @@ it("leaves the switch where it was, and says why, when it cannot be saved", asyn
 });
 
 it("keeps the bleed line on its own mic's tab, dimmed, and lets the editor overrule it", async () => {
-  render(<MultitrackTranscript document={fixture()} frame={0} solo={new Set()} onSeek={vi.fn()} />);
+  render(<MultitrackTranscript document={fixture()} frames={createFrameStore(0)} solo={new Set()} onSeek={vi.fn()} />);
   fireEvent.click(await screen.findByRole("tab", { name: /Sam/ }));
   const line = await waitFor(() => screen.getByRole("button", { name: /Heard on Alex's mic/ }));
   expect(screen.getByRole("button", { name: "Bleed · 1 dimmed" })).toBeTruthy();
@@ -80,7 +81,7 @@ it("keeps the bleed line on its own mic's tab, dimmed, and lets the editor overr
 
 it("offers to measure the mics when too few have a level to compare", async () => {
   answer = { ...answer, measured: [], missing: ["track-1", "track-2"], words: [] };
-  render(<MultitrackTranscript document={fixture()} frame={0} solo={new Set()} onSeek={vi.fn()} initialAll />);
+  render(<MultitrackTranscript document={fixture()} frames={createFrameStore(0)} solo={new Set()} onSeek={vi.fn()} initialAll />);
   await openBleed("Bleed not measured");
   fireEvent.click(await screen.findByRole("button", { name: "Measure mics" }));
   await waitFor(() => expect(calls.some((call) => call.cmd === "aaf_ownership" && call.args.build === true)).toBe(true));
@@ -89,7 +90,7 @@ it("offers to measure the mics when too few have a level to compare", async () =
 
 it("checks voices when the levels left words unsure, and reports what it found", async () => {
   answer = { ...answer, counts: { ...answer.counts, unsure: 3 } };
-  render(<MultitrackTranscript document={fixture()} frame={0} solo={new Set()} onSeek={vi.fn()} initialAll />);
+  render(<MultitrackTranscript document={fixture()} frames={createFrameStore(0)} solo={new Set()} onSeek={vi.fn()} initialAll />);
   await openBleed("Bleed · 1 dimmed");
   fireEvent.click(await screen.findByRole("button", { name: "Check voices" }));
   await screen.findByText("Alex's mic may have changed hands: later in the day it sounds like Sam.");
@@ -100,6 +101,6 @@ it("checks voices when the levels left words unsure, and reports what it found",
 it("shows why a Whisper line may have been invented, and keeps the line", () => {
   const document = fixture();
   document.transcripts = [{ ...multitrackTranscript("track-1"), engine: "whisper", cues: [{ ...multitrackTranscript().cues[0], text: "Thank you for watching.", suspect: "Whisper often invents this phrase on silence. Check the audio." }] }];
-  render(<MultitrackTranscript document={document} frame={0} solo={new Set()} onSeek={vi.fn()} />);
+  render(<MultitrackTranscript document={document} frames={createFrameStore(0)} solo={new Set()} onSeek={vi.fn()} />);
   expect(screen.getByRole("button", { name: /Thank you for watching\..*invents this phrase/ })).toBeTruthy();
 });
